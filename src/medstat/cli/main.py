@@ -1038,6 +1038,19 @@ def report_cmd(
 
             for s in studies_records:
                 if isinstance(s, dict):
+                    pval_raw = s.get(
+                        "p_value", s.get("p", s.get("p_val", s.get("p-val")))
+                    )
+                    pval = (
+                        float(pval_raw)
+                        if (
+                            pval_raw is not None
+                            and not (isinstance(pval_raw, float) and np.isnan(pval_raw))
+                        )
+                        else float("nan")
+                    )
+                    ci_lo = s.get("ci_lower")
+                    ci_hi = s.get("ci_upper")
                     est_rows.append(
                         Estimate(
                             term=str(s.get("study", "Study")),
@@ -1048,22 +1061,44 @@ def report_cmd(
                                     s.get("effect", s.get("log_effect", 0.0)),
                                 )
                             ),
-                            ci_lower=float(s.get("ci_lower", 0.0)),
-                            ci_upper=float(s.get("ci_upper", 0.0)),
-                            p_value=float(s.get("p_value", 0.05)),
+                            ci_lower=float(ci_lo)
+                            if ci_lo is not None
+                            else float("nan"),
+                            ci_upper=float(ci_hi)
+                            if ci_hi is not None
+                            else float("nan"),
+                            p_value=pval,
                             scale="Effect",
                         )
                     )
-            re = res_data.get("random_effects", res_data.get("fixed_effect", {}))
-            if re:
+            re = res_data.get(
+                "random_effects",
+                res_data.get("fixed_effect", res_data.get("summary", {})),
+            )
+            if re and isinstance(re, dict):
+                re_p_raw = re.get("p_value", re.get("p", re.get("p_val")))
+                re_pval = (
+                    float(re_p_raw)
+                    if (
+                        re_p_raw is not None
+                        and not (isinstance(re_p_raw, float) and np.isnan(re_p_raw))
+                    )
+                    else float("nan")
+                )
+                re_ci_lo = re.get("ci_lower")
+                re_ci_hi = re.get("ci_upper")
                 est_rows.append(
                     Estimate(
                         term="Overall Effect",
-                        label="Overall Effect",
+                        label=str(re.get("label", "Overall Effect")),
                         estimate=float(re.get("effect_disp", re.get("effect", 0.0))),
-                        ci_lower=float(re.get("ci_lower", 0.0)),
-                        ci_upper=float(re.get("ci_upper", 0.0)),
-                        p_value=float(re.get("p_value", 0.05)),
+                        ci_lower=float(re_ci_lo)
+                        if re_ci_lo is not None
+                        else float("nan"),
+                        ci_upper=float(re_ci_hi)
+                        if re_ci_hi is not None
+                        else float("nan"),
+                        p_value=re_pval,
                         scale="Overall",
                     )
                 )

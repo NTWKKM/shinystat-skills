@@ -631,3 +631,65 @@ def test_tier2_report_narrative_with_missing_pvalues():
         model_type="descriptive", exposure=None, outcome=None, covariates=None
     )
     assert len(text) > 20
+
+
+def test_tier2_report_forest_missing_pvalue_renders_unavailable(tmp_path):
+    """FEAT-09-B6: Forest plot JSON without p-values renders '—' (unavailable) rather than fabricated 0.05."""
+    import json
+
+    from click.testing import CliRunner
+
+    from medstat.cli.main import cli
+
+    forest_json = tmp_path / "forest.json"
+    out_html = tmp_path / "table.html"
+    forest_data = {
+        "studies": [
+            {
+                "study": "Trial A",
+                "effect": 1.45,
+                "ci_lower": 1.10,
+                "ci_upper": 1.90,
+                "weight_pct": 50.0,
+            },
+            {
+                "study": "Trial B",
+                "effect": 0.85,
+                "ci_lower": 0.60,
+                "ci_upper": 1.20,
+                "weight_pct": 50.0,
+            },
+        ],
+        "summary": {
+            "label": "Overall (Random Effects)",
+            "effect": 1.12,
+            "ci_lower": 0.85,
+            "ci_upper": 1.48,
+        },
+        "is_ratio": True,
+        "heterogeneity": {"Q": 4.5, "df": 1, "p_value": 0.034},
+    }
+    forest_json.write_text(json.dumps(forest_data))
+
+    runner = CliRunner()
+    res = runner.invoke(
+        cli,
+        [
+            "report",
+            "--results",
+            str(forest_json),
+            "--style",
+            "nejm",
+            "--output",
+            str(out_html),
+        ],
+    )
+    assert res.exit_code == 0
+    assert out_html.exists()
+    content = out_html.read_text()
+    assert "Trial A" in content
+    assert "Trial B" in content
+    assert "—" in content
+    # Ensure fabricated 0.05 default p-value is NOT rendered
+    assert "P=0.05" not in content
+    assert "0.050" not in content

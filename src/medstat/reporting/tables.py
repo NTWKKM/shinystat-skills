@@ -119,7 +119,10 @@ class PublicationRenderer:
                 est_str = r.ref_label
                 p_str = "—"
             else:
-                est_str = f"{r.estimate:.2f} ({r.ci_lower:.2f}–{r.ci_upper:.2f})"
+                if math.isnan(r.ci_lower) or math.isnan(r.ci_upper):
+                    est_str = f"{r.estimate:.2f} (—)"
+                else:
+                    est_str = f"{r.estimate:.2f} ({r.ci_lower:.2f}–{r.ci_upper:.2f})"
                 p_str = format_journal_p_value(r.p_value, style="NEJM")
 
             html_lines.append(
@@ -184,7 +187,10 @@ class PublicationRenderer:
                 p_str = "—"
             else:
                 est_str = f"{r.estimate:.2f}"
-                ci_str = f"[{r.ci_lower:.2f}, {r.ci_upper:.2f}]"
+                if math.isnan(r.ci_lower) or math.isnan(r.ci_upper):
+                    ci_str = "—"
+                else:
+                    ci_str = f"[{r.ci_lower:.2f}, {r.ci_upper:.2f}]"
                 p_str = format_journal_p_value(r.p_value, style="APA7")
 
             html_lines.append(
@@ -239,10 +245,14 @@ def render_ascii_table(table: EstimateTable) -> str:
         if r.reference:
             rows.append([r.label, r.ref_label, "—"])
         else:
+            if math.isnan(r.ci_lower) or math.isnan(r.ci_upper):
+                ci_formatted = f"{r.estimate:.2f} (—)"
+            else:
+                ci_formatted = f"{r.estimate:.2f} ({r.ci_lower:.2f}, {r.ci_upper:.2f})"
             rows.append(
                 [
                     r.label,
-                    f"{r.estimate:.2f} ({r.ci_lower:.2f}, {r.ci_upper:.2f})",
+                    ci_formatted,
                     format_journal_p_value(r.p_value),
                 ]
             )
