@@ -594,9 +594,12 @@ def pool_estimates(
     ci_upper = float(theta_bar + t_crit * se)
 
     lambda_ = float((B + B / m) / T) if T > 0 else 0.0
-    fmi = (
-        float((r + 2.0 / (df + 3.0)) / (r + 1.0)) if r > 0 and np.isfinite(df) else 0.0
-    )
+    if np.isinf(r):
+        fmi = 1.0
+    elif r > 0 and np.isfinite(df):
+        fmi = float((r + 2.0 / (df + 3.0)) / (r + 1.0))
+    else:
+        fmi = 0.0
 
     return PooledEstimate(
         estimate=theta_bar,

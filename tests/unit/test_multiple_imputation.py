@@ -78,6 +78,8 @@ class TestPoolEstimates:
         result = pool_estimates(estimates, variances, n_obs=100, df_complete=98)
 
         assert result.df == 2.0
+        assert result.fmi == 1.0
+        assert result.lambda_ == 1.0
 
 
 class TestMICEImputer:

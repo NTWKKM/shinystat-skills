@@ -600,11 +600,13 @@ class AnalysisPlan:
                 html_table = PublicationRenderer.render_html(
                     est_tbl, style=self.reporting.style
                 )
-                eff_strategy = model_spec.missing_strategy or "complete-case"
+                eff_strategy = model_spec.missing_strategy
                 if (
-                    eff_strategy.lower().replace("_", "-") == "mice"
-                ) and not fit_res.get("pooled", False):
-                    eff_strategy = "complete-case"
+                    eff_strategy
+                    and eff_strategy.lower().replace("_", "-") == "mice"
+                    and not fit_res.get("pooled", False)
+                ):
+                    eff_strategy = None
                 narrative = generate_narrative(
                     est_tbl,
                     style=self.reporting.style,

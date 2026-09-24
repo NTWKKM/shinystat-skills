@@ -724,9 +724,10 @@ def test_tier2_report_meta_unified_scale_and_log_effect_transform(tmp_path):
         ],
         "random_effects": {
             "label": "Overall Pooled",
-            "effect_disp": 1.50,
-            "ci_lower": 1.10,
-            "ci_upper": 2.05,
+            "log_effect": math.log(1.50),
+            "ci_lower": math.log(1.10),
+            "ci_upper": math.log(2.05),
+            "scale": "log",
             "p_value": 0.012,
         },
     }

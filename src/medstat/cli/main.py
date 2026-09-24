@@ -1091,27 +1091,25 @@ def report_cmd(
                         log_eff_val = float(s["log_effect"])
                         if is_study_ratio:
                             raw_eff = math.exp(log_eff_val)
-                            if ci_lo is not None and (
-                                s.get("ci_scale") == "log"
-                                or "log" in str(s.get("scale", "")).lower()
-                            ):
-                                ci_lo = math.exp(float(ci_lo))
-                            if ci_hi is not None and (
-                                s.get("ci_scale") == "log"
-                                or "log" in str(s.get("scale", "")).lower()
-                            ):
-                                ci_hi = math.exp(float(ci_hi))
+                            ci_scale = str(
+                                s.get("ci_scale", s.get("scale", ""))
+                            ).lower()
+                            if "log" in ci_scale or ci_scale == "":
+                                if ci_lo is not None:
+                                    ci_lo = math.exp(float(ci_lo))
+                                if ci_hi is not None:
+                                    ci_hi = math.exp(float(ci_hi))
                         else:
                             raw_eff = log_eff_val
-                    elif raw_eff is None:
-                        is_log_scale = (
-                            "log" in str(s.get("scale", "")).lower()
-                            or "log" in str(res_data.get("effect_measure", "")).lower()
-                        )
-                        if is_log_scale and s.get("log_effect") is not None:
-                            raw_eff = float(s["log_effect"])
-                            if is_study_ratio:
-                                raw_eff = math.exp(raw_eff)
+                    elif raw_eff is not None and is_study_ratio:
+                        study_scale = str(s.get("scale", "")).lower()
+                        if study_scale == "log":
+                            raw_eff = math.exp(float(raw_eff))
+                            if ci_lo is not None:
+                                ci_lo = math.exp(float(ci_lo))
+                            if ci_hi is not None:
+                                ci_hi = math.exp(float(ci_hi))
+
                     if raw_eff is None or (
                         isinstance(raw_eff, float) and np.isnan(raw_eff)
                     ):
@@ -1149,14 +1147,41 @@ def report_cmd(
                     else float("nan")
                 )
                 raw_overall = re.get("effect_disp", re.get("effect"))
+                re_ci_lo = re.get("ci_lower")
+                re_ci_hi = re.get("ci_upper")
+                re_scale = str(re.get("scale", "")).lower()
+
+                if raw_overall is None and "log_effect" in re:
+                    log_overall = float(re["log_effect"])
+                    if is_ratio_meta:
+                        raw_overall = math.exp(log_overall)
+                        if re_ci_lo is not None and (
+                            "log" in re_scale
+                            or re.get("ci_scale") == "log"
+                            or re_scale == ""
+                        ):
+                            re_ci_lo = math.exp(float(re_ci_lo))
+                        if re_ci_hi is not None and (
+                            "log" in re_scale
+                            or re.get("ci_scale") == "log"
+                            or re_scale == ""
+                        ):
+                            re_ci_hi = math.exp(float(re_ci_hi))
+                    else:
+                        raw_overall = log_overall
+                elif raw_overall is not None and is_ratio_meta and re_scale == "log":
+                    raw_overall = math.exp(float(raw_overall))
+                    if re_ci_lo is not None:
+                        re_ci_lo = math.exp(float(re_ci_lo))
+                    if re_ci_hi is not None:
+                        re_ci_hi = math.exp(float(re_ci_hi))
+
                 if raw_overall is None or (
                     isinstance(raw_overall, float) and np.isnan(raw_overall)
                 ):
                     raise click.ClickException(
                         "Missing required overall effect value in meta-analysis summary."
                     )
-                re_ci_lo = re.get("ci_lower")
-                re_ci_hi = re.get("ci_upper")
                 est_rows.append(
                     Estimate(
                         term="Overall Effect",

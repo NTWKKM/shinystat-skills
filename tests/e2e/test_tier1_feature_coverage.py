@@ -900,6 +900,51 @@ models:
         assert row["std_error"] >= np.sqrt(row["within_variance"])
 
 
+def test_tier1_spec_single_imputation_mice_narrative_omits_complete_case(
+    cardiovascular_fixture_path, tmp_path
+):
+    """Regression test: unpooled single-imputation MICE sets eff_strategy to None and does not claim complete-case."""
+    spec_mod = require_medstat_module("medstat.cli.spec")
+    df = pd.read_csv(cardiovascular_fixture_path).copy()
+    np.random.seed(42)
+    df.loc[df.sample(frac=0.1, random_state=42).index, "age"] = np.nan
+    in_csv = tmp_path / "cohort_single_mice.csv"
+    df.to_csv(in_csv, index=False)
+
+    yaml_content = f"""version: "1.0"
+data:
+  input_path: "{in_csv}"
+  id_column: "patient_id"
+variables:
+  - name: "cv_event"
+    data_type: "binary"
+    role: "outcome"
+  - name: "statin_rx"
+    data_type: "binary"
+    role: "exposure"
+  - name: "age"
+    data_type: "continuous"
+    role: "covariate"
+models:
+  - name: "single_mice"
+    type: "logistic"
+    outcome: "cv_event"
+    exposure: "statin_rx"
+    covariates: ["age"]
+    missing_strategy: "mice"
+    missing_justification: "Prespecified clinical MAR justification for MICE"
+    options:
+      n_imputations: 1
+"""
+    yaml_file = tmp_path / "single_mice.yaml"
+    yaml_file.write_text(yaml_content, encoding="utf-8")
+    plan = spec_mod.AnalysisPlan.from_yaml(yaml_file)
+    res = plan.execute()
+    narrative = res["reports"]["single_mice"]["methods_narrative"]
+    assert "complete-case" not in narrative.lower()
+    assert "rubin" not in narrative.lower()
+
+
 def test_tier1_spec_outcome_numeric_validation(
     cardiovascular_fixture_path, oncology_fixture_path, tmp_path
 ):
