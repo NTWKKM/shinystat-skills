@@ -13,6 +13,7 @@ reviews:
   collapse_walkthrough: false
   path_filters:
     - "!uv.lock"
+    - "**/*.csv"
   auto_review:
     enabled: true
     drafts: false
