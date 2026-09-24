@@ -896,4 +896,4 @@ def test_tier2_report_meta_explicit_log_ci_scale_with_natural_effect(tmp_path):
     assert res.exit_code == 0
     assert out_html.exists()
     content = out_html.read_text()
-    assert "1.50 (1.10–2.05)" in content
+    assert content.count("1.50 (1.10–2.05)") == 2
