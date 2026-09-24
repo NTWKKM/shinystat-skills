@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: "en"
+early_access: false
+
+tone_instructions: "Review with high rigor for clinical safety, statistical accuracy, Python standards, and agent skills."
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  path_filters:
+    - "!uv.lock"
+    - "!tests/fixtures/**"
+    - "!tests/benchmarks/**"
+    - "!.agent/**"
+    - "!.agents/**"
+    - "!.claude/**"
+    - "!.cursor/**"
+    - "!**/*.csv"
+  auto_review:
+    enabled: true
+    drafts: false
+
+chat:
+  auto_reply: true
