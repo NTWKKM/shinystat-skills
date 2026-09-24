@@ -15,7 +15,7 @@ def generate_methods_narrative(
     exposure: str | None = None,
     outcome: str | None = None,
     covariates: list[str] | None = None,
-    missing_strategy: str = "complete-case",
+    missing_strategy: str | None = None,
     is_firth: bool = False,
     is_rcs: bool = False,
     alpha: float = 0.05,

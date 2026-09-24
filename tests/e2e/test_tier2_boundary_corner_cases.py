@@ -631,6 +631,9 @@ def test_tier2_report_narrative_with_missing_pvalues():
         model_type="descriptive", exposure=None, outcome=None, covariates=None
     )
     assert len(text) > 20
+    # Without explicit missing_strategy, no unevidenced complete-case claim is made
+    assert "complete-case" not in text.lower()
+    assert "sample retention was audited" not in text.lower()
 
 
 def test_tier2_report_forest_missing_pvalue_renders_unavailable(tmp_path):
