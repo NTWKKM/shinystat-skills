@@ -844,3 +844,56 @@ def test_tier2_report_meta_ambiguous_log_effect_scale_rejected(tmp_path):
         "Ambiguous confidence limit scale for overall meta-analysis effect"
         in res2.output
     )
+
+
+def test_tier2_report_meta_explicit_log_ci_scale_with_natural_effect(tmp_path):
+    """FEAT-09-B8: Explicit ci_scale: 'log' exponentiates limits even when effect is already on natural scale."""
+    import json
+    import math
+
+    from click.testing import CliRunner
+
+    from medstat.cli.main import cli
+
+    forest_json = tmp_path / "forest_natural_eff_log_ci.json"
+    out_html = tmp_path / "table_decoupled_ci.html"
+    forest_data = {
+        "effect_measure": "OR",
+        "is_ratio": True,
+        "studies": [
+            {
+                "study": "Trial NaturalEffLogCI",
+                "effect_size": 1.50,  # Natural scale
+                "ci_lower": math.log(1.10),  # Log scale
+                "ci_upper": math.log(2.05),  # Log scale
+                "ci_scale": "log",  # Explicit CI scale
+            }
+        ],
+        "random_effects": {
+            "label": "Overall",
+            "effect_disp": 1.50,  # Natural scale
+            "ci_lower": math.log(1.10),  # Log scale
+            "ci_upper": math.log(2.05),  # Log scale
+            "ci_scale": "log",  # Explicit CI scale
+            "p_value": 0.012,
+        },
+    }
+    forest_json.write_text(json.dumps(forest_data))
+
+    runner = CliRunner()
+    res = runner.invoke(
+        cli,
+        [
+            "report",
+            "--results",
+            str(forest_json),
+            "--style",
+            "nejm",
+            "--output",
+            str(out_html),
+        ],
+    )
+    assert res.exit_code == 0
+    assert out_html.exists()
+    content = out_html.read_text()
+    assert "1.50 (1.10–2.05)" in content
