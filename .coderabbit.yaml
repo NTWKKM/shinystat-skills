@@ -11,6 +11,15 @@ reviews:
   poem: false
   review_status: true
   collapse_walkthrough: false
+  path_filters:
+    - "!uv.lock"
+    - "!tests/fixtures/**"
+    - "!tests/benchmarks/**"
+    - "!.agent/**"
+    - "!.agents/**"
+    - "!.claude/**"
+    - "!.cursor/**"
+    - "!**/*.csv"
   auto_review:
     enabled: true
     drafts: false
