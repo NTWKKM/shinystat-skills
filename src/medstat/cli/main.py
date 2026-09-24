@@ -388,7 +388,13 @@ def model_cmd(
         elif "cox" in mtype or "survival" in mtype:
             mtype = "cox"
 
-    result_data: dict[str, Any] = {"model_type": mtype, "outcome": outcome}
+    result_data: dict[str, Any] = {
+        "model_type": mtype,
+        "outcome": outcome,
+        "exposure": exposure,
+        "covariates": [c for c in covar_list if c != exposure],
+        "method": method,
+    }
 
     # Dummy-encode any categorical covariates
     X_raw = df[covar_list].copy()
@@ -508,6 +514,7 @@ def model_cmd(
         raise click.UsageError(f"Unsupported model type: {mtype}")
 
     if spline_var:
+        result_data["spline_var"] = spline_var
         if mtype in ("cox", "cox_ph"):
             t_col = time_col or "time"
             other_covars = [c for c in covar_list if c != spline_var]
@@ -1136,7 +1143,7 @@ def report_cmd(
             "covariates": res_data.get("covariates"),
             "missing_strategy": res_data.get(
                 "missing_strategy",
-                res_data.get("missing_data", {}).get("strategy", "complete-case"),
+                res_data.get("missing_data", {}).get("strategy"),
             ),
             "is_firth": res_data.get("method") == "firth",
             "is_rcs": bool(

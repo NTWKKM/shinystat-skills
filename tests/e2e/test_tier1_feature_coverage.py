@@ -7,6 +7,7 @@ import json
 
 import numpy as np
 import pandas as pd
+import pytest
 from conftest import require_medstat_module
 
 # ==============================================================================
@@ -374,6 +375,7 @@ models:
     yaml_file.write_text(yaml_content, encoding="utf-8")
 
     plan = spec_mod.AnalysisPlan.from_yaml(yaml_file)
+    assert plan.metadata.analyst == "medstat automated engine"
     res = plan.execute()
     assert "primary_adjusted_logistic" in res["models"]
     assert "primary_adjusted_logistic" in res["reports"]
@@ -834,3 +836,136 @@ def test_tier1_report_guideline_compliance_audit():
             metadata={"participant_flow": True, "missing_reported": True},
         )
         assert "items" in audit or "score" in audit
+
+
+def test_tier1_spec_mice_pooling_within_variance_and_se(
+    cardiovascular_fixture_path, tmp_path
+):
+    """Regression test: MICE pooling with missing data produces pooled SE >= sqrt(W_bar)."""
+    spec_mod = require_medstat_module("medstat.cli.spec")
+    df = pd.read_csv(cardiovascular_fixture_path).copy()
+    np.random.seed(42)
+    df.loc[df.sample(frac=0.1, random_state=42).index, "age"] = np.nan
+    df.loc[df.sample(frac=0.1, random_state=43).index, "ldl"] = np.nan
+
+    in_csv = tmp_path / "cohort_missing.csv"
+    df.to_csv(in_csv, index=False)
+
+    yaml_content = f"""version: "1.0"
+metadata:
+  study_title: "MICE Pooling Regression Test"
+  statistical_analyst: "medstat automated engine"
+data:
+  input_path: "{in_csv}"
+  id_column: "patient_id"
+variables:
+  - name: "cv_event"
+    data_type: "binary"
+    role: "outcome"
+  - name: "statin_rx"
+    data_type: "binary"
+    role: "exposure"
+  - name: "age"
+    data_type: "continuous"
+    role: "covariate"
+  - name: "ldl"
+    data_type: "continuous"
+    role: "covariate"
+models:
+  - name: "mice_logistic"
+    type: "logistic"
+    outcome: "cv_event"
+    exposure: "statin_rx"
+    covariates: ["age", "ldl"]
+    missing_strategy: "mice"
+    missing_justification: "MICE testing"
+    options:
+      n_imputations: 3
+"""
+    yaml_file = tmp_path / "mice_sap.yaml"
+    yaml_file.write_text(yaml_content, encoding="utf-8")
+
+    plan = spec_mod.AnalysisPlan.from_yaml(yaml_file)
+    res = plan.execute()
+    assert "mice_logistic" in res["models"]
+    m_res = res["models"]["mice_logistic"]
+    assert m_res.get("pooled") is True
+    sum_df = m_res["summary_df"]
+    for _, row in sum_df.iterrows():
+        assert row["odds_ratio"] > 0
+        assert row["or_ci_lower"] < row["odds_ratio"] < row["or_ci_upper"]
+
+
+def test_tier1_spec_outcome_numeric_validation(
+    cardiovascular_fixture_path, oncology_fixture_path, tmp_path
+):
+    """Regression test: AnalysisPlan.execute rejects text/non-numeric outcomes for logistic and Cox."""
+    spec_mod = require_medstat_module("medstat.cli.spec")
+    df = pd.read_csv(cardiovascular_fixture_path).copy()
+    df["cv_event"] = df["cv_event"].map({0: "Alive", 1: "Dead"})
+    in_csv = tmp_path / "cohort_text_outcome.csv"
+    df.to_csv(in_csv, index=False)
+
+    yaml_logistic = f"""version: "1.0"
+data:
+  input_path: "{in_csv}"
+variables:
+  - name: "cv_event"
+models:
+  - name: "log_model"
+    type: "logistic"
+    outcome: "cv_event"
+    covariates: ["age"]
+"""
+    log_file = tmp_path / "log.yaml"
+    log_file.write_text(yaml_logistic, encoding="utf-8")
+    p_log = spec_mod.AnalysisPlan.from_yaml(log_file)
+    with pytest.raises(ValueError, match="must be numeric"):
+        p_log.execute()
+
+    df_onc = pd.read_csv(oncology_fixture_path).copy()
+    df_onc["status"] = df_onc["status"].map({0: "Alive", 1: "Dead"})
+    onc_csv = tmp_path / "cohort_text_cox.csv"
+    df_onc.to_csv(onc_csv, index=False)
+
+    yaml_cox = f"""version: "1.0"
+data:
+  input_path: "{onc_csv}"
+variables:
+  - name: "status"
+models:
+  - name: "cox_model"
+    type: "cox"
+    outcome: "status"
+    time: "time"
+    covariates: ["age"]
+"""
+    cox_file = tmp_path / "cox.yaml"
+    cox_file.write_text(yaml_cox, encoding="utf-8")
+    p_cox = spec_mod.AnalysisPlan.from_yaml(cox_file)
+    with pytest.raises(ValueError, match="must be numeric"):
+        p_cox.execute()
+
+
+def test_tier1_spec_cox_rejects_mice(oncology_fixture_path, tmp_path):
+    """Regression test: AnalysisPlan.execute rejects MICE for Cox models."""
+    spec_mod = require_medstat_module("medstat.cli.spec")
+    yaml_cox_mice = f"""version: "1.0"
+data:
+  input_path: "{oncology_fixture_path}"
+models:
+  - name: "cox_mice_model"
+    type: "cox"
+    outcome: "status"
+    time: "time"
+    covariates: ["age"]
+    missing_strategy: "mice"
+    missing_justification: "Testing rejection"
+"""
+    cox_mice_file = tmp_path / "cox_mice.yaml"
+    cox_mice_file.write_text(yaml_cox_mice, encoding="utf-8")
+    p = spec_mod.AnalysisPlan.from_yaml(cox_mice_file)
+    with pytest.raises(
+        NotImplementedError, match="Multiple imputation pooling for Cox"
+    ):
+        p.execute()

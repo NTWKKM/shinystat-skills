@@ -124,7 +124,10 @@ class AnalysisPlan:
         metadata = MetadataSpec(
             study_title=meta_dict.get("study_title", "Clinical Study"),
             protocol_id=meta_dict.get("protocol_id", "MEDSTAT-SAP"),
-            analyst=meta_dict.get("analyst", "Clinical Biostatistician"),
+            analyst=meta_dict.get(
+                "analyst",
+                meta_dict.get("statistical_analyst", "Clinical Biostatistician"),
+            ),
             date=meta_dict.get("date", "2026-09-24"),
             reporting_guideline=meta_dict.get("reporting_guideline", "STROBE"),
             study_design=meta_dict.get("study_design", "observational"),
@@ -283,6 +286,22 @@ class AnalysisPlan:
             )
 
             if mod_type in ("logistic", "binary"):
+                y_raw = clean_df[model_spec.outcome]
+                u_y = y_raw.dropna().unique()
+                if len(u_y) > 2:
+                    raise ValueError(
+                        f"Binary outcome column '{model_spec.outcome}' must have at most 2 levels, found {len(u_y)}."
+                    )
+                if not pd.api.types.is_numeric_dtype(y_raw):
+                    raise ValueError(
+                        f"Binary outcome column '{model_spec.outcome}' must be numeric (0 for non-event, 1 for event). "
+                        "Text outcomes are not permitted; please recode outcomes as 0/1, with 1 representing the event."
+                    )
+                if not set(u_y).issubset({0, 1, 0.0, 1.0}):
+                    raise ValueError(
+                        f"Binary outcome column '{model_spec.outcome}' contains values outside {{0, 1}}: {set(u_y)}"
+                    )
+
                 covar_cols = [c for c in req_cols if c != model_spec.outcome]
                 if is_pooled:
                     if model_spec.options.get("method") == "firth":
@@ -298,8 +317,13 @@ class AnalysisPlan:
                         s_df = fit_i["summary_df"]
                         for idx, row in s_df.iterrows():
                             term_k = str(idx)
-                            b_val = float(row.get("estimate", row.get("coef", 0.0)))
-                            se_val = float(row.get("std_err", row.get("se", 0.0)))
+                            b_val = float(row.get("coef", row.get("estimate", 0.0)))
+                            se_val = float(
+                                row.get(
+                                    "std_error",
+                                    row.get("std_err", row.get("se", 0.0)),
+                                )
+                            )
                             term_estimates.setdefault(term_k, []).append(b_val)
                             term_variances.setdefault(term_k, []).append(se_val**2)
 
@@ -416,6 +440,28 @@ class AnalysisPlan:
                     fit_res["e_value"] = e_val
 
             elif mod_type in ("cox", "cox_ph", "survival"):
+                if (model_spec.missing_strategy or "").lower().replace(
+                    "_", "-"
+                ) == "mice":
+                    raise NotImplementedError(
+                        "Multiple imputation pooling for Cox proportional hazards models is not yet supported in medstat analysis plans."
+                    )
+                ev_raw = clean_df[model_spec.outcome]
+                u_ev = ev_raw.dropna().unique()
+                if len(u_ev) > 2:
+                    raise ValueError(
+                        f"Event outcome column '{model_spec.outcome}' must have at most 2 levels, found {len(u_ev)}."
+                    )
+                if not pd.api.types.is_numeric_dtype(ev_raw):
+                    raise ValueError(
+                        f"Event outcome column '{model_spec.outcome}' must be numeric (0 for non-event, 1 for event). "
+                        "Text outcomes are not permitted; please recode outcomes as 0/1, with 1 representing the event."
+                    )
+                if not set(u_ev).issubset({0, 1, 0.0, 1.0}):
+                    raise ValueError(
+                        f"Event outcome column '{model_spec.outcome}' contains values outside {{0, 1}}: {set(u_ev)}"
+                    )
+
                 dur_col = model_spec.time or "time"
                 covar_cols = [
                     c for c in req_cols if c not in {model_spec.outcome, dur_col}
@@ -470,8 +516,10 @@ class AnalysisPlan:
                         s_df = fit_i["summary_df"]
                         for idx, row in s_df.iterrows():
                             term_k = str(idx)
-                            b_val = float(row["coef"])
-                            se_val = float(row.get("std_err", 0.0))
+                            b_val = float(row.get("coef", row.get("estimate", 0.0)))
+                            se_val = float(
+                                row.get("std_error", row.get("std_err", 0.0))
+                            )
                             term_estimates.setdefault(term_k, []).append(b_val)
                             term_variances.setdefault(term_k, []).append(se_val**2)
 
@@ -546,7 +594,9 @@ class AnalysisPlan:
                     est_tbl, style=self.reporting.style
                 )
                 eff_strategy = model_spec.missing_strategy or "complete-case"
-                if eff_strategy.lower().replace("_", "-") == "mice" and not is_pooled:
+                if (
+                    eff_strategy.lower().replace("_", "-") == "mice"
+                ) and not fit_res.get("pooled", False):
                     eff_strategy = "complete-case"
                 narrative = generate_narrative(
                     est_tbl,

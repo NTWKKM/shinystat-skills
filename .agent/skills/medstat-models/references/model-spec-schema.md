@@ -56,7 +56,7 @@ models:
 
 > [!IMPORTANT]
 > **Binary & Event Outcome Encoding (Clinical Safety)**:
-> Both CLI commands and SAP YAML specs require binary/event outcomes to be explicitly encoded as numeric `0` and `1` (`1 = Event`, `0 = Non-event`). Text outcomes (e.g., `"Dead"`, `"Alive"`, `"Yes"`, `"No"`) are rejected with `ClickException` to eliminate clinical event misclassification. In `variables`, specify `data_type: "binary"`, `categories: [0, 1]`, and `reference_category: 0`.
+> Both CLI commands (`medstat model`) and SAP YAML specs (`AnalysisPlan.execute()`) require binary and event outcomes to be explicitly encoded as numeric `0` and `1` (`1 = Event`, `0 = Non-event`). Text outcomes (e.g., `"Dead"`, `"Alive"`, `"Yes"`, `"No"`) are rejected with `ClickException` (CLI) or `ValueError` (SAP plan) to eliminate clinical event misclassification. In `variables`, specify `data_type: "binary"`, `categories: [0, 1]`, and `reference_category: 0`.
 
 ---
 

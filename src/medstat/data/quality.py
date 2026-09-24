@@ -327,8 +327,11 @@ class DataQualityReport:
                     # Scope evaluation to non-null rows of referenced columns
                     if isinstance(rule.condition, str):
                         backtick_tokens = re.findall(r"`([^`]+)`", rule.condition)
+                        condition_without_backticks = re.sub(
+                            r"`([^`]+)`", "", rule.condition
+                        )
                         word_tokens = re.findall(
-                            r"\b[A-Za-z_][A-Za-z0-9_]*\b", rule.condition
+                            r"\b[A-Za-z_][A-Za-z0-9_]*\b", condition_without_backticks
                         )
                         tokens = set(backtick_tokens).union(word_tokens)
                         cols_in_rule = [c for c in self.df.columns if c in tokens]
@@ -648,22 +651,23 @@ class DataQualityReport:
         Generate complete, structured quality assessment.
         Backward-compatible with legacy DataQualityReport dictionary layout.
         """
-        scores = {
-            "completeness": round(self.completeness_score(), 1),
-            "consistency": round(self.consistency_score(), 1),
-            "uniqueness": round(self.uniqueness_score(), 1),
-            "validity": round(self.validity_score(), 1),
-            "plausibility": round(self.plausibility_score(), 1),
+        raw_scores = {
+            "completeness": self.completeness_score(),
+            "consistency": self.consistency_score(),
+            "uniqueness": self.uniqueness_score(),
+            "validity": self.validity_score(),
+            "plausibility": self.plausibility_score(),
         }
-        overall = self.composite_score(weights, scores=scores)
+        overall = self.composite_score(weights, scores=raw_scores)
         grade = self._score_to_grade(overall)
+        display_scores = {k: round(v, 1) for k, v in raw_scores.items()}
         issues = check_data_quality(self.df)
-        recs = self._generate_recommendations(scores)
+        recs = self._generate_recommendations(display_scores)
 
         return {
             "overall_score": overall,
             "grade": grade,
-            "dimension_scores": scores,
+            "dimension_scores": display_scores,
             "issues": issues,
             "rule_errors": self.rule_errors,
             "recommendations": recs,

@@ -567,6 +567,9 @@ def pool_estimates(
             df = float((df_old * df_obs) / (df_old + df_obs))
         else:
             df = float(df_old)
+    elif B > 0 and W_bar <= 0:
+        r = np.inf
+        df = float(m - 1)
     else:
         r = 0.0
         if n_obs is not None or df_complete is not None:

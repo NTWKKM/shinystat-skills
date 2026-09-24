@@ -70,6 +70,15 @@ class TestPoolEstimates:
         assert np.isfinite(result.df)
         assert result.df > 0
 
+    def test_pool_estimates_zero_within_variance_positive_between_variance(self):
+        """Test pooling when W_bar == 0 but B > 0 yields df = m - 1."""
+        estimates = [1.0, 2.0, 3.0]
+        variances = [0.0, 0.0, 0.0]
+
+        result = pool_estimates(estimates, variances, n_obs=100, df_complete=98)
+
+        assert result.df == 2.0
+
 
 class TestMICEImputer:
     """Tests for MICE imputation."""
