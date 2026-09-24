@@ -479,10 +479,6 @@ class TestDataQualityScoringStress:
         assert len(warnings) == 1
         assert "non-standard values" in warnings[0]
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Infinite values should trigger quality warnings and penalize plausibility/validity",
-    )
     def test_infinite_values_handling(self):
         """
         Infinite values (np.inf, -np.inf) should trigger warnings and reduce plausibility or validity scores.

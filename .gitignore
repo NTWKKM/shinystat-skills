@@ -38,6 +38,8 @@ env/
 .agents/sentinel*
 .agents/teamwork_preview*
 .agents/ORIGINAL_REQUEST.md
+.skills_backups/
+**/.skills_backups/
 
 # IDE & editors
 .vscode/

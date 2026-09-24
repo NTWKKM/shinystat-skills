@@ -15,44 +15,48 @@ metadata:
   reporting_guideline: "STROBE"
   random_seed: 42
 
-dataset:
-  path: "cardiovascular_cohort.csv"
-  format: "csv"
+data:
+  input_path: "cardiovascular_cohort.csv"
   id_column: "patient_id"
-
-missing_data:
-  strategy: "mice"
-  justification: "Multiple imputation with m=5 chained equations under MAR"
-  n_imputations: 5
-  variables: ["sbp", "ldl", "creatinine"]
 
 variables:
   - name: "cv_event"
-    type: "binary"
+    data_type: "binary"
     role: "outcome"
+    categories: [0, 1]
+    reference_category: 0
   - name: "statin_rx"
-    type: "binary"
+    data_type: "binary"
     role: "exposure"
-    reference_category: "0"
+    categories: [0, 1]
+    reference_category: 0
   - name: "age"
-    type: "continuous"
+    data_type: "continuous"
     role: "covariate"
-  - name: "diabetes"
-    type: "categorical"
+  - name: "ldl"
+    data_type: "continuous"
     role: "covariate"
-    reference_category: "No"
+  - name: "sbp"
+    data_type: "continuous"
+    role: "covariate"
 
 models:
   - name: "primary_adjusted_logistic"
     type: "logistic"
     outcome: "cv_event"
     exposure: "statin_rx"
-    covariates: ["age", "diabetes", "ldl", "sbp"]
-    method: "standard"
+    covariates: ["age", "ldl", "sbp"]
+    missing_strategy: "complete-case"
+    missing_justification: "Complete-case analysis prespecified under MCAR with <5% missingness"
     options:
+      method: "standard"
       e_value: true
       confidence_level: 0.95
 ```
+
+> [!IMPORTANT]
+> **Binary & Event Outcome Encoding (Clinical Safety)**:
+> Both CLI commands and SAP YAML specs require binary/event outcomes to be explicitly encoded as numeric `0` and `1` (`1 = Event`, `0 = Non-event`). Text outcomes (e.g., `"Dead"`, `"Alive"`, `"Yes"`, `"No"`) are rejected with `ClickException` to eliminate clinical event misclassification. In `variables`, specify `data_type: "binary"`, `categories: [0, 1]`, and `reference_category: 0`.
 
 ---
 
@@ -91,6 +95,8 @@ First invert $RR^* = 1 / RR$, then compute:
 $$\text{E-value} = RR^* + \sqrt{RR^*(RR^* - 1)}$$
 
 ### Odds Ratio Approximation:
-When outcome is rare (< 15%), $RR \approx \sqrt{OR}$ or directly approximate. For common outcomes:
-$$RR \approx \frac{OR}{1 - p_0 + (p_0 \cdot OR)}$$
-where $p_0$ is unexposed baseline risk.
+When the outcome is rare (< 15%), $OR$ approximates $RR$ directly ($RR \approx OR$).
+For common outcomes, if baseline risk $p_0$ is unavailable, the square-root approximation can be used:
+$$RR \approx \sqrt{OR}$$
+When baseline risk $p_0$ (unexposed outcome risk) is known, use the baseline-risk conversion formula:
+$$RR = \frac{OR}{1 - p_0 + (p_0 \cdot OR)}$$

@@ -82,6 +82,14 @@ def check_data_missingness(
         raise click.ClickException(err_msg)
 
 
+def _serialize_summary_df(sum_df: pd.DataFrame) -> list[dict[str, Any]]:
+    """Serialize model summary DataFrame to records, preserving the index as 'term'."""
+    df_copy = sum_df.copy()
+    if "term" not in df_copy.columns:
+        df_copy.insert(0, "term", df_copy.index.astype(str))
+    return df_copy.to_dict(orient="records")
+
+
 @click.group()
 @click.version_option(version="0.1.0", prog_name="medstat")
 def cli() -> None:
@@ -401,16 +409,15 @@ def model_cmd(
                 f"Event outcome column '{outcome}' must have at most 2 levels, found {len(u_ev)}."
             )
         if not pd.api.types.is_numeric_dtype(ev_raw):
-            if len(u_ev) == 2:
-                ev_vals = (ev_raw == u_ev[1]).astype(int).values
-            else:
-                ev_vals = np.zeros(len(ev_raw), dtype=int)
-        else:
-            if not set(u_ev).issubset({0, 1, 0.0, 1.0}):
-                raise click.ClickException(
-                    f"Event outcome column '{outcome}' contains values outside {{0, 1}}: {set(u_ev)}"
-                )
-            ev_vals = ev_raw.astype(int).values
+            raise click.ClickException(
+                f"Event outcome column '{outcome}' must be numeric (0 for non-event, 1 for event). "
+                "Text outcomes are not permitted; please recode outcomes as 0/1, with 1 representing the event."
+            )
+        if not set(u_ev).issubset({0, 1, 0.0, 1.0}):
+            raise click.ClickException(
+                f"Event outcome column '{outcome}' contains values outside {{0, 1}}: {set(u_ev)}"
+            )
+        ev_vals = ev_raw.astype(int).values
 
         if method == "firth":
             fit_res = fit_firth_cox(
@@ -420,7 +427,7 @@ def model_cmd(
                 feature_names=feature_names,
             )
             sum_df = fit_res["summary_df"]
-            result_data["coefficients"] = sum_df.to_dict(orient="records")
+            result_data["coefficients"] = _serialize_summary_df(sum_df)
             if schoenfeld:
                 result_data["schoenfeld_test"] = {
                     "status": "not_performed",
@@ -434,7 +441,7 @@ def model_cmd(
                 df_cox, duration_col=t_col, event_col=outcome, covariates=feature_names
             )
             sum_df = fit_res["summary_df"]
-            result_data["coefficients"] = sum_df.to_dict(orient="records")
+            result_data["coefficients"] = _serialize_summary_df(sum_df)
             if schoenfeld:
                 ph_res = check_proportional_hazards(fit_res["model"], df=df_cox)
                 result_data["schoenfeld_test"] = str(ph_res)
@@ -447,25 +454,24 @@ def model_cmd(
                 f"Binary outcome column '{outcome}' must have at most 2 levels, found {len(u_y)}."
             )
         if not pd.api.types.is_numeric_dtype(y_raw):
-            if len(u_y) == 2:
-                y = (y_raw == u_y[1]).astype(int).values
-            else:
-                y = np.zeros(len(y_raw), dtype=int)
-        else:
-            if not set(u_y).issubset({0, 1, 0.0, 1.0}):
-                raise click.ClickException(
-                    f"Binary outcome column '{outcome}' contains values outside {{0, 1}}: {set(u_y)}"
-                )
-            y = y_raw.astype(int).values
+            raise click.ClickException(
+                f"Binary outcome column '{outcome}' must be numeric (0 for non-event, 1 for event). "
+                "Text outcomes are not permitted; please recode outcomes as 0/1, with 1 representing the event."
+            )
+        if not set(u_y).issubset({0, 1, 0.0, 1.0}):
+            raise click.ClickException(
+                f"Binary outcome column '{outcome}' contains values outside {{0, 1}}: {set(u_y)}"
+            )
+        y = y_raw.astype(int).values
 
         if method == "firth":
             fit_res = fit_firth_logistic(y, X_df, feature_names=feature_names)
             sum_df = fit_res["summary_df"]
-            result_data["coefficients"] = sum_df.to_dict(orient="records")
+            result_data["coefficients"] = _serialize_summary_df(sum_df)
         else:
             fit_res = fit_standard_logistic(y, X_df)
             sum_df = fit_res["summary_df"]
-            result_data["coefficients"] = sum_df.to_dict(orient="records")
+            result_data["coefficients"] = _serialize_summary_df(sum_df)
 
         if e_value and exposure:
             matching = [idx for idx in sum_df.index if str(idx) == exposure]
@@ -497,7 +503,7 @@ def model_cmd(
 
     elif mtype in ("linear", "ols"):
         fit_res = fit_linear_regression(df[outcome], X_df)
-        result_data["coefficients"] = fit_res["summary_df"].to_dict(orient="records")
+        result_data["coefficients"] = _serialize_summary_df(fit_res["summary_df"])
     else:
         raise click.UsageError(f"Unsupported model type: {mtype}")
 
@@ -515,7 +521,7 @@ def model_cmd(
             )
             rcs_summary = rcs_res.get("summary_df")
             if isinstance(rcs_summary, pd.DataFrame):
-                result_data["spline_estimates"] = rcs_summary.to_dict(orient="records")
+                result_data["spline_estimates"] = _serialize_summary_df(rcs_summary)
             result_data["knots"] = rcs_res.get("knots", [])
             result_data["non_linear_pvalue"] = rcs_res.get("non_linear_pvalue")
 
@@ -1051,16 +1057,29 @@ def report_cmd(
                     )
                     ci_lo = s.get("ci_lower")
                     ci_hi = s.get("ci_upper")
+                    study_name = str(s.get("study", "Study"))
+                    raw_eff = s.get("effect_size", s.get("effect"))
+                    if raw_eff is None:
+                        is_log_scale = (
+                            "log" in str(s.get("scale", "")).lower()
+                            or "log" in str(res_data.get("effect_measure", "")).lower()
+                        )
+                        if is_log_scale:
+                            raw_eff = s.get("log_effect")
+                    if raw_eff is None or (
+                        isinstance(raw_eff, float) and np.isnan(raw_eff)
+                    ):
+                        raise click.ClickException(
+                            f"Missing required effect value for study '{study_name}' in meta-analysis results."
+                        )
+                    eff_val = float(raw_eff)
+                    ci_lo = s.get("ci_lower")
+                    ci_hi = s.get("ci_upper")
                     est_rows.append(
                         Estimate(
-                            term=str(s.get("study", "Study")),
-                            label=str(s.get("study", "Study")),
-                            estimate=float(
-                                s.get(
-                                    "effect_size",
-                                    s.get("effect", s.get("log_effect", 0.0)),
-                                )
-                            ),
+                            term=study_name,
+                            label=study_name,
+                            estimate=eff_val,
                             ci_lower=float(ci_lo)
                             if ci_lo is not None
                             else float("nan"),
@@ -1085,13 +1104,20 @@ def report_cmd(
                     )
                     else float("nan")
                 )
+                raw_overall = re.get("effect_disp", re.get("effect"))
+                if raw_overall is None or (
+                    isinstance(raw_overall, float) and np.isnan(raw_overall)
+                ):
+                    raise click.ClickException(
+                        "Missing required overall effect value in meta-analysis summary."
+                    )
                 re_ci_lo = re.get("ci_lower")
                 re_ci_hi = re.get("ci_upper")
                 est_rows.append(
                     Estimate(
                         term="Overall Effect",
                         label=str(re.get("label", "Overall Effect")),
-                        estimate=float(re.get("effect_disp", re.get("effect", 0.0))),
+                        estimate=float(raw_overall),
                         ci_lower=float(re_ci_lo)
                         if re_ci_lo is not None
                         else float("nan"),
@@ -1103,11 +1129,32 @@ def report_cmd(
                     )
                 )
 
+        narr_kwargs = {
+            "model_type": res_data.get("model_type", "logistic"),
+            "outcome": res_data.get("outcome", "primary outcome"),
+            "exposure": res_data.get("exposure"),
+            "covariates": res_data.get("covariates"),
+            "missing_strategy": res_data.get(
+                "missing_strategy",
+                res_data.get("missing_data", {}).get("strategy", "complete-case"),
+            ),
+            "is_firth": res_data.get("method") == "firth",
+            "is_rcs": bool(
+                res_data.get("spline_var") or res_data.get("spline_estimates")
+            ),
+            "check_schoenfeld": bool(
+                res_data.get("schoenfeld_test")
+                and res_data.get("schoenfeld_test") != "not_performed"
+                and not (
+                    isinstance(res_data.get("schoenfeld_test"), dict)
+                    and res_data.get("schoenfeld_test", {}).get("status")
+                    == "not_performed"
+                )
+            ),
+        }
+
         if out_format.lower() in ("markdown", "md") or str(output).endswith(".md"):
-            narr_text = generate_methods_narrative(
-                model_type=res_data.get("model_type", "logistic"),
-                outcome=res_data.get("outcome", "primary outcome"),
-            )
+            narr_text = generate_methods_narrative(**narr_kwargs)
             out_p.write_text(narr_text, encoding="utf-8")
         else:
             est_tbl = EstimateTable(
@@ -1115,10 +1162,7 @@ def report_cmd(
             )
             html_out = PublicationRenderer.render_html(est_tbl, style=style)
             if narrative:
-                narr_text = generate_methods_narrative(
-                    model_type=res_data.get("model_type", "logistic"),
-                    outcome=res_data.get("outcome", "primary outcome"),
-                )
+                narr_text = generate_methods_narrative(**narr_kwargs)
                 html_out += f"\n<!-- Methods Narrative -->\n<div class='methods-narrative'><p>{narr_text}</p></div>"
             out_p.write_text(html_out, encoding="utf-8")
         click.echo(f"Publication report saved to: {output}")

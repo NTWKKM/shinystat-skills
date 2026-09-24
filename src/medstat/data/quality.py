@@ -128,6 +128,16 @@ def check_data_quality(df: pd.DataFrame) -> list[str]:
 
         # CASE 1: Numeric Column
         if is_numeric_col:
+            # Check for infinite values (+/- np.inf)
+            is_inf = np.isinf(numeric_strict) & series.notna()
+            if is_inf.any():
+                inf_count = int(is_inf.sum())
+                error_rows = df.index[is_inf].tolist()
+                row_str = _format_row_list(error_rows, max_show=10000)
+                col_issues.append(
+                    f"Found {inf_count} non-standard values (infinite +/-Inf) at rows `{row_str}`."
+                )
+
             if strict_nan_count > 0:
                 error_rows = df.index[is_strict_nan].tolist()
                 try:
@@ -303,6 +313,7 @@ class DataQualityReport:
         base_score = float(np.mean(consistency_scores)) if consistency_scores else 100.0
 
         # Cross-variable rule checks if schema provided
+        self.rule_errors = []
         if self.schema and self.schema.cross_variable_rules:
             severity_weights = {
                 "info": 10.0,
@@ -315,9 +326,11 @@ class DataQualityReport:
                 try:
                     # Scope evaluation to non-null rows of referenced columns
                     if isinstance(rule.condition, str):
-                        tokens = set(
-                            re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", rule.condition)
+                        backtick_tokens = re.findall(r"`([^`]+)`", rule.condition)
+                        word_tokens = re.findall(
+                            r"\b[A-Za-z_][A-Za-z0-9_]*\b", rule.condition
                         )
+                        tokens = set(backtick_tokens).union(word_tokens)
                         cols_in_rule = [c for c in self.df.columns if c in tokens]
                     else:
                         cols_in_rule = []
@@ -546,6 +559,11 @@ class DataQualityReport:
             s_raw = self.df.iloc[:, i].dropna()
             s_num = pd.to_numeric(s_raw, errors="coerce")
 
+            # Non-finite values (+/- inf) are immediate plausibility violations
+            non_finite_mask = ~np.isfinite(s_num) & s_raw.notna()
+            non_finite_count = int(non_finite_mask.sum())
+            outlier_count += non_finite_count
+
             # Isolate finite values for distribution calculation
             s = s_num[np.isfinite(s_num)]
             n = len(s)
@@ -605,18 +623,22 @@ class DataQualityReport:
             return 100.0
         return max(0.0, 100.0 * (1.0 - (outlier_count / total_values)))
 
-    def composite_score(self, weights: dict[str, float] | None = None) -> float:
+    def composite_score(
+        self,
+        weights: dict[str, float] | None = None,
+        scores: dict[str, float] | None = None,
+    ) -> float:
         """Compute weighted composite data quality score (0-100)."""
         w = weights or self.DEFAULT_WEIGHTS
-        scores = {
+        calc_scores = scores or {
             "completeness": self.completeness_score(),
             "validity": self.validity_score(),
             "consistency": self.consistency_score(),
             "uniqueness": self.uniqueness_score(),
             "plausibility": self.plausibility_score(),
         }
-        total_w = sum(w.get(k, 0.0) for k in scores)
-        composite = sum(scores[k] * w.get(k, 0.0) for k in scores) / total_w
+        total_w = sum(w.get(k, 0.0) for k in calc_scores)
+        composite = sum(calc_scores[k] * w.get(k, 0.0) for k in calc_scores) / total_w
         return round(composite, 1)
 
     def generate_report(
@@ -633,7 +655,7 @@ class DataQualityReport:
             "validity": round(self.validity_score(), 1),
             "plausibility": round(self.plausibility_score(), 1),
         }
-        overall = self.composite_score(weights)
+        overall = self.composite_score(weights, scores=scores)
         grade = self._score_to_grade(overall)
         issues = check_data_quality(self.df)
         recs = self._generate_recommendations(scores)

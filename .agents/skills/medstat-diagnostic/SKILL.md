@@ -37,9 +37,9 @@ Output includes:
 - **Positive & Negative Likelihood Ratios (LR+, LR-)**: Pre-test to post-test odds transitions.
 - **Diagnostic Odds Ratio (DOR)**: $(\text{TP} \times \text{TN}) / (\text{FP} \times \text{FN})$.
 
-### Step 2: Empirical ROC Curve & Optimal Cutpoint Selection
+### Step 2: Empirical ROC Analysis & Youden's Index
 
-Generate full ROC curve across all thresholds and calculate Youden's Index:
+Compute empirical AUC with DeLong confidence intervals and calculate Youden's Index:
 
 ```bash
 medstat diag --data <cohort.csv> \
@@ -50,7 +50,7 @@ medstat diag --data <cohort.csv> \
 ```
 
 - **AUC & DeLong 95% CIs**: Analytical standard errors without bootstrapping.
-- **Youden's J**: Optimal threshold maximizing $J = \text{Sensitivity} + \text{Specificity} - 1$.
+- **Youden's J**: Optimal index maximizing $J = \text{Sensitivity} + \text{Specificity} - 1$.
 - Consult [references/diagnostic-cutpoints.md](references/diagnostic-cutpoints.md) for clinical cutpoint trade-offs.
 
 ### Step 3: Compare Correlated Diagnostic Biomarkers (Paired DeLong)

@@ -144,17 +144,22 @@ def create_forest_plot(meta_results: dict[str, Any]) -> go.Figure:
     het_str = f"Heterogeneity: I² = {het['I2']:.1f}%, τ² = {het['tau2']:.3f}, p = {het['p_value']:.3f}"
 
     measure = meta_results.get("effect_measure")
+    measure_norm = str(measure).strip().upper() if measure else ""
     if is_ratio:
-        if measure and ("OR" in str(measure).upper() or "ODDS" in str(measure).upper()):
+        if measure_norm in ("OR", "ODDS_RATIO", "ODDS RATIO"):
             x_title = "Odds Ratio (log scale)"
-        elif measure and (
-            "RR" in str(measure).upper() or "RISK" in str(measure).upper()
+        elif measure_norm in (
+            "RR",
+            "RISK_RATIO",
+            "RISK RATIO",
+            "RELATIVE_RISK",
+            "RELATIVE RISK",
         ):
             x_title = "Risk Ratio (log scale)"
-        elif measure and (
-            "HR" in str(measure).upper() or "HAZARD" in str(measure).upper()
-        ):
+        elif measure_norm in ("HR", "HAZARD_RATIO", "HAZARD RATIO"):
             x_title = "Hazard Ratio (log scale)"
+        elif measure_norm in ("IRR", "INCIDENCE_RATE_RATIO", "INCIDENCE RATE RATIO"):
+            x_title = "Incidence Rate Ratio (log scale)"
         elif measure:
             x_title = f"{measure} (log scale)"
         else:

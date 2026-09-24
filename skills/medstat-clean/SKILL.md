@@ -13,6 +13,7 @@ Clinical data preparation engine enforcing explicit missing data justification a
 2. **Audited Sample Retention Flow**: Every cleaning run tracks and records participant retention:
    $$N_{\text{initial}} \longrightarrow N_{\text{excluded}} \longrightarrow N_{\text{analyzed}}$$
 3. **Preserve Raw Values**: Keep original files untouched; write transformed cohorts to distinct output targets.
+4. **Binary Endpoint Standardization**: Recode all categorical/text endpoints (e.g., `'Alive'/'Dead'`, `'Yes'/'No'`) to numeric `0/1` (`1 = Event`, `0 = Non-event`) during cleaning so downstream modeling engines receive unambiguous event indicators.
 
 ## Execution Sequence
 
@@ -66,6 +67,7 @@ medstat clean --data <dataset.csv> \
 Detect and clamp non-physiological or extreme values:
 - Use Tukey's IQR rule ($1.5 \times \text{IQR}$) or Median Absolute Deviation (MAD > 3.0).
 - Extreme laboratory readings or physiological vitals (e.g. SBP > 260 or < 40) are winsorized to boundary percentiles (1st and 99th), never silently deleted.
+- Standardize all binary and survival clinical endpoints to numeric `0/1` (`1 = Event`, `0 = Non-event`); never forward text outcomes to modeling.
 
 ### Step 4: Verify Sample Retention Flow
 
@@ -78,5 +80,6 @@ Verify that the output contains the audited sample retention tracker:
 
 - [ ] Missingness audit executed and reviewed across all clinical variables.
 - [ ] Explicit missing data strategy chosen with documented clinical justification.
+- [ ] Binary and survival event endpoints standardized to numeric 0/1 (1 = Event).
 - [ ] Cleaned dataset written to `--output` path with zero unexpected `NaN` cells.
 - [ ] Sample retention flow metadata recorded with explicit initial, excluded, and analyzed counts.

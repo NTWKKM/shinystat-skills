@@ -163,13 +163,30 @@ class ConfigManager:
                 if existing_val is not None:
                     try:
                         if isinstance(existing_val, bool):
-                            converted_val = value.lower() in ("true", "1", "yes", "on")
+                            val_lower = str(value).strip().lower()
+                            if val_lower in ("true", "1", "yes", "on"):
+                                converted_val = True
+                            elif val_lower in ("false", "0", "no", "off"):
+                                converted_val = False
+                            else:
+                                raise ValueError(
+                                    f"Invalid boolean value '{value}' for {target_key} (expected true/false, 1/0, yes/no, on/off)"
+                                )
                         elif isinstance(existing_val, int):
-                            converted_val = int(value)
+                            f_val = float(value)
+                            if not f_val.is_integer():
+                                raise ValueError(
+                                    f"Fractional float '{value}' cannot be converted to integer for {target_key}"
+                                )
+                            converted_val = int(f_val)
                         elif isinstance(existing_val, float):
                             converted_val = float(value)
-                    except (ValueError, TypeError):
-                        converted_val = value
+                    except (ValueError, TypeError) as conv_err:
+                        warnings.warn(
+                            f"Failed to convert env override {key}={value} for {target_key}: {conv_err}; skipping override.",
+                            stacklevel=2,
+                        )
+                        continue
                 try:
                     self.update(target_key, converted_val)
                 except (KeyError, ValueError, TypeError) as e:

@@ -78,3 +78,18 @@ Package 5 atomic skills (`medstat-clean`, `medstat-models`, `medstat-diagnostic`
 - **Status**: Accepted & Verified.
 - **Portability**: Each skill directory can be copied independently into `.agents/skills/`, `.claude/skills/`, or `.cursor/skills/` without breaking any relative markdown links.
 - **Installer**: Provided `scripts/install-skills.sh` automates single-command deployment across platforms.
+
+---
+
+## ADR 6: Strict Numeric 0/1 Encoding for Binary Outcomes & Event Indicators
+
+### Context
+In clinical regression and survival modeling, accepting raw string/categorical outcomes (e.g., `"Dead"`, `"Alive"`, `"Yes"`, `"No"`) risks silent clinical event inversion depending on alphabetical ordering or factor level assignment across different statistical packages (e.g., Python `statsmodels` vs R vs SAS).
+
+### Decision
+Enforce strict numeric `0` and `1` (`1 = Event`, `0 = Non-event`) encoding across all modeling CLI commands, YAML SAP execution engines, and skill instructions. Reject non-numeric outcome columns at CLI entry points with explicit `ClickException` messages instructing the user/agent to recode endpoints during the `medstat-clean` phase.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Clinical Safety**: Eliminates the catastrophic risk of inverse odds/hazard ratio estimation ($HR < 1$ mistaken for protective when it is harmful).
+- **Separation of Concerns**: Data cleaning and recoding are isolated in `medstat-clean`, keeping `medstat-models` deterministic and unambiguous.

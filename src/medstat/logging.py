@@ -211,12 +211,15 @@ class LoggerFactory:
             import medstat.config as cfg_mod
 
             cfg = getattr(cfg_mod, "CONFIG", None)
+            is_fallback = False
             if cfg is None:
                 cfg = DEFAULT_CONFIG
+                is_fallback = True
 
             if not cfg.get("logging.enabled"):
                 logging.disable(logging.CRITICAL)
-                cls._configured = True
+                if not is_fallback:
+                    cls._configured = True
                 return
 
             log_level = cast(str, cfg.get("logging.level", "INFO"))
@@ -240,7 +243,8 @@ class LoggerFactory:
             if cfg.get("logging.file_enabled"):
                 cls._setup_file_logging(medstat_logger, formatter, cfg)
 
-            cls._configured = True
+            if not is_fallback:
+                cls._configured = True
 
         except Exception as e:
             print(f"[WARNING] Logging config failed: {e}", file=sys.stderr)

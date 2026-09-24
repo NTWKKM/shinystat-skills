@@ -60,3 +60,4 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
   - NEJM: $P = 0.04$, $P = 0.003$, $P < 0.001$ (with leading zero).
   - JAMA: $P = .04$, $P = .008$, $P < .001$ (no leading zero).
 - **Units**: Must be explicitly rendered on continuous clinical variables (`mg/dL`, `mmHg`, `mL/min/1.73m²`).
+- **Binary & Event Outcome Encoding**: Binary outcomes and survival event indicators must be strictly encoded as numeric `0` and `1` (`1 = Event`, `0 = Non-event`) across all CLI commands, YAML SAP specifications, and data cleaning pipelines. Text outcomes (`'Dead'`/`'Alive'`, `'Yes'`/`'No'`) are rejected to eliminate clinical event inversion.

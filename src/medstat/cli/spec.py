@@ -17,6 +17,7 @@ import pandas as pd
 import yaml
 
 from medstat.data.clean import prepare_data_for_analysis
+from medstat.data.missing import pool_estimates
 from medstat.data.retention import SampleFlowTracker
 from medstat.models.firth import fit_firth_logistic
 from medstat.models.glm import fit_linear_regression, fit_standard_logistic
@@ -261,9 +262,15 @@ class AnalysisPlan:
                 required_cols=req_cols,
                 handle_missing=model_spec.missing_strategy,
                 missing_justification=model_spec.missing_justification,
+                strategy_params={
+                    "n_imputations": int(model_spec.options.get("n_imputations", 5))
+                },
                 tracker=model_tracker,
             )
             results["model_flow"][model_spec.name] = model_tracker.get_flow_summary()
+
+            imputed_datasets = m_info.get("imputed_datasets")
+            is_pooled = bool(imputed_datasets and len(imputed_datasets) > 1)
 
             mod_type = model_spec.type.lower().strip()
             est_rows: list[Estimate] = []
@@ -276,54 +283,118 @@ class AnalysisPlan:
             )
 
             if mod_type in ("logistic", "binary"):
-                y = clean_df[model_spec.outcome]
                 covar_cols = [c for c in req_cols if c != model_spec.outcome]
-                X = clean_df[covar_cols]
+                if is_pooled:
+                    if model_spec.options.get("method") == "firth":
+                        raise NotImplementedError(
+                            "Multiple imputation pooling for Firth penalized logistic regression is not yet implemented."
+                        )
+                    term_estimates: dict[str, list[float]] = {}
+                    term_variances: dict[str, list[float]] = {}
+                    for imp_df in imputed_datasets:
+                        fit_i = fit_standard_logistic(
+                            imp_df[model_spec.outcome], imp_df[covar_cols]
+                        )
+                        s_df = fit_i["summary_df"]
+                        for idx, row in s_df.iterrows():
+                            term_k = str(idx)
+                            b_val = float(row.get("estimate", row.get("coef", 0.0)))
+                            se_val = float(row.get("std_err", row.get("se", 0.0)))
+                            term_estimates.setdefault(term_k, []).append(b_val)
+                            term_variances.setdefault(term_k, []).append(se_val**2)
 
-                if model_spec.options.get("method") == "firth":
-                    fit_res = fit_firth_logistic(y, X, feature_names=covar_cols)
-                    sum_df = fit_res["summary_df"]
-                    for idx, row in sum_df.iterrows():
+                    n_obs = len(imputed_datasets[0])
+                    k_params = len(term_estimates)
+                    sum_df_records = {}
+                    for term_k, thetas in term_estimates.items():
+                        vars_list = term_variances[term_k]
+                        pooled = pool_estimates(
+                            thetas,
+                            vars_list,
+                            n_obs=n_obs,
+                            df_complete=max(1.0, float(n_obs - k_params)),
+                        )
+                        or_val = float(np.exp(pooled.estimate))
+                        ci_lo = float(np.exp(pooled.ci_lower))
+                        ci_hi = float(np.exp(pooled.ci_upper))
+                        p_v = float(pooled.p_value)
+                        sum_df_records[term_k] = {
+                            "odds_ratio": or_val,
+                            "or_ci_lower": ci_lo,
+                            "or_ci_upper": ci_hi,
+                            "estimate": pooled.estimate,
+                            "p_value": p_v,
+                        }
                         est_rows.append(
                             Estimate(
-                                term=str(idx),
-                                label=str(idx),
-                                estimate=float(
-                                    row.get("odds_ratio", np.exp(row["estimate"]))
-                                ),
-                                ci_lower=float(
-                                    row.get("or_ci_lower", np.exp(row["ci_lower"]))
-                                ),
-                                ci_upper=float(
-                                    row.get("or_ci_upper", np.exp(row["ci_upper"]))
-                                ),
-                                p_value=float(row["p_value"]),
-                                scale="OR",
-                            )
-                        )
-                else:
-                    fit_res = fit_standard_logistic(y, X)
-                    sum_df = fit_res["summary_df"]
-                    for idx, row in sum_df.iterrows():
-                        est_val = float(
-                            row.get(
-                                "odds_ratio", row.get("estimate", row.get("coef", 1.0))
-                            )
-                        )
-                        ci_lo = float(row.get("or_ci_lower", row.get("ci_lower", 1.0)))
-                        ci_hi = float(row.get("or_ci_upper", row.get("ci_upper", 1.0)))
-                        p_v = float(row.get("p_value", row.get("p", 0.0)))
-                        est_rows.append(
-                            Estimate(
-                                term=str(idx),
-                                label=str(idx),
-                                estimate=est_val,
+                                term=term_k,
+                                label=term_k,
+                                estimate=or_val,
                                 ci_lower=ci_lo,
                                 ci_upper=ci_hi,
                                 p_value=p_v,
                                 scale="OR",
                             )
                         )
+                    sum_df = pd.DataFrame.from_dict(sum_df_records, orient="index")
+                    fit_res = {
+                        "pooled": True,
+                        "n_imputations": len(imputed_datasets),
+                        "summary_df": sum_df,
+                    }
+                else:
+                    y = clean_df[model_spec.outcome]
+                    X = clean_df[covar_cols]
+
+                    if model_spec.options.get("method") == "firth":
+                        fit_res = fit_firth_logistic(y, X, feature_names=covar_cols)
+                        sum_df = fit_res["summary_df"]
+                        for idx, row in sum_df.iterrows():
+                            est_rows.append(
+                                Estimate(
+                                    term=str(idx),
+                                    label=str(idx),
+                                    estimate=float(
+                                        row.get("odds_ratio", np.exp(row["estimate"]))
+                                    ),
+                                    ci_lower=float(
+                                        row.get("or_ci_lower", np.exp(row["ci_lower"]))
+                                    ),
+                                    ci_upper=float(
+                                        row.get("or_ci_upper", np.exp(row["ci_upper"]))
+                                    ),
+                                    p_value=float(row["p_value"]),
+                                    scale="OR",
+                                )
+                            )
+                    else:
+                        fit_res = fit_standard_logistic(y, X)
+                        sum_df = fit_res["summary_df"]
+                        for idx, row in sum_df.iterrows():
+                            est_val = float(
+                                row.get(
+                                    "odds_ratio",
+                                    row.get("estimate", row.get("coef", 1.0)),
+                                )
+                            )
+                            ci_lo = float(
+                                row.get("or_ci_lower", row.get("ci_lower", 1.0))
+                            )
+                            ci_hi = float(
+                                row.get("or_ci_upper", row.get("ci_upper", 1.0))
+                            )
+                            p_v = float(row.get("p_value", row.get("p", 0.0)))
+                            est_rows.append(
+                                Estimate(
+                                    term=str(idx),
+                                    label=str(idx),
+                                    estimate=est_val,
+                                    ci_lower=ci_lo,
+                                    ci_upper=ci_hi,
+                                    p_value=p_v,
+                                    scale="OR",
+                                )
+                            )
 
                 # Optional E-value
                 if (
@@ -388,23 +459,77 @@ class AnalysisPlan:
                     )
 
             elif mod_type in ("linear", "ols"):
-                y = clean_df[model_spec.outcome]
                 covar_cols = [c for c in req_cols if c != model_spec.outcome]
-                X = clean_df[covar_cols]
-                fit_res = fit_linear_regression(y, X)
-                sum_df = fit_res["summary_df"]
-                for idx, row in sum_df.iterrows():
-                    est_rows.append(
-                        Estimate(
-                            term=str(idx),
-                            label=str(idx),
-                            estimate=float(row["coef"]),
-                            ci_lower=float(row["ci_lower"]),
-                            ci_upper=float(row["ci_upper"]),
-                            p_value=float(row["p_value"]),
-                            scale="Beta",
+                if is_pooled:
+                    term_estimates = {}
+                    term_variances = {}
+                    for imp_df in imputed_datasets:
+                        fit_i = fit_linear_regression(
+                            imp_df[model_spec.outcome], imp_df[covar_cols]
                         )
-                    )
+                        s_df = fit_i["summary_df"]
+                        for idx, row in s_df.iterrows():
+                            term_k = str(idx)
+                            b_val = float(row["coef"])
+                            se_val = float(row.get("std_err", 0.0))
+                            term_estimates.setdefault(term_k, []).append(b_val)
+                            term_variances.setdefault(term_k, []).append(se_val**2)
+
+                    n_obs = len(imputed_datasets[0])
+                    k_params = len(term_estimates)
+                    sum_df_records = {}
+                    for term_k, thetas in term_estimates.items():
+                        vars_list = term_variances[term_k]
+                        pooled = pool_estimates(
+                            thetas,
+                            vars_list,
+                            n_obs=n_obs,
+                            df_complete=max(1.0, float(n_obs - k_params)),
+                        )
+                        b_val = float(pooled.estimate)
+                        ci_lo = float(pooled.ci_lower)
+                        ci_hi = float(pooled.ci_upper)
+                        p_v = float(pooled.p_value)
+                        sum_df_records[term_k] = {
+                            "coef": b_val,
+                            "ci_lower": ci_lo,
+                            "ci_upper": ci_hi,
+                            "p_value": p_v,
+                        }
+                        est_rows.append(
+                            Estimate(
+                                term=term_k,
+                                label=term_k,
+                                estimate=b_val,
+                                ci_lower=ci_lo,
+                                ci_upper=ci_hi,
+                                p_value=p_v,
+                                scale="Beta",
+                            )
+                        )
+                    sum_df = pd.DataFrame.from_dict(sum_df_records, orient="index")
+                    fit_res = {
+                        "pooled": True,
+                        "n_imputations": len(imputed_datasets),
+                        "summary_df": sum_df,
+                    }
+                else:
+                    y = clean_df[model_spec.outcome]
+                    X = clean_df[covar_cols]
+                    fit_res = fit_linear_regression(y, X)
+                    sum_df = fit_res["summary_df"]
+                    for idx, row in sum_df.iterrows():
+                        est_rows.append(
+                            Estimate(
+                                term=str(idx),
+                                label=str(idx),
+                                estimate=float(row["coef"]),
+                                ci_lower=float(row["ci_lower"]),
+                                ci_upper=float(row["ci_upper"]),
+                                p_value=float(row["p_value"]),
+                                scale="Beta",
+                            )
+                        )
             else:
                 fit_res = {"error": f"Unsupported model type: {mod_type}"}
 
@@ -420,10 +545,13 @@ class AnalysisPlan:
                 html_table = PublicationRenderer.render_html(
                     est_tbl, style=self.reporting.style
                 )
+                eff_strategy = model_spec.missing_strategy or "complete-case"
+                if eff_strategy.lower().replace("_", "-") == "mice" and not is_pooled:
+                    eff_strategy = "complete-case"
                 narrative = generate_narrative(
                     est_tbl,
                     style=self.reporting.style,
-                    missing_strategy=model_spec.missing_strategy or "complete-case",
+                    missing_strategy=eff_strategy,
                 )
                 results["reports"][model_spec.name] = {
                     "html_table": html_table,

@@ -246,10 +246,17 @@ def fit_cox_rcs(
 
     # Fit linear Cox model to compare for non-linearity (Likelihood Ratio Test)
     try:
-        linear_cols = [rcs_var] + adjust
-        linear_df = clean_df[[duration_col, event_col] + linear_cols].copy()
+        linear_rhs = f"{_quote_col(rcs_var)}"
+        if adjust:
+            linear_rhs += " + " + " + ".join(_quote_col(c) for c in adjust)
+        X_linear = patsy.dmatrix(linear_rhs, clean_df, return_type="dataframe")
+        if "Intercept" in X_linear.columns:
+            X_linear = X_linear.drop(columns=["Intercept"])
+        data_for_linear = X_linear.copy()
+        data_for_linear[duration_col] = clean_df[duration_col].values
+        data_for_linear[event_col] = clean_df[event_col].values
         cph_linear = CoxPHFitter()
-        cph_linear.fit(linear_df, duration_col=duration_col, event_col=event_col)
+        cph_linear.fit(data_for_linear, duration_col=duration_col, event_col=event_col)
 
         ll_spline = float(cph.log_likelihood_)
         ll_linear = float(cph_linear.log_likelihood_)

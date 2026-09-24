@@ -21,8 +21,8 @@ $$d^2 = \sum_{s=1}^S n_s (\bar{y}_{s,\text{obs}} - \hat{\mu}_{s,\text{obs}})^T \
 - **Null Hypothesis ($H_0$)**: Missingness is MCAR.
 - **Degrees of Freedom**: $\text{df} = \sum_{s=1}^S p_s - P$, where $p_s$ is observed variables in pattern $s$ and $P$ is total variables.
 - **Interpretation**:
-  - $p > 0.05$: Insufficient evidence to reject MCAR. Complete-case exclusion acceptable if total missingness is low (< 5%).
-  - $p \le 0.05$: Reject MCAR. Listwise deletion will introduce selection bias; Multiple Imputation (MICE) is mandatory.
+  - $p > 0.05$: Insufficient evidence against MCAR. A nonsignificant result does not prove MCAR or automatically justify complete-case analysis; evaluate clinical context and missingness proportion.
+  - $p \le 0.05$: Evidence against MCAR (departures from MCAR). The test cannot distinguish between MAR and MNAR; require a clinically justified mechanism assumption and sensitivity analysis.
 
 ---
 

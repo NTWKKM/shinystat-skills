@@ -65,13 +65,13 @@ Generate structured compliance checklists across major biomedical reporting guid
 
 ```bash
 # STROBE Checklist (Observational Studies: Cohort, Case-Control, Cross-Sectional)
-medstat report --checklist strobe --output strobe_checklist.html
+medstat report --checklist strobe --output strobe_checklist.md
 
 # CONSORT Checklist (Randomized Controlled Trials)
-medstat report --checklist consort --output consort_checklist.html
+medstat report --checklist consort --output consort_checklist.md
 
 # TRIPOD Checklist (Clinical Prediction and Diagnostic Models)
-medstat report --checklist tripod --output tripod_checklist.html
+medstat report --checklist tripod --output tripod_checklist.md
 ```
 
 - Each checklist audits required reporting items: participant flow, eligibility criteria, missingness handling, bias mitigation, confounder adjustments, and sensitivity analysis.

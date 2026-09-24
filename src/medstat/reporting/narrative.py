@@ -21,9 +21,9 @@ def generate_methods_narrative(
     alpha: float = 0.05,
     software_name: str = "medstat-core",
     include_descriptive: bool = True,
-    check_schoenfeld: bool = True,
-    normality_test: bool = True,
-    fisher_exact: bool = True,
+    check_schoenfeld: bool = False,
+    normality_test: bool = False,
+    fisher_exact: bool = False,
 ) -> str:
     """
     Generate an academic Statistical Methods section paragraph.
@@ -102,7 +102,7 @@ def generate_methods_narrative(
             )
         else:
             ph_sentence = (
-                " The proportional hazards assumption was verified across all covariates via Schoenfeld residual correlation tests."
+                " The proportional hazards assumption was assessed across all covariates via Schoenfeld residual correlation tests."
                 if check_schoenfeld
                 else ""
             )
@@ -136,20 +136,21 @@ def generate_methods_narrative(
         )
 
     # 4. Missing data sentence
-    if missing_strategy in ("complete-case", "complete_case"):
+    norm_strat = (missing_strategy or "").lower().replace("_", "-")
+    if norm_strat == "complete-case":
         paragraphs.append(
             "Missing data were managed via complete-case analysis, and sample retention was audited from initial enrollment to final analytic cohort."
         )
-    elif missing_strategy == "mice":
+    elif norm_strat == "mice":
         paragraphs.append(
             "Missing covariate values were imputed using Multiple Imputation by Chained Equations (MICE) under the missing-at-random (MAR) assumption. "
             "Estimates and standard errors across imputed datasets were pooled using Rubin's rules."
         )
-    elif missing_strategy == "knn":
+    elif norm_strat == "knn":
         paragraphs.append(
             "Missing covariate values were imputed using k-nearest neighbors (KNN) imputation based on Euclidean distance across normalized observed features."
         )
-    elif missing_strategy == "indicator":
+    elif norm_strat == "indicator":
         paragraphs.append(
             "Missing categorical covariates were encoded using missing-indicator categories to retain observations with incomplete data in multivariable models."
         )

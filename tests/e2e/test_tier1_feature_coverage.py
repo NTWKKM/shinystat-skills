@@ -317,6 +317,69 @@ def test_tier1_model_sap_spec_execution(analysis_plan_path, tmp_path):
     assert res is not None
 
 
+def test_tier1_model_sap_spec_schema_example_execution(
+    cardiovascular_fixture_path, tmp_path
+):
+    """FEAT-03.8: Execute minimal SAP YAML example from model-spec-schema.md."""
+    spec_mod = require_medstat_module("medstat.cli.spec")
+    yaml_content = f"""version: "1.0"
+metadata:
+  study_title: "Comparative Effectiveness of Statin Therapy on 3-Year MACE"
+  protocol_id: "SAP-CVD-2026-001"
+  principal_investigator: "Clinical Research Team"
+  statistical_analyst: "medstat automated engine"
+  date: "2026-09-24"
+  reporting_guideline: "STROBE"
+  random_seed: 42
+
+data:
+  input_path: "{cardiovascular_fixture_path}"
+  id_column: "patient_id"
+
+variables:
+  - name: "cv_event"
+    data_type: "binary"
+    role: "outcome"
+    categories: [0, 1]
+    reference_category: 0
+  - name: "statin_rx"
+    data_type: "binary"
+    role: "exposure"
+    categories: [0, 1]
+    reference_category: 0
+  - name: "age"
+    data_type: "continuous"
+    role: "covariate"
+  - name: "ldl"
+    data_type: "continuous"
+    role: "covariate"
+  - name: "sbp"
+    data_type: "continuous"
+    role: "covariate"
+
+models:
+  - name: "primary_adjusted_logistic"
+    type: "logistic"
+    outcome: "cv_event"
+    exposure: "statin_rx"
+    covariates: ["age", "ldl", "sbp"]
+    missing_strategy: "complete-case"
+    missing_justification: "Complete-case analysis prespecified under MCAR with <5% missingness"
+    options:
+      method: "standard"
+      e_value: true
+      confidence_level: 0.95
+"""
+    yaml_file = tmp_path / "minimal_sap.yaml"
+    yaml_file.write_text(yaml_content, encoding="utf-8")
+
+    plan = spec_mod.AnalysisPlan.from_yaml(yaml_file)
+    res = plan.execute()
+    assert "primary_adjusted_logistic" in res["models"]
+    assert "primary_adjusted_logistic" in res["reports"]
+    assert "e_value" in res["models"]["primary_adjusted_logistic"]
+
+
 # ==============================================================================
 # Feature 4: Diagnostic Test Accuracy & DCA (medstat diag)
 # ==============================================================================

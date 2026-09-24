@@ -3,6 +3,7 @@ tests/e2e/test_tier4_clinical_workflows.py: Tier 4 Real-World Clinical Workflows
 Executes the 5 canonical end-to-end clinical workflow CLI scenarios.
 """
 
+import pytest
 
 # ==============================================================================
 # Clinical Workflow 1: Observational Oncology Survival with Sparse Events (Firth Cox PH)
@@ -284,7 +285,9 @@ def test_tier4_workflow3_pocus_ultrasound_inter_rater_reliability(
             str(kappa_json),
         ]
     )
-    assert ec4 == 0 or kappa_json.exists() or "not yet implemented" in out4.lower()
+    if "not yet implemented" in out4.lower():
+        pytest.skip("Agreement kappa calculation is not yet implemented in medstat CLI")
+    assert ec4 == 0 and kappa_json.exists()
 
 
 # ==============================================================================

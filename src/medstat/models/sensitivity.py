@@ -21,7 +21,7 @@ def calculate_e_value(
     lower: float | None = None,
     upper: float | None = None,
     estimate_type: Literal["RR", "OR", "HR"] = "RR",
-    rare_outcome: bool = True,
+    rare_outcome: bool = False,
 ) -> dict[str, Any]:
     """
     Calculate E-value for a risk ratio (RR), odds ratio (OR), or hazard ratio (HR).

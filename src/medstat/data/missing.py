@@ -568,8 +568,16 @@ def pool_estimates(
         else:
             df = float(df_old)
     else:
-        df = np.inf
         r = 0.0
+        if n_obs is not None or df_complete is not None:
+            nu_com = (
+                float(df_complete)
+                if df_complete is not None
+                else max(1.0, float(n_obs - k))
+            )
+            df = float(((nu_com + 1.0) / (nu_com + 3.0)) * nu_com)
+        else:
+            df = np.inf
 
     t_stat = theta_bar / se if se > 0 else 0.0
     if np.isfinite(df) and df > 0:

@@ -22,9 +22,9 @@ where $p_T, p_C$ are proportions in each group.
 
 | SMD Range | Balance Quality | Clinical Implication | Action Required |
 | :--- | :--- | :--- | :--- |
-| **$< 0.10$** | **Well-balanced** | Negligible difference; groups are clinically comparable. | Proceed to outcome analysis. |
-| **$0.10 - 0.20$** | **Moderate Imbalance** | Potential residual confounding across this covariate. | Re-estimate propensity score with interaction/polynomial terms, or include as covariate in outcome model (Doubly Robust). |
-| **$> 0.20$** | **Severe Imbalance** | Substantial difference; confounding bias likely. | Tighten caliper, trim non-overlapping support, or switch to propensity score weighting (IPTW). |
+| **$\lvert\text{SMD}\rvert < 0.10$** | **Well-balanced** | Negligible difference; groups are clinically comparable. | Proceed to outcome analysis. |
+| **$0.10 \le \lvert\text{SMD}\rvert \le 0.20$** | **Moderate Imbalance** | Potential residual confounding across this covariate. | Re-estimate propensity score with interaction/polynomial terms, or include as covariate in outcome model (Doubly Robust). |
+| **$\lvert\text{SMD}\rvert > 0.20$** | **Severe Imbalance** | Substantial difference; confounding bias likely. | Tighten caliper, trim non-overlapping support, or switch to propensity score weighting (IPTW). |
 
 ---
 
@@ -40,7 +40,7 @@ $$L_i = \text{logit}(e_i) = \ln\left(\frac{e_i}{1 - e_i}\right)$$
 ### Optimal Caliper Width (Austin 2011)
 $$\text{Caliper Width} = 0.20 \times \text{SD}(L)$$
 
-- Using a caliper of $0.2 \times \text{SD}(L)$ eliminates over 98% of the bias from unmeasured linear covariates in observational studies.
+- Austin demonstrated that a caliper of $0.2 \times \text{SD}(L)$ removed approximately 98% to 99% of the bias of the crude estimator in simulated mean-difference and risk-difference settings with at least some continuous covariates; caliper choice had much less impact when all covariates were binary. This applies strictly to measured baseline covariates and does not eliminate unmeasured confounding; residual unmeasured confounding still requires assessment.
 - When matching ratio is 1:1 nearest neighbor without replacement, unmatched subjects are excluded and recorded in the sample retention flow.
 
 ---

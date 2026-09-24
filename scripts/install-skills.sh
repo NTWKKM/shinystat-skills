@@ -114,12 +114,17 @@ copy_skills() {
     echo "▶ Installing into ${env_name}: ${dest_dir}"
     mkdir -p "${dest_dir}"
 
+    local backup_dir
+    backup_dir="$(dirname "${dest_dir}")/.skills_backups"
+
     for skill in "${SKILL_DIRS[@]}"; do
         local src_path="${SKILLS_SRC}/${skill}"
         local target_path="${dest_dir}/${skill}"
         if [[ -d "${target_path}" ]]; then
-            local backup_path="${target_path}.backup.$(date +%Y%m%d%H%M%S)"
-            cp -R "${target_path}" "${backup_path}"
+            local backup_path
+            backup_path="${backup_dir}/${skill}.backup.$(date +%Y%m%d%H%M%S)"
+            mkdir -p "${backup_dir}"
+            mv "${target_path}" "${backup_path}"
             echo "  ↳ Backed up existing ${skill} -> ${backup_path}"
         fi
         rm -rf "${target_path}"
