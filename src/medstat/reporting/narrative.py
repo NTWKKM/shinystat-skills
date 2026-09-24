@@ -20,6 +20,10 @@ def generate_methods_narrative(
     is_rcs: bool = False,
     alpha: float = 0.05,
     software_name: str = "medstat-core",
+    include_descriptive: bool = True,
+    check_schoenfeld: bool = True,
+    normality_test: bool = True,
+    fisher_exact: bool = True,
 ) -> str:
     """
     Generate an academic Statistical Methods section paragraph.
@@ -29,11 +33,15 @@ def generate_methods_narrative(
         exposure: Primary exposure/treatment variable.
         outcome: Primary clinical outcome.
         covariates: List of confounders adjusted for.
-        missing_strategy: Strategy used to handle missing data ('complete-case', 'mice', etc.).
+        missing_strategy: Strategy used to handle missing data ('complete-case', 'mice', 'knn', 'indicator').
         is_firth: Whether Firth penalized likelihood was used.
         is_rcs: Whether restricted cubic splines were fitted for non-linear terms.
         alpha: Significance threshold (default 0.05).
         software_name: Software package citation.
+        include_descriptive: Whether to include baseline descriptive statistics description.
+        check_schoenfeld: Whether Schoenfeld residuals testing was performed for Cox models.
+        normality_test: Whether formal normality tests (Shapiro-Wilk) were performed.
+        fisher_exact: Whether Fisher's exact test was used for small cell counts.
 
     Returns:
         Formatted English narrative paragraph.
@@ -41,12 +49,25 @@ def generate_methods_narrative(
     paragraphs = []
 
     # 1. Descriptive stats sentence
-    paragraphs.append(
-        "Continuous variables were assessed for distributional normality using the Shapiro-Wilk test and visual inspection of Q-Q plots. "
-        "Normally distributed continuous variables were expressed as mean ± standard deviation (SD) and compared using Student's or Welch's t-test, "
-        "whereas skewed variables were reported as median with interquartile range (IQR) and compared using the Mann-Whitney U test. "
-        "Categorical variables were summarized as counts and percentages [n (%)] and compared across groups using the Pearson chi-square test or Fisher's exact test when expected cell counts were below 5."
-    )
+    if include_descriptive:
+        desc_parts = []
+        if normality_test:
+            desc_parts.append(
+                "Continuous variables were assessed for distributional normality using the Shapiro-Wilk test and visual inspection of Q-Q plots."
+            )
+        desc_parts.append(
+            "Normally distributed continuous variables were expressed as mean ± standard deviation (SD) and compared using Student's or Welch's t-test, "
+            "whereas skewed variables were reported as median with interquartile range (IQR) and compared using the Mann-Whitney U test."
+        )
+        if fisher_exact:
+            desc_parts.append(
+                "Categorical variables were summarized as counts and percentages [n (%)] and compared across groups using the Pearson chi-square test or Fisher's exact test when expected cell counts were below 5."
+            )
+        else:
+            desc_parts.append(
+                "Categorical variables were summarized as counts and percentages [n (%)] and compared across groups using the Pearson chi-square test."
+            )
+        paragraphs.append(" ".join(desc_parts))
 
     # 2. Primary modeling sentence
     cov_str = (
@@ -57,21 +78,39 @@ def generate_methods_narrative(
     exp_str = f"the association between {exposure} and " if exposure else ""
     out_str = f"{outcome}" if outcome else "the primary outcome"
 
-    if model_type.lower() == "cox":
+    norm_mtype = model_type.lower()
+    if "cox" in norm_mtype or "survival" in norm_mtype:
+        norm_mtype = "cox"
+    elif "logistic" in norm_mtype or "logit" in norm_mtype or norm_mtype == "binary":
+        norm_mtype = "logistic"
+    elif "linear" in norm_mtype or "ols" in norm_mtype:
+        norm_mtype = "linear"
+    elif "poisson" in norm_mtype:
+        norm_mtype = "poisson"
+
+    if norm_mtype == "cox":
         if is_firth:
+            ph_sentence = (
+                " Proportional hazards assumptions were evaluated using Schoenfeld residual tests."
+                if check_schoenfeld
+                else ""
+            )
             paragraphs.append(
                 f"To evaluate {exp_str}{out_str}, multivariable Cox proportional hazards regression with Firth's penalized partial likelihood "
                 f"was performed to reduce small-sample bias and address potential monotone likelihood or separation ({cov_str}). "
-                f"Parameter estimates are presented as hazard ratios (HR) with 95% profile likelihood confidence intervals (CIs). "
-                f"Proportional hazards assumptions were evaluated using Schoenfeld residual tests."
+                f"Parameter estimates are presented as hazard ratios (HR) with 95% profile likelihood confidence intervals (CIs).{ph_sentence}"
             )
         else:
+            ph_sentence = (
+                " The proportional hazards assumption was verified across all covariates via Schoenfeld residual correlation tests."
+                if check_schoenfeld
+                else ""
+            )
             paragraphs.append(
                 f"Multivariable Cox proportional hazards regression was used to evaluate {exp_str}{out_str} ({cov_str}). "
-                f"Results are reported as hazard ratios (HR) and 95% confidence intervals (CIs). "
-                f"The proportional hazards assumption was verified across all covariates via Schoenfeld residual correlation tests."
+                f"Results are reported as hazard ratios (HR) and 95% confidence intervals (CIs).{ph_sentence}"
             )
-    elif model_type.lower() == "logistic":
+    elif norm_mtype == "logistic":
         if is_firth:
             paragraphs.append(
                 f"Multivariable logistic regression with Firth's penalized likelihood was fitted to estimate {exp_str}{out_str} ({cov_str}). "
@@ -97,7 +136,7 @@ def generate_methods_narrative(
         )
 
     # 4. Missing data sentence
-    if missing_strategy == "complete-case":
+    if missing_strategy in ("complete-case", "complete_case"):
         paragraphs.append(
             "Missing data were managed via complete-case analysis, and sample retention was audited from initial enrollment to final analytic cohort."
         )
@@ -105,6 +144,14 @@ def generate_methods_narrative(
         paragraphs.append(
             "Missing covariate values were imputed using Multiple Imputation by Chained Equations (MICE) under the missing-at-random (MAR) assumption. "
             "Estimates and standard errors across imputed datasets were pooled using Rubin's rules."
+        )
+    elif missing_strategy == "knn":
+        paragraphs.append(
+            "Missing covariate values were imputed using k-nearest neighbors (KNN) imputation based on Euclidean distance across normalized observed features."
+        )
+    elif missing_strategy == "indicator":
+        paragraphs.append(
+            "Missing categorical covariates were encoded using missing-indicator categories to retain observations with incomplete data in multivariable models."
         )
 
     # 5. Significance & Software sentence
@@ -127,7 +174,20 @@ def generate_narrative(
     """
     if table is not None and hasattr(table, "meta") and table.meta is not None:
         meta = table.meta
-        mtype = getattr(meta, "estimator", getattr(meta, "model_type", "regression"))
+        mtype_raw = str(
+            getattr(meta, "estimator", getattr(meta, "model_type", "regression"))
+        ).lower()
+        if "cox" in mtype_raw or "survival" in mtype_raw:
+            mtype = "cox"
+        elif "logistic" in mtype_raw or "logit" in mtype_raw or mtype_raw == "binary":
+            mtype = "logistic"
+        elif "linear" in mtype_raw or "ols" in mtype_raw:
+            mtype = "linear"
+        elif "poisson" in mtype_raw:
+            mtype = "poisson"
+        else:
+            mtype = mtype_raw
+
         dep_var = getattr(
             meta, "outcome_name", getattr(meta, "dependent_var", "primary outcome")
         )

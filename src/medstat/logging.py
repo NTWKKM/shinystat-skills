@@ -208,31 +208,37 @@ class LoggerFactory:
             return
 
         try:
-            if not DEFAULT_CONFIG.get("logging.enabled"):
+            import medstat.config as cfg_mod
+
+            cfg = getattr(cfg_mod, "CONFIG", None)
+            if cfg is None:
+                cfg = DEFAULT_CONFIG
+
+            if not cfg.get("logging.enabled"):
                 logging.disable(logging.CRITICAL)
                 cls._configured = True
                 return
 
-            log_level = cast(str, DEFAULT_CONFIG.get("logging.level", "INFO"))
-            log_format = cast(str, DEFAULT_CONFIG.get("logging.format"))
-            date_format = cast(str, DEFAULT_CONFIG.get("logging.date_format"))
+            log_level = cast(str, cfg.get("logging.level", "INFO"))
+            log_format = cast(str, cfg.get("logging.format"))
+            date_format = cast(str, cfg.get("logging.date_format"))
 
             formatter = logging.Formatter(log_format, datefmt=date_format)
 
-            root_logger = logging.getLogger()
+            medstat_logger = logging.getLogger("medstat")
             numeric_level = getattr(logging, log_level.upper(), logging.INFO)
-            root_logger.setLevel(numeric_level)
+            medstat_logger.setLevel(numeric_level)
 
-            if root_logger.handlers:
-                root_logger.handlers.clear()
+            if medstat_logger.handlers:
+                medstat_logger.handlers.clear()
 
             cls._context_filter = ContextFilter()
 
-            if DEFAULT_CONFIG.get("logging.console_enabled"):
-                cls._setup_console_logging(root_logger, formatter)
+            if cfg.get("logging.console_enabled"):
+                cls._setup_console_logging(medstat_logger, formatter, cfg)
 
-            if DEFAULT_CONFIG.get("logging.file_enabled"):
-                cls._setup_file_logging(root_logger, formatter)
+            if cfg.get("logging.file_enabled"):
+                cls._setup_file_logging(medstat_logger, formatter, cfg)
 
             cls._configured = True
 
@@ -242,36 +248,42 @@ class LoggerFactory:
 
     @classmethod
     def _setup_console_logging(
-        cls, root_logger: logging.Logger, formatter: logging.Formatter
+        cls, app_logger: logging.Logger, formatter: logging.Formatter, cfg: Any = None
     ) -> None:
         try:
-            console_handler = logging.StreamHandler(sys.stdout)
-            console_level = cast(
-                str, DEFAULT_CONFIG.get("logging.console_level", "INFO")
-            )
+            if cfg is None:
+                import medstat.config as cfg_mod
+
+                cfg = getattr(cfg_mod, "CONFIG", DEFAULT_CONFIG)
+
+            console_handler = logging.StreamHandler(sys.stderr)
+            console_level = cast(str, cfg.get("logging.console_level", "INFO"))
             console_handler.setLevel(getattr(logging, console_level))
             console_handler.setFormatter(formatter)
             if cls._context_filter:
                 console_handler.addFilter(cls._context_filter)
-            root_logger.addHandler(console_handler)
+            app_logger.addHandler(console_handler)
         except Exception as e:
             print(f"[WARNING] Console logging setup failed: {e}", file=sys.stderr)
 
     @classmethod
     def _setup_file_logging(
-        cls, root_logger: logging.Logger, formatter: logging.Formatter
+        cls, app_logger: logging.Logger, formatter: logging.Formatter, cfg: Any = None
     ) -> None:
         try:
-            log_dir_str = cast(str, DEFAULT_CONFIG.get("logging.log_dir", "logs"))
+            if cfg is None:
+                import medstat.config as cfg_mod
+
+                cfg = getattr(cfg_mod, "CONFIG", DEFAULT_CONFIG)
+
+            log_dir_str = cast(str, cfg.get("logging.log_dir", "logs"))
             log_dir = Path(log_dir_str)
             log_dir.mkdir(exist_ok=True, parents=True)
 
-            log_file_name = cast(
-                str, DEFAULT_CONFIG.get("logging.log_file", "medstat.log")
-            )
+            log_file_name = cast(str, cfg.get("logging.log_file", "medstat.log"))
             log_file = log_dir / log_file_name
-            max_size = cast(int, DEFAULT_CONFIG.get("logging.max_log_size", 10485760))
-            backup_count = cast(int, DEFAULT_CONFIG.get("logging.backup_count", 5))
+            max_size = cast(int, cfg.get("logging.max_log_size", 10485760))
+            backup_count = cast(int, cfg.get("logging.backup_count", 5))
 
             handler = logging.handlers.RotatingFileHandler(
                 log_file, maxBytes=max_size, backupCount=backup_count
@@ -279,7 +291,7 @@ class LoggerFactory:
             handler.setFormatter(formatter)
             if cls._context_filter:
                 handler.addFilter(cls._context_filter)
-            root_logger.addHandler(handler)
+            app_logger.addHandler(handler)
         except Exception as e:
             print(f"[WARNING] File logging setup failed: {e}", file=sys.stderr)
 

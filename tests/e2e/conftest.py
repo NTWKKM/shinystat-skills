@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Tuple
 
 import pytest
+from click.testing import CliRunner
 
 # Ensure src/ is on sys.path for direct module imports
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -89,7 +90,6 @@ def medstat_cli_runner():
     def _run(args: list[str], catch_exceptions: bool = True) -> Tuple[int, str, str]:
         # 1. Check if medstat.cli.main can be imported
         try:
-            from click.testing import CliRunner
             from medstat.cli.main import cli
 
             runner = CliRunner()
@@ -145,5 +145,7 @@ def require_medstat_module(module_name: str):
         import importlib
 
         return importlib.import_module(module_name)
-    except ImportError as e:
-        pytest.skip(f"Required module '{module_name}' not yet implemented: {e}")
+    except ModuleNotFoundError as e:
+        if e.name == module_name or (e.name and module_name.startswith(e.name)):
+            pytest.skip(f"Required module '{module_name}' not yet implemented: {e}")
+        raise

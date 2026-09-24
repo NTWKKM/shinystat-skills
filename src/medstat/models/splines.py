@@ -15,6 +15,7 @@ import pandas as pd
 import patsy
 import plotly.graph_objects as go
 from lifelines import CoxPHFitter
+from scipy import stats
 
 from medstat.logging import get_logger
 from medstat.theme.palette import get_color_palette
@@ -69,7 +70,7 @@ def fit_cox_rcs(
     df: pd.DataFrame,
     duration_col: str,
     event_col: str,
-    rcs_var: str,
+    rcs_var: str | None = None,
     adjust_cols: list[str] | None = None,
     knots: int | None = None,
     ref_value: float | None = None,
@@ -84,8 +85,8 @@ def fit_cox_rcs(
         df: Input DataFrame.
         duration_col: Name of time duration column.
         event_col: Name of binary event column.
-        rcs_var: Continuous variable to model with splines.
-        adjust_cols: Optional list of additional covariates to adjust for.
+        rcs_var: Continuous variable to model with splines (alias: spline_var).
+        adjust_cols: Optional list of additional covariates to adjust for (alias: covariates).
         knots: Number of spline knots (must be >= 3, default 4). Also accepts n_knots.
         ref_value: Reference value for hazard ratio comparisons (defaults to median of rcs_var).
         constraints: Centering/orthogonality constraint passed to patsy cr (default: 'center').
@@ -93,6 +94,20 @@ def fit_cox_rcs(
     Returns:
         CoxRCSResult: Tuple/dict supporting (plotly_figure, contrast_dataframe, model_stats_dict)
     """
+    if rcs_var is None:
+        rcs_var = kwargs.pop("spline_var", None)
+    if adjust_cols is None:
+        adjust_cols = kwargs.pop("covariates", None)
+    kwargs.pop("spline_var", None)
+    kwargs.pop("covariates", None)
+    if kwargs:
+        unexpected = ", ".join(repr(k) for k in kwargs)
+        raise TypeError(f"fit_cox_rcs got unexpected keyword argument(s): {unexpected}")
+    if not rcs_var:
+        raise ValueError(
+            "`rcs_var` (or `spline_var`) must be specified for spline modeling."
+        )
+
     num_knots = n_knots if n_knots is not None else (knots if knots is not None else 4)
     if num_knots < 3:
         raise ValueError("knots must be >= 3 for Restricted Cubic Splines.")
@@ -229,15 +244,36 @@ def fit_cox_rcs(
         yaxis_type="log",
     )
 
+    # Fit linear Cox model to compare for non-linearity (Likelihood Ratio Test)
+    try:
+        linear_cols = [rcs_var] + adjust
+        linear_df = clean_df[[duration_col, event_col] + linear_cols].copy()
+        cph_linear = CoxPHFitter()
+        cph_linear.fit(linear_df, duration_col=duration_col, event_col=event_col)
+
+        ll_spline = float(cph.log_likelihood_)
+        ll_linear = float(cph_linear.log_likelihood_)
+        df_diff = len(cph.params_) - len(cph_linear.params_)
+        if df_diff > 0:
+            lr_stat = max(0.0, 2.0 * (ll_spline - ll_linear))
+            non_linear_p = float(stats.chi2.sf(lr_stat, df=df_diff))
+        else:
+            non_linear_p = np.nan
+    except Exception as e:
+        logger.warning(f"Could not compute non-linear LR test for splines: {e}")
+        non_linear_p = np.nan
+
     spline_cols = [c for c in X.columns if rcs_var in c]
     stats_meta = {
         "model": cph,
         "cph": cph,
+        "summary_df": cph.summary,
         "ref_value": ref_value,
         "knots": num_knots,
         "spline_columns": spline_cols,
         "c_index": float(cph.concordance_index_),
         "log_likelihood": float(cph.log_likelihood_),
+        "non_linear_pvalue": non_linear_p,
     }
 
     return CoxRCSResult(fig, contrast_df, stats_meta)

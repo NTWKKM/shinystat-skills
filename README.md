@@ -73,8 +73,8 @@ medstat/
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/medstat.git
-cd medstat
+git clone https://github.com/NTWKKM/shinystat-skills.git
+cd shinystat-skills
 
 # Create a virtual environment (Python >= 3.12 required)
 python3.12 -m venv .venv

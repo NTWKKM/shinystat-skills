@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import yaml
 
@@ -164,8 +165,8 @@ class AnalysisPlan:
                 description=m.get("description", ""),
                 time=m.get("time"),
                 reference_categories=m.get("reference_categories", {}),
-                missing_strategy=m.get("missing_strategy", "complete-case"),
-                missing_justification=m.get("missing_justification", "Prespecified"),
+                missing_strategy=m.get("missing_strategy"),
+                missing_justification=m.get("missing_justification"),
                 options=m.get("options", {}),
             )
             for m in data.get("models", [])
@@ -223,9 +224,10 @@ class AnalysisPlan:
                     reason=flt.reason,
                 )
                 current_df = filtered
-            except Exception:
-                # If query syntax fails, skip filter gracefully
-                pass
+            except Exception as e:
+                raise ValueError(
+                    f"Failed to apply cohort filter '{flt.expression}': {e}"
+                ) from e
 
         results: dict[str, Any] = {
             "metadata": {
@@ -234,6 +236,7 @@ class AnalysisPlan:
                 "reporting_guideline": self.metadata.reporting_guideline,
             },
             "flow_summary": tracker.get_flow_summary(),
+            "model_flow": {},
             "models": {},
             "reports": {},
         }
@@ -249,13 +252,18 @@ class AnalysisPlan:
             req_cols = list(dict.fromkeys(req_cols))
 
             # Clean and handle missingness with explicit justification
+            model_tracker = SampleFlowTracker(
+                n_initial=len(current_df),
+                initial_name=f"Cohort for {model_spec.name}",
+            )
             clean_df, m_info = prepare_data_for_analysis(
                 current_df,
                 required_cols=req_cols,
                 handle_missing=model_spec.missing_strategy,
                 missing_justification=model_spec.missing_justification,
-                tracker=tracker,
+                tracker=model_tracker,
             )
+            results["model_flow"][model_spec.name] = model_tracker.get_flow_summary()
 
             mod_type = model_spec.type.lower().strip()
             est_rows: list[Estimate] = []
@@ -280,9 +288,15 @@ class AnalysisPlan:
                             Estimate(
                                 term=str(idx),
                                 label=str(idx),
-                                estimate=float(row["estimate"]),
-                                ci_lower=float(row["ci_lower"]),
-                                ci_upper=float(row["ci_upper"]),
+                                estimate=float(
+                                    row.get("odds_ratio", np.exp(row["estimate"]))
+                                ),
+                                ci_lower=float(
+                                    row.get("or_ci_lower", np.exp(row["ci_lower"]))
+                                ),
+                                ci_upper=float(
+                                    row.get("or_ci_upper", np.exp(row["ci_upper"]))
+                                ),
                                 p_value=float(row["p_value"]),
                                 scale="OR",
                             )
@@ -406,7 +420,11 @@ class AnalysisPlan:
                 html_table = PublicationRenderer.render_html(
                     est_tbl, style=self.reporting.style
                 )
-                narrative = generate_narrative(est_tbl, style=self.reporting.style)
+                narrative = generate_narrative(
+                    est_tbl,
+                    style=self.reporting.style,
+                    missing_strategy=model_spec.missing_strategy or "complete-case",
+                )
                 results["reports"][model_spec.name] = {
                     "html_table": html_table,
                     "methods_narrative": narrative,

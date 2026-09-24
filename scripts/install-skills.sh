@@ -7,6 +7,7 @@
 
 set -euo pipefail
 
+CALLER_CWD="$(pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SKILLS_SRC="${REPO_ROOT}/skills"
@@ -116,6 +117,11 @@ copy_skills() {
     for skill in "${SKILL_DIRS[@]}"; do
         local src_path="${SKILLS_SRC}/${skill}"
         local target_path="${dest_dir}/${skill}"
+        if [[ -d "${target_path}" ]]; then
+            local backup_path="${target_path}.backup.$(date +%Y%m%d%H%M%S)"
+            cp -R "${target_path}" "${backup_path}"
+            echo "  ↳ Backed up existing ${skill} -> ${backup_path}"
+        fi
         rm -rf "${target_path}"
         cp -R "${src_path}" "${target_path}"
         echo "  ✓ Installed ${skill} -> ${target_path}"
@@ -138,23 +144,23 @@ case "${TARGET}" in
             DESTINATIONS+=("${HOME}/.gemini/config/skills|Antigravity (Global config)")
             DESTINATIONS+=("${HOME}/.gemini/antigravity/skills|Antigravity (Global antigravity)")
         else
-            DESTINATIONS+=("${REPO_ROOT}/.agents/skills|Antigravity (Workspace .agents)")
-            DESTINATIONS+=("${REPO_ROOT}/.agent/skills|Antigravity (Workspace .agent singular)")
+            DESTINATIONS+=("${CALLER_CWD}/.agents/skills|Antigravity (Workspace .agents)")
+            DESTINATIONS+=("${CALLER_CWD}/.agent/skills|Antigravity (Workspace .agent singular)")
         fi
         ;;
     claude)
         if [[ "${SCOPE}" == "global" ]]; then
             DESTINATIONS+=("${HOME}/.claude/skills|Claude Code (Global)")
         else
-            DESTINATIONS+=("${REPO_ROOT}/.claude/skills|Claude Code (Workspace)")
+            DESTINATIONS+=("${CALLER_CWD}/.claude/skills|Claude Code (Workspace)")
         fi
         ;;
     cursor)
         if [[ "${SCOPE}" == "global" ]]; then
             DESTINATIONS+=("${HOME}/.cursor/skills|Cursor (Global)")
         else
-            DESTINATIONS+=("${REPO_ROOT}/.cursor/skills|Cursor (Workspace .cursor)")
-            DESTINATIONS+=("${REPO_ROOT}/.agents/skills|Cursor (Workspace .agents)")
+            DESTINATIONS+=("${CALLER_CWD}/.cursor/skills|Cursor (Workspace .cursor)")
+            DESTINATIONS+=("${CALLER_CWD}/.agents/skills|Cursor (Workspace .agents)")
         fi
         ;;
     all)
@@ -164,10 +170,10 @@ case "${TARGET}" in
             DESTINATIONS+=("${HOME}/.claude/skills|Claude Code (Global)")
             DESTINATIONS+=("${HOME}/.cursor/skills|Cursor (Global)")
         else
-            DESTINATIONS+=("${REPO_ROOT}/.agents/skills|Antigravity (Workspace .agents)")
-            DESTINATIONS+=("${REPO_ROOT}/.agent/skills|Antigravity (Workspace .agent singular)")
-            DESTINATIONS+=("${REPO_ROOT}/.claude/skills|Claude Code (Workspace)")
-            DESTINATIONS+=("${REPO_ROOT}/.cursor/skills|Cursor (Workspace .cursor)")
+            DESTINATIONS+=("${CALLER_CWD}/.agents/skills|Antigravity (Workspace .agents)")
+            DESTINATIONS+=("${CALLER_CWD}/.agent/skills|Antigravity (Workspace .agent singular)")
+            DESTINATIONS+=("${CALLER_CWD}/.claude/skills|Claude Code (Workspace)")
+            DESTINATIONS+=("${CALLER_CWD}/.cursor/skills|Cursor (Workspace .cursor)")
         fi
         ;;
     *)

@@ -20,7 +20,10 @@ from medstat.data.clean import (
     detect_missing_in_variable,
     get_missing_summary_df,
 )
-from medstat.data.missing import handle_missing_for_analysis
+from medstat.data.missing import (
+    MissingStrategyRequiredError,
+    handle_missing_for_analysis,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -187,7 +190,9 @@ class TestHandleMissingForAnalysis:
         df = pd.DataFrame({"a": [1, np.nan, 3, 4], "b": [10, 20, np.nan, 40]})
         var_meta = {}
 
-        _, counts = handle_missing_for_analysis(df, var_meta, return_counts=True)
+        _, counts = handle_missing_for_analysis(
+            df, var_meta, strategy="complete-case", return_counts=True
+        )
 
         assert "original_rows" in counts
         assert "final_rows" in counts
@@ -199,9 +204,15 @@ class TestHandleMissingForAnalysis:
         df = pd.DataFrame({"value": [1, -99, 3, 4]})
         var_meta = {"value": {"missing_values": [-99]}}
 
-        result = handle_missing_for_analysis(df, var_meta)
+        result = handle_missing_for_analysis(df, var_meta, strategy="complete-case")
 
         assert len(result) == 3
+
+    def test_missing_strategy_required(self):
+        """Test that calling handle_missing_for_analysis without strategy raises error."""
+        df = pd.DataFrame({"value": [1, np.nan, 3]})
+        with pytest.raises(MissingStrategyRequiredError):
+            handle_missing_for_analysis(df)
 
 
 class TestCheckMissingDataImpact:

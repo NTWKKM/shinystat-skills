@@ -276,8 +276,22 @@ def _compute_icc_from_matrix(
     res_df = pd.DataFrame(results)
 
     if icc_type is not None:
-        filtered = res_df[res_df["Type"] == icc_type].copy()
-        if not filtered.empty:
-            return filtered
+        type_norm = icc_type.replace("_", "").lower()
+        mapping = {
+            "icc1": "ICC1",
+            "icc2": "ICC2",
+            "icc3": "ICC3",
+            "icc1k": "ICC1k",
+            "icc2k": "ICC2k",
+            "icc3k": "ICC3k",
+        }
+        target_type = mapping.get(type_norm, icc_type)
+        filtered = res_df[res_df["Type"] == target_type].copy()
+        if filtered.empty:
+            valid_types = res_df["Type"].tolist()
+            raise ValueError(
+                f"Invalid icc_type '{icc_type}'. Must be one of: {valid_types}"
+            )
+        return filtered
 
     return res_df

@@ -144,16 +144,23 @@ def calculate_ici(
     y_p_sorted = y_p[order]
     y_t_sorted = y_t[order]
 
-    # Use rolling window or deciles
-    window_size = max(len(y_t) // 10, 5)
-    smooth_obs = (
-        pd.Series(y_t_sorted)
-        .rolling(window=window_size, center=True, min_periods=3)
-        .mean()
-        .bfill()
-        .ffill()
-        .to_numpy()
-    )
+    # Use LOWESS smoother (Austin & Steyerberg 2019: frac=2/3, it=0)
+    try:
+        from statsmodels.nonparametric.smoothers_lowess import lowess
+
+        smooth_obs = lowess(
+            y_t_sorted, y_p_sorted, frac=2.0 / 3.0, it=0, return_sorted=False
+        )
+    except Exception:
+        window_size = max(len(y_t) // 10, 5)
+        smooth_obs = (
+            pd.Series(y_t_sorted)
+            .rolling(window=window_size, center=True, min_periods=3)
+            .mean()
+            .bfill()
+            .ffill()
+            .to_numpy()
+        )
 
     abs_errors = np.abs(y_p_sorted - smooth_obs)
 

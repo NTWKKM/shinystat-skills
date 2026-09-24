@@ -290,20 +290,11 @@ def test_tier1_model_restricted_cubic_splines(oncology_fixture_path):
     """FEAT-03.5: Restricted Cubic Splines (RCS) basis expansion."""
     splines_mod = require_medstat_module("medstat.models.splines")
     df = pd.read_csv(oncology_fixture_path)
-    try:
-        fig, curve_df, knots_info = splines_mod.fit_cox_rcs(
-            df, duration_col="time", event_col="status", rcs_var="age", knots=4
-        )
-        assert not curve_df.empty
-        assert "knots" in knots_info
-    except Exception as e:
-        # Documented patsy cr() collinearity issue in lifelines CoxPHFitter
-        # Escalate implementation bug to Worker M1
-        assert (
-            "singular" in str(e).lower()
-            or "convergence" in str(e).lower()
-            or hasattr(splines_mod, "fit_cox_rcs")
-        )
+    fig, curve_df, knots_info = splines_mod.fit_cox_rcs(
+        df, duration_col="time", event_col="status", rcs_var="age", knots=4
+    )
+    assert not curve_df.empty
+    assert "knots" in knots_info
 
 
 def test_tier1_model_e_value_sensitivity():
@@ -532,13 +523,8 @@ def test_tier1_meta_forest_plot_coordinates(meta_fixture_path):
     df = pd.read_csv(meta_fixture_path)
     df["log_effect"] = df["effect_size"]
     meta_res = meta_mod.run_meta_analysis(df)
-    # Check if generate_forest_data or create_forest_plot handles meta results
-    try:
-        plot_data = forest_mod.generate_forest_data(meta_res)
-        assert "studies" in plot_data
-    except KeyError:
-        # Known variance / implementation discrepancy escalated
-        pass
+    plot_data = forest_mod.generate_forest_data(meta_res)
+    assert "studies" in plot_data
 
 
 def test_tier1_meta_eggers_test_publication_bias(meta_fixture_path):

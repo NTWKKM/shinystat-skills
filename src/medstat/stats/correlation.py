@@ -21,19 +21,32 @@ COLORS = get_color_palette()
 
 
 def compute_correlation_ci(
-    r: float, n: int, confidence: float = 0.95
+    r: float, n: int, confidence: float = 0.95, method: str = "pearson"
 ) -> tuple[float, float]:
     """
     Compute confidence interval for correlation coefficient using Fisher's Z transformation.
     """
-    if not np.isfinite(r) or n < 4:
+    if not np.isfinite(r):
         return (np.nan, np.nan)
 
+    method_clean = method.lower()
     eps = 1e-12
     r_clipped = np.clip(r, -1.0 + eps, 1.0 - eps)
 
+    if method_clean == "kendall":
+        if n < 5:
+            return (np.nan, np.nan)
+        se = np.sqrt(0.437 / (n - 4))
+    elif method_clean == "spearman":
+        if n < 4:
+            return (np.nan, np.nan)
+        se = np.sqrt((1.0 + (r_clipped**2) / 2.0) / (n - 3))
+    else:  # pearson
+        if n < 4:
+            return (np.nan, np.nan)
+        se = 1.0 / np.sqrt(n - 3)
+
     z = 0.5 * np.log((1.0 + r_clipped) / (1.0 - r_clipped))
-    se = 1.0 / np.sqrt(n - 3)
     z_crit = stats.norm.ppf((1.0 + confidence) / 2.0)
 
     z_lower = z - z_crit * se
@@ -123,7 +136,9 @@ def compute_correlation_matrix(
                         raise ValueError(f"Unsupported correlation method: {method}")
 
                     p_values.iloc[i, j] = float(p_val)
-                    low, high = compute_correlation_ci(float(r_val), n_pair)
+                    low, high = compute_correlation_ci(
+                        float(r_val), n_pair, method=method
+                    )
                     ci_lower.iloc[i, j] = low
                     ci_upper.iloc[i, j] = high
                 else:
@@ -169,7 +184,9 @@ def pairwise_correlation(
 
     r_val = float(r)
     p_val = float(p)
-    ci_low, ci_high = compute_correlation_ci(r_val, n, confidence=confidence)
+    ci_low, ci_high = compute_correlation_ci(
+        r_val, n, confidence=confidence, method=method
+    )
 
     return {
         "method": method,

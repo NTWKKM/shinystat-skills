@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import click
+import numpy as np
 import pandas as pd
 
 from medstat.agreement.bland_altman import bland_altman_analysis
@@ -169,8 +170,7 @@ def clean_cmd(
             n_neighbors=neighbors,
         )
     except MissingStrategyRequiredError as e:
-        click.echo(f"MissingStrategyRequiredError: {e}")
-        raise
+        raise click.ClickException(str(e))
 
     assumed_mech = (
         mechanism or ("mcar" if strategy == "complete-case" else "mar")
@@ -187,10 +187,25 @@ def clean_cmd(
 
     if output:
         Path(output).parent.mkdir(parents=True, exist_ok=True)
-        cleaned_df.to_csv(output, index=False)
-        click.echo(
-            f"Cleaned dataset saved to: {output} (Rows: {len(cleaned_df)}, Mechanism: {assumed_mech})"
-        )
+        out_p = Path(output)
+        if info.get("imputed_datasets") is not None:
+            cleaned_df.to_csv(output, index=False)
+            stem = out_p.stem
+            suffix = out_p.suffix
+            num_imps = len(info["imputed_datasets"])
+            for m_idx, imp_df in enumerate(info["imputed_datasets"]):
+                imp_path = out_p.parent / f"{stem}_imp{m_idx + 1}{suffix}"
+                imp_df.to_csv(imp_path, index=False)
+            click.echo(
+                f"Cleaned dataset saved to: {output} (Rows: {len(cleaned_df)}, Mechanism: {assumed_mech})\n"
+                f"Preserved {num_imps} imputed datasets ({stem}_imp1{suffix} to {stem}_imp{num_imps}{suffix}). "
+                f"Downstream analyses must pool results across imputations using Rubin's rules."
+            )
+        else:
+            cleaned_df.to_csv(output, index=False)
+            click.echo(
+                f"Cleaned dataset saved to: {output} (Rows: {len(cleaned_df)}, Mechanism: {assumed_mech})"
+            )
 
 
 # ==============================================================================
@@ -208,12 +223,15 @@ def clean_cmd(
 )
 @click.option("--digits", default=1, type=int, help="Decimal precision.")
 @click.option(
-    "--include-smd",
-    is_flag=True,
+    "--include-smd/--no-include-smd",
     default=True,
     help="Include Standardized Mean Differences.",
 )
-@click.option("--include-p", is_flag=True, default=True, help="Include p-values.")
+@click.option(
+    "--include-p/--no-include-p",
+    default=True,
+    help="Include p-values.",
+)
 @click.option("--output", type=click.Path(), help="Output path (JSON, HTML, or CSV).")
 def table1_cmd(
     data: str,
@@ -337,7 +355,7 @@ def model_cmd(
         if output:
             Path(output).parent.mkdir(parents=True, exist_ok=True)
             with open(output, "w") as f:
-                json.dump(res.get("metadata", {}), f, indent=2)
+                json.dump(res, f, indent=2, default=str)
             click.echo(f"Analysis Plan executed successfully: {output}")
         return
 
@@ -377,9 +395,21 @@ def model_cmd(
         t_col = time_col or "time"
         t_vals = pd.to_numeric(df[t_col], errors="coerce").values
         ev_raw = df[outcome]
+        u_ev = ev_raw.dropna().unique()
+        if len(u_ev) > 2:
+            raise click.ClickException(
+                f"Event outcome column '{outcome}' must have at most 2 levels, found {len(u_ev)}."
+            )
         if not pd.api.types.is_numeric_dtype(ev_raw):
-            ev_vals = (ev_raw == ev_raw.unique()[1]).astype(int).values
+            if len(u_ev) == 2:
+                ev_vals = (ev_raw == u_ev[1]).astype(int).values
+            else:
+                ev_vals = np.zeros(len(ev_raw), dtype=int)
         else:
+            if not set(u_ev).issubset({0, 1, 0.0, 1.0}):
+                raise click.ClickException(
+                    f"Event outcome column '{outcome}' contains values outside {{0, 1}}: {set(u_ev)}"
+                )
             ev_vals = ev_raw.astype(int).values
 
         if method == "firth":
@@ -393,7 +423,8 @@ def model_cmd(
             result_data["coefficients"] = sum_df.to_dict(orient="records")
             if schoenfeld:
                 result_data["schoenfeld_test"] = {
-                    "status": "Proportional hazards assumption satisfied"
+                    "status": "not_performed",
+                    "reason": "Schoenfeld residuals test is not performed for Firth penalized Cox models",
                 }
         else:
             df_cox = X_df.copy()
@@ -405,14 +436,26 @@ def model_cmd(
             sum_df = fit_res["summary_df"]
             result_data["coefficients"] = sum_df.to_dict(orient="records")
             if schoenfeld:
-                ph_res = check_proportional_hazards(fit_res["model"])
+                ph_res = check_proportional_hazards(fit_res["model"], df=df_cox)
                 result_data["schoenfeld_test"] = str(ph_res)
 
     elif mtype in ("logistic", "binary"):
         y_raw = df[outcome]
+        u_y = y_raw.dropna().unique()
+        if len(u_y) > 2:
+            raise click.ClickException(
+                f"Binary outcome column '{outcome}' must have at most 2 levels, found {len(u_y)}."
+            )
         if not pd.api.types.is_numeric_dtype(y_raw):
-            y = (y_raw == y_raw.unique()[1]).astype(int).values
+            if len(u_y) == 2:
+                y = (y_raw == u_y[1]).astype(int).values
+            else:
+                y = np.zeros(len(y_raw), dtype=int)
         else:
+            if not set(u_y).issubset({0, 1, 0.0, 1.0}):
+                raise click.ClickException(
+                    f"Binary outcome column '{outcome}' contains values outside {{0, 1}}: {set(u_y)}"
+                )
             y = y_raw.astype(int).values
 
         if method == "firth":
@@ -425,16 +468,31 @@ def model_cmd(
             result_data["coefficients"] = sum_df.to_dict(orient="records")
 
         if e_value and exposure:
-            matching = [idx for idx in sum_df.index if exposure in str(idx)]
-            exp_term = sum_df.loc[matching[0]] if matching else sum_df.iloc[0]
-            est_val = float(
-                exp_term.get(
-                    "odds_ratio", exp_term.get("estimate", exp_term.get("coef", 1.5))
+            matching = [idx for idx in sum_df.index if str(idx) == exposure]
+            if not matching:
+                matching = [
+                    idx for idx in sum_df.index if str(idx).startswith(f"{exposure}_")
+                ]
+            if not matching:
+                raise click.ClickException(
+                    f"Exposure term '{exposure}' not found in model results for E-value calculation."
                 )
+            exp_term = sum_df.loc[matching[0]]
+            or_val = exp_term.get("odds_ratio", exp_term.get("estimate"))
+            ci_lo = exp_term.get("or_ci_lower", exp_term.get("ci_lower"))
+            ci_hi = exp_term.get("or_ci_upper", exp_term.get("ci_upper"))
+            if (
+                or_val is None
+                or ci_lo is None
+                or ci_hi is None
+                or np.isnan(float(or_val))
+            ):
+                raise click.ClickException(
+                    f"Model output for exposure '{exposure}' missing required OR or CI values for E-value calculation."
+                )
+            ev = calculate_e_value(
+                float(or_val), float(ci_lo), float(ci_hi), estimate_type="OR"
             )
-            ci_lo = float(exp_term.get("or_ci_lower", exp_term.get("ci_lower", 1.0)))
-            ci_hi = float(exp_term.get("or_ci_upper", exp_term.get("ci_upper", 2.0)))
-            ev = calculate_e_value(est_val, ci_lo, ci_hi, estimate_type="OR")
             result_data["e_value"] = ev
 
     elif mtype in ("linear", "ols"):
@@ -640,16 +698,16 @@ def bland_altman_cmd(
 @click.option(
     "--data", required=True, type=click.Path(exists=True), help="Input CSV dataset."
 )
+@click.option("--rater1", default=None, help="First rater column name.")
+@click.option("--rater2", default=None, help="Second rater column name.")
 @click.option("--output", type=click.Path(), help="Output path for Kappa JSON.")
-def kappa_cmd(data: str, output: str | None) -> None:
+def kappa_cmd(
+    data: str, rater1: str | None, rater2: str | None, output: str | None
+) -> None:
     """Compute Fleiss' or Cohen's Kappa for categorical agreement."""
-    df = pd.read_csv(data)
-    res = {"n": len(df), "kappa": 0.85, "interpretation": "Strong agreement"}
-    if output:
-        Path(output).parent.mkdir(parents=True, exist_ok=True)
-        with open(output, "w") as f:
-            json.dump(res, f, indent=2)
-        click.echo(f"Kappa results saved to: {output}")
+    raise click.ClickException(
+        "Cohen's/Fleiss' kappa calculation is not yet implemented in the agreement engine."
+    )
 
 
 # ==============================================================================
@@ -820,6 +878,12 @@ def sample_size_cmd(
     output: str | None,
 ) -> None:
     """Calculate statistical power and required sample size."""
+    valid_types = ("t-test", "t_test", "ttest")
+    if test_type.lower() not in valid_types:
+        raise click.ClickException(
+            f"Sample size calculation for test type '{test_type}' is not supported. Supported: {list(valid_types)}"
+        )
+
     n_per_group = calculate_sample_size_t_test(
         effect_size=effect_size, alpha=alpha, power=power
     )
@@ -898,34 +962,56 @@ def report_cmd(
         if isinstance(coefs, list) and len(coefs) > 0:
             for c in coefs:
                 term = str(c.get("term", c.get("feature", c.get("variable", "var"))))
-                est = float(
-                    c.get(
-                        "odds_ratio",
-                        c.get(
-                            "hazard_ratio",
-                            c.get("estimate", c.get("exp(coef)", c.get("coef", 1.0))),
-                        ),
+                est_candidates = [
+                    c.get("odds_ratio"),
+                    c.get("hazard_ratio"),
+                    c.get("estimate"),
+                    c.get("exp(coef)"),
+                    c.get("coef"),
+                ]
+                est_val = next((v for v in est_candidates if v is not None), None)
+                if est_val is None:
+                    raise click.ClickException(
+                        f"Missing estimate/coef for term '{term}'"
                     )
-                )
-                ci_lo = float(
-                    c.get(
-                        "hr_ci_lower",
-                        c.get(
-                            "or_ci_lower",
-                            c.get("ci_lower", c.get("exp(coef) lower 95%", est * 0.8)),
-                        ),
+                est = float(est_val)
+
+                ci_lo_candidates = [
+                    c.get("hr_ci_lower"),
+                    c.get("or_ci_lower"),
+                    c.get("ci_lower"),
+                    c.get("exp(coef) lower 95%"),
+                    c.get("lower_ci"),
+                ]
+                ci_lo_val = next((v for v in ci_lo_candidates if v is not None), None)
+
+                ci_hi_candidates = [
+                    c.get("hr_ci_upper"),
+                    c.get("or_ci_upper"),
+                    c.get("ci_upper"),
+                    c.get("exp(coef) upper 95%"),
+                    c.get("upper_ci"),
+                ]
+                ci_hi_val = next((v for v in ci_hi_candidates if v is not None), None)
+
+                pval_val = c.get("p_value", c.get("p", c.get("p-val", c.get("p_val"))))
+
+                missing_keys = []
+                if ci_lo_val is None:
+                    missing_keys.append("ci_lower")
+                if ci_hi_val is None:
+                    missing_keys.append("ci_upper")
+                if pval_val is None:
+                    missing_keys.append("p_value")
+
+                if missing_keys:
+                    raise click.ClickException(
+                        f"Term '{term}' missing required keys: {', '.join(missing_keys)}"
                     )
-                )
-                ci_hi = float(
-                    c.get(
-                        "hr_ci_upper",
-                        c.get(
-                            "or_ci_upper",
-                            c.get("ci_upper", c.get("exp(coef) upper 95%", est * 1.2)),
-                        ),
-                    )
-                )
-                pval = float(c.get("p_value", c.get("p", 0.05)))
+
+                ci_lo = float(ci_lo_val)
+                ci_hi = float(ci_hi_val)
+                pval = float(pval_val)
                 est_rows.append(
                     Estimate(
                         term=term,

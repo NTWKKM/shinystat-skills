@@ -179,7 +179,36 @@ def run_meta_analysis(
         use_hksj: If True, uses Hartung-Knapp-Sidik-Jonkman adjustment.
         alpha: Significance level (default 0.05 for 95% CIs).
     """
+    valid_methods_re = ["DL", "DERSIMONIAN-LAIRD"]
+    if method_re.upper() not in valid_methods_re:
+        raise ValueError(
+            f"Unsupported random-effects tau^2 estimator '{method_re}'. Currently supported: {valid_methods_re}"
+        )
+
+    if model is not None and model.lower() not in ["fixed", "random", "both"]:
+        raise ValueError(
+            f"Unsupported model '{model}'. Must be 'fixed', 'random', or 'both'."
+        )
+
+    if method is not None and method.upper() not in [
+        "DL",
+        "DERSIMONIAN-LAIRD",
+        "FE",
+        "RE",
+        "FIXED",
+        "RANDOM",
+    ]:
+        raise ValueError(
+            f"Unsupported method '{method}'. Must be one of: DL, FE, RE, fixed, random."
+        )
+
     df_work = df.copy()
+    effect_measure = kwargs.get("effect_measure") or kwargs.get("measure")
+    if not effect_measure:
+        for c in ["effect_measure", "measure"]:
+            if c in df_work.columns:
+                effect_measure = str(df_work[c].iloc[0])
+                break
     if effect_col and effect_col in df_work.columns:
         df_work["log_effect"] = df_work[effect_col]
     elif "log_effect" not in df_work.columns:
@@ -283,6 +312,7 @@ def run_meta_analysis(
     return {
         "k": k,
         "is_ratio": is_ratio,
+        "effect_measure": effect_measure,
         "studies": studies_with_weights,
         "fixed_effect": {
             "log_effect": theta_fe,
@@ -304,6 +334,7 @@ def run_meta_analysis(
             else None,
         },
         "heterogeneity": {
+            "estimator": "DerSimonian-Laird",
             "Q": q_stat,
             "df": df_q,
             "p_value": p_q,

@@ -135,8 +135,8 @@ def mann_whitney_u(
     u_stat = float(res.statistic)
     p_val = float(res.pvalue)
 
-    # Rank-biserial correlation effect size r = 1 - 2*U / (n1 * n2)
-    rank_biserial = 1.0 - (2.0 * u_stat) / (n1 * n2)
+    # Rank-biserial correlation effect size r = (2 * U1) / (n1 * n2) - 1 (positive when group 1 is larger)
+    rank_biserial = (2.0 * u_stat) / (n1 * n2) - 1.0
 
     return {
         "test": "Mann-Whitney U",

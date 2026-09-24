@@ -17,6 +17,13 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from medstat.data.missing import (
+    MissingDataError,
+    MissingStrategyRequiredError,
+    apply_missing_values_to_df,
+    detect_missing_in_variable,
+    get_missing_summary_df,
+)
 from medstat.logging import get_logger
 
 logger = get_logger(__name__)
@@ -33,48 +40,6 @@ class DataCleaningError(Exception):
 
 class DataValidationError(ValueError):
     """Custom exception for data validation failures (inherits from ValueError)."""
-
-
-class MissingDataError(ValueError):
-    """Base exception for missing data errors."""
-
-
-class MissingStrategyRequiredError(MissingDataError):
-    """
-    CLINICAL SAFETY MANDATE:
-    Raised when missing data is detected in required analysis columns without
-    an explicit, clinically justified strategy.
-    Inherits from ValueError for broad test harness compatibility.
-    """
-
-    def __init__(
-        self,
-        message: str | None = None,
-        missing_counts: dict[str, int] | None = None,
-        missing_pct: dict[str, float] | None = None,
-        required_cols: list[str] | None = None,
-    ):
-        self.missing_counts = missing_counts or {}
-        self.missing_pct = missing_pct or {}
-        self.required_cols = required_cols or []
-
-        if message is None:
-            formatted_vars = "\n".join(
-                f"  - '{col}': {count} missing ({self.missing_pct.get(col, 0.0):.1f}%)"
-                for col, count in self.missing_counts.items()
-                if count > 0
-            )
-            message = (
-                f"[CLINICAL SAFETY ERROR: MissingStrategyRequiredError] Dataset contains missing values in required variables:\n"
-                f"{formatted_vars}\n"
-                f"Silent listwise deletion is prohibited under clinical safety directives.\n"
-                f"You must explicitly specify a missing data strategy and clinical justification:\n"
-                f"  --strategy complete-case   (Requires justification explaining MCAR assumption)\n"
-                f"  --strategy mice            (Multiple Imputation by Chained Equations; recommended)\n"
-                f"  --strategy knn             (K-Nearest Neighbors imputation)\n"
-                f"  --strategy indicator       (Missing indicator method with dummy variable)\n"
-            )
-        super().__init__(message)
 
 
 # ==============================================================================
@@ -249,7 +214,7 @@ class LittlesMCARResult:
 # ==============================================================================
 
 
-_SPECIAL_CHARS_RE = re.compile(r"[<|>|,|%|$|€|£|฿|¥|~|±|\s]")
+_SPECIAL_CHARS_RE = re.compile(r"[<>=,%$€£฿¥]")
 
 
 def clean_numeric(
@@ -280,6 +245,12 @@ def clean_numeric(
         s = s.strip()
 
     if not s:
+        return np.nan
+
+    # Reject ambiguous clinical values containing ±, ~, |, or whitespace between digits
+    if any(char in s for char in ("±", "~", "|")):
+        return np.nan
+    if re.search(r"\d\s+\d", s):
         return np.nan
 
     # Standardize unicode minus characters
@@ -321,15 +292,22 @@ def clean_numeric_vector(
     str_s = s.astype(str).str.strip()
     str_s = str_s.str.replace("−", "-", regex=False).str.replace("–", "-", regex=False)
 
+    # Detect ambiguous values containing ±, ~, |, or whitespace between digits
+    ambiguous_mask = str_s.str.contains(r"[±~|]", regex=True) | str_s.str.contains(
+        r"\d\s+\d", regex=True
+    )
+
     # Handle financial parentheses '(100)' -> '-100'
     parens_mask = str_s.str.startswith("(") & str_s.str.endswith(")")
     str_s.loc[parens_mask] = "-" + str_s.loc[parens_mask].str.slice(1, -1).str.strip()
 
     # Strip symbols
-    cleaned_str = str_s.str.replace(r"[<|>|,|%|$|€|£|฿|¥|~|±|\s]", "", regex=True)
+    cleaned_str = str_s.str.replace(r"[<>=,%$€£฿¥]", "", regex=True)
 
-    # Coerce to float, invalid entries become NaN
-    return pd.to_numeric(cleaned_str, errors="coerce").astype(float)
+    # Coerce to float, invalid entries and ambiguous become NaN
+    result = pd.to_numeric(cleaned_str, errors="coerce").astype(float)
+    result.loc[ambiguous_mask] = np.nan
+    return result
 
 
 # ==============================================================================
@@ -500,122 +478,6 @@ def detect_zero_variance(
                 zero_var_cols.append(col)
 
     return zero_var_cols
-
-
-# ==============================================================================
-# 4. Missing Value Code Normalization & Inspection
-# ==============================================================================
-
-
-def apply_missing_values_to_df(
-    df: pd.DataFrame,
-    var_meta: dict[str, Any] | None = None,
-    missing_codes: list[Any] | dict[str, Any] | None = None,
-) -> pd.DataFrame:
-    """
-    Replace user-specified missing value codes (e.g. -99, 999, 'NA') with NaN.
-    """
-    df_copy = df.copy()
-    var_meta = var_meta or {}
-
-    for col in df_copy.columns:
-        codes = []
-        if col in var_meta and "missing_values" in var_meta[col]:
-            codes = var_meta[col]["missing_values"]
-        elif isinstance(missing_codes, dict):
-            codes = missing_codes.get(col, [])
-        elif missing_codes:
-            codes = missing_codes
-
-        if not isinstance(codes, (list, tuple, set, np.ndarray)):
-            codes = [codes]
-
-        normalized_codes = set()
-        for code in codes:
-            if pd.isna(code):
-                continue
-            normalized_codes.add(code)
-            normalized_codes.add(str(code))
-            try:
-                normalized_codes.add(float(code))
-            except (ValueError, TypeError):
-                pass
-
-        if normalized_codes:
-            df_copy[col] = df_copy[col].replace(list(normalized_codes), np.nan)
-
-    return df_copy
-
-
-def detect_missing_in_variable(
-    series: pd.Series,
-    missing_codes: list[Any] | None = None,
-    already_normalized: bool = False,
-) -> dict[str, Any]:
-    """
-    Count missing values (NaNs and user codes) in a single Series.
-    """
-    total_count = len(series)
-    missing_nan_count = int(series.isna().sum())
-    missing_coded_count = 0
-
-    if missing_codes and not already_normalized:
-        for code in missing_codes:
-            if pd.isna(code):
-                continue
-            missing_coded_count += int((series == code).sum())
-
-    total_missing = missing_nan_count + missing_coded_count
-    missing_pct = (
-        round((total_missing / total_count * 100), 2) if total_count > 0 else 0.0
-    )
-
-    return {
-        "total_count": total_count,
-        "missing_count": total_missing,
-        "missing_pct": missing_pct,
-        "missing_coded_count": missing_coded_count,
-        "missing_nan_count": missing_nan_count,
-        "valid_count": total_count - total_missing,
-    }
-
-
-def get_missing_summary_df(
-    df: pd.DataFrame,
-    var_meta: dict[str, Any] | None = None,
-    missing_codes: list[Any] | None = None,
-    already_normalized: bool = False,
-) -> pd.DataFrame:
-    """
-    Build a sorted summary DataFrame of missingness per variable.
-    """
-    var_meta = var_meta or {}
-    rows = []
-    for col in df.columns:
-        var_type = (
-            "Continuous" if pd.api.types.is_numeric_dtype(df[col]) else "Categorical"
-        )
-        if col in var_meta and "type" in var_meta[col]:
-            var_type = var_meta[col]["type"]
-
-        stats_dict = detect_missing_in_variable(
-            df[col], missing_codes=missing_codes, already_normalized=already_normalized
-        )
-        rows.append(
-            {
-                "Variable": col,
-                "Type": var_type,
-                "N_Total": stats_dict["total_count"],
-                "N_Valid": stats_dict["valid_count"],
-                "N_Missing": stats_dict["missing_count"],
-                "Pct_Missing": f"{stats_dict['missing_pct']}%",
-            }
-        )
-
-    summary_df = pd.DataFrame(rows)
-    return summary_df.sort_values(by="N_Missing", ascending=False).reset_index(
-        drop=True
-    )
 
 
 def check_missing_data_impact(
@@ -833,6 +695,7 @@ def littles_mcar_test(
 
     # Check if data is completely observed
     if not np.any(nan_mask):
+        cov_mat = np.atleast_2d(np.cov(Y.T))
         return LittlesMCARResult(
             statistic=0.0,
             df=0,
@@ -846,7 +709,7 @@ def littles_mcar_test(
             em_iterations=0,
             mu_mle={col: float(np.mean(Y[:, i])) for i, col in enumerate(target_cols)},
             sigma_mle={
-                c1: {c2: float(np.cov(Y.T)[i, j]) for j, c2 in enumerate(target_cols)}
+                c1: {c2: float(cov_mat[i, j]) for j, c2 in enumerate(target_cols)}
                 for i, c1 in enumerate(target_cols)
             },
             message="Dataset is fully observed (0 missing values). MCAR holds trivially.",
@@ -1110,8 +973,9 @@ def clean_dataframe(
                 _, out_stats = detect_outliers(coerced, method=outlier_method)
                 report["outlier_stats"][col] = out_stats
         else:
-            # Leave as string-like
-            df_clean[col] = series.astype(str)
+            # Leave as string-like, preserving missing values as NaN
+            mask = series.isna()
+            df_clean[col] = series.astype(str).mask(mask, np.nan)
             report["string_cols"].append(col)
 
     report["final_shape"] = df_clean.shape

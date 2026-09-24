@@ -15,16 +15,9 @@ metadata:
   reporting_guideline: "STROBE"
   random_seed: 42
 
-dataset:
-  path: "cardiovascular_cohort.csv"
-  format: "csv"
+data:
+  input_path: "cardiovascular_cohort.csv"
   id_column: "patient_id"
-
-missing_data:
-  strategy: "mice"
-  justification: "Multiple imputation with m=5 chained equations under MAR"
-  n_imputations: 5
-  variables: ["sbp", "ldl", "creatinine"]
 
 variables:
   - name: "cv_event"
@@ -49,7 +42,10 @@ models:
     exposure: "statin_rx"
     covariates: ["age", "diabetes", "ldl", "sbp"]
     method: "standard"
+    missing_strategy: "mice"
+    missing_justification: "Multiple imputation with m=5 chained equations under MAR"
     options:
+      n_imputations: 5
       e_value: true
       confidence_level: 0.95
 ```
@@ -91,6 +87,8 @@ First invert $RR^* = 1 / RR$, then compute:
 $$\text{E-value} = RR^* + \sqrt{RR^*(RR^* - 1)}$$
 
 ### Odds Ratio Approximation:
-When outcome is rare (< 15%), $RR \approx \sqrt{OR}$ or directly approximate. For common outcomes:
-$$RR \approx \frac{OR}{1 - p_0 + (p_0 \cdot OR)}$$
-where $p_0$ is unexposed baseline risk.
+When the outcome is rare (< 15%), $OR$ approximates $RR$ directly ($RR \approx OR$).
+For common outcomes, if baseline risk $p_0$ is unavailable, the square-root approximation can be used:
+$$RR \approx \sqrt{OR}$$
+When baseline risk $p_0$ (unexposed outcome risk) is known, use the baseline-risk conversion formula:
+$$RR = \frac{OR}{1 - p_0 + (p_0 \cdot OR)}$$

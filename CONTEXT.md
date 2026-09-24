@@ -10,7 +10,7 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
 | **MICE** | `mice` | Multiple Imputation by Chained Equations. Iterative imputation using series of regression models under Missing at Random (MAR). |
 | **Sample Flow Tracker** | `SampleFlowTracker` | CONSORT/STROBE audit tracker recording participant transitions: $N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$. |
 | **Standardized Mean Difference** | `SMD` | Difference in means or proportions divided by pooled standard deviation. Evaluates baseline balance; $\text{SMD} < 0.10$ signifies negligible imbalance. |
-| **Firth Penalization** | `firth` | Penalization of the log-likelihood by Jeffrey's invariant prior $\frac{1}{2}\ln|I(\beta)|$, removing first-order bias and resolving monotone separation in small/sparse cohorts. |
+| **Firth Penalization** | `firth` | Penalization of the log-likelihood by Jeffrey's invariant prior $\frac{1}{2}\ln\lvert I(\beta)\rvert$, removing first-order bias and resolving monotone separation in small/sparse cohorts. |
 | **Proportional Hazards** | `cox_ph` | Cox survival model assuming constant hazard ratios over time. Checked via Schoenfeld residual correlation ($p > 0.05$). |
 | **Restricted Cubic Splines** | `rcs` | Piecewise cubic polynomials constrained to be linear past outer boundary knots, modeling non-linear biomarker curves. |
 | **E-Value** | `e_value` | The minimum strength of association on the risk ratio scale that an unmeasured confounder must have with both exposure and outcome to fully explain away an observed association. |

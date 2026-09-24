@@ -260,6 +260,7 @@ class DataQualityReport:
         self.total_rows = len(df)
         self.total_columns = len(df.columns)
         self.total_cells = df.size
+        self.rule_errors: list[dict[str, Any]] = []
 
     def completeness_score(self) -> float:
         """Score 0-100: Percentage of non-missing cells."""
@@ -314,9 +315,10 @@ class DataQualityReport:
                 try:
                     # Scope evaluation to non-null rows of referenced columns
                     if isinstance(rule.condition, str):
-                        cols_in_rule = [
-                            c for c in self.df.columns if c in rule.condition
-                        ]
+                        tokens = set(
+                            re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", rule.condition)
+                        )
+                        cols_in_rule = [c for c in self.df.columns if c in tokens]
                     else:
                         cols_in_rule = []
 
@@ -347,8 +349,14 @@ class DataQualityReport:
                     weight = severity_weights.get(sev, 25.0)
                     rule_penalties += violation_rate * weight
 
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.rule_errors.append(
+                        {
+                            "rule": getattr(rule, "name", str(rule)),
+                            "condition": str(getattr(rule, "condition", "")),
+                            "error": str(e),
+                        }
+                    )
 
             base_score = max(0.0, base_score - min(100.0, rule_penalties))
 
@@ -499,11 +507,11 @@ class DataQualityReport:
                         rule.allowed_values
                     )
 
-                # 5. Regular expression pattern
+                # 5. Regular expression pattern (full string match)
                 if rule.regex_pattern is not None:
-                    is_invalid.loc[non_null.index] |= ~non_null.astype(str).str.match(
-                        rule.regex_pattern
-                    )
+                    is_invalid.loc[non_null.index] |= ~non_null.astype(
+                        str
+                    ).str.fullmatch(rule.regex_pattern)
 
             invalid_cells += int(is_invalid.sum())
 
@@ -635,6 +643,7 @@ class DataQualityReport:
             "grade": grade,
             "dimension_scores": scores,
             "issues": issues,
+            "rule_errors": self.rule_errors,
             "recommendations": recs,
             "total_rows": self.total_rows,
             "total_columns": self.total_columns,

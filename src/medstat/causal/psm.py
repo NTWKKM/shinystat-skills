@@ -62,7 +62,7 @@ def calculate_propensity_score(
             ps_clean = fl_model.predict_proba(X)[:, 1]
 
     ps_full = pd.Series(index=df.index, dtype=float)
-    ps_full.loc[clean_sub.index] = ps_clean.values
+    ps_full.loc[clean_sub.index] = np.asarray(ps_clean, dtype=float)
     return ps_full
 
 
@@ -80,7 +80,7 @@ def perform_matching(
         df: Input DataFrame containing treatment and propensity scores.
         treatment: Column name for treatment indicator (1=treated, 0=control).
         ps_col: Column name containing propensity scores.
-        caliper: Maximum allowable difference on the propensity score scale (default 0.2).
+        caliper: Caliper width in standard deviations of logit propensity score (default 0.2).
         ratio: Number of controls matched to each treated subject (default 1).
 
     Returns:
@@ -93,14 +93,21 @@ def perform_matching(
     if treated.empty or control.empty:
         raise ValueError("Matching requires both treated and control subjects.")
 
-    treated_ps = treated[[ps_col]].values
-    control_ps = control[[ps_col]].values
+    ps_vals = np.clip(sub[ps_col].to_numpy(dtype=float), 1e-7, 1.0 - 1e-7)
+    sub["_logit_ps"] = np.log(ps_vals / (1.0 - ps_vals))
+    sd_logit = float(np.std(sub["_logit_ps"], ddof=1)) if len(sub) > 1 else 0.0
+    caliper_threshold = caliper * sd_logit if sd_logit > 0 else caliper
 
-    # Pairwise absolute distance matrix
-    distances = cdist(treated_ps, control_ps, metric="euclidean")
+    treated_logit = sub.loc[treated.index, ["_logit_ps"]].values
+    control_logit = sub.loc[control.index, ["_logit_ps"]].values
+
+    # Pairwise absolute distance matrix on logit propensity score scale
+    distances = cdist(treated_logit, control_logit, metric="euclidean")
 
     matched_treated_idx = []
     matched_control_idx = []
+    treated_weights = []
+    control_weights = []
     treated_pair_ids = []
     control_pair_ids = []
     used_controls = set()
@@ -109,7 +116,7 @@ def perform_matching(
     for i, t_idx in enumerate(treated.index):
         # Find closest available controls within caliper
         sorted_ctrl_indices = np.argsort(distances[i, :])
-        matches_found = 0
+        curr_matched_controls = []
 
         for c_pos in sorted_ctrl_indices:
             c_idx = control.index[c_pos]
@@ -117,17 +124,23 @@ def perform_matching(
                 continue
 
             dist = distances[i, c_pos]
-            if dist <= caliper:
-                matched_treated_idx.append(t_idx)
-                matched_control_idx.append(c_idx)
-                treated_pair_ids.append(current_pair)
-                control_pair_ids.append(current_pair)
+            if dist <= caliper_threshold:
+                curr_matched_controls.append(c_idx)
                 used_controls.add(c_idx)
-                matches_found += 1
-                if matches_found >= ratio:
+                if len(curr_matched_controls) >= ratio:
                     break
 
-        if matches_found > 0:
+        if curr_matched_controls:
+            matched_treated_idx.append(t_idx)
+            treated_pair_ids.append(current_pair)
+            treated_weights.append(1.0)
+
+            ctrl_weight = 1.0 / len(curr_matched_controls)
+            for c_idx in curr_matched_controls:
+                matched_control_idx.append(c_idx)
+                control_pair_ids.append(current_pair)
+                control_weights.append(ctrl_weight)
+
             current_pair += 1
 
     if not matched_treated_idx:
@@ -135,12 +148,15 @@ def perform_matching(
 
     matched_treated_df = sub.loc[matched_treated_idx].copy()
     matched_treated_df["pair_id"] = treated_pair_ids
+    matched_treated_df["matching_weight"] = treated_weights
 
     matched_control_df = sub.loc[matched_control_idx].copy()
     matched_control_df["pair_id"] = control_pair_ids
+    matched_control_df["matching_weight"] = control_weights
 
     matched_df = pd.concat([matched_treated_df, matched_control_df])
-    matched_df["matching_weight"] = 1.0
+    if "_logit_ps" in matched_df.columns:
+        matched_df = matched_df.drop(columns=["_logit_ps"])
 
     return matched_df
 

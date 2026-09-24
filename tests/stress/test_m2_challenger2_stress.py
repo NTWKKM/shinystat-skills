@@ -479,22 +479,22 @@ class TestDataQualityScoringStress:
         assert len(warnings) == 1
         assert "non-standard values" in warnings[0]
 
+    @pytest.mark.xfail(
+        strict=True,
+        reason="Infinite values should trigger quality warnings and penalize plausibility/validity",
+    )
     def test_infinite_values_handling(self):
         """
-        ALGORITHMIC GAP: Infinite values (np.inf, -np.inf) are not counted as missing,
-        and cause RuntimeWarnings in numpy.percentile while scoring 100.0 across all dimensions.
+        Infinite values (np.inf, -np.inf) should trigger warnings and reduce plausibility or validity scores.
         """
         df_inf = pd.DataFrame({"lab_ratio": [1.0, 2.0, np.inf, -np.inf, 5.0]})
         report = DataQualityReport(df_inf)
 
-        # Completeness treats inf as non-missing
-        assert report.completeness_score() == 100.0
-        # Plausibility handles NaN IQR and returns 100.0
-        assert report.plausibility_score() == 100.0
-        # Consistency is 100.0
-        assert report.consistency_score() == 100.0
-        # Check data quality reports no issues
-        assert check_data_quality(df_inf) == []
+        # Expect reduced plausibility or validity score
+        assert report.plausibility_score() < 100.0 or report.validity_score() < 100.0
+        # Check data quality reports warnings
+        issues = check_data_quality(df_inf)
+        assert len(issues) > 0
 
     def test_cross_variable_rules_exception_resilience(self):
         """

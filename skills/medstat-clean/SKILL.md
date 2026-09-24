@@ -34,7 +34,7 @@ Evaluate the resulting audit:
   - **5% – 20% (Moderate)**: Multiple Imputation by Chained Equations (MICE) recommended.
   - **20% – 40% (High)**: Imputation required with sensitivity analysis.
   - **> 40% (Critical)**: High risk of bias; consider indicator method or dropping variable.
-- Check Little's MCAR test: $p > 0.05$ indicates data consistent with MCAR; $p \le 0.05$ indicates MAR or MNAR.
+- Check Little's MCAR test: $p > 0.05$ provides insufficient evidence to reject MCAR; $p \le 0.05$ provides evidence against MCAR (data depart from MCAR).
 - Consult [references/missing-data-mechanisms.md](references/missing-data-mechanisms.md) for mechanism selection criteria.
 
 ### Step 2: Execute Clinically Justified Strategy

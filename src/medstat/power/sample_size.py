@@ -35,6 +35,15 @@ def calculate_sample_size_means(
     if sd1 <= 0 or s2 <= 0:
         raise ValueError("Standard deviations must be strictly positive.")
 
+    if not (0.0 < alpha < 1.0):
+        raise ValueError(f"alpha must be strictly between 0 and 1, got {alpha}")
+    if not (0.0 < power < 1.0):
+        raise ValueError(f"power must be strictly between 0 and 1, got {power}")
+    if power <= alpha:
+        raise ValueError(
+            f"power ({power}) must be strictly greater than alpha ({alpha})"
+        )
+
     sd_pooled = math.sqrt((sd1**2 + s2**2) / 2.0)
     diff = abs(mean1 - mean2)
     if diff == 0:
@@ -87,6 +96,15 @@ def calculate_sample_size_t_test(
     """
     if effect_size <= 0:
         raise ValueError("Effect size must be strictly positive.")
+    if not (0.0 < alpha < 1.0):
+        raise ValueError(f"alpha must be strictly between 0 and 1, got {alpha}")
+    if not (0.0 < power < 1.0):
+        raise ValueError(f"power must be strictly between 0 and 1, got {power}")
+    if power <= alpha:
+        raise ValueError(
+            f"power ({power}) must be strictly greater than alpha ({alpha})"
+        )
+
     analysis = smp.TTestIndPower()
     n = analysis.solve_power(
         effect_size=effect_size,

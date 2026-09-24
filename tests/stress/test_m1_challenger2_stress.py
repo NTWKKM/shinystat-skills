@@ -288,7 +288,7 @@ class TestConftestForwardingWrapper:
         assert proc.returncode == 0
         assert "CAUGHT_WARNING" not in proc.stdout
 
-    def test_conftest_wrapper_invoked_from_different_cwd(self):
+    def test_conftest_wrapper_invoked_from_different_cwd(self, tmp_path):
         """
         Empirical proof:
         1. When conftest.py is executed via Python < 3.12 from a directory outside project_root,
@@ -305,20 +305,20 @@ class TestConftestForwardingWrapper:
         if Path(py39_bin).exists():
             proc39 = subprocess.run(
                 [py39_bin, str(conftest_path), "--collect-only"],
-                cwd="/tmp",
+                cwd=str(tmp_path),
                 capture_output=True,
                 text=True,
             )
-            # Forwarded pytest runs in /tmp without project root, collecting 0 tests (code 5)
+            # Forwarded pytest runs in tmp_path without project root, collecting 0 tests (code 5)
             assert proc39.returncode == 5, (
-                f"Expected returncode 5 (no tests in /tmp) from python 3.9 forwarder, got {proc39.returncode}"
+                f"Expected returncode 5 (no tests in {tmp_path}) from python 3.9 forwarder, got {proc39.returncode}"
             )
             assert "no tests collected" in proc39.stdout.lower()
 
         # In Python 3.12 directly, running `python tests/conftest.py` invokes venv_pytest
         proc312 = subprocess.run(
             [sys.executable, str(conftest_path), "--collect-only"],
-            cwd="/tmp",
+            cwd=str(tmp_path),
             capture_output=True,
             text=True,
         )

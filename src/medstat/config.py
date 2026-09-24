@@ -48,18 +48,18 @@ class ConfigManager:
         legacy_strategy = analysis.get("missing_strategy")
         legacy_threshold = analysis.get("missing_threshold_pct")
 
-        if legacy_strategy is not None and "strategy" not in missing:
-            missing["strategy"] = legacy_strategy
-        if legacy_threshold is not None and "report_threshold_pct" not in missing:
-            missing["report_threshold_pct"] = legacy_threshold
-
-        if "missing_strategy" not in analysis and "strategy" in missing:
+        if "strategy" in missing and legacy_strategy != missing["strategy"]:
             analysis["missing_strategy"] = missing["strategy"]
+        elif legacy_strategy is not None:
+            missing["strategy"] = legacy_strategy
+
         if (
-            "missing_threshold_pct" not in analysis
-            and "report_threshold_pct" in missing
+            "report_threshold_pct" in missing
+            and legacy_threshold != missing["report_threshold_pct"]
         ):
             analysis["missing_threshold_pct"] = missing["report_threshold_pct"]
+        elif legacy_threshold is not None:
+            missing["report_threshold_pct"] = legacy_threshold
 
     @staticmethod
     def _get_default_config() -> dict[str, Any]:
@@ -157,8 +157,21 @@ class ConfigManager:
                     continue
                 section = parts[0]
                 key_name = "_".join(parts[1:])
+                target_key = f"{section}.{key_name}"
+                existing_val = self.get(target_key)
+                converted_val: Any = value
+                if existing_val is not None:
+                    try:
+                        if isinstance(existing_val, bool):
+                            converted_val = value.lower() in ("true", "1", "yes", "on")
+                        elif isinstance(existing_val, int):
+                            converted_val = int(value)
+                        elif isinstance(existing_val, float):
+                            converted_val = float(value)
+                    except (ValueError, TypeError):
+                        converted_val = value
                 try:
-                    self.update(f"{section}.{key_name}", value)
+                    self.update(target_key, converted_val)
                 except (KeyError, ValueError, TypeError) as e:
                     warnings.warn(
                         f"Failed to set env override {key}={value}: {e}", stacklevel=2
@@ -185,15 +198,23 @@ class ConfigManager:
         if final_key not in config:
             raise KeyError(f"Config key '{key}' does not exist")
         config[final_key] = value
-        if key.startswith("analysis.missing_"):
+
+        if key in ("analysis.missing_strategy", "analysis.missing.strategy"):
             analysis = self._config.get("analysis", {})
             missing = analysis.get("missing")
             if isinstance(missing, dict):
-                if key.endswith("missing_strategy"):
-                    missing["strategy"] = value
-                elif key.endswith("missing_threshold_pct"):
-                    missing["report_threshold_pct"] = value
-        if key.startswith("analysis.missing"):
+                missing["strategy"] = value
+            analysis["missing_strategy"] = value
+        elif key in (
+            "analysis.missing_threshold_pct",
+            "analysis.missing.report_threshold_pct",
+        ):
+            analysis = self._config.get("analysis", {})
+            missing = analysis.get("missing")
+            if isinstance(missing, dict):
+                missing["report_threshold_pct"] = value
+            analysis["missing_threshold_pct"] = value
+        elif key.startswith("analysis.missing"):
             self._sync_missing_legacy()
 
     def set_nested(self, key: str, value: Any, create: bool = False) -> None:

@@ -134,7 +134,7 @@ The test suite is structured into four distinct, progressive tiers designed to v
      - Input: `tests/fixtures/sepsis_diagnostics.csv` (500 ED patients, suspected sepsis, Procalcitonin vs Lactate).
      - Execution: Data cleaning $\to$ 2x2 accuracy table at optimal clinical cutoff $\to$ DeLong correlated ROC comparison $\to$ DCA net benefit curves $\to$ TRIPOD compliance checklist.
   3. **Workflow 3: Point-of-Care Ultrasound (POCUS) Multi-Rater Reliability**:
-     - Input: `tests/fixtures/pocus_reliability.csv` (80 lung ultrasound examinations evaluated by 3 independent clinicians).
+     - Input: `tests/fixtures/pocus_reliability.csv` (50 lung ultrasound examinations evaluated by 3 independent clinicians, 150 rows).
      - Execution: Data cleaning $\to$ Pure-SciPy two-way ANOVA ICC (ICC2k agreement) $\to$ Pairwise Bland-Altman limits of agreement $\to$ Fleiss' multi-rater Kappa $\to$ Methods narrative.
   4. **Workflow 4: Cardiovascular Drug Effectiveness via Propensity Score Matching (PSM)**:
      - Input: `tests/fixtures/cardiovascular_cohort.csv` (1,000 cardiovascular patients evaluating Statin therapy on 3-year MACE).

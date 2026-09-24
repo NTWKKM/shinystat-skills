@@ -33,16 +33,16 @@ The **Opaque-Box Requirement-Driven End-to-End (E2E) Test Suite and Infrastructu
 ```text
 ============================= test session starts ==============================
 platform darwin -- Python 3.12.12, pytest-9.0.2, pluggy-1.6.0
-rootdir: /Users/ntwkkm/shinystat-skills
+rootdir: <project_root>
 configfile: pyproject.toml
 collected 105 items
 
-tests/e2e/test_tier1_feature_coverage.py ......... [40 passed, 10 skipped]
-tests/e2e/test_tier2_boundary_corner_cases.py .... [40 passed, 5 skipped]
-tests/e2e/test_tier3_cross_feature_interactions.py [5 skipped (Milestone M3 CLI)]
-tests/e2e/test_tier4_clinical_workflows.py ........ [5 skipped (Milestone M3 CLI)]
+tests/e2e/test_tier1_feature_coverage.py ......... [49 passed, 1 skipped]
+tests/e2e/test_tier2_boundary_corner_cases.py .... [45 passed]
+tests/e2e/test_tier3_cross_feature_interactions.py [5 passed]
+tests/e2e/test_tier4_clinical_workflows.py ........ [5 passed]
 
-================== 80 passed, 25 skipped, 0 failed in 2.20s ===================
+================== 104 passed, 1 skipped, 0 failed in 3.23s ===================
 ```
 
 ---
@@ -107,16 +107,13 @@ Real-world end-to-end clinical workflow execution:
 
 ---
 
-## 5. Escalated Implementation Defects (For Worker M1 / Implementing Workers)
+## 5. Escalated Implementation Defects (Resolved)
 
-During verification against statistical interfaces, three implementation bugs were identified and escalated:
+The implementation defects previously identified during interface verification have been resolved:
 
-1. **`src/medstat/models/splines.py:82-99` (Restricted Cubic Splines Collinearity)**:
-   - *Observation*: `fit_cox_rcs` creates design matrix with `patsy.dmatrices("... ~ cr(rcs_var, df=knots)")`. Because `patsy.cr` creates natural cubic spline basis functions whose rows sum to $1.0$, the spline basis has an implicit intercept. When passed to `lifelines.CoxPHFitter`, matrix inversion fails with `lifelines.exceptions.ConvergenceError: A singular matrix detected: slice(s) [0] are singular`.
-   - *Recommended Fix*: Center the spline basis or drop the first column of the `cr()` basis so the basis functions do not sum to a constant.
-2. **`src/medstat/meta/forest.py:33` (Missing Per-Study Confidence Intervals)**:
-   - *Observation*: `generate_forest_data` expects `row["ci_lower"]` and `row["ci_upper"]` in `meta_results["studies"]`, but `run_meta_analysis` returns a DataFrame with `weight_fe_pct` and `weight_re_pct` without computing per-study confidence limits.
-   - *Recommended Fix*: In `run_meta_analysis`, populate `ci_lower = theta - 1.96 * se` and `ci_upper = theta + 1.96 * se` in `studies_df`.
-3. **`src/medstat/meta/models.py:180-185` (Zero Standard Error Division)**:
-   - *Observation*: When a study has `se = 0.0`, `w_fe = 1.0 / (se**2)` divides by zero and generates `inf`/`nan` with `RuntimeWarning` rather than raising a defensive `ValueError("Standard error must be strictly positive")`.
-   - *Recommended Fix*: Add defensive check `if np.any(se <= 0): raise ValueError("Standard error must be strictly positive.")` at the beginning of `run_meta_analysis`.
+1. **`src/medstat/models/splines.py` (Restricted Cubic Splines Collinearity)**:
+   - *Status*: **Resolved**. Centering constraint implemented and singular matrix issue addressed; verified in `TestEscalatedDefects`.
+2. **`src/medstat/meta/forest.py` (Missing Per-Study Confidence Intervals)**:
+   - *Status*: **Resolved**. `run_meta_analysis` populates per-study confidence limits (`ci_lower`, `ci_upper`) and effect measures in `studies_df`.
+3. **`src/medstat/meta/models.py` (Zero Standard Error Division)**:
+   - *Status*: **Resolved**. Strict validation ensures standard error values are positive and non-zero; verified in `TestMetaAnalysisBoundaries`.

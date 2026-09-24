@@ -206,8 +206,12 @@ def fit_negative_binomial(
     model = sm.NegativeBinomial(y_arr, X_mat, exposure=exposure_arr)
     result = model.fit(disp=False)
 
-    coefs = result.params
-    conf = result.conf_int()
+    k = len(names)
+    coefs = result.params[:k]
+    conf = np.asarray(result.conf_int())[:k]
+    bse = result.bse[:k]
+    tval = result.tvalues[:k]
+    pval = result.pvalues[:k]
     irr = np.exp(coefs)
     irr_low = np.exp(conf[:, 0])
     irr_high = np.exp(conf[:, 1])
@@ -215,9 +219,9 @@ def fit_negative_binomial(
     summary_df = pd.DataFrame(
         {
             "coef": coefs,
-            "std_error": result.bse,
-            "z_stat": result.tvalues,
-            "p_value": result.pvalues,
+            "std_error": bse,
+            "z_stat": tval,
+            "p_value": pval,
             "irr": irr,
             "irr_ci_lower": irr_low,
             "irr_ci_upper": irr_high,
@@ -225,10 +229,16 @@ def fit_negative_binomial(
         index=names,
     )
 
+    alpha_disp = (
+        float(result.params[-1])
+        if len(result.params) > k
+        else float(getattr(result, "scale", np.nan))
+    )
+
     return {
         "model": result,
         "summary_df": summary_df,
-        "alpha_dispersion": float(result.params.get("alpha", np.nan)),
+        "alpha_dispersion": alpha_disp,
         "log_likelihood": float(result.llf),
         "aic": float(result.aic),
         "bic": float(result.bic),

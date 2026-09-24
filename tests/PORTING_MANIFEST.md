@@ -27,24 +27,24 @@ The legacy test suite contained a mixture of pure statistical calculations, data
 | 8 | `test_multiple_imputation.py` | `tests/unit/test_multiple_imputation.py` | **Ported** | Chained equations (MICE), Rubin's pooling, and FMI. |
 | 9 | `test_mi_reporting.py` | `tests/unit/test_sample_flow_retention.py` | **Consolidated** | Participant flow tracking through imputation stages. |
 | 10 | `test_firth_regression.py` | `tests/stress/test_m1_stress_icc_firth.py` | **Ported & Deepened** | Profile Likelihood 95% CIs and LRT p-values under separation. |
-| 11 | `test_bland_altman.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | Mean bias, 95% LoA, and Carkeet confidence intervals. |
-| 12 | `test_calibration_ici.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | Brier score, calibration slope/intercept, and ICI/E50/E90. |
+| 11 | `test_bland_altman.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Pending** | Standalone unit tests pending; covered in E2E. |
+| 12 | `test_calibration_ici.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Pending** | Standalone unit tests pending; covered in E2E. |
 | 13 | `test_causal.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | Propensity score matching, caliper, and SMD balance. |
 | 14 | `test_dca.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | Vickers Decision Curve Analysis net benefit curves. |
 | 15 | `test_diag_returns.py` | `tests/e2e/test_tier2_boundary_corner_cases.py` | **Ported** | 2x2 contingency matrix, Sensitivity, Specificity, Wilson CIs. |
 | 16 | `test_diagnostic_advanced.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | Empirical ROC, Youden index, DeLong paired AUC test. |
-| 17 | `test_effect_sizes.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | Cohen's d, Hedges' g, and Standardized Mean Differences. |
-| 18 | `test_fagan_nomogram.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | Pre-test to post-test probability Bayesian nomogram. |
+| 17 | `test_effect_sizes.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Pending** | Standalone unit tests pending; covered in E2E. |
+| 18 | `test_fagan_nomogram.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Pending** | Not yet ported to headless suite. |
 | 19 | `test_formatting.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | Medical journal precision and rounding rules. |
 | 20 | `test_formatting_styles.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | NEJM, JAMA, and APA 7 typography rules. |
 | 21 | `test_glm.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | Generalized linear models (logistic, linear regression). |
 | 22 | `test_heterogeneity.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | Cochran's Q and Higgins $I^2$ meta-analytic heterogeneity. |
 | 23 | `test_linear_lib.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | OLS regression, ANOVA decomposition, and parameter estimates. |
-| 24 | `test_mediation.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported (Optional)** | Causal mediation analysis (optional extra). |
+| 24 | `test_mediation.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Conditional** | Causal mediation analysis (runs only when optional dependency installed). |
 | 25 | `test_meta_analysis.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | DerSimonian-Laird random effects, Forest plots, Egger's test. |
-| 26 | `test_model_diagnostics.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | Multicollinearity (VIF), Cook's distance, and leverage. |
-| 27 | `test_model_diagnostics_plots.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | Diagnostic residual plot data structures. |
-| 28 | `test_poisson_lib.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | Poisson and negative binomial count regression. |
+| 26 | `test_model_diagnostics.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Pending** | Multicollinearity (VIF) and influence diagnostics pending. |
+| 27 | `test_model_diagnostics_plots.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Pending** | Diagnostic residual plot data structures pending. |
+| 28 | `test_poisson_lib.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Pending** | Poisson and negative binomial count regression pending. |
 | 29 | `test_publication_renderer.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | HTML publication table rendering without vertical borders. |
 | 30 | `test_regression_publication.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | Publication table styling for GLM and Cox models. |
 | 31 | `test_repeated_measures.py` | `tests/stress/test_m1_stress_icc_firth.py` | **Ported & Re-engineered** | Replaced `pingouin` with pure-SciPy two-way ANOVA ICC. |
@@ -56,7 +56,7 @@ The legacy test suite contained a mixture of pure statistical calculations, data
 | 37 | `test_statistics.py` | `tests/unit/` & `tests/e2e/` | **Ported** | Parametric and non-parametric bivariate hypothesis tests. |
 | 38 | `test_survival_assumptions.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | Schoenfeld residual tests for proportional hazards. |
 | 39 | `test_survival_lib_patch.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | Lifelines Cox PH wrapper and robust covariance estimation. |
-| 40 | `test_tvc_lib.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | Time-varying covariates in survival analysis. |
+| 40 | `test_tvc_lib.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Pending** | Time-varying covariates in survival analysis pending. |
 | 41 | `verify_table_one.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | Table 1 baseline characteristics with continuous/binary SMDs. |
 | 42 | `test_collinearity.py` | `tests/e2e/test_tier2_boundary_corner_cases.py`| **Ported** | Boundary handling of perfectly collinear feature matrices. |
 | 43 | `test_correlation_returns.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | Pearson and Spearman correlation coefficient returns. |
@@ -77,6 +77,8 @@ The legacy test suite contained a mixture of pure statistical calculations, data
 ## 3. Summary Statistics
 
 - **Total Legacy Modules**: 54 files.
-- **Ported to Headless Core (`tests/unit/`, `tests/e2e/`, `tests/stress/`)**: 46 files (85.2%).
+- **Ported to Headless Core (`tests/unit/`, `tests/e2e/`, `tests/stress/`)**: 37 files (68.5%).
+- **Conditional / Optional Extra**: 1 file (1.9%).
+- **Pending Porting**: 8 files (14.8%).
 - **Retired GUI/Shiny UI Modules**: 8 files (14.8%).
 - **Total Tests Currently Executed & Passing**: **255 Passed, 1 Skipped, 0 Failed**.

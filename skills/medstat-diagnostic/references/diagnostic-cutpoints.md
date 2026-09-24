@@ -4,7 +4,7 @@ Reference guide for diagnostic test evaluation, threshold selection, and decisio
 
 ## 1. Wilson Score Confidence Interval
 
-The Wald interval $\hat{p} \pm 1.96 \sqrt{\hat{p}(1-\hat{p})/n}$ breaks down near 0 or 1, producing intervals exceeding $[0, 1]$ or zero width. The **Wilson score interval** with continuity correction is used across all sensitivity and specificity bounds:
+The Wald interval $\hat{p} \pm 1.96 \sqrt{\hat{p}(1-\hat{p})/n}$ breaks down near 0 or 1, producing intervals exceeding $[0, 1]$ or zero width. The **Wilson score interval** is used across all sensitivity and specificity bounds:
 
 $$\text{CI} = \frac{2n\hat{p} + z^2 \pm z \sqrt{z^2 + 4n\hat{p}(1 - \hat{p})}}{2(n + z^2)}$$
 

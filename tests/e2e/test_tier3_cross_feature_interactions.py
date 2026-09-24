@@ -39,27 +39,28 @@ def test_tier3_clean_mice_to_table1(
         ]
     )
     assert exit_code == 0
+    assert clean_csv.exists()
 
-    if clean_csv.exists():
-        df_imputed = pd.read_csv(clean_csv)
-        assert len(df_imputed) == 400
-        assert df_imputed["creatinine"].isnull().sum() == 0
+    df_imputed = pd.read_csv(clean_csv)
+    assert len(df_imputed) == 400
+    assert df_imputed["creatinine"].isnull().sum() == 0
 
-        # Step 2: Table 1 on imputed cohort
-        exit_code2, stdout2, _ = medstat_cli_runner(
-            [
-                "table1",
-                "--data",
-                str(clean_csv),
-                "--group",
-                "treatment",
-                "--vars",
-                "age,sex,creatinine,bmi",
-                "--output",
-                str(table1_json),
-            ]
-        )
-        assert exit_code2 == 0 or "Table 1" in stdout2
+    # Step 2: Table 1 on imputed cohort
+    exit_code2, stdout2, _ = medstat_cli_runner(
+        [
+            "table1",
+            "--data",
+            str(clean_csv),
+            "--group",
+            "treatment",
+            "--vars",
+            "age,sex,creatinine,bmi",
+            "--output",
+            str(table1_json),
+        ]
+    )
+    assert exit_code2 == 0
+    assert table1_json.exists()
 
 
 def test_tier3_clean_complete_case_to_firth_to_report(

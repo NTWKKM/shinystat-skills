@@ -143,9 +143,28 @@ def create_forest_plot(meta_results: dict[str, Any]) -> go.Figure:
     # Title with heterogeneity
     het_str = f"Heterogeneity: I² = {het['I2']:.1f}%, τ² = {het['tau2']:.3f}, p = {het['p_value']:.3f}"
 
+    measure = meta_results.get("effect_measure")
+    if is_ratio:
+        if measure and ("OR" in str(measure).upper() or "ODDS" in str(measure).upper()):
+            x_title = "Odds Ratio (log scale)"
+        elif measure and (
+            "RR" in str(measure).upper() or "RISK" in str(measure).upper()
+        ):
+            x_title = "Risk Ratio (log scale)"
+        elif measure and (
+            "HR" in str(measure).upper() or "HAZARD" in str(measure).upper()
+        ):
+            x_title = "Hazard Ratio (log scale)"
+        elif measure:
+            x_title = f"{measure} (log scale)"
+        else:
+            x_title = "Risk Ratio (log scale)"
+    else:
+        x_title = "Effect Size"
+
     fig.update_layout(
         title=f"Meta-Analysis Forest Plot<br><sup>{het_str}</sup>",
-        xaxis_title="Risk Ratio (log scale)" if is_ratio else "Effect Size",
+        xaxis_title=x_title,
         yaxis=dict(
             tickmode="array",
             tickvals=y_pos,

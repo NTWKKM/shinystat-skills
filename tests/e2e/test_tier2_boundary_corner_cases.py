@@ -311,8 +311,7 @@ def test_tier2_causal_caliper_too_narrow_zero_matches_handled():
         df, treatment="trt", covariates=["age"]
     )
     matched = psm_mod.perform_matching(df, treatment="trt", ps_col="ps", caliper=0.0001)
-    # Either returns empty matched DataFrame or raises ValueError
-    assert len(matched) == 0 or "ps" in matched.columns
+    assert len(matched) == 0
 
 
 def test_tier2_causal_no_common_support_in_propensity_scores():
@@ -529,26 +528,19 @@ def test_tier2_sample_size_zero_effect_size_raises_error():
 def test_tier2_sample_size_alpha_zero_or_one_rejected():
     """FEAT-08-B2: Invalid significance levels alpha <= 0 or alpha >= 1 handled."""
     power_mod = require_medstat_module("medstat.power.sample_size")
-    # statsmodels power calculation emits warning or raises on invalid alpha
-    try:
-        res = power_mod.calculate_sample_size_means(
+    with pytest.raises(ValueError):
+        power_mod.calculate_sample_size_means(
             mean1=10.0, mean2=15.0, sd1=10.0, alpha=0.0, power=0.80
         )
-        assert res is not None
-    except (ValueError, Warning):
-        pass
 
 
 def test_tier2_sample_size_power_less_than_alpha_rejected():
     """FEAT-08-B3: Target power <= alpha handled gracefully."""
     power_mod = require_medstat_module("medstat.power.sample_size")
-    try:
-        res = power_mod.calculate_sample_size_means(
+    with pytest.raises(ValueError):
+        power_mod.calculate_sample_size_means(
             mean1=10.0, mean2=15.0, sd1=10.0, alpha=0.05, power=0.01
         )
-        assert res is not None
-    except (ValueError, Warning):
-        pass
 
 
 def test_tier2_sample_size_negative_sd_rejected():

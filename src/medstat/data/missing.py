@@ -510,6 +510,8 @@ def pool_estimates(
     variances: list[float] | np.ndarray,
     n_obs: int | None = None,
     alpha: float = 0.05,
+    k: int = 1,
+    df_complete: int | None = None,
 ) -> PooledEstimate:
     """
     Pool estimates and variances across m multiple imputations using Rubin's rules
@@ -554,8 +556,14 @@ def pool_estimates(
     if B > 0 and W_bar > 0:
         r = float((1.0 + 1.0 / m) * B / W_bar)
         df_old = (m - 1) * (1.0 + 1.0 / r) ** 2
-        if n_obs is not None and n_obs > 1:
-            df_obs = (n_obs - 1) * (1.0 - r / (r + 1.0))
+        if n_obs is not None or df_complete is not None:
+            nu_com = (
+                float(df_complete)
+                if df_complete is not None
+                else max(1.0, float(n_obs - k))
+            )
+            lam = r / (r + 1.0)
+            df_obs = ((nu_com + 1.0) / (nu_com + 3.0)) * nu_com * (1.0 - lam)
             df = float((df_old * df_obs) / (df_old + df_obs))
         else:
             df = float(df_old)
@@ -745,18 +753,18 @@ def prepare_data_for_analysis(
     if var_meta or missing_codes:
         df_subset = apply_missing_values_to_df(df_subset, var_meta, missing_codes)
 
-    # 3. Detect 100% missing columns
+    # 3. Numeric coercion for numeric_cols
+    if numeric_cols:
+        for col in numeric_cols:
+            if col in df_subset.columns:
+                df_subset[col] = pd.to_numeric(df_subset[col], errors="coerce")
+
+    # 4. Detect 100% missing columns
     for col in required_cols:
         if df_subset[col].isna().all():
             raise ValueError(
                 f"Column '{col}' is 100% missing and cannot be analyzed or imputed."
             )
-
-    # 4. Numeric coercion for numeric_cols
-    if numeric_cols:
-        for col in numeric_cols:
-            if col in df_subset.columns:
-                df_subset[col] = pd.to_numeric(df_subset[col], errors="coerce")
 
     # 5. Missingness audit across required columns
     missing_counts = {col: int(df_subset[col].isna().sum()) for col in required_cols}
@@ -824,6 +832,17 @@ def prepare_data_for_analysis(
             )
 
     elif strategy_norm == "mice":
+        non_numeric_missing = [
+            col
+            for col in required_cols
+            if missing_counts.get(col, 0) > 0
+            and not pd.api.types.is_numeric_dtype(df_subset[col])
+        ]
+        if non_numeric_missing:
+            raise ValueError(
+                f"MICE imputation requires numeric columns; non-numeric columns with missing data: {non_numeric_missing}"
+            )
+
         m_imputations = strategy_params.get(
             "n_imputations", strategy_params.get("m", 5)
         )
@@ -847,6 +866,17 @@ def prepare_data_for_analysis(
             )
 
     elif strategy_norm == "knn":
+        non_numeric_missing = [
+            col
+            for col in required_cols
+            if missing_counts.get(col, 0) > 0
+            and not pd.api.types.is_numeric_dtype(df_subset[col])
+        ]
+        if non_numeric_missing:
+            raise ValueError(
+                f"KNN imputation requires numeric columns; non-numeric columns with missing data: {non_numeric_missing}"
+            )
+
         k_neighbors = strategy_params.get("n_neighbors", strategy_params.get("k", 5))
         df_clean = impute_knn(df_subset, n_neighbors=k_neighbors, scale=True)
         rows_excluded = 0
@@ -871,6 +901,17 @@ def prepare_data_for_analysis(
                 reason=f"Missing indicator method: {missing_justification}",
             )
 
+    # Validate that df_clean contains no missing values in required_cols
+    remaining_missing = [
+        col
+        for col in required_cols
+        if col in df_clean.columns and df_clean[col].isna().any()
+    ]
+    if remaining_missing:
+        raise ValueError(
+            f"Missing data handling failed to resolve missing values in required columns: {remaining_missing}"
+        )
+
     info: dict[str, Any] = {
         "strategy": strategy_norm,
         "missing_justification": missing_justification,
@@ -890,12 +931,17 @@ def prepare_data_for_analysis(
 def handle_missing_for_analysis(
     df: pd.DataFrame,
     var_meta: dict[str, Any] | None = None,
-    strategy: str = "complete-case",
+    strategy: str | None = None,
     return_counts: bool = False,
 ) -> pd.DataFrame | tuple[pd.DataFrame, dict[str, int]]:
     """
     Backward-compatible legacy wrapper for complete-case filtering.
+    Requires an explicit strategy.
     """
+    if strategy is None:
+        raise MissingStrategyRequiredError(
+            "An explicit missing-data strategy must be specified for handle_missing_for_analysis."
+        )
     df_work = df.copy()
     if var_meta:
         df_work = apply_missing_values_to_df(df_work, var_meta)

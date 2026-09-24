@@ -94,11 +94,14 @@ def beggs_test(df: pd.DataFrame) -> dict[str, Any]:
     se = df["se"].to_numpy(dtype=float)
 
     # Variance-weighted mean effect for standardization
-    w = 1.0 / (se**2)
-    theta_bar = np.sum(w * theta) / np.sum(w)
-    std_effects = (theta - theta_bar) / np.sqrt(se**2)
+    v = se**2
+    w = 1.0 / v
+    sum_w = np.sum(w)
+    theta_bar = np.sum(w * theta) / sum_w
+    var_pooled = 1.0 / sum_w
+    std_effects = (theta - theta_bar) / np.sqrt(v - var_pooled)
 
-    tau, p_val = stats.kendalltau(std_effects, se**2)
+    tau, p_val = stats.kendalltau(std_effects, v)
 
     return {
         "test": "Begg and Mazumdar rank correlation",
