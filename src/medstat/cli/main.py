@@ -8,6 +8,7 @@ clean, table1, model, diag, agreement, causal, meta, sample-size, and report.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -1049,6 +1050,25 @@ def report_cmd(
             else:
                 studies_records = []
 
+            eff_measure = str(
+                res_data.get("effect_measure", res_data.get("scale", ""))
+            ).strip()
+            is_ratio_meta = bool(
+                res_data.get("is_ratio", False)
+            ) or eff_measure.upper() in {
+                "OR",
+                "RR",
+                "HR",
+                "ODDS_RATIO",
+                "RISK_RATIO",
+                "HAZARD_RATIO",
+            }
+            unified_scale = (
+                eff_measure
+                if eff_measure and eff_measure.lower() != "none"
+                else ("Ratio" if is_ratio_meta else "Effect")
+            )
+
             for s in studies_records:
                 if isinstance(s, dict):
                     pval_raw = s.get(
@@ -1066,13 +1086,32 @@ def report_cmd(
                     ci_hi = s.get("ci_upper")
                     study_name = str(s.get("study", "Study"))
                     raw_eff = s.get("effect_size", s.get("effect"))
-                    if raw_eff is None:
+                    is_study_ratio = bool(s.get("is_ratio", is_ratio_meta))
+                    if raw_eff is None and "log_effect" in s:
+                        log_eff_val = float(s["log_effect"])
+                        if is_study_ratio:
+                            raw_eff = math.exp(log_eff_val)
+                            if ci_lo is not None and (
+                                s.get("ci_scale") == "log"
+                                or "log" in str(s.get("scale", "")).lower()
+                            ):
+                                ci_lo = math.exp(float(ci_lo))
+                            if ci_hi is not None and (
+                                s.get("ci_scale") == "log"
+                                or "log" in str(s.get("scale", "")).lower()
+                            ):
+                                ci_hi = math.exp(float(ci_hi))
+                        else:
+                            raw_eff = log_eff_val
+                    elif raw_eff is None:
                         is_log_scale = (
                             "log" in str(s.get("scale", "")).lower()
                             or "log" in str(res_data.get("effect_measure", "")).lower()
                         )
-                        if is_log_scale:
-                            raw_eff = s.get("log_effect")
+                        if is_log_scale and s.get("log_effect") is not None:
+                            raw_eff = float(s["log_effect"])
+                            if is_study_ratio:
+                                raw_eff = math.exp(raw_eff)
                     if raw_eff is None or (
                         isinstance(raw_eff, float) and np.isnan(raw_eff)
                     ):
@@ -1080,8 +1119,6 @@ def report_cmd(
                             f"Missing required effect value for study '{study_name}' in meta-analysis results."
                         )
                     eff_val = float(raw_eff)
-                    ci_lo = s.get("ci_lower")
-                    ci_hi = s.get("ci_upper")
                     est_rows.append(
                         Estimate(
                             term=study_name,
@@ -1094,7 +1131,7 @@ def report_cmd(
                             if ci_hi is not None
                             else float("nan"),
                             p_value=pval,
-                            scale="Effect",
+                            scale=unified_scale,
                         )
                     )
             re = res_data.get(
@@ -1132,7 +1169,7 @@ def report_cmd(
                         if re_ci_hi is not None
                         else float("nan"),
                         p_value=re_pval,
-                        scale="Overall",
+                        scale=unified_scale,
                     )
                 )
 

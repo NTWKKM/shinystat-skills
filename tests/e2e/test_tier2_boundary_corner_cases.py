@@ -693,3 +693,60 @@ def test_tier2_report_forest_missing_pvalue_renders_unavailable(tmp_path):
     # Ensure fabricated 0.05 default p-value is NOT rendered
     assert "P=0.05" not in content
     assert "0.050" not in content
+
+
+def test_tier2_report_meta_unified_scale_and_log_effect_transform(tmp_path):
+    """Regression test: report_cmd unifies table scale to effect_measure (OR) and exponentiates log_effect."""
+    import json
+    import math
+
+    from click.testing import CliRunner
+
+    from medstat.cli.main import cli
+
+    forest_json = tmp_path / "forest_log.json"
+    out_html = tmp_path / "table_log.html"
+    forest_data = {
+        "effect_measure": "OR",
+        "is_ratio": True,
+        "studies": [
+            {
+                "study": "Trial Log",
+                "log_effect": math.log(1.50),
+                "ci_lower": 1.10,
+                "ci_upper": 2.05,
+                "ci_scale": "natural",
+                "p_value": 0.012,
+            }
+        ],
+        "random_effects": {
+            "label": "Overall Pooled",
+            "effect_disp": 1.50,
+            "ci_lower": 1.10,
+            "ci_upper": 2.05,
+            "p_value": 0.012,
+        },
+    }
+    forest_json.write_text(json.dumps(forest_data))
+
+    runner = CliRunner()
+    res = runner.invoke(
+        cli,
+        [
+            "report",
+            "--results",
+            str(forest_json),
+            "--style",
+            "nejm",
+            "--output",
+            str(out_html),
+        ],
+    )
+    assert res.exit_code == 0
+    assert out_html.exists()
+    content = out_html.read_text()
+    # Check that scale header is OR (95% CI) rather than Effect (95% CI)
+    assert "OR (95% CI)" in content
+    # Check that log_effect was exponentiated to 1.50 rather than remaining log(1.50) ≈ 0.41
+    assert "1.50 (1.10–2.05)" in content
+    assert "0.41" not in content
