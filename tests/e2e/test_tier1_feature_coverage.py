@@ -891,9 +891,13 @@ models:
     m_res = res["models"]["mice_logistic"]
     assert m_res.get("pooled") is True
     sum_df = m_res["summary_df"]
+    assert not sum_df.empty
     for _, row in sum_df.iterrows():
         assert row["odds_ratio"] > 0
         assert row["or_ci_lower"] < row["odds_ratio"] < row["or_ci_upper"]
+        # Verify pooled SE is at least sqrt(mean(within_variances)) and within_variance is positive
+        assert row["within_variance"] > 0
+        assert row["std_error"] >= np.sqrt(row["within_variance"])
 
 
 def test_tier1_spec_outcome_numeric_validation(

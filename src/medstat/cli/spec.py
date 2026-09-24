@@ -343,6 +343,10 @@ class AnalysisPlan:
                         ci_hi = float(np.exp(pooled.ci_upper))
                         p_v = float(pooled.p_value)
                         sum_df_records[term_k] = {
+                            "coef": pooled.estimate,
+                            "std_error": pooled.se,
+                            "within_variance": pooled.within_variance,
+                            "between_variance": pooled.between_variance,
                             "odds_ratio": or_val,
                             "or_ci_lower": ci_lo,
                             "or_ci_upper": ci_hi,
@@ -540,6 +544,9 @@ class AnalysisPlan:
                         p_v = float(pooled.p_value)
                         sum_df_records[term_k] = {
                             "coef": b_val,
+                            "std_error": pooled.se,
+                            "within_variance": pooled.within_variance,
+                            "between_variance": pooled.between_variance,
                             "ci_lower": ci_lo,
                             "ci_upper": ci_hi,
                             "p_value": p_v,
