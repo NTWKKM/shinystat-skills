@@ -1091,24 +1091,46 @@ def report_cmd(
                         log_eff_val = float(s["log_effect"])
                         if is_study_ratio:
                             raw_eff = math.exp(log_eff_val)
-                            ci_scale = str(
-                                s.get("ci_scale", s.get("scale", ""))
-                            ).lower()
-                            if "log" in ci_scale or ci_scale == "":
+                            if ci_lo is not None or ci_hi is not None:
+                                ci_scale = (
+                                    str(s.get("ci_scale", s.get("scale", "")))
+                                    .lower()
+                                    .strip()
+                                )
+                                if ci_scale == "log":
+                                    if ci_lo is not None:
+                                        ci_lo = math.exp(float(ci_lo))
+                                    if ci_hi is not None:
+                                        ci_hi = math.exp(float(ci_hi))
+                                elif ci_scale == "natural":
+                                    pass
+                                else:
+                                    raise click.ClickException(
+                                        f"Ambiguous confidence limit scale for study '{study_name}'. "
+                                        f"When providing confidence limits with 'log_effect' in ratio meta-analyses, "
+                                        f"explicit scale metadata ('ci_scale' or 'scale' as 'log' or 'natural') is required."
+                                    )
+                        else:
+                            raw_eff = log_eff_val
+                    elif raw_eff is not None and is_study_ratio:
+                        study_scale = str(s.get("scale", "")).lower().strip()
+                        if study_scale == "log":
+                            raw_eff = math.exp(float(raw_eff))
+                            ci_scale = (
+                                str(s.get("ci_scale", study_scale)).lower().strip()
+                            )
+                            if ci_scale == "log":
                                 if ci_lo is not None:
                                     ci_lo = math.exp(float(ci_lo))
                                 if ci_hi is not None:
                                     ci_hi = math.exp(float(ci_hi))
-                        else:
-                            raw_eff = log_eff_val
-                    elif raw_eff is not None and is_study_ratio:
-                        study_scale = str(s.get("scale", "")).lower()
-                        if study_scale == "log":
-                            raw_eff = math.exp(float(raw_eff))
-                            if ci_lo is not None:
-                                ci_lo = math.exp(float(ci_lo))
-                            if ci_hi is not None:
-                                ci_hi = math.exp(float(ci_hi))
+                            elif ci_scale == "natural":
+                                pass
+                            else:
+                                raise click.ClickException(
+                                    f"Ambiguous confidence limit scale for study '{study_name}' with log scale. "
+                                    f"Specify 'ci_scale' ('log' or 'natural')."
+                                )
 
                     if raw_eff is None or (
                         isinstance(raw_eff, float) and np.isnan(raw_eff)
@@ -1149,32 +1171,48 @@ def report_cmd(
                 raw_overall = re.get("effect_disp", re.get("effect"))
                 re_ci_lo = re.get("ci_lower")
                 re_ci_hi = re.get("ci_upper")
-                re_scale = str(re.get("scale", "")).lower()
+                re_scale = str(re.get("scale", "")).lower().strip()
 
                 if raw_overall is None and "log_effect" in re:
                     log_overall = float(re["log_effect"])
                     if is_ratio_meta:
                         raw_overall = math.exp(log_overall)
-                        if re_ci_lo is not None and (
-                            "log" in re_scale
-                            or re.get("ci_scale") == "log"
-                            or re_scale == ""
-                        ):
-                            re_ci_lo = math.exp(float(re_ci_lo))
-                        if re_ci_hi is not None and (
-                            "log" in re_scale
-                            or re.get("ci_scale") == "log"
-                            or re_scale == ""
-                        ):
-                            re_ci_hi = math.exp(float(re_ci_hi))
+                        if re_ci_lo is not None or re_ci_hi is not None:
+                            re_ci_scale = (
+                                str(re.get("ci_scale", re.get("scale", "")))
+                                .lower()
+                                .strip()
+                            )
+                            if re_ci_scale == "log":
+                                if re_ci_lo is not None:
+                                    re_ci_lo = math.exp(float(re_ci_lo))
+                                if re_ci_hi is not None:
+                                    re_ci_hi = math.exp(float(re_ci_hi))
+                            elif re_ci_scale == "natural":
+                                pass
+                            else:
+                                raise click.ClickException(
+                                    "Ambiguous confidence limit scale for overall meta-analysis effect. "
+                                    "When providing confidence limits with 'log_effect' in ratio meta-analyses, "
+                                    "explicit scale metadata ('ci_scale' or 'scale' as 'log' or 'natural') is required."
+                                )
                     else:
                         raw_overall = log_overall
                 elif raw_overall is not None and is_ratio_meta and re_scale == "log":
                     raw_overall = math.exp(float(raw_overall))
-                    if re_ci_lo is not None:
-                        re_ci_lo = math.exp(float(re_ci_lo))
-                    if re_ci_hi is not None:
-                        re_ci_hi = math.exp(float(re_ci_hi))
+                    re_ci_scale = str(re.get("ci_scale", re_scale)).lower().strip()
+                    if re_ci_scale == "log":
+                        if re_ci_lo is not None:
+                            re_ci_lo = math.exp(float(re_ci_lo))
+                        if re_ci_hi is not None:
+                            re_ci_hi = math.exp(float(re_ci_hi))
+                    elif re_ci_scale == "natural":
+                        pass
+                    else:
+                        raise click.ClickException(
+                            "Ambiguous confidence limit scale for overall meta-analysis effect with log scale. "
+                            "Specify 'ci_scale' ('log' or 'natural')."
+                        )
 
                 if raw_overall is None or (
                     isinstance(raw_overall, float) and np.isnan(raw_overall)

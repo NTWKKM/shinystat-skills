@@ -754,3 +754,93 @@ def test_tier2_report_meta_unified_scale_and_log_effect_transform(tmp_path):
     # Check that log_effect was exponentiated to 1.50 rather than remaining log(1.50) ≈ 0.41
     assert "1.50 (1.10–2.05)" in content
     assert "0.41" not in content
+
+
+def test_tier2_report_meta_ambiguous_log_effect_scale_rejected(tmp_path):
+    """FEAT-09-B7: Ambiguous confidence limit scale for ratio log_effect is strictly rejected."""
+    import json
+    import math
+
+    from click.testing import CliRunner
+
+    from medstat.cli.main import cli
+
+    # Case 1: Study record has log_effect and CIs without ci_scale or scale
+    ambig_json = tmp_path / "forest_ambig_study.json"
+    out_html = tmp_path / "table_ambig.html"
+    forest_data = {
+        "effect_measure": "OR",
+        "is_ratio": True,
+        "studies": [
+            {
+                "study": "Trial Ambiguous",
+                "log_effect": math.log(1.50),
+                "ci_lower": 1.10,
+                "ci_upper": 2.05,
+                # Missing ci_scale or scale
+            }
+        ],
+        "random_effects": {
+            "label": "Overall",
+            "effect_disp": 1.50,
+            "ci_lower": 1.10,
+            "ci_upper": 2.05,
+        },
+    }
+    ambig_json.write_text(json.dumps(forest_data))
+
+    runner = CliRunner()
+    res = runner.invoke(
+        cli,
+        [
+            "report",
+            "--results",
+            str(ambig_json),
+            "--style",
+            "nejm",
+            "--output",
+            str(out_html),
+        ],
+    )
+    assert res.exit_code != 0
+    assert "Ambiguous confidence limit scale for study 'Trial Ambiguous'" in res.output
+
+    # Case 2: Overall record has log_effect and CIs without ci_scale or scale
+    ambig_overall_json = tmp_path / "forest_ambig_overall.json"
+    forest_data_overall = {
+        "effect_measure": "OR",
+        "is_ratio": True,
+        "studies": [
+            {
+                "study": "Trial Valid",
+                "effect_size": 1.50,
+                "ci_lower": 1.10,
+                "ci_upper": 2.05,
+            }
+        ],
+        "random_effects": {
+            "label": "Overall",
+            "log_effect": math.log(1.50),
+            "ci_lower": 1.10,
+            "ci_upper": 2.05,
+            # Missing ci_scale or scale
+        },
+    }
+    ambig_overall_json.write_text(json.dumps(forest_data_overall))
+    res2 = runner.invoke(
+        cli,
+        [
+            "report",
+            "--results",
+            str(ambig_overall_json),
+            "--style",
+            "nejm",
+            "--output",
+            str(out_html),
+        ],
+    )
+    assert res2.exit_code != 0
+    assert (
+        "Ambiguous confidence limit scale for overall meta-analysis effect"
+        in res2.output
+    )
