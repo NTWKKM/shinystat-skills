@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: "en"
+early_access: false
+
+tone_instructions: >-
+  You are an expert clinical software architect and biostatistician.
+  Review code with high rigor for:
+  1. Statistical accuracy (Firth penalization, DeLong ROC CIs, Austin 2009 PSM balance, Bland-Altman limits, Little's MCAR).
+  2. Clinical safety & zero-PHI compliance (anonymized data only, explicit units).
+  3. Python engineering standards (type annotations, robust error handling, pytest/ruff compliance).
+  4. Agent skills specification adherence (SKILL.md frontmatter, schema consistency).
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  auto_review:
+    enabled: true
+    drafts: false
+
+chat:
+  auto_reply: true
