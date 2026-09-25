@@ -1,6 +1,6 @@
 ---
 name: medstat-causal-meta
-description: Causal inference via Propensity Score Matching (PSM), Austin 2009 covariate balance diagnostics, Love plots, Bland-Altman limits of agreement with Carkeet CIs, pure-SciPy Intraclass Correlation Coefficient (ICC), and random-effects meta-analysis with Egger's test. Use when conducting observational comparative effectiveness studies, propensity score matching, assessing rater agreement or reliability, pooling multi-study effect sizes, or evaluating publication bias.
+description: Causal inference via Propensity Score Matching (PSM), Austin 2009 covariate balance diagnostics, Love plots, Bland-Altman limits of agreement with large-sample CIs, pure-SciPy Intraclass Correlation Coefficient (ICC), and random-effects meta-analysis with Egger's test. Use when conducting observational comparative effectiveness studies, propensity score matching, assessing rater agreement or reliability, pooling multi-study effect sizes, or evaluating publication bias.
 ---
 
 # medstat-causal-meta: Causal Inference, Agreement & Meta-Analysis
@@ -44,7 +44,7 @@ medstat causal psm --data <observational_cohort.csv> \
 ### Step 2: Rater Agreement & Measurement Reliability
 
 #### Bland-Altman Analysis (Paired Continuous Measures)
-Compute mean bias, limits of agreement, and Carkeet confidence intervals:
+Compute mean bias, limits of agreement, and large-sample approximate confidence intervals:
 
 ```bash
 medstat agreement bland-altman --data <paired_device_trials.csv> \
@@ -73,19 +73,20 @@ medstat agreement icc --data <rater_scores.csv> \
   - `icc2`: Two-way random effects, absolute agreement (generalizable raters; standard for clinical trials).
   - `icc3`: Two-way mixed effects, consistency (fixed panel of expert clinicians).
   - `icc2_k`: Average score of $k$ independent raters.
-- **Interpretation**: Koo & Li (2016): $\text{ICC} < 0.50$ Poor, $0.50 \le \text{ICC} < 0.75$ Moderate, $0.75 \le \text{ICC} \le 0.90$ Good, $\text{ICC} > 0.90$ Excellent.
+- **Interpretation**: Koo & Li (2016): apply reliability categories to the 95% confidence interval rather than point estimate alone ($\text{ICC} < 0.50$ Poor, $0.50 \le \text{ICC} < 0.75$ Moderate, $0.75 \le \text{ICC} \le 0.90$ Good, $\text{ICC} > 0.90$ Excellent). When the 95% CI spans multiple categories, report the interval and characterize reliability by the spanning range (e.g., 95% CI 0.68–0.82 indicates moderate-to-good reliability).
 
 ### Step 3: Meta-Analysis & Funnel Plot Publication Bias
 
 Pool effect sizes (log odds ratios, log hazard ratios, or mean differences) across studies:
 
 ```bash
+# Model selection: use --model random (e.g. DerSimonian-Laird via --method dl) when pre-specified by analysis plan
 medstat meta --data <clinical_trials.csv> \
   --effect-col log_hr \
   --se-col se_log_hr \
   --study-col trial_name \
-  --model random \         # Use when random-effects is pre-specified by the analysis plan
-  --method dl \            # DerSimonian-Laird; select method per analysis plan
+  --model random \
+  --method dl \
   --forest-plot forest_plot.json \
   --egger \
   --output meta_analysis.json

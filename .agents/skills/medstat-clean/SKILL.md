@@ -66,7 +66,7 @@ medstat clean --data <dataset.csv> \
 ### Step 3: Sanitize & Winsorize Outliers
 
 Detect and handle non-physiological or extreme values:
-- Use Tukey's IQR rule ($1.5 \times \text{IQR}$) or robust median deviation (e.g., modified z-score $> 3.5$ or $|x_i - \text{median}| > 3 \times \text{MAD}$).
+- Use Tukey's IQR rule ($1.5 \times \text{IQR}$) or robust median deviation (e.g., $|\text{modified z-score}| > 3.5$ or $|x_i - \text{median}| > 3 \times \text{MAD}$).
 - Extreme laboratory readings or physiological vitals (e.g., SBP > 260 or < 40 mmHg) should be flagged for clinical chart review and verification against source records; apply prespecified variable-specific handling rules rather than blanket automatic winsorization.
 - Standardize explicitly binary event-status fields to numeric `0/1` (`1 = Event`, `0 = Non-event`), ensuring survival follow-up duration and multicategory endpoints remain intact; never forward text outcomes to modeling.
 

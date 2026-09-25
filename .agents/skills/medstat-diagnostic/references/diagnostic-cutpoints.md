@@ -31,7 +31,7 @@ $$\text{Post-test Odds} = \text{Pre-test Odds} \times \text{LR}$$
 
 | Objective | Method | Formula | Clinical Scenario |
 | :--- | :--- | :--- | :--- |
-| **Balanced** | Youden's Index ($J$) | $\max(J) = \text{Sens} + \text{Spec} - 1$ | Weights sensitivity and specificity equally; does not imply equal clinical costs or equal numbers of false positives and false negatives (optimal cutoff depends on disease prevalence and relative error costs). |
+| **Balanced** | Youden's Index ($J$) | $\max(J) = \text{Sens} + \text{Spec} - 1$ | Weights sensitivity and specificity equally; does not imply equal clinical costs or equal numbers of false positives and false negatives (a clinically utility-optimal cutoff may differ from the Youden-selected cutoff and depends on disease prevalence and relative error costs). |
 | **Rule-Out** | Fixed High Sensitivity (illustrative) | $\text{Threshold at } \text{Sens} \ge 95\%$ | Illustrative target; clinical use requires validated, indication- and assay-specific pathways (e.g. clinical probability with age-adjusted D-dimer thresholds for PE; assay-specific serial results for high-sensitivity troponin). |
 | **Rule-In** | Fixed High Specificity (illustrative) | $\text{Threshold at } \text{Spec} \ge 95\%$ | Illustrative target for minimizing false positives; high-risk clinical actions require assessing post-test probability against the relevant clinical action threshold based on pre-test probability and likelihood ratios. |
 | **Geometric** | Closest to Top-Left | $\min \sqrt{(1 - \text{Sens})^2 + (1 - \text{Spec})^2}$ | Alternative Euclidean distance to ideal $(0, 1)$ ROC coordinate. |

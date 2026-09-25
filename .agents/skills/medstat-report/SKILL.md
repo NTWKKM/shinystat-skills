@@ -80,5 +80,5 @@ medstat report --checklist tripod --output tripod_checklist.md
 
 - [ ] Statistical analysis results ingested and validated from JSON output.
 - [ ] Publication table rendered in target journal format (NEJM, JAMA, or APA 7) with zero vertical lines and correct CI notation.
-- [ ] Methods and results narrative paragraphs generated and reviewed.
+- [ ] Methods and results narrative paragraphs generated and reviewed (when `--narrative` is requested).
 - [ ] Appropriate reporting checklist (STROBE, CONSORT, or TRIPOD) audited.

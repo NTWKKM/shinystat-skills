@@ -21,7 +21,7 @@ Validation engine for clinical biomarkers, laboratory diagnostic assays, point-o
 
 ### Step 1: Calculate 2x2 Contingency Matrix & Accuracy Metrics
 
-Evaluate classification performance at a clinically defined cut-off. Scores greater than or equal to `--cutoff` are classified as positive; for low-is-positive biomarkers (e.g. platelet count in thrombocytopenia, PaO2/FiO2 in ARDS), invert or recode scores first:
+Orient each biomarker score so higher values indicate disease-positive before cutoff classification, ROC analysis, or paired DeLong analysis. Scores greater than or equal to `--cutoff` are classified as positive; for low-is-positive biomarkers (e.g. platelet count in thrombocytopenia, PaO2/FiO2 in ARDS), invert or recode scores first:
 
 ```bash
 medstat diag --data <cohort.csv> \
@@ -80,7 +80,7 @@ medstat diag --data <cohort.csv> \
   --output dca_net_benefit.json
 ```
 
-- **Encoding Requirement**: `--gold-standard` (and `--gold-standard-col`) must strictly contain only `0` (control / non-disease) and `1` (disease / event), matching the encoding required by `calculate_dca` and clinical contingency calculations.
+- **Encoding Requirement**: `--gold-standard` must strictly contain only `0` (control / non-disease) and `1` (disease / event), matching the encoding required by `calculate_dca` and clinical contingency calculations.
 - **Net Benefit Formula**:
   $$\text{Net Benefit}(p_t) = \frac{\text{TP}}{N} - \frac{\text{FP}}{N} \cdot \left(\frac{p_t}{1 - p_t}\right)$$
 - Clinical Rule: A biomarker should only be deployed across threshold ranges where its net benefit curve exceeds both "Treat All" and "Treat None".

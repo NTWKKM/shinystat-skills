@@ -93,12 +93,12 @@ Transparent Reporting of a multivariable prediction model for Individual Prognos
   - Report the number of participants (events and non-events) and how sample size was determined.
 - **Item 11 (Missing Data)**:
   - Details on handling missing data; describe imputation method if used.
-- **Item 12 (Analytical Methods & Model Development)**:
+- **Item 12a (Analytical Methods & Model Development)**:
   - Describe how predictors were handled (linear, transformed, splines, embeddings).
-  - Specify model-building procedure, internal/external validation techniques.
+  - Specify model-building procedure, including data partitioning (e.g. into development and evaluation datasets) and internal/external validation techniques.
   - Performance measures: discrimination (AUC with DeLong CIs for binary outcomes; C-index with censoring-aware bootstrap or Harrell's method for survival models), calibration (intercept, slope, calibration curves), and clinical utility (Decision Curve Analysis net benefit).
-- **Item 16 (Training vs. Evaluation)**:
-  - Describe how data were split or used for model training versus evaluation.
+- **Item 16 (Development vs. Evaluation Datasets)**:
+  - Describe any differences between development and evaluation datasets in setting, eligibility criteria, outcome, and predictors.
 - **Item 23a (Model Performance)**:
   - Report performance estimates with confidence intervals (discrimination, calibration, and net benefit) across development and validation sets, including results in key clinical subgroups.
 - **Item 23b (Heterogeneity Across Clusters)**:
@@ -114,4 +114,4 @@ When synthesizing statistical methods text for clinical manuscripts, state proce
 > "Continuous variables were summarized as mean (SD) or median (IQR) [when verified: based on normality evaluated via the Shapiro-Wilk test], and categorical variables as frequencies and percentages. [When performed: Baseline group differences were assessed using Standardized Mean Differences (SMDs), with $|\text{SMD}| < 0.10$ indicating adequate balance.] Multivariable logistic regression was fitted to estimate adjusted odds ratios (aORs) and 95% confidence intervals for the primary outcome. Missing data were handled using [complete-case analysis under MCAR / multiple imputation by chained equations (MICE, with $m$ determined by fraction of missing information) under MAR]. [When specified: Sensitivity to unmeasured confounding was quantified using the VanderWeele E-value.] [When confirmed: All tests were two-tailed with statistical significance set at \$\\alpha = 0.05\$.]"  
 
 ### Survival Analysis (Cox Proportional Hazards)
-> "[When performed: Time-to-event outcomes were analyzed using the Kaplan-Meier method, and group differences were evaluated using the log-rank test.] Multivariable Cox proportional hazards regression was performed to estimate adjusted hazard ratios (aHRs) and 95% confidence intervals. [When verified: The proportional hazards assumption was assessed using Schoenfeld residual tests.] [When sparse events/separation occur: Firth's penalized likelihood estimation with profile likelihood confidence intervals was employed to resolve monotone likelihood and small-sample bias.]"
+> "[When performed: Time-to-event outcomes were analyzed using the Kaplan-Meier method, and group differences were evaluated using the log-rank test.] Multivariable Cox proportional hazards regression was performed to estimate adjusted hazard ratios (aHRs) and 95% confidence intervals. [When verified: The proportional hazards assumption was assessed using Schoenfeld residual tests.] [When Firth estimation was used: Firth's penalized likelihood estimation with profile likelihood confidence intervals was employed to resolve monotone likelihood and small-sample bias.]"
