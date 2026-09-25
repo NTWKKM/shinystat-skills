@@ -10,11 +10,11 @@ Clinical data preparation engine enforcing explicit missing data justification a
 ## Core Rules
 
 1. **No Silent Listwise Deletion**: Omitting `--strategy` when missing values exist raises `MissingStrategyRequiredError`. Never drop rows without clinical justification.
-2. **Audited Sample Retention Flow**: Every cleaning run tracks participant retention:
+2. **Audited Sample Retention Flow**: Every cleaning run (with `--strategy`) tracks participant retention:
    $$N_{\text{initial}} \longrightarrow N_{\text{excluded}} \longrightarrow N_{\text{analyzed}}$$
-   Specify `--audit-out <file>` to persist the audited flow artifact.
+   Specify `--audit-out <file>` to persist the audited flow artifact. Note: The `--audit-only` path produces missingness audit output but does not execute cleaning or generate `sample_flow` data.
 3. **Preserve Raw Values**: Keep original files untouched; write transformed cohorts to distinct output targets.
-4. **Binary Endpoint Standardization**: Recode explicitly binary event-status endpoints (e.g., `'Alive'/'Dead'`, `'Yes'/'No'`) to numeric `0/1` (`1 = Event`, `0 = Non-event`) during cleaning, preserving multicategory outcomes and survival follow-up time unrecoded.
+4. **Binary Endpoint Standardization**: Explicitly recode binary event-status endpoints to numeric `0/1` (`1 = Event`, `0 = Non-event`) before model execution. Event direction must not be inferred from arbitrary text labels. Multicategory outcomes and survival follow-up time columns must be preserved without recoding.
 
 ## Execution Sequence
 
@@ -34,7 +34,7 @@ Evaluate the resulting audit:
 - Review descriptive missingness tiers (used for exploratory assessment; method selection must be clinically justified by mechanism rather than rigid percentage cutoffs):
   - **< 5% (Low)**: Complete-case analysis often viable if missingness mechanism is consistent with MCAR.
   - **5% – 20% (Moderate)**: Multiple Imputation by Chained Equations (MICE) under MAR assumption.
-  - **20% – 40% (High)**: Substantial missingness; requires multiple imputation and sensitivity analysis.
+  - **20% – 40% (High)**: Substantial missingness; multiple imputation may be appropriate if missingness mechanism, imputation model adequacy, and analysis objectives support it. Mandatory sensitivity analysis comparing imputed vs. complete-case results.
   - **> 40% (Critical)**: High risk of residual bias; evaluate whether variable can be reliably imputed or retained.
 - Check Little's MCAR test: $p > 0.05$ fails to reject MCAR (insufficient evidence against MCAR); $p \le 0.05$ provides evidence against MCAR (departures from MCAR).
 - Consult [references/missing-data-mechanisms.md](references/missing-data-mechanisms.md) for mechanism selection criteria.

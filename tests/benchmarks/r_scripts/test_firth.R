@@ -5,7 +5,7 @@
 # -----------------------------------------------------------------------------
 # 1. Setup & Dependencies
 # -----------------------------------------------------------------------------
-required_packages <- c("logistf", "survival", "coxphf", "dplyr")
+required_packages <- c("logistf", "survival", "coxphf")
 missing_packages <- required_packages[!(required_packages %in% installed.packages()[, "Package"])]
 if (length(missing_packages)) {
     stop(paste(
@@ -17,7 +17,7 @@ if (length(missing_packages)) {
 library(logistf)
 library(survival)
 library(coxphf)
-library(dplyr)
+
 
 # Output directory for CSV benchmarks
 output_dir <- "tests/benchmarks/python_results"

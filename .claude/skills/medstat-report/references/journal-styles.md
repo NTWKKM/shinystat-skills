@@ -62,7 +62,7 @@ Strengthening the Reporting of Observational Studies in Epidemiology:
   - 12a: Describe all statistical methods, including those used to control for confounding.
   - 12b: Describe any methods used to examine subgroups and interactions.
   - 12c: Explain how missing data were addressed (e.g. complete-case, MICE, KNN with explicit justification).
-  - 12d: Describe matching criteria for cohort or case-control designs (caliper, ratio, replacement).
+  - 12d: *Cohort studies*: describe methods for addressing loss to follow-up. *Case-control studies*: describe matching criteria (caliper, ratio, replacement).
   - 12e: Describe any sensitivity analyses (e.g. VanderWeele E-value, unmeasured confounding bounds).
 - **Item 13 (Participants)**:
   - Report numbers of individuals at each stage: $N_{\text{screened}} \to N_{\text{eligible}} \to N_{\text{enrolled}} \to N_{\text{analyzed}}$.
@@ -76,25 +76,31 @@ Strengthening the Reporting of Observational Studies in Epidemiology:
 
 ### CONSORT 2025 (Randomized Controlled Trials)
 Consolidated Standards of Reporting Trials (2025 Statement):
-- **Item 13 (Participant Flow)**:
+- **Item 16 (Sample Size)**:
+  - How sample size was determined (including assumptions and calculations).
+- **Item 21b (Analysis Populations)**:
+  - Define analysis populations and describe who is included in each analysis.
+- **Item 22 (Participant Flow)**:
   - Flow diagram depicting enrollment, allocation, follow-up, and analysis.
-- **Item 15 (Baseline Data)**:
+- **Item 25 (Baseline Data)**:
   - Baseline demographic and clinical characteristics of each group.
-- **Item 16 (Numbers Analyzed)**:
-  - Number of participants included in each analysis, indicating whether analyses were performed according to originally assigned groups (e.g., Intention-to-Treat [ITT], modified ITT, or per-protocol populations) without mandating ITT for every analysis.
-- **Item 17 (Outcomes and Estimation)**:
-  - For each primary and secondary outcome, results for each group, estimated effect size and its precision (95% CI).
+- **Item 26 (Numbers Analyzed and Outcomes)**:
+  - Number of participants included in each analysis with estimated effect sizes and precision (95% CI).
 
 ### TRIPOD+AI (Clinical Prediction Models & Diagnostic Machine Learning)
 Transparent Reporting of a multivariable prediction model for Individual Prognosis Or Diagnosis + Artificial Intelligence (BMJ 2024;385:e078378; supersedes TRIPOD 2015):
-- **Item 9 (Missing Data)**:
+- **Item 10 (Sample Size)**:
+  - Report the number of participants (events and non-events) and how sample size was determined.
+- **Item 11 (Missing Data)**:
   - Details on handling missing data; describe imputation method if used.
-- **Item 10 (Model Development & Specifications)**:
+- **Item 12 (Analytical Methods & Model Development)**:
   - Describe how predictors were handled (linear, transformed, splines, embeddings).
   - Specify model-building procedure, internal/external validation techniques.
-  - Performance measures: discrimination (AUC / C-index with DeLong CIs), calibration (intercept, slope, calibration curves), and clinical utility (Decision Curve Analysis net benefit).
-- **Item 16 (Model Performance)**:
-  - Report performance estimates and confidence intervals for discrimination, calibration, and net benefit.
+  - Performance measures: discrimination (AUC with DeLong CIs for binary outcomes; C-index with censoring-aware bootstrap or Harrell's method for survival models), calibration (intercept, slope, calibration curves), and clinical utility (Decision Curve Analysis net benefit).
+- **Item 16 (Training vs. Evaluation)**:
+  - Describe how data were split or used for model training versus evaluation.
+- **Item 23a/b (Model Performance)**:
+  - Report performance estimates and confidence intervals for discrimination, calibration, and net benefit across development and validation sets.
 
 ---
 
@@ -103,7 +109,7 @@ Transparent Reporting of a multivariable prediction model for Individual Prognos
 When synthesizing statistical methods text for clinical manuscripts, state procedures only when confirmed by the actual analysis record:
 
 ### Multivariable Logistic Regression
-> "Continuous variables were summarized as mean (SD) or median (IQR) based on normality evaluated via the Shapiro-Wilk test, and categorical variables as frequencies and percentages. Baseline group differences were assessed using Standardized Mean Differences (SMDs), with $|\text{SMD}| < 0.10$ indicating adequate balance. Multivariable logistic regression was fitted to estimate adjusted odds ratios (aORs) and 95% confidence intervals for the primary outcome. Missing data were handled using [complete-case analysis under MCAR / multiple imputation by chained equations (MICE, with $m$ determined by fraction of missing information) under MAR]. [When specified: Sensitivity to unmeasured confounding was quantified using the VanderWeele E-value.] All tests were two-tailed with statistical significance set at \$\\alpha = 0.05\$."
+> "Continuous variables were summarized as mean (SD) or median (IQR) [when verified: based on normality evaluated via the Shapiro-Wilk test], and categorical variables as frequencies and percentages. [When performed: Baseline group differences were assessed using Standardized Mean Differences (SMDs), with $|\text{SMD}| < 0.10$ indicating adequate balance.] Multivariable logistic regression was fitted to estimate adjusted odds ratios (aORs) and 95% confidence intervals for the primary outcome. Missing data were handled using [complete-case analysis under MCAR / multiple imputation by chained equations (MICE, with $m$ determined by fraction of missing information) under MAR]. [When specified: Sensitivity to unmeasured confounding was quantified using the VanderWeele E-value.] [When confirmed: All tests were two-tailed with statistical significance set at \$\\alpha = 0.05\$.]"  
 
 ### Survival Analysis (Cox Proportional Hazards)
-> "Time-to-event outcomes were analyzed using the Kaplan-Meier method, and group differences were evaluated using the log-rank test. Multivariable Cox proportional hazards regression was performed to estimate adjusted hazard ratios (aHRs) and 95% confidence intervals. [When verified: The proportional hazards assumption was assessed using Schoenfeld residual tests.] [When sparse events/separation occur: Firth's penalized likelihood estimation with profile likelihood confidence intervals was employed to resolve monotone likelihood and small-sample bias.]"
+> "[When performed: Time-to-event outcomes were analyzed using the Kaplan-Meier method, and group differences were evaluated using the log-rank test.] Multivariable Cox proportional hazards regression was performed to estimate adjusted hazard ratios (aHRs) and 95% confidence intervals. [When verified: The proportional hazards assumption was assessed using Schoenfeld residual tests.] [When sparse events/separation occur: Firth's penalized likelihood estimation with profile likelihood confidence intervals was employed to resolve monotone likelihood and small-sample bias.]"

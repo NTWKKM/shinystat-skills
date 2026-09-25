@@ -10,8 +10,8 @@ Dissemination engine for rendering publication-quality tables conforming to top 
 ## Core Rules
 
 1. **Strict Journal Typography**: Enforce the exact rules of the target journal (NEJM double top border and symbol footnotes; JAMA minimal horizontal rules, decimal precision, and exact p-values without leading zeros; APA 7 italicized statistics).
-2. **Automated Methods Narrative**: Every analysis report must pair quantitative tables with an automated Methods text describing model type, confounder selection, missing data handling, and significance criteria.
-3. **Guideline Compliance**: Accompany observational studies with STROBE audits, randomized trials with CONSORT, and prediction/diagnostic studies with TRIPOD.
+2. **Automated Methods Narrative**: When `--narrative` is specified, pair quantitative tables with an automated Methods text describing model type, confounder selection, missing data handling, and significance criteria.
+3. **Guideline Compliance**: Accompany observational studies with STROBE audits, randomized trials with CONSORT, prediction models with TRIPOD (or TRIPOD+AI where applicable), and diagnostic-accuracy studies with STARD (or STARD-AI where applicable).
 
 ## Execution Sequence
 

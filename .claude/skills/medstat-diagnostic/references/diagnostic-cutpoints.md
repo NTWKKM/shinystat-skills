@@ -20,7 +20,7 @@ $$\text{Post-test Odds} = \text{Pre-test Odds} \times \text{LR}$$
 
 | LR+ | LR- | Clinical Impact | Action |
 | :--- | :--- | :--- | :--- |
-| $> 10$ | $< 0.10$ | Large, conclusive shift in disease probability | Rule-in (LR+) / Rule-out (LR-) |
+| $> 10$ | $< 0.10$ | Often strong evidence for shifting disease probability | Supports rule-in (LR+) / rule-out (LR-); assess post-test probability against the clinical action threshold |
 | $5 - 10$ | $0.10 - 0.20$ | Moderate shift in probability | Meaningful diagnostic contribution |
 | $2 - 5$ | $0.20 - 0.50$ | Small shift in probability | Weak; requires confirmatory testing |
 | $1 - 2$ | $0.50 - 1.00$ | Negligible shift | Diagnostically uninformative |
@@ -32,7 +32,7 @@ $$\text{Post-test Odds} = \text{Pre-test Odds} \times \text{LR}$$
 | Objective | Method | Formula | Clinical Scenario |
 | :--- | :--- | :--- | :--- |
 | **Balanced** | Youden's Index ($J$) | $\max(J) = \text{Sens} + \text{Spec} - 1$ | General screening where false positives and false negatives carry equal weight. |
-| **Rule-Out** | Fixed High Sensitivity | $\text{Threshold at } \text{Sens} \ge 95\%$ | Emergency triage (e.g. D-dimer for pulmonary embolism, Troponin for ACS). |
+| **Rule-Out** | Fixed High Sensitivity (illustrative) | $\text{Threshold at } \text{Sens} \ge 95\%$ | Illustrative target; clinical use requires validated, indication- and assay-specific pathways (e.g. clinical probability with age-adjusted D-dimer thresholds for PE; assay-specific serial results for high-sensitivity troponin). |
 | **Rule-In** | Fixed High Specificity | $\text{Threshold at } \text{Spec} \ge 95\%$ | High-risk invasive treatments (e.g. chemotherapy initiation, invasive biopsy). |
 | **Geometric** | Closest to Top-Left | $\min \sqrt{(1 - \text{Sens})^2 + (1 - \text{Spec})^2}$ | Alternative Euclidean distance to ideal $(0, 1)$ ROC coordinate. |
 

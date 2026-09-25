@@ -79,10 +79,6 @@ models:
     options:
       ci_method: "wald"
       e_value: true
-      splines:
-        variable: "age"
-        knots: 4
-        reference_value: 60.0
 
 reporting:
   style: "nejm"

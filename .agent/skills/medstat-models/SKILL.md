@@ -72,7 +72,7 @@ See [references/model-spec-schema.md](references/model-spec-schema.md) for full 
 
 ### Step 3: Assess Model Diagnostics
 
-- **Cox Proportional Hazards (Standard Cox with `--schoenfeld`)**: Confirm Schoenfeld test $p > 0.05$ across all covariates (note that penalized Firth Cox does not compute Schoenfeld tests via CLI).
+- **Cox Proportional Hazards (Standard Cox with `--schoenfeld`)**: The Schoenfeld residual correlation test is one diagnostic for the proportional hazards assumption; $p > 0.05$ indicates insufficient evidence against PH but does not establish proportionality. Review scaled Schoenfeld residual plots and model context, as the test may miss non-monotone departures (penalized Firth Cox does not compute Schoenfeld tests via CLI).
 - **Firth Convergence**: Verify profile likelihood confidence intervals converge.
 - **E-Value Sensitivity**: If effect is statistically significant, compute the minimum unmeasured confounding strength required to explain away the observed estimate.
 

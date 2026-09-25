@@ -84,8 +84,8 @@ medstat meta --data <clinical_trials.csv> \
   --effect-col log_hr \
   --se-col se_log_hr \
   --study-col trial_name \
-  --model random \
-  --method dl \
+  --model random \         # Use when random-effects is pre-specified by the analysis plan
+  --method dl \            # DerSimonian-Laird; select method per analysis plan
   --forest-plot forest_plot.json \
   --egger \
   --output meta_analysis.json
