@@ -110,3 +110,23 @@ In meta-analyses, study effect sizes and confidence intervals may be supplied on
 - **Status**: Accepted & Verified.
 - **Precision & Reliability**: Forest plots and tables display coherent natural-scale numbers; FMI remains strictly defined on $[0, 1]$.
 
+---
+
+## ADR 8: Reporting Guidelines Modernization & Multi-Agent Parity
+
+### Context
+CodeRabbit AI review on PR #2 identified discrepancies across distributed skill copies (`.agent/`, `.agents/`, `.claude/`, `.cursor/`), outdated reporting checklist references (CONSORT 2010 instead of 2025, TRIPOD 2015 instead of TRIPOD+AI 2024), mechanical $I^2$ cutoffs contradicting Cochrane Chapter 10, and mismatched R benchmark scale limits.
+
+### Decision
+1. Modernize trial and prediction reporting standards across all skills to **CONSORT 2025** and **TRIPOD+AI (2024)**, revising analysis population descriptions to accommodate Intention-to-Treat, modified ITT, and per-protocol workflows.
+2. Remove mechanical $I^2$ model switching thresholds; align meta-analysis guidance with Cochrane Chapter 10 by conditioning model choice on clinical/methodological variation assumptions.
+3. Explicitly state the simulation context of Austin (2009) caliper matching (98–99% bias reduction in measured continuous baseline covariates, without eliminating unmeasured confounding).
+4. Accurately relabel Limits of Agreement variance formulas as large-sample approximations (Bland & Altman 1999) matching the codebase implementation.
+5. Establish `skills/` as the single authoritative source of truth and propagate identical contents to all 4 multi-agent platforms to ensure zero cross-platform drift.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Guideline Compliance**: Aligns the toolkit with current ICMJE and EQUATOR Network standards.
+- **Cross-Platform Uniformity**: Guarantees identical agent instructions regardless of IDE or agent runtime.
+
+
