@@ -21,19 +21,19 @@ $$d^2 = \sum_{s=1}^S n_s (\bar{y}_{s,\text{obs}} - \hat{\mu}_{s,\text{obs}})^T \
 - **Null Hypothesis ($H_0$)**: Missingness is MCAR.
 - **Degrees of Freedom**: $\text{df} = \sum_{s=1}^S p_s - P$, where $p_s$ is observed variables in pattern $s$ and $P$ is total variables.
 - **Interpretation**:
-  - $p > 0.05$: Insufficient evidence against MCAR. A nonsignificant result does not prove MCAR or automatically justify complete-case analysis; evaluate clinical context and missingness proportion.
-  - $p \le 0.05$: Evidence against MCAR (departures from MCAR). The test cannot distinguish between MAR and MNAR; require a clinically justified mechanism assumption and sensitivity analysis.
+  - $p > 0.05$: Fails to reject MCAR null (insufficient evidence against MCAR). A nonsignificant result does not establish or prove MCAR, nor does low missingness alone justify complete-case exclusion; evaluate clinical context and potential subtle dependency.
+  - $p \le 0.05$: Rejects MCAR null (evidence of departures from MCAR). Note that Little's test cannot distinguish between MAR and MNAR; standard MICE assumes MAR and may remain biased under MNAR, requiring explicit clinical mechanism rationale and sensitivity analysis.
 
 ---
 
 ## 3. Clinical Risk Tiers
 
-| Tier | Missingness % | Clinical Risk Assessment | Action Mandate |
+| Tier | Missingness % | Clinical Risk Assessment | Analytical Considerations & Strategy |
 | :--- | :--- | :--- | :--- |
-| **Low** | $< 5\%$ | Negligible impact on effect estimates if MCAR holds. | Complete-case exclusion allowed with documented rationale. |
-| **Moderate** | $5\% - 20\%$ | Potential loss of statistical power and mild bias. | MICE with $m \ge 5$ imputations. |
-| **High** | $20\% - 40\%$ | Severe risk of distortion and attenuation of effects. | MICE with $m \ge 20$ imputations; mandatory sensitivity analysis comparing CC vs MICE. |
-| **Critical** | $> 40\%$ | High risk of residual confounding or structural non-response. | Missing indicator method, separate reporting, or drop variable from primary multivariable model. |
+| **Low** | $< 5\%$ | Negligible impact on effect estimates if MCAR holds. | Complete-case exclusion acceptable only with justified MCAR assumption and documented rationale. |
+| **Moderate** | $5\% - 20\%$ | Potential loss of statistical power and mild bias. | MICE under assumed MAR mechanism; select number of imputations $m$ based on Fraction of Missing Information (FMI) and target standard error precision. |
+| **High** | $20\% - 40\%$ | Severe risk of distortion and attenuation of effects. | Multiple imputation with elevated $m$ (scaled to FMI) and mandatory sensitivity analyses comparing complete-case, MICE, and tipping-point MNAR models. |
+| **Critical** | $> 40\%$ | High risk of residual confounding or structural non-response. | Missing-indicator method can introduce severe bias for confounders even under MCAR in observational studies; evaluate separate reporting, dropping variable from primary model, or pattern-mixture sensitivity. |
 
 ---
 

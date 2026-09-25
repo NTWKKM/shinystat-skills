@@ -74,36 +74,36 @@ Strengthening the Reporting of Observational Studies in Epidemiology:
   - Give unadjusted estimates and confounder-adjusted estimates with 95% confidence intervals.
   - Make clear which confounders were adjusted for and why they were included.
 
-### CONSORT 2010 (Randomized Controlled Trials)
-Consolidated Standards of Reporting Trials:
+### CONSORT 2025 (Randomized Controlled Trials)
+Consolidated Standards of Reporting Trials (2025 Statement):
 - **Item 13 (Participant Flow)**:
   - Flow diagram depicting enrollment, allocation, follow-up, and analysis.
 - **Item 15 (Baseline Data)**:
   - Baseline demographic and clinical characteristics of each group.
 - **Item 16 (Numbers Analyzed)**:
-  - Number of participants included in each analysis, reporting by original assigned groups (Intention-to-Treat, ITT).
+  - Number of participants included in each analysis, indicating whether analyses were performed according to originally assigned groups (e.g., Intention-to-Treat [ITT], modified ITT, or per-protocol populations) without mandating ITT for every analysis.
 - **Item 17 (Outcomes and Estimation)**:
   - For each primary and secondary outcome, results for each group, estimated effect size and its precision (95% CI).
 
-### TRIPOD (Clinical Prediction and Diagnostic Models)
-Transparent Reporting of a multivariable prediction model for Individual Prognosis Or Diagnosis:
+### TRIPOD+AI (Clinical Prediction Models & Diagnostic Machine Learning)
+Transparent Reporting of a multivariable prediction model for Individual Prognosis Or Diagnosis + Artificial Intelligence (BMJ 2024;385:e078378; supersedes TRIPOD 2015):
 - **Item 9 (Missing Data)**:
   - Details on handling missing data; describe imputation method if used.
-- **Item 10 (Statistical Analysis Methods)**:
-  - Describe how predictors were handled (linear, transformed, splines).
+- **Item 10 (Model Development & Specifications)**:
+  - Describe how predictors were handled (linear, transformed, splines, embeddings).
   - Specify model-building procedure, internal/external validation techniques.
   - Performance measures: discrimination (AUC / C-index with DeLong CIs), calibration (intercept, slope, calibration curves), and clinical utility (Decision Curve Analysis net benefit).
-- **Item 16 (Performance)**:
+- **Item 16 (Model Performance)**:
   - Report performance estimates and confidence intervals for discrimination, calibration, and net benefit.
 
 ---
 
 ## 3. Automated Methods Narrative Templates
 
-When synthesizing statistical methods text for clinical manuscripts:
+When synthesizing statistical methods text for clinical manuscripts, state procedures only when confirmed by the actual analysis record:
 
 ### Multivariable Logistic Regression
-> "Continuous variables were summarized as mean (SD) or median (IQR) based on normality evaluated via the Shapiro-Wilk test, and categorical variables as frequencies and percentages. Baseline group differences were assessed using Standardized Mean Differences (SMDs), with SMD < 0.10 indicating adequate balance. Multivariable logistic regression was fitted to estimate adjusted odds ratios (aORs) and 95% confidence intervals for the primary outcome. Missing data were handled using [complete-case analysis / multiple imputation by chained equations (MICE, m=5)] under a justified [MCAR / MAR] mechanism. Sensitivity to unmeasured confounding was quantified using the VanderWeele E-value. All tests were two-tailed with statistical significance set at \$\\alpha = 0.05\$."
+> "Continuous variables were summarized as mean (SD) or median (IQR) based on normality evaluated via the Shapiro-Wilk test, and categorical variables as frequencies and percentages. Baseline group differences were assessed using Standardized Mean Differences (SMDs), with $|\text{SMD}| < 0.10$ indicating adequate balance. Multivariable logistic regression was fitted to estimate adjusted odds ratios (aORs) and 95% confidence intervals for the primary outcome. Missing data were handled using [complete-case analysis under MCAR / multiple imputation by chained equations (MICE, with $m$ determined by fraction of missing information) under MAR]. [When specified: Sensitivity to unmeasured confounding was quantified using the VanderWeele E-value.] All tests were two-tailed with statistical significance set at \$\\alpha = 0.05\$."
 
 ### Survival Analysis (Cox Proportional Hazards)
-> "Time-to-event outcomes were analyzed using the Kaplan-Meier method, and group differences were evaluated using the log-rank test. Multivariable Cox proportional hazards regression was performed to estimate adjusted hazard ratios (aHRs) and 95% confidence intervals. The proportional hazards assumption was verified for all covariates using Schoenfeld residual tests. In instances of sparse mortality events, Firth's penalized likelihood estimation with profile likelihood confidence intervals was employed to resolve monotone likelihood and small-sample bias."
+> "Time-to-event outcomes were analyzed using the Kaplan-Meier method, and group differences were evaluated using the log-rank test. Multivariable Cox proportional hazards regression was performed to estimate adjusted hazard ratios (aHRs) and 95% confidence intervals. [When verified: The proportional hazards assumption was assessed using Schoenfeld residual tests.] [When sparse events/separation occur: Firth's penalized likelihood estimation with profile likelihood confidence intervals was employed to resolve monotone likelihood and small-sample bias.]"

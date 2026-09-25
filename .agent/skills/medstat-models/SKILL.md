@@ -10,9 +10,9 @@ Biostatistical modeling engine supporting generalized linear models, Cox proport
 ## Core Rules
 
 1. **Pre-Model Table 1**: Always characterize baseline covariates with Standardized Mean Differences (SMD) before multivariable modeling.
-2. **Proportional Hazards Assumption**: Every Cox model must check Schoenfeld residual correlation across time; violations require stratified Cox or time-varying covariates.
+2. **Proportional Hazards Assumption**: Standard Cox models evaluate the proportional hazards assumption via Schoenfeld residuals when `--schoenfeld` is specified in the CLI (penalized Firth Cox does not compute Schoenfeld tests via CLI); violations require stratified Cox or time-varying covariates.
 3. **Sparse Events & Monotone Likelihood**: In sparse event survival (< 20 events) or quasi-complete logistic separation, use Firth's penalized likelihood with profile likelihood confidence intervals.
-4. **Non-Linearity Verification**: Continuous exposures with potential non-linear biology must be modeled using restricted cubic splines (RCS) with centered contrast reference points.
+4. **Non-Linearity Verification**: Continuous exposures with potential non-linear biology can be modeled using restricted cubic splines (RCS, supported for Cox regression in the CLI via `--spline-var`) with centered contrast reference points.
 5. **Binary & Event Outcome Encoding**: Binary outcomes (logistic regression) and event indicators (Cox proportional hazards) must be explicitly encoded as numeric `0` and `1` (`1 = Event`, `0 = Non-event`). Raw text outcomes (e.g., `"Dead"`, `"Alive"`, `"Yes"`, `"No"`) are rejected to prevent clinical event inversion.
 
 ## Execution Sequence

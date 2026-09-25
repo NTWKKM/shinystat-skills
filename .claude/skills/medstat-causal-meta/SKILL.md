@@ -10,9 +10,9 @@ Biostatistical engine for observational causal inference, rater reliability anal
 ## Core Rules
 
 1. **Caliper Enforcement**: Propensity score matching requires a strict caliper ($0.20 \times \text{SD}(\text{logit } e_i)$) to prevent poor pairs. Unmatched subjects must be logged in the sample retention flow.
-2. **Standardized Mean Difference Criterion**: Evaluate post-match balance across all baseline covariates; every covariate must achieve $\text{SMD} < 0.10$.
+2. **Standardized Mean Difference Criterion**: Evaluate post-match balance across all baseline covariates; every covariate must achieve $|\text{SMD}| < 0.10$.
 3. **Pure-SciPy ICC (GPL-Free)**: Compute intraclass correlation coefficients via pure two-way ANOVA decomposition without external GPL dependencies.
-4. **Heterogeneity Thresholding**: Heterogeneity of $I^2 \ge 50\%$ mandates the DerSimonian-Laird random-effects model over fixed-effects inverse variance.
+4. **Meta-Analysis Model Selection**: Model choice (fixed-effect vs. DerSimonian-Laird random-effects) must reflect the study design and clinical/methodological variation assumptions; Cochrane advises against selecting models solely by statistical heterogeneity tests ($I^2$).
 
 ## Execution Sequence
 
@@ -37,7 +37,7 @@ medstat causal psm --data <observational_cohort.csv> \
 
 - **Output Evaluation**:
   - Review pre-match vs. post-match Standardized Mean Differences (SMD).
-  - Confirm all post-match SMDs are below the $0.10$ threshold (Austin 2009).
+  - Confirm all post-match absolute SMDs ($|\text{SMD}|$) are below the $0.10$ threshold (Austin 2009).
   - Unmatched control/treatment rows are tracked in the sample retention flow ($N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{matched}}$).
   - Consult [references/balance-diagnostics.md](references/balance-diagnostics.md) for balance criteria and formulas.
 
@@ -101,7 +101,7 @@ medstat meta --data <clinical_trials.csv> \
 ## Completion Criteria
 
 - [ ] Propensity score matching completed with documented caliper and sample retention flow.
-- [ ] Post-matching covariate balance confirmed with all SMDs $< 0.10$ or residual imbalance noted.
+- [ ] Post-matching covariate balance confirmed with all $|\text{SMD}| < 0.10$ or residual imbalance noted.
 - [ ] Bland-Altman or ICC reliability metrics evaluated with 95% confidence intervals.
-- [ ] Meta-analytic pooled effect computed with appropriate model selection (fixed vs. random effects) based on $I^2$.
+- [ ] Meta-analytic pooled effect computed with justified model selection (fixed vs. random effects) based on study design and variation assumptions, reporting $I^2$ and Cochran's $Q$.
 - [ ] Publication bias evaluated via Egger's test when $\ge 10$ studies are pooled.

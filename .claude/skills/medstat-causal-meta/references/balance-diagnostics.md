@@ -22,9 +22,9 @@ where $p_T, p_C$ are proportions in each group.
 
 | SMD Range | Balance Quality | Clinical Implication | Action Required |
 | :--- | :--- | :--- | :--- |
-| **$< 0.10$** | **Well-balanced** | Negligible difference; groups are clinically comparable. | Proceed to outcome analysis. |
-| **$0.10 - 0.20$** | **Moderate Imbalance** | Potential residual confounding across this covariate. | Re-estimate propensity score with interaction/polynomial terms, or include as covariate in outcome model (Doubly Robust). |
-| **$> 0.20$** | **Severe Imbalance** | Substantial difference; confounding bias likely. | Tighten caliper, trim non-overlapping support, or switch to propensity score weighting (IPTW). |
+| **$\lvert\text{SMD}\rvert < 0.10$** | **Well-balanced** | Negligible difference; groups are clinically comparable. | Proceed to outcome analysis. |
+| **$0.10 \le \lvert\text{SMD}\rvert \le 0.20$** | **Moderate Imbalance** | Potential residual confounding across this covariate. | Re-estimate propensity score with interaction/polynomial terms, or include as covariate in outcome model (Doubly Robust). |
+| **$\lvert\text{SMD}\rvert > 0.20$** | **Severe Imbalance** | Substantial difference; confounding bias likely. | Tighten caliper, trim non-overlapping support, or switch to propensity score weighting (IPTW). |
 
 ---
 
@@ -40,7 +40,7 @@ $$L_i = \text{logit}(e_i) = \ln\left(\frac{e_i}{1 - e_i}\right)$$
 ### Optimal Caliper Width (Austin 2011)
 $$\text{Caliper Width} = 0.20 \times \text{SD}(L)$$
 
-- Using a caliper of $0.2 \times \text{SD}(L)$ eliminates over 98% of the bias from unmeasured linear covariates in observational studies.
+- Austin demonstrated that a caliper of $0.2 \times \text{SD}(L)$ removed approximately 98% to 99% of the bias of the crude estimator in simulated mean-difference and risk-difference settings with at least some continuous covariates; caliper choice had much less impact when all covariates were binary. This applies strictly to measured baseline covariates and does not eliminate unmeasured confounding; residual unmeasured confounding still requires assessment.
 - When matching ratio is 1:1 nearest neighbor without replacement, unmatched subjects are excluded and recorded in the sample retention flow.
 
 ---
@@ -56,11 +56,13 @@ $$d_i = x_{i1} - x_{i2}, \quad \bar{d} = \frac{1}{n}\sum_{i=1}^n d_i, \quad s_d 
 ### Limits of Agreement (95% LoA)
 $$\text{Lower LoA} = \bar{d} - 1.96 \cdot s_d, \quad \text{Upper LoA} = \bar{d} + 1.96 \cdot s_d$$
 
-### Confidence Intervals for LoA (Carkeet 2015)
-The variance of the limits of agreement accounts for sampling error in both $\bar{d}$ and $s_d$:
+### Large-Sample Approximate Confidence Intervals for LoA (Bland & Altman 1999)
+The large-sample variance of the limits of agreement accounts for sampling error in both $\bar{d}$ and $s_d$:
 $$\widehat{\text{Var}}(\text{LoA}) = s_d^2 \left(\frac{1}{n} + \frac{z_{1 - \alpha/2}^2}{2(n - 1)}\right)$$
 
 $$\text{95% CI of LoA} = \text{LoA} \pm t_{n-1, 1 - \alpha/2} \cdot \sqrt{\widehat{\text{Var}}(\text{LoA})}$$
+
+*Note*: This large-sample approximation is implemented in `medstat.agreement.bland_altman`. For small sample sizes ($n < 30$), exact tolerance-factor methods (Carkeet 2015) can provide refined coverage.
 
 ---
 
@@ -97,9 +99,13 @@ where $w_i = \frac{1}{\text{SE}_i^2}$ and $\hat{\theta}_{\text{FE}} = \frac{\sum
 
 ### Higgins & Thompson $I^2$
 $$I^2 = \max\left(0, \frac{Q - (k - 1)}{Q}\right) \times 100\%$$
-- **$I^2 < 25\%$**: Low heterogeneity (fixed-effects inverse variance model valid).
-- **$25\% - 50\%$**: Moderate heterogeneity.
-- **$\ge 50\%$**: Substantial heterogeneity (DerSimonian-Laird random effects mandatory).
+$I^2$ describes the percentage of total variation across studies due to heterogeneity rather than chance:
+- **$0\% - 40\%$**: Might not be important.
+- **$30\% - 60\%$**: May represent moderate heterogeneity.
+- **$50\% - 90\%$**: May represent substantial heterogeneity.
+- **$75\% - 100\%$**: Considerable heterogeneity.
+
+*Model Selection Guidance (Cochrane Handbook Ch. 10)*: Model choice (fixed-effect vs. DerSimonian-Laird random-effects) must reflect the target inference and assumptions about whether there is a single common true effect or a distribution of effects across clinical populations, rather than a mechanical decision based solely on an $I^2$ threshold.
 
 ### DerSimonian-Laird Random Effects ($\tau^2$)
 $$\tau^2 = \max\left(0, \frac{Q - (k - 1)}{\sum w_i - \frac{\sum w_i^2}{\sum w_i}}\right)$$

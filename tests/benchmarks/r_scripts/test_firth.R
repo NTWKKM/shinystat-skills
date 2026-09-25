@@ -71,8 +71,8 @@ fit_cox_firth <- coxphf(Surv(TIME, CENS) ~ T + N + G + CD, data = breast)
 results_cox_firth <- data.frame(
     term = names(fit_cox_firth$coefficients),
     estimate = as.numeric(fit_cox_firth$coefficients),
-    conf.low = fit_cox_firth$ci.lower,
-    conf.high = fit_cox_firth$ci.upper,
+    conf.low = log(fit_cox_firth$ci.lower),
+    conf.high = log(fit_cox_firth$ci.upper),
     p.value = fit_cox_firth$prob,
     stringsAsFactors = FALSE
 )

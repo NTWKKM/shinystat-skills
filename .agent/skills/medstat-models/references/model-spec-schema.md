@@ -69,7 +69,7 @@ models:
 | `cox_ph` | `--type cox_ph --time <t>` | `schoenfeld: true`, `penalizer: 0.0` | Schoenfeld residual correlation |
 | `firth_cox` | `--type cox_ph --method firth` | `ci_method: "profile"` | Profile likelihood convergence |
 | `linear` | `--type linear` | `robust: "HC1"` | White's heteroskedasticity test |
-| `rcs_cox` | Via Python API | `knots: 4`, `constraints: "center"` | Non-linearity Wald test ($p < 0.05$) |
+| `rcs_cox` | Via Python API / CLI (`--spline-var`) | `df: 4` (Patsy degrees of freedom; produces 5 knots with centering), `constraints: "center"` | Non-linearity Wald test ($p < 0.05$) |
 
 ---
 
@@ -100,3 +100,6 @@ For common outcomes, if baseline risk $p_0$ is unavailable, the square-root appr
 $$RR \approx \sqrt{OR}$$
 When baseline risk $p_0$ (unexposed outcome risk) is known, use the baseline-risk conversion formula:
 $$RR = \frac{OR}{1 - p_0 + (p_0 \cdot OR)}$$
+
+> [!NOTE]
+> In the CLI, `medstat model --e-value` executes `calculate_e_value` with `rare_outcome=False` by default (applying the square-root transformation $RR \approx \sqrt{OR}$ for odds ratios). For rare outcomes requiring direct $RR \approx OR$ conversion, utilize the Python API (`medstat.models.sensitivity.calculate_e_value(..., rare_outcome=True)`) or input direct risk ratio estimates.

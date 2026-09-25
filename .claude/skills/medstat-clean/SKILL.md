@@ -10,9 +10,11 @@ Clinical data preparation engine enforcing explicit missing data justification a
 ## Core Rules
 
 1. **No Silent Listwise Deletion**: Omitting `--strategy` when missing values exist raises `MissingStrategyRequiredError`. Never drop rows without clinical justification.
-2. **Audited Sample Retention Flow**: Every cleaning run tracks and records participant retention:
+2. **Audited Sample Retention Flow**: Every cleaning run tracks participant retention:
    $$N_{\text{initial}} \longrightarrow N_{\text{excluded}} \longrightarrow N_{\text{analyzed}}$$
+   Specify `--audit-out <file>` to persist the audited flow artifact.
 3. **Preserve Raw Values**: Keep original files untouched; write transformed cohorts to distinct output targets.
+4. **Binary Endpoint Standardization**: Recode explicitly binary event-status endpoints (e.g., `'Alive'/'Dead'`, `'Yes'/'No'`) to numeric `0/1` (`1 = Event`, `0 = Non-event`) during cleaning, preserving multicategory outcomes and survival follow-up time unrecoded.
 
 ## Execution Sequence
 
@@ -29,12 +31,12 @@ medstat clean --data <dataset.csv> --audit-only --audit-out <audit.json>
 ```
 
 Evaluate the resulting audit:
-- Check per-variable missingness percentage:
-  - **< 5% (Low)**: Complete-case analysis acceptable under MCAR.
-  - **5% – 20% (Moderate)**: Multiple Imputation by Chained Equations (MICE) recommended.
-  - **20% – 40% (High)**: Imputation required with sensitivity analysis.
-  - **> 40% (Critical)**: High risk of bias; consider indicator method or dropping variable.
-- Check Little's MCAR test: $p > 0.05$ indicates data consistent with MCAR; $p \le 0.05$ indicates MAR or MNAR.
+- Review descriptive missingness tiers (used for exploratory assessment; method selection must be clinically justified by mechanism rather than rigid percentage cutoffs):
+  - **< 5% (Low)**: Complete-case analysis often viable if missingness mechanism is consistent with MCAR.
+  - **5% – 20% (Moderate)**: Multiple Imputation by Chained Equations (MICE) under MAR assumption.
+  - **20% – 40% (High)**: Substantial missingness; requires multiple imputation and sensitivity analysis.
+  - **> 40% (Critical)**: High risk of residual bias; evaluate whether variable can be reliably imputed or retained.
+- Check Little's MCAR test: $p > 0.05$ fails to reject MCAR (insufficient evidence against MCAR); $p \le 0.05$ provides evidence against MCAR (departures from MCAR).
 - Consult [references/missing-data-mechanisms.md](references/missing-data-mechanisms.md) for mechanism selection criteria.
 
 ### Step 2: Execute Clinically Justified Strategy
@@ -45,7 +47,7 @@ Run cleaning with an approved strategy (`complete-case`, `mice`, `knn`, `indicat
 # Complete-case analysis (MCAR justified)
 medstat clean --data <dataset.csv> \
   --strategy complete-case \
-  --missing-justification "MCAR verified by Little test (p=0.42); baseline labs missing <5%" \
+  --missing-justification "Little's test did not reject MCAR null (p=0.42); complete-case analysis prespecified with <5% missingness" \
   --output clean_cc.csv --audit-out retention.json
 
 # Multiple Imputation by Chained Equations (MICE, MAR justified)
@@ -63,9 +65,10 @@ medstat clean --data <dataset.csv> \
 
 ### Step 3: Sanitize & Winsorize Outliers
 
-Detect and clamp non-physiological or extreme values:
-- Use Tukey's IQR rule ($1.5 \times \text{IQR}$) or Median Absolute Deviation (MAD > 3.0).
-- Extreme laboratory readings or physiological vitals (e.g. SBP > 260 or < 40) are winsorized to boundary percentiles (1st and 99th), never silently deleted.
+Detect and handle non-physiological or extreme values:
+- Use Tukey's IQR rule ($1.5 \times \text{IQR}$) or robust median deviation (e.g., modified z-score $> 3.5$ or $|x_i - \text{median}| > 3 \times \text{MAD}$).
+- Extreme laboratory readings or physiological vitals (e.g., SBP > 260 or < 40 mmHg) should be flagged for clinical chart review and verification against source records; apply prespecified variable-specific handling rules rather than blanket automatic winsorization.
+- Standardize explicitly binary event-status fields to numeric `0/1` (`1 = Event`, `0 = Non-event`), ensuring survival follow-up duration and multicategory endpoints remain intact; never forward text outcomes to modeling.
 
 ### Step 4: Verify Sample Retention Flow
 
@@ -78,5 +81,6 @@ Verify that the output contains the audited sample retention tracker:
 
 - [ ] Missingness audit executed and reviewed across all clinical variables.
 - [ ] Explicit missing data strategy chosen with documented clinical justification.
+- [ ] Binary and survival event endpoints standardized to numeric 0/1 (1 = Event).
 - [ ] Cleaned dataset written to `--output` path with zero unexpected `NaN` cells.
 - [ ] Sample retention flow metadata recorded with explicit initial, excluded, and analyzed counts.
