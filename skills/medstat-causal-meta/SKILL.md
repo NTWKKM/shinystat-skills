@@ -54,7 +54,7 @@ medstat agreement bland-altman --data <paired_device_trials.csv> \
 ```
 
 - Mean bias ($\bar{d}$) evaluates systematic over/under-estimation.
-- $95\%$ Limits of Agreement ($\bar{d} \pm 1.96 \cdot s_d$) indicate the interval where $95\%$ of future difference measurements will lie.
+- $95\%$ Limits of Agreement ($\bar{d} \pm 1.96 \cdot s_d$) estimate the interval containing approximately $95\%$ of paired differences, valid under the assumption of approximately normally distributed paired differences with no material trend or changing spread (heteroscedasticity); assess these assumptions before clinical interpretation.
 
 #### Pure-SciPy Intraclass Correlation Coefficient (ICC)
 Evaluate intra- or inter-rater reliability across targets and raters:
@@ -73,7 +73,7 @@ medstat agreement icc --data <rater_scores.csv> \
   - `icc2`: Two-way random effects, absolute agreement (generalizable raters; standard for clinical trials).
   - `icc3`: Two-way mixed effects, consistency (fixed panel of expert clinicians).
   - `icc2_k`: Average score of $k$ independent raters.
-- **Interpretation**: Koo & Li (2016): $< 0.50$ Poor, $0.50–0.75$ Moderate, $0.75–0.90$ Good, $> 0.90$ Excellent.
+- **Interpretation**: Koo & Li (2016): $\text{ICC} < 0.50$ Poor, $0.50 \le \text{ICC} < 0.75$ Moderate, $0.75 \le \text{ICC} \le 0.90$ Good, $\text{ICC} > 0.90$ Excellent.
 
 ### Step 3: Meta-Analysis & Funnel Plot Publication Bias
 

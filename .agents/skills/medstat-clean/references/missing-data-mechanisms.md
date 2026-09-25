@@ -32,7 +32,7 @@ $$d^2 = \sum_{s=1}^S n_s (\bar{y}_{s,\text{obs}} - \hat{\mu}_{s,\text{obs}})^T \
 | :--- | :--- | :--- | :--- |
 | **Low** | $< 5\%$ | Negligible impact on effect estimates if MCAR holds. | Complete-case analysis may be valid depending on the estimand, model, and missingness structure; document rationale and assess potential selection bias even at low missingness fractions. |
 | **Moderate** | $5\% - 20\%$ | Potential loss of statistical power and mild bias. | MICE under assumed MAR mechanism; select number of imputations $m$ based on Fraction of Missing Information (FMI) and target standard error precision. |
-| **High** | $20\% - 40\%$ | Severe risk of distortion and attenuation of effects. | Multiple imputation with elevated $m$ (scaled to FMI) and mandatory sensitivity analyses comparing complete-case, MICE, and tipping-point MNAR models. |
+| **High** | $20\% - 40\%$ | Substantial missingness warranting comprehensive mechanism and sensitivity assessment. | Multiple imputation with elevated $m$ (scaled to FMI) and mandatory sensitivity analyses comparing complete-case, MICE, and tipping-point MNAR models. |
 | **Critical** | $> 40\%$ | High risk of residual confounding or structural non-response. | Missing-indicator method can introduce severe bias for confounders even under MCAR in observational studies; evaluate separate reporting, dropping variable from primary model, or pattern-mixture sensitivity. |
 
 ---

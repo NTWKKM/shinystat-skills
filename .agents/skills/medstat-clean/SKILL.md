@@ -14,7 +14,7 @@ Clinical data preparation engine enforcing explicit missing data justification a
    $$N_{\text{initial}} \longrightarrow N_{\text{excluded}} \longrightarrow N_{\text{analyzed}}$$
    Specify `--audit-out <file>` to persist the audited flow artifact. Note: The `--audit-only` path produces missingness audit output but does not execute cleaning or generate `sample_flow` data.
 3. **Preserve Raw Values**: Keep original files untouched; write transformed cohorts to distinct output targets.
-4. **Binary Endpoint Standardization**: Explicitly recode binary event-status endpoints to numeric `0/1` (`1 = Event`, `0 = Non-event`) before model execution. Event direction must not be inferred from arbitrary text labels. Multicategory outcomes and survival follow-up time columns must be preserved without recoding.
+4. **Binary Endpoint Standardization**: Supported binary and survival workflows require numeric outcomes and strictly reject text outcomes. Explicitly recode binary event-status endpoints to numeric `0/1` (`1 = Event`, `0 = Non-event`) before model execution; event direction must not be inferred from arbitrary text labels. Multicategory labels and survival follow-up time columns must be preserved in cleaned data, requiring separate documented model-input encoding for compatible multicategory models without overwriting original labels.
 
 ## Execution Sequence
 

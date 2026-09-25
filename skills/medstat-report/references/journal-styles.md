@@ -31,7 +31,7 @@ Reference guide for publication-ready table formatting, journal-specific typogra
 - **P-Value Format**:
   - Expressed with capital italic $P$: $P = .04$, $P = .008$, $P < .001$.
   - **No leading zero** before the decimal point because p-values cannot exceed 1.
-  - Exact to 2 decimal places if $P > .01$; exact to 3 decimal places if $.001 \le P \le .01$; reported as $P < .001$ otherwise.
+  - Reported as $P > .99$ if greater than $.99$; rounded to 2 decimal places if $P \ge .01$; exact to 3 decimal places if $.001 \le P < .01$; reported as $P < .001$ otherwise.
   - **No asterisks** for statistical significance; exact p-values are stated directly in table cells.
 - **Footnote Notation**:
   - Superscript lowercase letters ($^a$, $^b$, $^c$).
@@ -62,7 +62,7 @@ Strengthening the Reporting of Observational Studies in Epidemiology:
   - 12a: Describe all statistical methods, including those used to control for confounding.
   - 12b: Describe any methods used to examine subgroups and interactions.
   - 12c: Explain how missing data were addressed (e.g. complete-case, MICE, KNN with explicit justification).
-  - 12d: *Cohort studies*: describe methods for addressing loss to follow-up. *Case-control studies*: describe matching criteria (caliper, ratio, replacement).
+  - 12d: *Cohort studies*: describe methods for addressing loss to follow-up. *Case-control studies*: describe matching criteria (caliper, ratio, replacement). *Cross-sectional studies*: if applicable, describe analytical methods taking account of sampling strategy.
   - 12e: Describe any sensitivity analyses (e.g. VanderWeele E-value, unmeasured confounding bounds).
 - **Item 13 (Participants)**:
   - Report numbers of individuals at each stage: $N_{\text{screened}} \to N_{\text{eligible}} \to N_{\text{enrolled}} \to N_{\text{analyzed}}$.
@@ -99,8 +99,10 @@ Transparent Reporting of a multivariable prediction model for Individual Prognos
   - Performance measures: discrimination (AUC with DeLong CIs for binary outcomes; C-index with censoring-aware bootstrap or Harrell's method for survival models), calibration (intercept, slope, calibration curves), and clinical utility (Decision Curve Analysis net benefit).
 - **Item 16 (Training vs. Evaluation)**:
   - Describe how data were split or used for model training versus evaluation.
-- **Item 23a/b (Model Performance)**:
-  - Report performance estimates and confidence intervals for discrimination, calibration, and net benefit across development and validation sets.
+- **Item 23a (Model Performance)**:
+  - Report performance estimates with confidence intervals (discrimination, calibration, and net benefit) across development and validation sets, including results in key clinical subgroups.
+- **Item 23b (Heterogeneity Across Clusters)**:
+  - Report results evaluating heterogeneity in model performance across clusters (e.g. centers, hospitals, regions), if examined.
 
 ---
 

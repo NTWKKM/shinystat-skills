@@ -69,7 +69,7 @@ models:
 | `cox_ph` | `--type cox_ph --time <t>` | `schoenfeld: true`, `penalizer: 0.0` | Schoenfeld residual correlation |
 | `firth_cox` | `--type cox_ph --method firth` | `ci_method: "profile"` | Profile likelihood convergence |
 | `linear` | `--type linear` | `robust: "HC1"` | White's heteroskedasticity test |
-| `rcs_cox` | Via Python API / CLI (`--spline-var`) | `df: 4` (Patsy degrees of freedom; produces 5 knots with centering), `constraints: "center"` | Non-linearity likelihood-ratio test ($p < 0.05$) |
+| `rcs_cox` | Via Python API (`fit_cox_rcs`) / CLI (`--spline-var`) | `knots: 4` or `n_knots: 4` (supplied value is used as Patsy's degrees of freedom `df`), `constraints: "center"` | Non-linearity likelihood-ratio test ($p < 0.05$) |
 
 ---
 
