@@ -72,7 +72,7 @@ See [references/model-spec-schema.md](references/model-spec-schema.md) for full 
 
 ### Step 3: Assess Model Diagnostics
 
-- **Cox Proportional Hazards**: Confirm Schoenfeld test $p > 0.05$ across all covariates.
+- **Cox Proportional Hazards (Standard Cox with `--schoenfeld`)**: Confirm Schoenfeld test $p > 0.05$ across all covariates (note that penalized Firth Cox does not compute Schoenfeld tests via CLI).
 - **Firth Convergence**: Verify profile likelihood confidence intervals converge.
 - **E-Value Sensitivity**: If effect is statistically significant, compute the minimum unmeasured confounding strength required to explain away the observed estimate.
 

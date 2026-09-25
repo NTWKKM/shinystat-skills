@@ -50,10 +50,10 @@ medstat clean --data <dataset.csv> \
   --missing-justification "Little's test did not reject MCAR null (p=0.42); complete-case analysis prespecified with <5% missingness" \
   --output clean_cc.csv --audit-out retention.json
 
-# Multiple Imputation by Chained Equations (MICE, MAR justified)
+# Multiple Imputation by Chained Equations (MICE, MAR justified; m=5 shown as illustrative baseline, scale m to FMI and target SE precision)
 medstat clean --data <dataset.csv> \
   --strategy mice --imputations 5 \
-  --missing-justification "MAR assumed; chained predictive mean matching for creatinine and BMI" \
+  --missing-justification "MAR assumed; chained predictive mean matching for creatinine and BMI (m=5 illustrative)" \
   --output clean_mice.csv --audit-out retention.json
 
 # K-Nearest Neighbors imputation
