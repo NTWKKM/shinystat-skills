@@ -129,4 +129,23 @@ CodeRabbit AI review on PR #2 identified discrepancies across distributed skill 
 - **Guideline Compliance**: Aligns the toolkit with current ICMJE and EQUATOR Network standards.
 - **Cross-Platform Uniformity**: Guarantees identical agent instructions regardless of IDE or agent runtime.
 
+---
+
+## ADR 9: Master Biostatistical Orchestrator & Autonomous SAP Execution
+
+### Context
+Users interacting with AI agents often upload clinical spreadsheets (CSV, XLSX) without knowing which atomic skill (`medstat-clean`, `medstat-models`, `medstat-diagnostic`, `medstat-causal-meta`, `medstat-report`) to invoke. Forcing users to choose individual skills introduces friction and risks incorrect statistical method selection (e.g., selecting multivariable logistic regression for clustered rater data or treating text outcomes directly).
+
+### Decision
+Introduce `medstat-master` as the master orchestrator skill. It operates in two modes:
+1. **Direct Autonomous Execution**: Automatically audits data health, recodes binary endpoints to numeric `0/1`, infers study design, runs the clean $\to$ model $\to$ report pipeline, and returns finished manuscript tables when user intent is unambiguous.
+2. **Statistical Analysis Proposal (SAP) Mode**: Synthesizes a structured 1-page clinical proposal aligning primary estimand, missingness mechanism, candidate model options, and target journal styles when ambiguity exists.
+
+Downstream atomic skills are chained seamlessly via CLI subcommands without requiring manual skill switching.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **User Experience**: Users can drop any clinical tabular file into chat and receive appropriate biostatistical analysis automatically.
+- **Clinical Governance**: Enforces all core invariants (strict numeric 0/1 outcomes, zero silent deletion with sample retention flow, Wilson CIs, DeLong AUC) centrally before any downstream model execution.
+
 
