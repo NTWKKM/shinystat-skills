@@ -22,6 +22,8 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
 | **Intraclass Correlation** | `icc` | Variance partition ratio quantifying reliability and agreement among clinical observers based on two-way ANOVA decomposition. |
 | **DerSimonian-Laird** | `dl` | Non-iterative method of moments estimator for between-study variance ($\tau^2$) in random-effects meta-analysis. |
 | **Egger's Test** | `egger` | Linear regression of standardized effect against precision assessing funnel plot asymmetry and publication bias. |
+| **Master Orchestration** | `medstat-master` | Autonomous intelligence layer that profiles datasets, infers clinical study design, and orchestrates downstream atomic skills without manual skill selection. |
+| **Statistical Analysis Plan** | `SAP` | Formal specification of primary estimand, data cleaning/retention strategy, planned models, and reporting standards before execution. |
 
 ---
 

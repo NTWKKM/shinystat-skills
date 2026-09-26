@@ -1,6 +1,6 @@
 # medstat-core: Headless Biostatistical Calculation Engine & CLI
 
-`medstat-core` is a pure headless Python biostatistical calculation engine and CLI tool with 5 self-contained Agent Skills, decoupled from interactive UI frameworks and licensed under the permissive **Apache-2.0** license.
+`medstat-core` is a pure headless Python biostatistical calculation engine and CLI tool with 6 self-contained Agent Skills, decoupled from interactive UI frameworks and licensed under the permissive **Apache-2.0** license.
 
 ---
 
@@ -71,10 +71,11 @@ medstat/
 
 ## Agent Skills
 
-This project ships **5 agent skills** in `.agent/skills/` that teach AI coding agents how to use the `medstat` library correctly — enforcing clinical safety rules, correct statistical methods, and publication-grade output.
+This project ships **6 agent skills** in `.agent/skills/` (and `skills/`) that teach AI coding agents how to use the `medstat` library correctly — enforcing clinical safety rules, correct statistical methods, and publication-grade output.
 
 | Skill | Domain | Key Capabilities |
 |:------|:-------|:-----------------|
+| **medstat-master** | **Master Orchestrator** | **Ingests raw CSV/XLSX without requiring manual skill selection. Automatically audits data, infers clinical study design, formulates or executes a Statistical Analysis Plan (SAP), and orchestrates the downstream skills pipeline.** |
 | **medstat-clean** | Data Cleaning | Missingness audit (Little's MCAR), imputation (MICE/KNN/indicator), sample-flow tracking, rejects silent listwise deletion |
 | **medstat-models** | Regression & Survival | Table 1 (SMD), GLM/logistic, Cox PH + Schoenfeld, Firth penalized (sparse events), RCS splines, E-value sensitivity |
 | **medstat-diagnostic** | Diagnostic Accuracy | 2×2 contingency (Wilson CI), ROC + DeLong CI, paired DeLong biomarker comparison, DCA net benefit |

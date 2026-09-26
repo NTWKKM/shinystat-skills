@@ -8,8 +8,15 @@ System architecture and structural specifications for `medstat-core` and the `me
 
 ```
                           ┌───────────────────────────┐
-                          │    Agent Skills Layer     │
-                          │ (.agents/skills / skills) │
+                          │   medstat-master Skill    │
+                          │   (Master Orchestrator)   │
+                          └─────────────┬─────────────┘
+                                        │ orchestrates
+                                        ▼
+                          ┌───────────────────────────┐
+                          │    Atomic Agent Skills    │
+                          │   (clean, models, diag,   │
+                          │    causal-meta, report)   │
                           └─────────────┬─────────────┘
                                         │ invokes
                                         ▼
