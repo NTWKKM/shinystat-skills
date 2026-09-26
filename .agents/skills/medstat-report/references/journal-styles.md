@@ -98,9 +98,9 @@ Transparent Reporting of a multivariable prediction model for Individual Prognos
 - **Item 12b (Predictor Handling)**:
   - Describe how predictors were handled in the analyses (functional form, rescaling, transformation, standardization, splines, embeddings).
 - **Item 12c (Model Specification & Building)**:
-  - Specify the type of model and rationale, all model-building steps (including hyperparameter tuning), the method for internal validation (e.g., k-fold cross-validation, bootstrapping), model stability assessment, and handling of repeated-record or clustered data.
+  - Specify the type of model and rationale, all model-building steps (including hyperparameter tuning), the method for internal validation (e.g., k-fold cross-validation, bootstrapping), model stability assessment, and handling of repeated records or samples from the same individual.
 - **Item 12d (Heterogeneity)**:
-  - Describe if and how any heterogeneity in model parameter estimates and model performance across clusters (e.g., centers, subgroups) was handled.
+  - Describe if and how any heterogeneity in model parameter estimates and model performance across clusters (e.g., centers, hospitals, countries) was handled.
 - **Item 12e (Performance Measures & Plots)**:
   - Specify all measures and plots used to evaluate model performance, including rationale for selected metrics: discrimination (AUC with DeLong CIs for binary outcomes; C-index with censoring-aware bootstrap or Harrell's method for survival models), calibration (intercept, slope, calibration curves), clinical utility (Decision Curve Analysis net benefit), and any model comparisons.
 - **Item 16 (Development vs. Evaluation Datasets)**:
