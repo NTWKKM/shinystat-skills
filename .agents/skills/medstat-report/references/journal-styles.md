@@ -93,10 +93,16 @@ Transparent Reporting of a multivariable prediction model for Individual Prognos
   - Report the number of participants (events and non-events) and how sample size was determined.
 - **Item 11 (Missing Data)**:
   - Details on handling missing data; describe imputation method if used.
-- **Item 12a (Analytical Methods & Model Development)**:
-  - Describe how predictors were handled (linear, transformed, splines, embeddings).
-  - Specify model-building procedure, including data partitioning (e.g. into development and evaluation datasets) and internal/external validation techniques.
-  - Performance measures: discrimination (AUC with DeLong CIs for binary outcomes; C-index with censoring-aware bootstrap or Harrell's method for survival models), calibration (intercept, slope, calibration curves), and clinical utility (Decision Curve Analysis net benefit).
+- **Item 12a (Data Use & Partitioning)**:
+  - Describe how data were used in the analysis (e.g., for development and evaluation of model performance), including whether the data were partitioned, any sample-size sufficiency considerations, and measures to prevent data leakage.
+- **Item 12b (Predictor Handling)**:
+  - Describe how predictors were handled in the analyses (functional form, rescaling, transformation, standardization, splines, embeddings).
+- **Item 12c (Model Specification & Building)**:
+  - Specify the type of model and rationale, all model-building steps (including hyperparameter tuning), the method for internal validation (e.g., k-fold cross-validation, bootstrapping), model stability assessment, and handling of repeated-record or clustered data.
+- **Item 12d (Heterogeneity)**:
+  - Describe if and how any heterogeneity in model parameter estimates and model performance across clusters (e.g., centers, subgroups) was handled.
+- **Item 12e (Performance Measures & Plots)**:
+  - Specify all measures and plots used to evaluate model performance, including rationale for selected metrics: discrimination (AUC with DeLong CIs for binary outcomes; C-index with censoring-aware bootstrap or Harrell's method for survival models), calibration (intercept, slope, calibration curves), clinical utility (Decision Curve Analysis net benefit), and any model comparisons.
 - **Item 16 (Development vs. Evaluation Datasets)**:
   - Describe any differences between development and evaluation datasets in setting, eligibility criteria, outcome, and predictors.
 - **Item 23a (Model Performance)**:

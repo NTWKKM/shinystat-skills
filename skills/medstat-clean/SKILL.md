@@ -34,7 +34,7 @@ Evaluate the resulting audit:
 - Review descriptive missingness tiers (used for exploratory assessment; method selection must be clinically justified by mechanism rather than rigid percentage cutoffs):
   - **< 5% (Low)**: Complete-case analysis often viable if missingness mechanism is consistent with MCAR.
   - **5% – 20% (Moderate)**: Multiple Imputation by Chained Equations (MICE) under MAR assumption.
-  - **20% – 40% (High)**: Substantial missingness; multiple imputation may be appropriate if missingness mechanism, imputation model adequacy, and analysis objectives support it. Mandatory sensitivity analysis comparing imputed vs. complete-case results.
+  - **20% – 40% (High)**: Substantial missingness; multiple imputation may be appropriate if missingness mechanism, imputation model adequacy, and analysis objectives support it. Mandatory sensitivity analysis selected based on estimand and assessed mechanism.
   - **> 40% (Critical)**: High risk of residual bias; evaluate whether variable can be reliably imputed or retained.
 - Check Little's MCAR test: $p > 0.05$ fails to reject MCAR (insufficient evidence against MCAR); $p \le 0.05$ provides evidence against MCAR (departures from MCAR).
 - Consult [references/missing-data-mechanisms.md](references/missing-data-mechanisms.md) for mechanism selection criteria.
@@ -47,7 +47,7 @@ Run cleaning with an approved strategy (`complete-case`, `mice`, `knn`, `indicat
 # Complete-case analysis (MCAR justified)
 medstat clean --data <dataset.csv> \
   --strategy complete-case \
-  --missing-justification "Little's test did not reject MCAR null (p=0.42); complete-case analysis prespecified with <5% missingness" \
+  --missing-justification "Missing lab values attributable to random specimen handling failures unrelated to patient severity or the target estimand; MCAR plausible by clinical mechanism. Supporting: Little's test non-significant (p=0.42) and overall missingness <5%" \
   --output clean_cc.csv --audit-out retention.json
 
 # Multiple Imputation by Chained Equations (MICE, MAR justified; m=5 shown as illustrative baseline, scale m to FMI and target SE precision)
