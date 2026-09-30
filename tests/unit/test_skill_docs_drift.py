@@ -106,27 +106,86 @@ def test_autonomous_sap_yaml_template_parses():
 
 def test_no_phantom_cli_syntax_in_skills():
     """Verify that obsolete/phantom CLI commands and flags are absent from all skill markdown docs."""
-    forbidden_patterns = [
-        (r"\bmodel fit\b", "Phantom subcommand 'model fit' (use 'medstat model')"),
-        (r"--y\s", "Phantom option '--y' (use '--outcome')"),
-        (r"--x\s", "Phantom option '--x' (use '--covariates' or '--exposure')"),
-        (r"--event\s", "Phantom option '--event' (use '--outcome')"),
-        (
-            r"\bmeta dl\b",
-            "Phantom subcommand 'meta dl' (use 'medstat meta --method dl')",
-        ),
-        (
-            r"medstat --spec\b",
-            "Phantom root flag 'medstat --spec' (use 'medstat model --spec')",
-        ),
-    ]
+    import re
+    import shlex
+
+    import click
+
+    from medstat.cli.main import cli
 
     md_files = list(SKILLS_CANONICAL.rglob("*.md"))
 
     for md_file in md_files:
         text = md_file.read_text(encoding="utf-8")
-        for pattern, msg in forbidden_patterns:
-            matches = re.findall(pattern, text)
-            assert not matches, (
-                f"Forbidden pattern '{pattern}' ({msg}) found in {md_file.relative_to(REPO_ROOT)}"
-            )
+
+        # Check both bash blocks and inline code blocks
+        blocks = re.findall(r"```bash\n(.*?)\n```", text, re.DOTALL)
+        inline_blocks = re.findall(r"`([^`]+)`", text)
+
+        lines_to_check = []
+        for block in blocks:
+            # Handle line continuations in bash blocks
+            block = block.replace("\\\n", " ")
+            lines_to_check.extend(block.split("\n"))
+        lines_to_check.extend(inline_blocks)
+
+        for line in lines_to_check:
+            line = line.strip()
+            if line.startswith("#") or not line:
+                continue
+            if "medstat " in line:
+                # Basic cleanup
+                if line.startswith("uv run "):
+                    line = line[len("uv run ") :]
+                if line.startswith("$ "):
+                    line = line[2:]
+
+                try:
+                    args = shlex.split(line)
+                except ValueError:
+                    continue
+
+                if not args or args[0] != "medstat":
+                    continue
+
+                # Remove the first "medstat" since we start evaluating against the cli root group
+                test_args = args[1:]
+
+                current = cli
+                idx = 0
+                cmd_path = ["medstat"]
+
+                while idx < len(test_args):
+                    arg = test_args[idx]
+                    if arg.startswith("-"):
+                        break
+
+                    if isinstance(current, click.Group):
+                        ctx = click.Context(current)
+                        cmd = current.get_command(ctx, arg)
+                        assert cmd is not None, (
+                            f"Phantom subcommand '{arg}' for '{' '.join(cmd_path)}' found in {md_file.relative_to(REPO_ROOT)}"
+                        )
+                        current = cmd
+                        cmd_path.append(arg)
+                        idx += 1
+                    else:
+                        # Leaf command, subsequent non-dash arguments are positional
+                        break
+
+                # Now validate options for `current`
+                allowed_opts = set()
+                for param in current.params:
+                    if isinstance(param, click.Option):
+                        allowed_opts.update(param.opts)
+                        allowed_opts.update(param.secondary_opts)
+
+                allowed_opts.update(["--help", "--version"])
+
+                for arg in test_args[idx:]:
+                    if arg.startswith("-"):
+                        opt_name = arg.split("=")[0]
+                        if opt_name.startswith("-") and not opt_name.startswith("--<"):
+                            assert opt_name in allowed_opts, (
+                                f"Phantom option '{opt_name}' for command '{' '.join(cmd_path)}' found in {md_file.relative_to(REPO_ROOT)}"
+                            )

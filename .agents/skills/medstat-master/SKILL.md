@@ -54,6 +54,9 @@ Activate **medstat-master** whenever:
 
 When a dataset is presented, inspect it before proposing or executing any models:
 
+0. **Pre-Flight PHI Check**:
+   - Explicitly run `phi-privacy-auditor` before ingesting any CSV/Excel file to ensure no Protected Health Information is present.
+
 1. **Load & Inspect Metadata**:
    - File format (`.csv`, `.xlsx`, `.tsv`, `.parquet`).
    - Dimensions: Sample size $N$ (rows) and feature count $P$ (columns).
@@ -139,51 +142,22 @@ Present a concise, structured 1-page **Statistical Analysis Proposal (SAP)**:
 When executing the pipeline, strictly enforce the following sequence across downstream tools:
 
 ### Step 1: Clean & Standardize (`medstat-clean`)
-- Run missingness audit:
-  ```bash
-  uv run medstat clean --data <raw_file.csv> --audit-only --audit-out audit.json
-  ```
+- Run missingness audit.
 - Recode any text outcome columns (`"Dead"` $\to$ `1`, `"Alive"` $\to$ `0`) so downstream tools never receive text labels.
-- Execute cleaning with explicit strategy and documented clinical justification:
-  ```bash
-  uv run medstat clean --data <raw_file.csv> --strategy <mice|complete-case|knn> \
-    --missing-justification "<rationale>" --output clean_cohort.csv --audit-out retention.json
-  ```
+- Execute cleaning with explicit strategy and documented clinical justification.
+- Run `uv run medstat clean --help` to dynamically understand the current CLI schema.
 
 ### Step 2: Baseline Descriptive & Balance (`medstat-models` / `medstat-causal-meta`)
-- Generate Table 1 with SMDs:
-  ```bash
-  uv run medstat table1 --data clean_cohort.csv --group <exposure_col> --vars "<covariates>" --output table1.json
-  ```
+- Generate Table 1 with SMDs.
+- Run `uv run medstat table1 --help` to dynamically understand the current CLI schema.
 
 ### Step 3: Core Statistical & Causal Modeling
-- **Multivariable Regression / Survival**:
-  ```bash
-  # Logistic (Standard)
-  uv run medstat model --data clean_cohort.csv --type logistic --outcome <outcome> --exposure <tx> --covariates "<covariates>" --output model_results.json
-  # Firth penalized logistic (for sparse events / separation)
-  uv run medstat model --data clean_cohort.csv --type logistic --outcome <outcome> --exposure <tx> --covariates "<covariates>" --method firth --ci-method profile --output model_results.json
-  # Cox Proportional Hazards (time and outcome, with Schoenfeld test)
-  uv run medstat model --data clean_cohort.csv --type cox --time <duration> --outcome <status> --exposure <tx> --covariates "<covariates>" --schoenfeld --output cox_results.json
-  ```
-- **Diagnostic Testing**:
-  ```bash
-  uv run medstat diag --data clean_cohort.csv --gold-standard <disease> --test-col <biomarker> --roc --dca --output diag_results.json
-  ```
-- **Causal PSM Matching**:
-  ```bash
-  uv run medstat causal psm --data clean_cohort.csv --treatment <tx> --covariates "<vars>" --caliper 0.2 --output psm_results.json
-  ```
-- **Inter-Rater Agreement & ICC**:
-  ```bash
-  uv run medstat agreement icc --data clean_cohort.csv --targets <subject_id> --raters <rater_id> --ratings <score> --output icc_results.json
-  ```
+- Execute multivariable regression, survival models, diagnostic testing, causal PSM matching, or inter-rater agreement based on the inferred study design.
+- Run `uv run medstat model --help`, `uv run medstat diag --help`, `uv run medstat causal --help`, or `uv run medstat agreement --help` to dynamically understand the current CLI schemas.
 
 ### Step 4: Publication Reporting (`medstat-report`)
-- Format model results into journal-styled HTML tables (NEJM, JAMA, APA 7) and compile automated methods narratives and checklist audits (CONSORT, STROBE, TRIPOD+AI):
-  ```bash
-  uv run medstat report --results model_results.json --style nejm --narrative --output publication_table.html
-  ```
+- Format model results into journal-styled HTML tables (NEJM, JAMA, APA 7) and compile automated methods narratives and checklist audits (CONSORT, STROBE, TRIPOD+AI).
+- Run `uv run medstat report --help` to dynamically understand the current CLI schema.
 
 ---
 
@@ -211,3 +185,7 @@ All operations coordinated by **medstat-master** must strictly follow these rule
 - [ ] Sample retention flow ($N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$) tracked.
 - [ ] Primary statistical model executed conforming to clinical standards (Wilson CI, DeLong, Firth, or PSM).
 - [ ] Results compiled into publication-grade table (NEJM/JAMA) and methods narrative.
+
+
+```bash
+```
