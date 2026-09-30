@@ -131,7 +131,7 @@ Claude Code discovers skills in `~/.claude/skills/` (global) or `.claude/skills/
 </details>
 
 <details>
-<summary><strong>Claude Web</strong> (claude.ai Projects)</summary>
+<summary><strong>Claude Web</strong> (claude.ai)</summary>
 
 Upload each skill as a `.zip` file via **Upload a skill**:
 
@@ -144,7 +144,7 @@ for skill_dir in .agent/skills/*/; do
 done
 ```
 
-Then in [claude.ai](https://claude.ai): Navigate to **Customize** → **Skills** → **+** → **Create skill** → **Upload a skill** (or Project settings) and select each `.zip` file. Ensure **Code execution and file creation** is enabled. Claude reads the YAML frontmatter from `SKILL.md` inside each skill archive.
+Then in [claude.ai](https://claude.ai): Navigate to **Customize** → **Skills** → **+** → **Create skill** → **Upload a skill** and select each `.zip` file. Ensure **Code execution and file creation** is enabled. Claude reads the YAML frontmatter from `SKILL.md` inside each skill archive.
 
 > **Note:** Python execution is supported in Claude Web when code execution is enabled, but availability of `medstat-core` and its dependencies depends on the execution environment. If `medstat` is not available in the environment, use the generated instructions and code locally.
 

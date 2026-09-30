@@ -41,7 +41,7 @@ Use this format when presenting a proposal to the user before running heavy comp
    - Non-Linear Modeling: `[Restricted Cubic Splines on continuous markers]`
 3. **Sensitivity & Robustness Analyses**:
    - VanderWeele E-value for unmeasured confounding (evaluating primary exposure–outcome effect).
-   - Proportional hazards validation via Schoenfeld residuals.
+   - Proportional hazards validation via Schoenfeld residuals (for Cox PH analyses).
 4. **Reporting & Publication Formatting**:
    - Format: `[NEJM / JAMA / APA 7]` HTML table with strictly 0 vertical borders.
    - Reporting Guideline: `[STROBE / CONSORT 2025 / TRIPOD+AI 2024]` audit.
@@ -110,7 +110,7 @@ models:
     reference_categories:
       treatment_arm: 0
     missing_strategy: "complete-case"
-    missing_justification: "Complete-case analysis under plausible MCAR assumption; verified with sensitivity analysis"
+    missing_justification: "Complete-case analysis under plausible MCAR assumption; sensitivity analysis assesses robustness to plausible departures from MCAR"
     options:
       ci_method: "profile"
       method: "firth"  # options: standard, firth
@@ -120,5 +120,4 @@ reporting:
   style: "nejm"
   format: "html"
   include_narrative: true
-  include_flow_diagram: true
 ```
