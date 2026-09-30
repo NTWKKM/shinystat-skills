@@ -58,7 +58,7 @@ medstat/
 │       ├── table1.py           # Baseline characteristics Table 1 with SMDs and auto-testing
 │       ├── tables.py           # APA 7, NEJM, JAMA HTML and text table formatters
 │       └── narrative.py        # Automated Statistical Methods narrative generation
-├── .agent/skills/              # 5 self-contained Agent Skills (SKILL.md + references/)
+├── .agent/skills/              # 6 self-contained Agent Skills (SKILL.md + references/)
 └── tests/
     ├── conftest.py             # Pytest forwarding wrapper & shared fixtures
     ├── fixtures/               # Synthetic clinical datasets
@@ -121,9 +121,9 @@ Copy skills into your Claude Code skills directory:
 
 ```bash
 git clone https://github.com/NTWKKM/shinystat-skills.git
-cp -r shinystat-skills/.agent/skills/* ~/.claude/skills/
+mkdir -p ~/.claude/skills && cp -r shinystat-skills/.agent/skills/* ~/.claude/skills/
 # Or for project-scoped:
-cp -r shinystat-skills/.agent/skills/* .claude/skills/
+mkdir -p .claude/skills && cp -r shinystat-skills/.agent/skills/* .claude/skills/
 ```
 
 Claude Code discovers skills in `~/.claude/skills/` (global) or `.claude/skills/` (project). Each `SKILL.md` with valid YAML frontmatter registers as an available skill.
@@ -160,10 +160,12 @@ git clone https://github.com/NTWKKM/shinystat-skills.git
 cd your-project
 
 # Option A: Symlink the skills directory
+mkdir -p .agents
 ln -s /path/to/shinystat-skills/.agent/skills .agents/skills
 
 # Option B: Copy and reference from AGENTS.md
-cp -r /path/to/shinystat-skills/.agent/skills .agents/skills
+mkdir -p .agents/skills
+cp -r /path/to/shinystat-skills/.agent/skills/* .agents/skills/
 ```
 
 Codex discovers `AGENTS.md` and `.agents/` directories by walking up from the CWD. Use `AGENTS.override.md` for machine-specific local tweaks (not committed to VCS).
@@ -179,9 +181,11 @@ OpenClaw supports the standard `SKILL.md` format:
 git clone https://github.com/NTWKKM/shinystat-skills.git
 
 # Global install
+mkdir -p ~/.agents/skills
 cp -r shinystat-skills/.agent/skills/* ~/.agents/skills/
 
 # Or workspace-scoped
+mkdir -p .agents/skills
 cp -r shinystat-skills/.agent/skills/* .agents/skills/
 
 # Verify
@@ -201,9 +205,11 @@ Pi supports the `SKILL.md` open standard:
 git clone https://github.com/NTWKKM/shinystat-skills.git
 
 # Copy into Pi's skills directory
+mkdir -p ~/.agents/skills
 cp -r shinystat-skills/.agent/skills/* ~/.agents/skills/
 
 # Or project-scoped
+mkdir -p .agents/skills
 cp -r shinystat-skills/.agent/skills/* .agents/skills/
 ```
 
@@ -220,6 +226,7 @@ Copy skills into Hermes' skills directory:
 git clone https://github.com/NTWKKM/shinystat-skills.git
 
 # Default location
+mkdir -p ~/.hermes/skills
 cp -r shinystat-skills/.agent/skills/* ~/.hermes/skills/
 
 # Or configure external_dirs in ~/.hermes/config.yaml:
@@ -242,6 +249,7 @@ git clone https://github.com/NTWKKM/shinystat-skills.git
 cd your-project
 
 # Copy or symlink
+mkdir -p .agents/skills
 cp -r /path/to/shinystat-skills/.agent/skills/* .agents/skills/
 ```
 

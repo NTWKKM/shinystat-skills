@@ -76,7 +76,7 @@ Map the data geometry and clinical context to one of the canonical clinical desi
 | Clinical Design Pattern | Detected Data Signature | Orchestrated Pipeline | Target Skill Set |
 | :--- | :--- | :--- | :--- |
 | **Type 1: Baseline Cohort & Descriptive** | Patient demographics, comorbidities, labs, group/arm comparison | Clean $\to$ Table 1 $\to$ Bivariate $\to$ Report | `medstat-clean`<br>`medstat-models`<br>`medstat-report` |
-| **Type 2: Prognostic & Multivariable Risk** | Exposure/predictors + binary clinical outcome ($0/1$) | Clean $\to$ Table 1 $\to$ GLM/Firth Logistic $\to$ RCS Splines $\to$ E-value $\to$ Report | `medstat-clean`<br>`medstat-models`<br>`medstat-report` |
+| **Type 2: Prognostic & Multivariable Risk** | Exposure/predictors + binary clinical outcome ($0/1$) | Clean $\to$ Table 1 $\to$ GLM/Firth Logistic $\to$ RCS Splines $\to$ E-value (causal exposure) $\to$ Report | `medstat-clean`<br>`medstat-models`<br>`medstat-report` |
 | **Type 3: Time-to-Event / Survival Cohort** | Follow-up time column + binary event indicator ($0/1$) | Clean $\to$ KM Curves $\to$ Cox PH + Schoenfeld $\to$ Firth Cox (if sparse) $\to$ Report | `medstat-clean`<br>`medstat-models`<br>`medstat-report` |
 | **Type 4: Diagnostic Accuracy & Biomarker** | Continuous/ordinal index test + binary gold standard | Clean $\to$ 2×2 Contingency (Wilson CI) $\to$ ROC + DeLong AUC $\to$ DCA Net Benefit $\to$ Report | `medstat-clean`<br>`medstat-diagnostic`<br>`medstat-report` |
 | **Type 5: Observational Causal Inference** | Non-randomized treatment indicator + baseline confounders | Clean $\to$ PSM Matching (caliper 0.2×SD) $\to$ Love Plot (SMD < 0.10) $\to$ Outcome Model $\to$ Report | `medstat-clean`<br>`medstat-causal-meta`<br>`medstat-models`<br>`medstat-report` |
@@ -98,7 +98,7 @@ The agent supports **both modes** seamlessly depending on user intent and contex
 - The pipeline has a single obvious gold-standard path.
 
 **Action**:
-1. Execute data audit and clean automatically with defensible defaults (Little's MCAR check, MICE if MAR/moderate missingness or complete-case if MCAR justified).
+1. Execute data audit and clean with clinically justified strategy (audit missingness patterns and Little's MCAR test; evaluate plausible mechanisms MAR/MCAR/MNAR; apply MICE, complete-case, KNN, or indicator with documented rationale and sample flow tracking).
 2. Run baseline Table 1 and primary model.
 3. Render publication-ready tables and narrative.
 4. Provide the complete result along with a transparent summary of decisions made.
@@ -107,7 +107,7 @@ The agent supports **both modes** seamlessly depending on user intent and contex
 **When to use**:
 - The user simply uploads a dataset without specifying the clinical question.
 - Multiple competing analytical paths exist (e.g., Propensity Score Matching vs Multivariable Regression adjustment; dichotomizing a continuous biomarker vs spline curve).
-- Missingness exceeds 20% or non-trivial clinical assumptions must be aligned.
+- Missingness patterns require mechanistic clinical assumptions, or non-trivial analytical trade-offs exist.
 
 **Action**:
 Present a concise, structured 1-page **Statistical Analysis Proposal (SAP)**:
@@ -125,7 +125,7 @@ Present a concise, structured 1-page **Statistical Analysis Proposal (SAP)**:
   1. Baseline Table 1 stratified by `tx_group` with Standardized Mean Differences (SMDs).
   2. Multivariable Logistic Regression with Firth penalization if event rate is sparse (<10 EPV).
   3. Non-linear dose-response spline for continuous `lactate`.
-  4. VanderWeele E-value sensitivity analysis for unmeasured confounding.
+  4. VanderWeele E-value sensitivity analysis for unmeasured confounding (evaluating the primary exposure–outcome relationship).
   5. Publication-grade Table formatted to NEJM style.
 ```
 *Prompt the user: "Would you like me to proceed with this plan, or would you like to adjust any variables or methods?"*
@@ -159,10 +159,12 @@ When executing the pipeline, strictly enforce the following sequence across down
 ### Step 3: Core Statistical & Causal Modeling
 - **Multivariable Regression / Survival**:
   ```bash
-  # Logistic / Firth
-  uv run medstat model fit --data clean_cohort.csv --type logistic --y <outcome> --x "<covariates>" --firth --output model_results.json
-  # Cox Survival
-  uv run medstat model fit --data clean_cohort.csv --type cox --time <duration> --event <status> --x "<covariates>" --schoenfeld --output cox_results.json
+  # Logistic (Standard)
+  uv run medstat model --data clean_cohort.csv --type logistic --outcome <outcome> --exposure <tx> --covariates "<covariates>" --output model_results.json
+  # Firth penalized logistic (for sparse events / separation)
+  uv run medstat model --data clean_cohort.csv --type logistic --outcome <outcome> --exposure <tx> --covariates "<covariates>" --method firth --ci-method profile --output model_results.json
+  # Cox Proportional Hazards (time and outcome, with Schoenfeld test)
+  uv run medstat model --data clean_cohort.csv --type cox --time <duration> --outcome <status> --exposure <tx> --covariates "<covariates>" --schoenfeld --output cox_results.json
   ```
 - **Diagnostic Testing**:
   ```bash
@@ -189,7 +191,7 @@ When executing the pipeline, strictly enforce the following sequence across down
 
 All operations coordinated by **medstat-master** must strictly follow these rules:
 
-1. **Strict Numeric 0/1 Endpoints**: Outcomes must be numeric `0` and `1` (`1 = Event`, `0 = Non-event`). Text outcomes (`"Yes"/"No"`, `"Dead"/"Alive"`) must be converted in Step 1.
+1. **Strict Numeric 0/1 Endpoints & Explicit Event Mapping**: Binary outcomes and survival endpoints must be numeric `0` and `1` (`1 = Event`, `0 = Non-event / Censored`). Before recoding text outcomes (`"Dead"`/`"Alive"`, `"Yes"`/`"No"`, `"Recurred"`/`"Disease-Free"`), the agent must establish an explicit, unambiguous mapping of which category represents the clinical event of interest. In survival analysis, ensure `1 = Event` and `0 = Censored` (never invert). If the event direction or status column meaning is ambiguous, **STOP and prompt the clinician for confirmation** before recoding.
 2. **Never Silent Deletion**: `MissingStrategyRequiredError` is fatal. Always pass `--strategy` and track sample attrition:
    $$N_{\text{initial}} \longrightarrow N_{\text{excluded}} \longrightarrow N_{\text{analyzed}}$$
 3. **Wilson Score Confidence Intervals**: All binomial proportions (Sensitivity, Specificity, PPV, NPV) must use Wilson score intervals.

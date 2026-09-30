@@ -1,6 +1,6 @@
 # Autonomous Statistical Analysis Plan (SAP) Templates
 
-This document provides standardized templates for presenting clinical proposals (Mode B) or executing automated analysis plans via YAML (`medstat --spec`).
+This document provides standardized templates for presenting clinical proposals (Mode B) or executing automated analysis plans via YAML (`medstat model --spec`).
 
 ---
 
@@ -40,7 +40,7 @@ Use this format when presenting a proposal to the user before running heavy comp
    - Sparse Event Handling: `[Standard Maximum Likelihood | Firth Penalized Likelihood]`
    - Non-Linear Modeling: `[Restricted Cubic Splines on continuous markers]`
 3. **Sensitivity & Robustness Analyses**:
-   - VanderWeele E-value for unmeasured confounding.
+   - VanderWeele E-value for unmeasured confounding (evaluating primary exposure–outcome effect).
    - Proportional hazards validation via Schoenfeld residuals.
 4. **Reporting & Publication Formatting**:
    - Format: `[NEJM / JAMA / APA 7]` HTML table with strictly 0 vertical borders.
@@ -54,54 +54,71 @@ Use this format when presenting a proposal to the user before running heavy comp
 
 ## 2. Automated YAML Analysis Plan Spec Template
 
-For headless automated execution via `medstat --spec analysis_plan.yaml`:
+For headless automated execution via `medstat model --spec analysis_plan.yaml`:
 
 ```yaml
 version: "1.0"
-study_title: "Automated Clinical Cohort Analysis"
-dataset:
+
+metadata:
+  study_title: "Automated Clinical Cohort Analysis"
+  protocol_id: "MEDSTAT-SAP-001"
+  analyst: "Clinical Biostatistics Core"
+  date: "2026-09-30"
+  reporting_guideline: "STROBE"
+  study_design: "retrospective_cohort"
+
+data:
   input_path: "data/raw_clinical_cohort.csv"
-  cleaned_path: "data/cleaned_cohort.csv"
-  sample_flow_output: "reports/sample_flow.json"
+  id_column: "patient_id"
+  filters: []
 
-cleaning:
-  missing_strategy: "mice"
-  imputations: 5
-  justification: "Missing physiological vitals and lab values assumed MAR conditional on baseline severity scores; Little's MCAR test p=0.24."
-  binary_outcome_recoding:
-    mortality_30d:
-      "Dead": 1
-      "Alive": 0
+variables:
+  - name: "mortality_30d"
+    label: "30-Day All-Cause Mortality"
+    role: "outcome"
+    data_type: "binary"
+    categories: [0, 1]
+    reference_category: 0
 
-table1:
-  stratify_by: "treatment_arm"
-  variables:
-    - "age"
-    - "sex"
-    - "bmi"
-    - "sofa_score"
-    - "comorbidity_charlson"
-  smd_threshold: 0.10
-  output_json: "reports/table1.json"
+  - name: "treatment_arm"
+    label: "High-Intensity Intervention"
+    role: "exposure"
+    data_type: "binary"
+    categories: [0, 1]
+    reference_category: 0
 
-primary_model:
-  type: "logistic"
-  outcome: "mortality_30d"
-  covariates:
-    - "treatment_arm"
-    - "age"
-    - "sex"
-    - "sofa_score"
-  firth_penalization: true  # auto-activated if events < 10 per variable
-  splines:
-    - variable: "sofa_score"
-      knots: 4
-  e_value_sensitivity: true
-  output_json: "reports/primary_model.json"
+  - name: "age"
+    label: "Baseline Age (years)"
+    role: "covariate"
+    data_type: "continuous"
+
+  - name: "sofa_score"
+    label: "Baseline SOFA Score"
+    role: "covariate"
+    data_type: "continuous"
+
+models:
+  - name: "primary_logistic_regression"
+    description: "Multivariable logistic regression of 30-day mortality on treatment arm"
+    type: "logistic"
+    outcome: "mortality_30d"
+    exposure: "treatment_arm"
+    covariates:
+      - "age"
+      - "sofa_score"
+    formula: "mortality_30d ~ treatment_arm + age + sofa_score"
+    reference_categories:
+      treatment_arm: 0
+    missing_strategy: "complete-case"
+    missing_justification: "Complete-case analysis under plausible MCAR assumption; verified with sensitivity analysis"
+    options:
+      ci_method: "profile"
+      method: "firth"  # options: standard, firth
+      e_value: true
 
 reporting:
-  target_journal: "nejm"
-  output_html: "reports/manuscript_table.html"
-  guideline: "strobe"
-  methods_narrative: true
+  style: "nejm"
+  format: "html"
+  include_narrative: true
+  include_flow_diagram: true
 ```

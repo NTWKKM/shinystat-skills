@@ -138,7 +138,7 @@ Users interacting with AI agents often upload clinical spreadsheets (CSV, XLSX) 
 
 ### Decision
 Introduce `medstat-master` as the master orchestrator skill. It operates in two modes:
-1. **Direct Autonomous Execution**: Automatically audits data health, recodes binary endpoints to numeric `0/1`, infers study design, runs the clean $\to$ model $\to$ report pipeline, and returns finished manuscript tables when user intent is unambiguous.
+1. **Direct Autonomous Execution**: Automatically audits data health, establishes explicit event mapping (including "Dead"/"Alive", "Yes"/"No", "Recurred"/"Disease-Free"; stopping for clinician confirmation when event direction or censoring status is ambiguous), recodes binary endpoints to numeric `0/1` (ensuring in survival analysis that 1 = Event and 0 = Censored without inversion), infers study design, runs the clean $\to$ model $\to$ report pipeline, and returns finished manuscript tables when user intent is unambiguous.
 2. **Statistical Analysis Proposal (SAP) Mode**: Synthesizes a structured 1-page clinical proposal aligning primary estimand, missingness mechanism, candidate model options, and target journal styles when ambiguity exists.
 
 Downstream atomic skills are chained seamlessly via CLI subcommands without requiring manual skill switching.
@@ -146,6 +146,26 @@ Downstream atomic skills are chained seamlessly via CLI subcommands without requ
 ### Consequences
 - **Status**: Accepted & Verified.
 - **User Experience**: Users can drop any clinical tabular file into chat and receive appropriate biostatistical analysis automatically.
-- **Clinical Governance**: Enforces all core invariants (strict numeric 0/1 outcomes, zero silent deletion with sample retention flow, Wilson CIs, DeLong AUC) centrally before any downstream model execution.
+- **Clinical Governance**: Enforces all core invariants (strict numeric 0/1 outcomes with verified event mapping, zero silent deletion with sample retention flow, Wilson CIs, DeLong AUC) centrally before any downstream model execution.
+
+---
+
+## ADR 10: Executable Documentation Contract & Skill CLI Parity
+
+### Context
+CodeRabbit AI review on PR #4 and local testing revealed that documentation and skill instructions drifted from actual CLI implementations:
+1. Phantom CLI flags (`model fit`, `--y`, `--x`, `--event`, `--firth`, `meta dl`) were documented that did not exist in the Click CLI options.
+2. SAP YAML spec templates used an imaginary schema (`dataset`, `cleaning`, `table1`, `primary_model`) that crashed `AnalysisPlan.from_yaml` at runtime.
+3. Multiple skill mirror directories (`.agent/`, `.agents/`, `.claude/`, `.cursor/`, `skills/`) lacked automated drift detection, allowing out-of-sync documentation across agent platforms.
+
+### Decision
+1. **Strict CLI Parity**: All CLI snippets in `SKILL.md` and reference documents must reflect exact, verifiable Click CLI options (`medstat model --outcome/--exposure/--covariates/--method firth`, `medstat model --spec`, `medstat meta --data --effect-col --se-col --study-col --model random --method dl`).
+2. **Executable Spec Templates**: All YAML templates in skill documentation must strictly adhere to the `AnalysisPlan` schema (`version`, `metadata`, `data`, `variables`, `models`, `reporting`) and execute successfully end-to-end via `medstat model --spec`.
+3. **Automated Drift Enforcement**: Enforce multi-agent mirror parity and YAML template validity programmatically via unit tests (`tests/unit/test_skill_docs_drift.py`).
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Reliability**: Any command or configuration copied by an AI agent or human analyst executes successfully without syntax crashes.
+- **Drift Immunity**: Continuous testing fails immediately if mirror copies diverge or if CLI options change without updating skill documentation.
 
 
