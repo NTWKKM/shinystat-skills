@@ -98,7 +98,7 @@ The agent supports **both modes** seamlessly depending on user intent and contex
 - The pipeline has a single obvious gold-standard path.
 
 **Action**:
-1. Execute data audit and clean with clinically justified strategy (audit missingness patterns and Little's MCAR test; evaluate plausible mechanisms MAR/MCAR/MNAR; apply MICE, complete-case, KNN, or indicator with documented rationale and sample flow tracking).
+1. Execute data audit and clean with clinically justified strategy (audit missingness patterns and Little's MCAR test; evaluate plausible mechanisms MAR/MCAR/MNAR; apply MICE, complete-case, KNN, or indicator with documented rationale and sample flow tracking; indicator imputation is not an appropriate default for missing confounders in observational analyses).
 2. Run baseline Table 1 and primary model.
 3. Render publication-ready tables and narrative.
 4. Provide the complete result along with a transparent summary of decisions made.
@@ -123,7 +123,7 @@ Present a concise, structured 1-page **Statistical Analysis Proposal (SAP)**:
   - Recommended Strategy: MICE (5 imputations) with sample flow audit.
 - **Recommended Analysis Pipeline**:
   1. Baseline Table 1 stratified by `tx_group` with Standardized Mean Differences (SMDs).
-  2. Multivariable Logistic Regression with Firth penalization if event rate is sparse (<10 EPV).
+  2. Multivariable Logistic Regression with Firth penalization if indicated by sparse-data diagnostics (evaluated against parameter count), separation, or prespecified bias-reduction criteria (not solely an EPV < 10 cutoff).
   3. Non-linear dose-response spline for continuous `lactate`.
   4. VanderWeele E-value sensitivity analysis for unmeasured confounding (evaluating the primary exposure–outcome relationship).
   5. Publication-grade Table formatted to NEJM style.

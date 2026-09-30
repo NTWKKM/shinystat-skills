@@ -136,17 +136,17 @@ Claude Code discovers skills in `~/.claude/skills/` (global) or `.claude/skills/
 Upload each skill as a `.zip` file via **Upload a skill**:
 
 ```bash
-# Create zip packages for each skill
+# Create zip packages for each skill (archiving the directory from its parent)
 cd shinystat-skills
 for skill_dir in .agent/skills/*/; do
   skill_name=$(basename "$skill_dir")
-  cd "$skill_dir" && zip -r ~/Desktop/"${skill_name}.zip" . && cd -
+  (cd .agent/skills && zip -r ~/Desktop/"${skill_name}.zip" "$skill_name")
 done
 ```
 
-Then in [claude.ai](https://claude.ai): Project → **Upload a skill** → select each `.zip` file. Claude reads the YAML frontmatter from `SKILL.md` inside each zip.
+Then in [claude.ai](https://claude.ai): Navigate to **Customize** → **Skills** → **+** → **Create skill** → **Upload a skill** (or Project settings) and select each `.zip` file. Ensure **Code execution and file creation** is enabled. Claude reads the YAML frontmatter from `SKILL.md` inside each skill archive.
 
-> **Note:** Claude Web cannot execute Python code — skills serve as instructions only. Copy and run generated code locally.
+> **Note:** Python execution is supported in Claude Web when code execution is enabled, but availability of `medstat-core` and its dependencies depends on the execution environment. If `medstat` is not available in the environment, use the generated instructions and code locally.
 
 </details>
 

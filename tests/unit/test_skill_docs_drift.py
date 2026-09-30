@@ -48,6 +48,15 @@ def test_skill_mirror_parity(mirror_dir: Path):
         ]
     )
 
+    mirror_files = sorted(
+        [p.relative_to(mirror_dir) for p in mirror_dir.rglob("*") if p.is_file()]
+    )
+    assert mirror_files == canonical_files, (
+        f"Mirror directory {mirror_dir.parent.name} file set differs from canonical skills/:\n"
+        f"Extra in mirror: {set(mirror_files) - set(canonical_files)}\n"
+        f"Missing from mirror: {set(canonical_files) - set(mirror_files)}"
+    )
+
     for rel_path in canonical_files:
         src = SKILLS_CANONICAL / rel_path
         dst = mirror_dir / rel_path
