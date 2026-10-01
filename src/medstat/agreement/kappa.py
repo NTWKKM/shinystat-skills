@@ -74,35 +74,50 @@ def cohens_kappa(
                     w[i, j] = 1.0 - abs(i - j) / (k - 1)
                 else:
                     w[i, j] = 1.0 - ((i - j) ** 2) / ((k - 1) ** 2)
-        p_o_w = float(np.sum(w * p_mat))
-        p_e_w = float(np.sum(w * np.outer(row_margins, col_margins)))
-        kappa = (p_o_w - p_e_w) / (1.0 - p_e_w) if abs(1.0 - p_e_w) > 1e-12 else 1.0
+        p_o = float(np.sum(w * p_mat))
+        p_e = float(np.sum(w * np.outer(row_margins, col_margins)))
     else:
-        kappa = (
-            (p_observed - p_expected) / (1.0 - p_expected)
-            if abs(1.0 - p_expected) > 1e-12
-            else 1.0
-        )
+        w = np.eye(k, dtype=float)
+        p_o = p_observed
+        p_e = p_expected
 
-    # Standard error approximation
-    se = (
-        np.sqrt(
-            p_expected
-            + p_expected**2
-            - np.sum(row_margins * col_margins * (row_margins + col_margins))
-        )
-        / ((1.0 - p_expected) * np.sqrt(n))
-        if abs(1.0 - p_expected) > 1e-12
+    denom = 1.0 - p_e
+    kappa = (p_o - p_e) / denom if abs(denom) > 1e-12 else 1.0
+
+    # 1. Null standard error (Fleiss, Cohen, & Everitt 1969) under H0: kappa = 0
+    # Used for the z-test and p-value
+    w_row = w @ col_margins  # \bar{w}_{i\cdot} = \sum_j w_{ij} p_{\cdot j}
+    w_col = w.T @ row_margins  # \bar{w}_{\cdot j} = \sum_i w_{ij} p_{i\cdot}
+    w_bar_sum = np.add.outer(w_row, w_col)  # \bar{w}_{i\cdot} + \bar{w}_{\cdot j}
+    outer_margins = np.outer(row_margins, col_margins)
+
+    var_null = (
+        (np.sum(outer_margins * ((w - w_bar_sum) ** 2)) - p_e**2) / (n * (denom**2))
+        if abs(denom) > 1e-12
         else 0.0
     )
-    ci_lower = max(-1.0, float(kappa - 1.96 * se))
-    ci_upper = min(1.0, float(kappa + 1.96 * se))
-    z = (kappa / se) if se > 0 else 0.0
+    se_null = float(np.sqrt(max(0.0, var_null)))
+
+    # 2. Large-sample non-null standard error for confidence interval
+    # (Cohen 1968 / Fleiss, Cohen & Everitt 1969 / Cicchetti & Allison 1971)
+    z_mat = w * denom - w_bar_sum * (1.0 - p_o)
+    var_non_null = (
+        (np.sum(p_mat * (z_mat**2)) - (p_o * p_e - 2.0 * p_e + p_o) ** 2)
+        / (n * (denom**4))
+        if abs(denom) > 1e-12
+        else 0.0
+    )
+    se_ci = float(np.sqrt(max(0.0, var_non_null)))
+
+    ci_lower = max(-1.0, float(kappa - 1.96 * se_ci))
+    ci_upper = min(1.0, float(kappa + 1.96 * se_ci))
+    z = (kappa / se_null) if se_null > 0 else 0.0
     p_val = float(2.0 * (1.0 - stats.norm.cdf(abs(z))))
 
     return {
         "kappa": float(kappa),
-        "se": float(se),
+        "se": float(se_ci),
+        "se_null": float(se_null),
         "ci_lower": ci_lower,
         "ci_upper": ci_upper,
         "p_value": p_val,
@@ -128,9 +143,15 @@ def fleiss_kappa(subject_category_matrix: np.ndarray) -> dict[str, Any]:
         return {"kappa": 1.0, "se": 0.0, "p_value": 0.0}
 
     # Number of raters per subject
-    m = np.sum(mat[0, :])
+    row_sums = np.sum(mat, axis=1)
+    m = row_sums[0]
     if m <= 1:
         raise ValueError("Fleiss' Kappa requires at least 2 ratings per subject.")
+    if not np.all(row_sums == m):
+        raise ValueError(
+            f"Fleiss' Kappa requires all subjects to have the same number of ratings. "
+            f"Found varying rating counts: min={row_sums.min()}, max={row_sums.max()}."
+        )
 
     # Proportion of all assignments to each category
     p_j = np.sum(mat, axis=0) / (N * m)
@@ -176,21 +197,33 @@ def calculate_kappa(
     """
     High-level entry point to calculate either Cohen's or Fleiss' Kappa automatically.
     """
-    # 1. Two named columns -> Cohen's Kappa
-    if rater1 and rater2 and rater1 in df.columns and rater2 in df.columns:
+    # 1. Explicit two named columns -> Cohen's Kappa
+    if rater1 is not None or rater2 is not None:
+        if not (rater1 and rater2 and rater1 in df.columns and rater2 in df.columns):
+            missing = [r for r in (rater1, rater2) if not r or r not in df.columns]
+            raise ValueError(
+                f"Explicit rater columns not found in DataFrame: {missing}"
+            )
         res = cohens_kappa(df[rater1], df[rater2])
         res["type"] = "cohen"
         res["raters"] = [rater1, rater2]
         return res
 
-    # 2. Long format -> pivot to subject x rater
-    if (
-        targets
-        and raters
-        and ratings
-        and all(c in df.columns for c in (targets, raters, ratings))
-    ):
+    # 2. Explicit long format -> pivot to subject x rater
+    if targets is not None or raters is not None or ratings is not None:
+        if not (
+            targets
+            and raters
+            and ratings
+            and all(c in df.columns for c in (targets, raters, ratings))
+        ):
+            missing = [
+                c for c in (targets, raters, ratings) if not c or c not in df.columns
+            ]
+            raise ValueError(f"Long-format columns not found in DataFrame: {missing}")
         pivot_df = df.pivot(index=targets, columns=raters, values=ratings)
+
+    # 3. Standard auto-detected long format columns
     elif (
         "subject_id" in df.columns
         and "rater_id" in df.columns
@@ -204,10 +237,20 @@ def calculate_kappa(
             if c in ("rating", "ratings", "score", "measurement_score")
         )
         pivot_df = df.pivot(index="subject_id", columns="rater_id", values=score_col)
+
+    # 4. No explicit rater columns resolved -> raise ValueError
     else:
-        pivot_df = df.select_dtypes(include=[np.number, "category", "object"])
+        raise ValueError(
+            "No explicit rater columns resolved from data. "
+            "Specify rater1 and rater2 for two raters, or targets, raters, and ratings for long-format data."
+        )
 
     cols = list(pivot_df.columns)
+    if len(cols) < 2:
+        raise ValueError(
+            f"At least 2 raters are required to compute Kappa, found {len(cols)}."
+        )
+
     if len(cols) == 2:
         res = cohens_kappa(pivot_df[cols[0]], pivot_df[cols[1]])
         res["type"] = "cohen"
@@ -215,20 +258,36 @@ def calculate_kappa(
         return res
 
     # If >2 raters:
-    # If values are continuous, discretize into quartiles
+    # Reject continuous ratings instead of quartile-binning them
     vals = pivot_df.values.flatten()
-    if (
-        pd.api.types.is_numeric_dtype(pivot_df.dtypes.iloc[0])
-        and len(np.unique(vals[~pd.isna(vals)])) > 10
-    ):
-        # Bin continuous measurements into 4 categories
-        try:
-            binned = pd.qcut(
-                pivot_df.stack(), q=4, labels=[1, 2, 3, 4], duplicates="drop"
-            ).unstack()
-            pivot_df = binned
-        except Exception:
-            pass
+    valid_vals = vals[~pd.isna(vals)]
+    if len(valid_vals) == 0:
+        raise ValueError("No valid ratings found.")
+
+    is_numeric = False
+    try:
+        num_vals = pd.to_numeric(valid_vals)
+        is_numeric = True
+    except (ValueError, TypeError):
+        is_numeric = False
+
+    if is_numeric:
+        has_fractions = bool(
+            np.any(~np.isclose(num_vals, np.round(num_vals), atol=1e-8))
+        )
+        if has_fractions or len(np.unique(num_vals)) > 10:
+            raise ValueError(
+                "Continuous ratings are not supported for Kappa. "
+                "Ratings must be discrete categorical classes; for continuous scores, use ICC or Bland-Altman."
+            )
+
+    # Validate that each subject has the same number of ratings before calling fleiss_kappa
+    ratings_per_subj = pivot_df.notna().sum(axis=1)
+    if ratings_per_subj.nunique() > 1:
+        raise ValueError(
+            f"Fleiss' Kappa requires all subjects to have the same number of ratings. "
+            f"Found varying rating counts: min={ratings_per_subj.min()}, max={ratings_per_subj.max()}."
+        )
 
     # Build count matrix for Fleiss' Kappa
     cats = sorted(list(set(pivot_df.stack().dropna().unique())))

@@ -59,14 +59,17 @@ def run_mediation(
     X_out = sm.add_constant(df_clean[[treatment, mediator] + covar_list])
     y_out = df_clean[outcome]
 
-    is_binary_outcome = y_out.nunique() == 2
-    if is_binary_outcome and (set(y_out.unique()).issubset({0, 1, 0.0, 1.0})):
-        try:
-            out_model = sm.Logit(y_out, X_out).fit(disp=False)
-        except Exception:
-            out_model = sm.OLS(y_out, X_out).fit()
+    is_binary_outcome = bool(
+        y_out.nunique() == 2 and set(y_out.unique()).issubset({0, 1, 0.0, 1.0})
+    )
+    if is_binary_outcome:
+        out_model = sm.Logit(y_out, X_out).fit(disp=False)
+        scale = "log_odds"
+        method_desc = "Baron-Kenny Product of Coefficients (Log-Odds Scale)"
     else:
         out_model = sm.OLS(y_out, X_out).fit()
+        scale = "linear"
+        method_desc = "Quasi-Bayesian Monte Carlo & Baron-Kenny (Linear Scale)"
 
     beta_trt = float(out_model.params[treatment])
     se_beta_trt = float(out_model.bse[treatment])
@@ -113,6 +116,8 @@ def run_mediation(
         "mediator": mediator,
         "outcome": outcome,
         "n_observations": len(df_clean),
+        "scale": scale,
+        "effect_scale": scale,
         "acme": acme_point,
         "acme_ci": acme_ci,
         "acme_pvalue": p_value_acme,
@@ -124,5 +129,5 @@ def run_mediation(
         "total_effect": total_point,
         "total_ci": total_ci,
         "prop_mediated": prop_med,
-        "method": "Quasi-Bayesian Monte Carlo & Baron-Kenny",
+        "method": method_desc,
     }

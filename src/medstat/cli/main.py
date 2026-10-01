@@ -330,12 +330,22 @@ def clean_cmd(
         raise click.ClickException(str(e))
 
     if outlier_action:
-        act = outlier_action.lower()
+        act = outlier_action.lower().strip()
         num_cols = [
             c
             for c in cleaned_df.columns
             if pd.api.types.is_numeric_dtype(cleaned_df[c])
+            and cleaned_df[c].dropna().nunique() > 2
         ]
+        outlier_counts: dict[str, int] = {}
+        for c in num_cols:
+            mask, stats_c = detect_outliers(
+                cleaned_df[c], method="iqr", threshold=iqr_multiplier
+            )
+            outlier_counts[c] = int(stats_c.get("outlier_count", mask.sum()))
+
+        info["outlier_counts"] = outlier_counts
+
         if act == "remove":
             is_outlier = pd.Series(False, index=cleaned_df.index)
             for c in num_cols:
@@ -354,6 +364,10 @@ def clean_cmd(
                 cleaned_df[c] = handle_outliers(
                     cleaned_df[c], method="iqr", action=act, threshold=iqr_multiplier
                 )
+        elif act == "flag":
+            # Per-column outlier counts recorded in info["outlier_counts"] without altering data
+            pass
+
         info["outlier_action"] = act
 
     assumed_mech = (
@@ -367,6 +381,9 @@ def clean_cmd(
             audit_dict = audit.to_dict() if hasattr(audit, "to_dict") else audit
             audit_dict["assumed_mechanism"] = assumed_mech
             audit_dict["sample_flow"] = tracker.to_dict()
+            if "outlier_action" in info:
+                audit_dict["outlier_action"] = info["outlier_action"]
+                audit_dict["outlier_counts"] = info.get("outlier_counts", {})
             json.dump(audit_dict, f, indent=2, default=str)
 
     if output:
@@ -715,6 +732,12 @@ def model_cmd(
             rcs_summary = rcs_res.get("summary_df")
             if isinstance(rcs_summary, pd.DataFrame):
                 result_data["spline_estimates"] = _serialize_summary_df(rcs_summary)
+            if "contrast_df" in rcs_res and isinstance(
+                rcs_res["contrast_df"], pd.DataFrame
+            ):
+                result_data["contrast_df"] = _serialize_summary_df(
+                    rcs_res["contrast_df"]
+                )
             result_data["knots"] = rcs_res.get("knots", [])
             result_data["non_linear_pvalue"] = rcs_res.get("non_linear_pvalue")
         elif mtype in ("logistic", "logit", "binary"):
@@ -729,6 +752,12 @@ def model_cmd(
             rcs_summary = rcs_res.get("summary_df")
             if isinstance(rcs_summary, pd.DataFrame):
                 result_data["spline_estimates"] = _serialize_summary_df(rcs_summary)
+            if "contrast_df" in rcs_res and isinstance(
+                rcs_res["contrast_df"], pd.DataFrame
+            ):
+                result_data["contrast_df"] = _serialize_summary_df(
+                    rcs_res["contrast_df"]
+                )
             result_data["knots"] = rcs_res.get("knots", [])
             result_data["non_linear_pvalue"] = rcs_res.get("non_linear_pvalue")
 
@@ -776,10 +805,14 @@ def model_cmd(
     help="Second biomarker column for paired DeLong ROC comparison.",
 )
 @click.option(
-    "--dca", is_flag=True, help="Perform Decision Curve Analysis (DCA net benefit)."
+    "--dca",
+    is_flag=True,
+    help="Perform Decision Curve Analysis (requires predicted risk probabilities in [0, 1]; oriented if --direction low).",
 )
 @click.option(
-    "--calibration", is_flag=True, help="Compute calibration curve and Brier score."
+    "--calibration",
+    is_flag=True,
+    help="Compute calibration curve and Brier score (requires predicted risk probabilities in [0, 1]; oriented if --direction low).",
 )
 @click.option("--output", type=click.Path(), help="Output path for diagnostic JSON.")
 def diag_cmd(
@@ -838,17 +871,47 @@ def diag_cmd(
             comp_res = delong_paired_test(y_true, eff_score, eff_comp)
             diag_res["delong_comparison"] = comp_res
 
+    if dca or calibration:
+        valid_mask = ~(pd.isna(y_true) | pd.isna(y_score))
+        valid_scores = y_score[valid_mask]
+        if len(valid_scores) == 0:
+            raise click.ClickException(
+                "Test score contains no valid observations for DCA or calibration."
+            )
+        min_score = float(np.nanmin(valid_scores))
+        max_score = float(np.nanmax(valid_scores))
+
+        if min_score >= 0.0 and max_score <= 1.0:
+            prob_risk = (1.0 - y_score) if dir_norm == "low" else y_score
+        else:
+            eff_score = -y_score if dir_norm == "low" else y_score
+            try:
+                import statsmodels.api as sm
+
+                X_log = sm.add_constant(eff_score[valid_mask])
+                model_prob = sm.Logit(y_true[valid_mask].astype(int), X_log).fit(
+                    disp=False
+                )
+                prob_risk = pd.Series(np.nan, index=df.index, dtype=float)
+                prob_risk.loc[valid_mask] = model_prob.predict(X_log)
+                prob_risk = prob_risk.values
+            except Exception:
+                norm_score = (eff_score - min_score) / (max_score - min_score + 1e-9)
+                prob_risk = np.clip(norm_score, 1e-6, 1.0 - 1e-6)
+    else:
+        prob_risk = y_score
+
     if dca:
-        dca_res = calculate_dca(y_true, y_score)
+        dca_res = calculate_dca(y_true, prob_risk)
         if isinstance(dca_res, pd.DataFrame):
             diag_res["dca"] = dca_res.to_dict(orient="records")
         else:
             diag_res["dca"] = dca_res
 
     if calibration:
-        brier = calculate_brier_score(y_true, y_score)
-        slope_inter = calculate_calibration_slope_and_intercept(y_true, y_score)
-        ici = calculate_ici(y_true, y_score)
+        brier = calculate_brier_score(y_true, prob_risk)
+        slope_inter = calculate_calibration_slope_and_intercept(y_true, prob_risk)
+        ici = calculate_ici(y_true, prob_risk)
         diag_res["calibration"] = {
             "brier": brier,
             "slope_and_intercept": slope_inter,
@@ -1184,13 +1247,48 @@ def meta_cmd(
 )
 @click.option("--alpha", default=0.05, type=float, help="Type I error rate.")
 @click.option("--power", default=0.80, type=float, help="Statistical power (1 - beta).")
-@click.option("--effect-size", default=0.5, type=float, help="Target effect size.")
+@click.option(
+    "--effect-size",
+    default=None,
+    type=float,
+    help="Target effect size (Cohen's d for t-test).",
+)
+@click.option(
+    "--p1",
+    default=None,
+    type=float,
+    help="Baseline proportion for proportions test in (0, 1).",
+)
+@click.option(
+    "--p2",
+    default=None,
+    type=float,
+    help="Comparison proportion for proportions test in (0, 1).",
+)
+@click.option(
+    "--hazard-ratio",
+    "--hr",
+    default=None,
+    type=float,
+    help="Target hazard ratio for survival log-rank test.",
+)
+@click.option(
+    "--correlation-r",
+    "--r",
+    default=None,
+    type=float,
+    help="Expected Pearson correlation coefficient r in (-1, 1).",
+)
 @click.option("--output", type=click.Path(), help="Output path for sample size JSON.")
 def sample_size_cmd(
     test_type: str,
     alpha: float,
     power: float,
-    effect_size: float,
+    effect_size: float | None,
+    p1: float | None,
+    p2: float | None,
+    hazard_ratio: float | None,
+    correlation_r: float | None,
     output: str | None,
 ) -> None:
     """Calculate statistical power and required sample size."""
@@ -1210,21 +1308,29 @@ def sample_size_cmd(
         )
 
     if tt_lower in ("t-test", "t_test", "ttest", "means"):
+        es = effect_size if effect_size is not None else 0.5
         n_per_group = calculate_sample_size_t_test(
-            effect_size=effect_size, alpha=alpha, power=power
+            effect_size=es, alpha=alpha, power=power
         )
         res = {
             "test_type": test_type,
             "alpha": alpha,
             "power": power,
-            "effect_size": effect_size,
+            "effect_size": es,
             "sample_size_per_group": n_per_group,
             "total_sample_size": n_per_group * 2,
         }
     elif tt_lower in ("proportions", "proportion"):
-        p1 = 0.20
-        h = effect_size
-        p2 = min(0.95, max(0.05, p1 + h / 2.0))
+        if p1 is None or p2 is None:
+            raise click.ClickException(
+                "Proportions sample size calculation requires explicitly supplied --p1 and --p2 (both in (0, 1))."
+            )
+        if not (0.0 < p1 < 1.0 and 0.0 < p2 < 1.0):
+            raise click.ClickException(
+                f"Proportions --p1 ({p1}) and --p2 ({p2}) must be strictly between 0 and 1."
+            )
+        if p1 == p2:
+            raise click.ClickException("Proportions --p1 and --p2 cannot be identical.")
         prop_res = calculate_sample_size_proportions(
             p1=p1, p2=p2, alpha=alpha, power=power
         )
@@ -1232,27 +1338,45 @@ def sample_size_cmd(
             "test_type": test_type,
             "alpha": alpha,
             "power": power,
-            "effect_size": effect_size,
+            "p1": p1,
+            "p2": p2,
             "sample_size_per_group": prop_res["n1"],
             "total_sample_size": prop_res["total_n"],
             "details": prop_res,
         }
     elif tt_lower in ("survival", "logrank", "log-rank"):
-        hr = effect_size if effect_size != 1.0 else 0.70
+        if hazard_ratio is None:
+            raise click.ClickException(
+                "Survival sample size calculation requires explicitly supplied --hazard-ratio (or --hr)."
+            )
+        if hazard_ratio <= 0.0 or hazard_ratio == 1.0:
+            raise click.ClickException(
+                f"Hazard ratio must be positive and not equal to 1.0, found {hazard_ratio}."
+            )
         surv_res = calculate_sample_size_survival(
-            hazard_ratio=hr, alpha=alpha, power=power
+            hazard_ratio=hazard_ratio, alpha=alpha, power=power
         )
         res = {
             "test_type": test_type,
             "alpha": alpha,
             "power": power,
-            "hazard_ratio": hr,
+            "hazard_ratio": hazard_ratio,
             "required_events": surv_res["required_events"],
             "total_sample_size": surv_res["total_n"],
             "sample_size_per_group": surv_res["n_treated"],
         }
     elif tt_lower in ("correlation", "pearson"):
-        r_val = effect_size if -1 < effect_size < 1 and effect_size != 0 else 0.30
+        r_val = correlation_r
+        if r_val is None and effect_size is not None:
+            r_val = effect_size
+        if r_val is None:
+            raise click.ClickException(
+                "Correlation sample size calculation requires explicitly supplied --r (or --correlation-r)."
+            )
+        if not (-1.0 < r_val < 1.0 and r_val != 0.0):
+            raise click.ClickException(
+                f"Correlation r must be strictly between -1.0 and 1.0, and non-zero. Found: {r_val}."
+            )
         corr_res = calculate_sample_size_correlation(r=r_val, alpha=alpha, power=power)
         res = {
             "test_type": test_type,

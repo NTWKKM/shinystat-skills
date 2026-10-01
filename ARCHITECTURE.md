@@ -42,6 +42,7 @@ System architecture and structural specifications for `medstat-core` and the `me
       │                     medstat.agreement                             │
       │  - Bland-Altman LoA with Carkeet CIs                              │
       │  - Pure-SciPy Intraclass Correlation Coefficient (ICC) (No GPL)   │
+      │  - Cohen's & Fleiss' Kappa (Categorical Inter-Rater Agreement)    │
       └───────────────────────────────────────────────────────────────────┘
 ```
 
@@ -79,6 +80,11 @@ System architecture and structural specifications for `medstat-core` and the `me
 - **`models.py`**: Fixed-effects inverse variance and DerSimonian-Laird random-effects meta-analysis, Cochran's Q test, and Higgins $I^2$.
 - **`forest.py`**: Forest plot structured data generation.
 - **`bias.py`**: Egger's linear regression test for funnel plot asymmetry.
+
+### `medstat.agreement`
+- **`bland_altman.py`**: Paired measurement difference analysis and limits of agreement with exact Carkeet CIs.
+- **`icc.py`**: Pure-SciPy two-way ANOVA Intraclass Correlation Coefficients (ICC1, ICC2, ICC3, and average-measure forms).
+- **`kappa.py`**: Cohen's Kappa (unweighted, linear, quadratic with non-null and null SEs) and Fleiss' generalized multi-rater Kappa for discrete categories.
 
 ### `medstat.reporting`
 - **`tables.py`**: Journal-compliant polymorphic HTML table rendering (NEJM, JAMA, APA 7) with strict border rules, no vertical dividers, and support for Table 1, Regression, Diagnostic accuracy, Bland-Altman, ICC, and Covariate balance.

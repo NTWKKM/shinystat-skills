@@ -37,11 +37,24 @@ def load_clinical_data(
             df = pd.read_excel(p, sheet_name=sheet_name)
         elif ext == ".parquet":
             df = pd.read_parquet(p)
-        elif ext == ".tsv":
-            df = pd.read_csv(p, sep="\t")
-        else:
-            # Default to CSV
-            df = pd.read_csv(p)
+        elif ext == ".tsv" or ext in (".csv", ".txt") or True:
+            sep = "\t" if ext == ".tsv" else ","
+            encodings = ["utf-8", "utf-8-sig", "latin1", "cp1252"]
+            df = None
+            last_decode_err: Exception | None = None
+            for enc in encodings:
+                try:
+                    df = pd.read_csv(p, sep=sep, encoding=enc)
+                    break
+                except UnicodeDecodeError as err:
+                    last_decode_err = err
+                    continue
+            if df is None:
+                if last_decode_err is not None:
+                    raise last_decode_err
+                raise click.ClickException(
+                    f"Failed to decode '{path}' with supported encodings."
+                )
     except Exception as e:
         raise click.ClickException(f"Failed to load dataset '{path}': {e}")
 

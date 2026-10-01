@@ -222,7 +222,32 @@ Downstream reporting in `medstat report` previously crashed (`AttributeError: 'l
 - **Publication Readiness**: Seamlessly converts all core statistical outputs (Table 1, GLM/Cox regression, diagnostic test accuracy, Bland-Altman LoA, ICC reliability, and Causal PSM covariate balance) into publication-styled HTML tables matching NEJM, JAMA, and APA 7 standards.
 - **Guideline Completeness**: Full coverage across the major EQUATOR Network publication guidelines.
 
-[MEMORY_LEARN: Universal clinical ingestion with fuzzy column suggestions, biomarker score directionality handling, and polymorphic table reporting transform biostatistical CLI tools into fully autonomous, error-resilient agent skills.]
+---
+
+## ADR 14: Biostatistical Precision, Rater Agreement Rigor, and Probability-Scale DCA Calibration
+
+### Context
+Code review identified statistical subtleties across rater agreement, mediation, spline odds ratios, and diagnostic decision curve analysis:
+1. Cohen's Kappa confidence intervals previously used the null standard error instead of the large-sample non-null standard error accounting for weights; Fleiss' Kappa lacked rater count uniformity checks and silently binned continuous ratings into quartiles.
+2. Mediation with binary outcomes returned log-odds coefficients under OLS fallbacks without explicit scale labeling.
+3. Logistic RCS summary tables reported exponentiated basis terms as odds ratios instead of contrast estimates relative to reference values.
+4. DCA and calibration calculations accepted unoriented scores and arbitrary ranges outside $[0, 1]$.
+5. Outlier detection lacked flag-only count recording and operated blindly on low-cardinality/binary columns.
+6. Sample size calculations relied on silent default effect sizes and heuristic conversions.
+
+### Decision
+1. **Agreement**: Calculate separate Fleiss-Cohen-Everitt null SE (for hypothesis z-tests) and large-sample non-null SE (for 95% CIs) in `cohens_kappa`. Validate constant rater count per subject in `fleiss_kappa` and reject continuous ratings instead of quartile-binning them. Require explicit rater columns or long format.
+2. **Mediation**: Reject silent OLS fallbacks in binary Logit fits, and label effect estimates explicitly with `"scale": "log_odds"` vs `"scale": "linear"`.
+3. **Spline Contrasts**: Exclude basis terms and intercept from `odds_ratio` in `summary_df` (set to NaN), and construct a contrast matrix relative to `ref_value` to yield interpretable Odds Ratio trajectories across continuous exposure grids in `contrast_df`.
+4. **DCA & Calibration**: Enforce risk probability orientation: if scores are bounded in $[0, 1]$, orient low-abnormality scores as $1 - p$; if continuous biomarkers are passed, orient via univariate logistic regression to map scores into valid probability scales.
+5. **Data Cleaning & Loader**: Exclude binary/low-cardinality columns (distinct non-null values $\le 2$) from outlier processing and record per-column outlier counts when `--outlier-action flag` is passed. Support multi-encoding fallback (`utf-8`, `utf-8-sig`, `latin1`, `cp1252`) in universal data loader.
+6. **Sample Size**: Require explicit parameter inputs (`--p1`/`--p2` for proportions, `--hazard-ratio` for survival, `--r` for correlation) and reject silent default fallbacks.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Statistical Rigor**: Eliminates false confidence interval coverage in weighted kappa, misleading spline basis ORs, and decision curve artifacts from unoriented raw biomarker scores.
+
+[MEMORY_LEARN: Strict non-null standard errors for weighted kappa, contrast matrices for non-linear spline ORs, and probability-oriented DCA curves ensure rigorous biostatistical validity in automated clinical pipelines.]
 
 
 

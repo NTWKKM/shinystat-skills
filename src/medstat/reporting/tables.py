@@ -544,13 +544,14 @@ def render_balance_table(
     for idx, cov in enumerate(covariates):
         pre_val = smd_pre[idx] if idx < len(smd_pre) else None
         post_val = smd_post[idx] if idx < len(smd_post) else None
-        pre_str = f"{pre_val:.3f}" if pre_val is not None else "—"
-        post_str = f"{post_val:.3f}" if post_val is not None else "—"
-        status = (
-            "Balanced (SMD < 0.10)"
-            if (post_val is not None and abs(post_val) < 0.10)
-            else "Imbalanced"
-        )
+        pre_valid = pre_val is not None and math.isfinite(pre_val)
+        post_valid = post_val is not None and math.isfinite(post_val)
+        pre_str = f"{pre_val:.3f}" if pre_valid else "—"
+        post_str = f"{post_val:.3f}" if post_valid else "—"
+        if post_valid:
+            status = "Balanced (SMD < 0.10)" if abs(post_val) < 0.10 else "Imbalanced"
+        else:
+            status = "—"
         records.append(
             {
                 "Covariate": str(cov),
