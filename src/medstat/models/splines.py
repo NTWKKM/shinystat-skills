@@ -284,3 +284,82 @@ def fit_cox_rcs(
     }
 
     return CoxRCSResult(fig, contrast_df, stats_meta)
+
+
+def fit_logistic_rcs(
+    df: pd.DataFrame,
+    outcome: str,
+    spline_var: str,
+    covariates: list[str] | None = None,
+    n_knots: int = 4,
+    ref_value: float | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """
+    Fit multivariable Logistic Regression with Restricted Cubic Splines (RCS).
+
+    Parameters:
+        df: Input DataFrame.
+        outcome: Binary outcome column.
+        spline_var: Continuous variable to model with splines.
+        covariates: Optional baseline confounders.
+        n_knots: Number of knots (default: 4).
+        ref_value: Reference value for Odds Ratio comparisons (default: median).
+
+    Returns:
+        dict containing model, summary_df, knots, non_linear_pvalue, and log_likelihood.
+    """
+    import statsmodels.api as sm
+
+    adjust = covariates or []
+    all_cols = [outcome, spline_var] + adjust
+    clean_df = df[all_cols].dropna().copy()
+
+    if len(clean_df) < 10:
+        raise ValueError("Insufficient observations for logistic RCS analysis.")
+
+    num_knots = n_knots if n_knots >= 3 else 4
+    if ref_value is None:
+        ref_value = float(clean_df[spline_var].median())
+
+    rhs = f"cr({_quote_col(spline_var)}, df={num_knots}, constraints='center')"
+    if adjust:
+        rhs += " + " + " + ".join(_quote_col(c) for c in adjust)
+
+    X = patsy.dmatrix(rhs, clean_df, return_type="dataframe")
+    y = clean_df[outcome].values
+
+    logit_model = sm.Logit(y, X).fit(disp=False)
+
+    # Linear comparison for non-linearity test
+    linear_rhs = f"{_quote_col(spline_var)}"
+    if adjust:
+        linear_rhs += " + " + " + ".join(_quote_col(c) for c in adjust)
+    X_linear = patsy.dmatrix(linear_rhs, clean_df, return_type="dataframe")
+    linear_model = sm.Logit(y, X_linear).fit(disp=False)
+
+    lr_stat = max(0.0, 2.0 * (logit_model.llf - linear_model.llf))
+    df_diff = len(logit_model.params) - len(linear_model.params)
+    non_linear_p = float(stats.chi2.sf(lr_stat, df=df_diff)) if df_diff > 0 else np.nan
+
+    conf = logit_model.conf_int()
+    summary_df = pd.DataFrame(
+        {
+            "coef": logit_model.params,
+            "std_error": logit_model.bse,
+            "z_score": logit_model.tvalues,
+            "p_value": logit_model.pvalues,
+            "odds_ratio": np.exp(logit_model.params),
+            "ci_lower": np.exp(conf[0]),
+            "ci_upper": np.exp(conf[1]),
+        }
+    )
+
+    return {
+        "model": logit_model,
+        "summary_df": summary_df,
+        "ref_value": ref_value,
+        "knots": num_knots,
+        "non_linear_pvalue": non_linear_p,
+        "log_likelihood": float(logit_model.llf),
+    }

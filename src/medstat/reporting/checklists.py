@@ -481,8 +481,358 @@ def get_tripod_checklist() -> ReportingChecklist:
     )
 
 
+def get_stard_checklist() -> ReportingChecklist:
+    """Standards for Reporting Diagnostic Accuracy Studies (STARD 2015)."""
+    items = [
+        ChecklistItem(
+            "1",
+            "Title",
+            "Identify study as a study of diagnostic accuracy using at least one measure of accuracy",
+            "Title and Abstract",
+        ),
+        ChecklistItem(
+            "2",
+            "Abstract",
+            "Structured summary of study design, methods, results, and conclusions",
+            "Title and Abstract",
+        ),
+        ChecklistItem(
+            "3",
+            "Background",
+            "Scientific and clinical background, including intended clinical role of index test",
+            "Introduction",
+        ),
+        ChecklistItem(
+            "4",
+            "Objectives",
+            "Study objectives and prespecified hypotheses",
+            "Introduction",
+        ),
+        ChecklistItem(
+            "5",
+            "Protocol",
+            "Whether a study protocol was prepared and where it can be accessed",
+            "Methods",
+        ),
+        ChecklistItem(
+            "6",
+            "Eligibility criteria",
+            "Eligibility criteria for participants",
+            "Methods",
+        ),
+        ChecklistItem(
+            "7",
+            "Setting",
+            "Where and when potentially eligible participants were identified",
+            "Methods",
+        ),
+        ChecklistItem(
+            "8",
+            "Participant recruitment",
+            "Whether participants formed a consecutive, random, or convenience series",
+            "Methods",
+        ),
+        ChecklistItem(
+            "9",
+            "Participant sampling",
+            "Whether data collection was prospective or retrospective",
+            "Methods",
+        ),
+        ChecklistItem(
+            "10a",
+            "Index test",
+            "Index test details, including how it was executed and interpreted",
+            "Methods",
+        ),
+        ChecklistItem(
+            "10b",
+            "Cut-offs",
+            "Prespecified or post-hoc cut-offs for index test positivity and test direction",
+            "Methods",
+        ),
+        ChecklistItem(
+            "11",
+            "Reference standard",
+            "Reference standard specifications, execution, and clinical rationale",
+            "Methods",
+        ),
+        ChecklistItem(
+            "12",
+            "Blinding",
+            "Blinding of index test readers to reference standard, and vice versa",
+            "Methods",
+        ),
+        ChecklistItem(
+            "13a",
+            "Statistical methods",
+            "Methods for estimating diagnostic accuracy (sensitivity, specificity, AUC) and 95% CIs",
+            "Methods",
+        ),
+        ChecklistItem(
+            "13b",
+            "Indeterminate results",
+            "How missing, indeterminate, or outlier results were handled",
+            "Methods",
+        ),
+        ChecklistItem(
+            "14",
+            "Participant flow",
+            "Flow of participants through study (CONSORT/STARD flow diagram)",
+            "Results",
+        ),
+        ChecklistItem(
+            "15",
+            "Baseline characteristics",
+            "Baseline demographic and clinical characteristics of study cohort",
+            "Results",
+        ),
+        ChecklistItem(
+            "16",
+            "Disease severity",
+            "Distribution of severity of disease or alternative diagnoses in cohort",
+            "Results",
+        ),
+        ChecklistItem(
+            "17",
+            "Time interval",
+            "Time interval and clinical interventions between index test and reference standard",
+            "Results",
+        ),
+        ChecklistItem(
+            "18",
+            "Cross-tabulation",
+            "Cross-tabulation of index test results (2x2 matrix) by reference standard",
+            "Results",
+        ),
+        ChecklistItem(
+            "19",
+            "Diagnostic accuracy",
+            "Estimates of sensitivity, specificity, PPV, NPV, likelihood ratios, AUC with DeLong CIs",
+            "Results",
+        ),
+        ChecklistItem(
+            "20",
+            "Decision curve analysis",
+            "Net benefit assessment across clinical decision thresholds",
+            "Results",
+        ),
+        ChecklistItem(
+            "21",
+            "Adverse events",
+            "Any adverse events from performing index test or reference standard",
+            "Results",
+        ),
+        ChecklistItem(
+            "22",
+            "Limitations",
+            "Study limitations, sources of potential bias, and statistical uncertainty",
+            "Discussion",
+        ),
+        ChecklistItem(
+            "23",
+            "Implications",
+            "Implications for clinical practice and patient health outcomes",
+            "Discussion",
+        ),
+        ChecklistItem(
+            "24",
+            "Registration",
+            "Registration number and name of trial registry",
+            "Other information",
+        ),
+        ChecklistItem(
+            "25",
+            "Funding",
+            "Sources of funding and role of funders",
+            "Other information",
+        ),
+    ]
+    return ReportingChecklist(
+        "STARD", "Standards for Reporting Diagnostic Accuracy Studies", items
+    )
+
+
+def get_prisma_checklist() -> ReportingChecklist:
+    """Preferred Reporting Items for Systematic Reviews and Meta-Analyses (PRISMA 2020)."""
+    items = [
+        ChecklistItem(
+            "1",
+            "Title",
+            "Identify the report as a systematic review and/or meta-analysis",
+            "Title and Abstract",
+        ),
+        ChecklistItem(
+            "2",
+            "Abstract",
+            "Structured summary including background, methods, results, and conclusions",
+            "Title and Abstract",
+        ),
+        ChecklistItem(
+            "3",
+            "Rationale",
+            "Rationale for review in context of existing clinical evidence",
+            "Introduction",
+        ),
+        ChecklistItem(
+            "4",
+            "Objectives",
+            "Explicit statement of clinical questions addressed (PICO/PECO format)",
+            "Introduction",
+        ),
+        ChecklistItem(
+            "5",
+            "Eligibility criteria",
+            "Inclusion and exclusion criteria and study design characteristics",
+            "Methods",
+        ),
+        ChecklistItem(
+            "6",
+            "Information sources",
+            "All bibliographic databases, registers, and websites searched and dates",
+            "Methods",
+        ),
+        ChecklistItem(
+            "7",
+            "Search strategy",
+            "Full electronic search strategy for at least one database",
+            "Methods",
+        ),
+        ChecklistItem(
+            "8",
+            "Selection process",
+            "Methods used to screen and select studies, independent reviewers",
+            "Methods",
+        ),
+        ChecklistItem(
+            "9",
+            "Data collection",
+            "Methods used to extract data from included reports",
+            "Methods",
+        ),
+        ChecklistItem(
+            "10a",
+            "Data items",
+            "Outcomes sought, effect measures (RR, OR, HR, MD, SMD), definitions",
+            "Methods",
+        ),
+        ChecklistItem(
+            "10b",
+            "Data assumptions",
+            "Assumptions made regarding missing or unclear information",
+            "Methods",
+        ),
+        ChecklistItem(
+            "11",
+            "Risk of bias",
+            "Methods used to assess risk of bias in included studies (RoB 2, ROBINS-I)",
+            "Methods",
+        ),
+        ChecklistItem(
+            "12",
+            "Effect measures",
+            "Effect measures used in synthesis (OR, RR, HR, SMD)",
+            "Methods",
+        ),
+        ChecklistItem(
+            "13",
+            "Synthesis methods",
+            "Statistical synthesis methods, fixed/random effects, DerSimonian-Laird, tau2, I2",
+            "Methods",
+        ),
+        ChecklistItem(
+            "14",
+            "Reporting bias",
+            "Methods used to assess reporting/publication bias (Egger's test, funnel plots)",
+            "Methods",
+        ),
+        ChecklistItem(
+            "15",
+            "Certainty assessment",
+            "Methods used to assess certainty of evidence (GRADE framework)",
+            "Methods",
+        ),
+        ChecklistItem(
+            "16",
+            "Study selection",
+            "Numbers of studies screened, assessed for eligibility, and included (PRISMA flow)",
+            "Results",
+        ),
+        ChecklistItem(
+            "17",
+            "Study characteristics",
+            "Citations of included studies and summary table of characteristics",
+            "Results",
+        ),
+        ChecklistItem(
+            "18",
+            "Risk of bias in studies",
+            "Risk of bias assessments for each included study",
+            "Results",
+        ),
+        ChecklistItem(
+            "19",
+            "Synthesis results",
+            "Pooled estimates, forest plots, confidence intervals, heterogeneity I2 and tau2",
+            "Results",
+        ),
+        ChecklistItem(
+            "20",
+            "Reporting biases",
+            "Assessments of publication bias (Egger's regression intercept and p-value)",
+            "Results",
+        ),
+        ChecklistItem(
+            "21",
+            "Certainty of evidence",
+            "Assessments of certainty of evidence for each primary clinical outcome",
+            "Results",
+        ),
+        ChecklistItem(
+            "22",
+            "Interpretation",
+            "General interpretation of findings in context of existing evidence",
+            "Discussion",
+        ),
+        ChecklistItem(
+            "23",
+            "Limitations",
+            "Limitations of evidence included and review methodology",
+            "Discussion",
+        ),
+        ChecklistItem(
+            "24",
+            "Implications",
+            "Implications for clinical practice, policy, and future clinical trials",
+            "Discussion",
+        ),
+        ChecklistItem(
+            "25",
+            "Registration",
+            "Registration number and register name (PROSPERO), protocol access",
+            "Other information",
+        ),
+        ChecklistItem(
+            "26",
+            "Support",
+            "Sources of financial and non-financial support for the review",
+            "Other information",
+        ),
+        ChecklistItem(
+            "27",
+            "Competing interests",
+            "Financial or non-financial competing interests of review authors",
+            "Other information",
+        ),
+    ]
+    return ReportingChecklist(
+        "PRISMA",
+        "Preferred Reporting Items for Systematic Reviews and Meta-Analyses",
+        items,
+    )
+
+
 def get_checklist(name: str) -> ReportingChecklist:
-    """Retrieve checklist by name (strobe, consort, tripod)."""
+    """Retrieve checklist by name (strobe, consort, tripod, stard, prisma)."""
     key = name.lower().strip()
     if "strobe" in key:
         return get_strobe_checklist()
@@ -490,7 +840,11 @@ def get_checklist(name: str) -> ReportingChecklist:
         return get_consort_checklist()
     elif "tripod" in key:
         return get_tripod_checklist()
+    elif "stard" in key:
+        return get_stard_checklist()
+    elif "prisma" in key:
+        return get_prisma_checklist()
     else:
         raise ValueError(
-            f"Unknown reporting checklist: '{name}'. Choose 'strobe', 'consort', or 'tripod'."
+            f"Unknown reporting checklist: '{name}'. Choose 'strobe', 'consort', 'tripod', 'stard', or 'prisma'."
         )

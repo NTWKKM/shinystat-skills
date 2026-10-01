@@ -97,6 +97,7 @@ class MissingnessAudit:
     co_occurrence: dict[str, dict[str, float]]
     has_critical_missing: bool
     summary_df: pd.DataFrame
+    littles_mcar: LittlesMCARResult | None = None
 
     def to_dict(self) -> dict[str, Any]:
         base = {
@@ -112,6 +113,8 @@ class MissingnessAudit:
             "patterns": [p.to_dict() for p in self.patterns],
             "co_occurrence": self.co_occurrence,
         }
+        if self.littles_mcar is not None:
+            base["littles_mcar"] = self.littles_mcar.to_dict()
         for k, v in self.variables.items():
             base[k] = v.to_dict()
         return base
@@ -632,6 +635,16 @@ def audit_missingness(
         df_work, var_meta=var_meta, already_normalized=True
     )
 
+    # Compute Little's MCAR test if continuous variables have missing values
+    littles_res: LittlesMCARResult | None = None
+    num_cols = [c for c in df_work.columns if pd.api.types.is_numeric_dtype(df_work[c])]
+    cols_with_na = [c for c in num_cols if df_work[c].isna().sum() > 0]
+    if len(cols_with_na) >= 1 and len(num_cols) >= 2 and total_rows >= 10:
+        try:
+            littles_res = littles_mcar_test(df_work, cols=num_cols)
+        except Exception:
+            littles_res = None
+
     return MissingnessAudit(
         total_rows=total_rows,
         total_columns=total_cols,
@@ -643,6 +656,7 @@ def audit_missingness(
         co_occurrence=co_occurrence,
         has_critical_missing=has_critical,
         summary_df=summary_df,
+        littles_mcar=littles_res,
     )
 
 

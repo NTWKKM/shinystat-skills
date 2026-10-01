@@ -168,6 +168,61 @@ CodeRabbit AI review on PR #4 and local testing revealed that documentation and 
 - **Reliability**: Any command or configuration copied by an AI agent or human analyst executes successfully without syntax crashes.
 - **Drift Immunity**: Continuous testing fails immediately if mirror copies diverge or if CLI options change without updating skill documentation.
 
-[MEMORY_LEARN: Strict positive framing, progressive disclosure, and automated CLI drift testing applied to agent skills for cognitive optimization.]
+---
+
+## ADR 11: Universal Clinical Ingestion & Automated Data Geometry Profiling
+
+### Context
+Clinical datasets originate from diverse hospital IT systems (EHR exports, registries, bedside ultrasound logs) across varied formats: Excel (`.xlsx`, `.xls`), Tab-Separated (`.tsv`), Parquet, and CSVs with divergent text encodings (`utf-8-sig`, `cp1252`, `latin1`) or trailing column whitespace. Furthermore, users and AI agents frequently encounter column name typos that caused uninformative `KeyError` crashes.
+
+### Decision
+1. Implement universal loader `load_clinical_data` in `medstat.data.loader` supporting CSV, TSV, Excel, and Parquet with automated fallback encodings (`utf-8`, `utf-8-sig`, `latin1`, `cp1252`) and automatic column name whitespace stripping.
+2. Introduce `validate_columns` with `difflib.get_close_matches` providing intelligent suggestions when required columns are missing (e.g., *"Did you mean 'statin_rx' instead of 'tx_statin'?"*).
+3. Introduce `medstat profile` command providing an instant one-shot clinical data health overview: cohort dimensions, missingness percentage, candidate clinical outcomes, survival endpoints, biomarker columns, and automated clinical study design inference.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Robustness**: Agents and clinicians can pass any standard spreadsheet directly without manual format pre-conversion.
+- **Self-Healing Ergonomics**: Typo suggestions guide agents to self-correct variable names immediately without looping on failures.
+
+---
+
+## ADR 12: Biomarker Directionality & Safe Clinical Diagnostic Inference
+
+### Context
+In clinical diagnostic evaluation, high biomarker values typically indicate disease (e.g., Troponin, Lactate, Procalcitonin). However, critical clinical indicators are abnormal when *low* (e.g., Platelet count in severe thrombocytopenia, eGFR in renal failure, PaO2/FiO2 ratio in ARDS). Hardcoding $(y_{\text{score}} \ge \text{cutoff})$ inverted diagnostic accuracy (reporting sensitivity as $(1 - \text{sensitivity})$ and inverting ROC curve concordance).
+
+### Decision
+1. Add explicit `--direction [high|low]` option to `medstat diag` (defaulting to `high`).
+2. When `--direction low` is specified:
+   - Cutoff classification uses $(y_{\text{score}} \le \text{cutoff})$.
+   - Biomarker scores are negated ($y_{\text{eff}} = -y_{\text{score}}$) for rank sweeps in ROC calculation, Youden's index, and paired DeLong AUC comparisons, ensuring positive concordance is strictly preserved.
+3. Enforce that at least one analytical flag (`--cutoff`, `--roc`, `--compare-roc`, `--dca`, `--calibration`) is provided, preventing empty runs.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Clinical Safety**: Eliminates diagnostic inversion risk for low-is-abnormal laboratory and physiological tests.
+- **Deterministic Validity**: True positives and true negatives align with bedside clinical definitions.
+
+---
+
+## ADR 13: Polymorphic Publication Reporting & Reporting Guidelines Modernization
+
+### Context
+Downstream reporting in `medstat report` previously crashed (`AttributeError: 'list' object has no attribute 'get'`) when handling list-based results such as Table 1 baseline records or Intraclass Correlation (ICC) tables. Furthermore, while STROBE, CONSORT, and TRIPOD were supported, diagnostic accuracy studies (STARD 2015) and systematic reviews / meta-analyses (PRISMA 2020) lacked structured reporting checklists.
+
+### Decision
+1. Implement polymorphic dispatch in `report_cmd` and `medstat.reporting.tables`:
+   - Detects list schemas and renders `render_records_table`.
+   - Polymorphically routes dictionary schemas into specialized publication renderers: `render_diagnostic_table`, `render_bland_altman_table`, and `render_balance_table`.
+2. Expand `medstat.reporting.checklists` with comprehensive `get_stard_checklist()` (STARD 2015, 25 essential items) and `get_prisma_checklist()` (PRISMA 2020, 27 essential items), accessible directly via `medstat report --checklist [stard|prisma]`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Publication Readiness**: Seamlessly converts all core statistical outputs (Table 1, GLM/Cox regression, diagnostic test accuracy, Bland-Altman LoA, ICC reliability, and Causal PSM covariate balance) into publication-styled HTML tables matching NEJM, JAMA, and APA 7 standards.
+- **Guideline Completeness**: Full coverage across the major EQUATOR Network publication guidelines.
+
+[MEMORY_LEARN: Universal clinical ingestion with fuzzy column suggestions, biomarker score directionality handling, and polymorphic table reporting transform biostatistical CLI tools into fully autonomous, error-resilient agent skills.]
+
 
 

@@ -18,14 +18,18 @@ import pandas as pd
 
 from medstat.agreement.bland_altman import bland_altman_analysis
 from medstat.agreement.icc import calculate_icc
+from medstat.agreement.kappa import calculate_kappa
 from medstat.causal.balance import calculate_smd
 from medstat.causal.psm import propensity_score_match
 from medstat.cli.spec import AnalysisPlan
 from medstat.data.clean import (
     MissingStrategyRequiredError,
     audit_missingness,
+    detect_outliers,
+    handle_outliers,
     prepare_data_for_analysis,
 )
+from medstat.data.loader import load_clinical_data, validate_columns
 from medstat.data.retention import SampleFlowTracker
 from medstat.diagnostic.accuracy import calculate_diagnostic_accuracy
 from medstat.diagnostic.calibration import (
@@ -45,9 +49,14 @@ from medstat.meta.models import run_meta_analysis
 from medstat.models.firth import fit_firth_cox, fit_firth_logistic
 from medstat.models.glm import fit_linear_regression, fit_standard_logistic
 from medstat.models.sensitivity import calculate_e_value
-from medstat.models.splines import fit_cox_rcs
+from medstat.models.splines import fit_cox_rcs, fit_logistic_rcs
 from medstat.models.survival import check_proportional_hazards, fit_cox_ph
-from medstat.power.sample_size import calculate_sample_size_t_test
+from medstat.power.sample_size import (
+    calculate_sample_size_correlation,
+    calculate_sample_size_proportions,
+    calculate_sample_size_survival,
+    calculate_sample_size_t_test,
+)
 from medstat.reporting.checklists import get_checklist
 from medstat.reporting.narrative import generate_methods_narrative
 from medstat.reporting.table1 import generate_table_one
@@ -55,6 +64,10 @@ from medstat.reporting.tables import (
     Estimate,
     EstimateTable,
     PublicationRenderer,
+    render_balance_table,
+    render_bland_altman_table,
+    render_diagnostic_table,
+    render_records_table,
 )
 
 
@@ -99,6 +112,127 @@ def cli() -> None:
 
 
 # ==============================================================================
+# 0. profile
+# ==============================================================================
+@cli.command("profile")
+@click.option(
+    "--data",
+    required=True,
+    type=click.Path(exists=True),
+    help="Input clinical dataset (.csv, .xlsx, .tsv, .parquet).",
+)
+@click.option("--output", type=click.Path(), help="Output path for profile JSON.")
+def profile_cmd(data: str, output: str | None) -> None:
+    """Rapid one-shot dataset health profile and autonomous study design inference."""
+    df = load_clinical_data(data)
+    audit = audit_missingness(df)
+    n_rows, n_cols = df.shape
+
+    # Detect candidate primary endpoints
+    endpoints: list[dict[str, Any]] = []
+    for col in df.columns:
+        s = df[col].dropna()
+        if s.nunique() == 2:
+            endpoints.append(
+                {
+                    "column": col,
+                    "type": "binary",
+                    "unique_values": [str(x) for x in s.unique()[:2]],
+                }
+            )
+        elif any(
+            time_hint in col.lower()
+            for time_hint in ("time", "duration", "followup", "survival", "surv")
+        ):
+            endpoints.append({"column": col, "type": "survival_time"})
+
+    # Infer clinical design type (Type 1 to 7)
+    has_survival = any(e["type"] == "survival_time" for e in endpoints)
+    has_binary = any(e["type"] == "binary" for e in endpoints)
+    has_clusters = any(
+        "rater" in c.lower() or "observer" in c.lower() or "method" in c.lower()
+        for c in df.columns
+    )
+    has_treatment = any(
+        c.lower() in ("treatment", "treat", "rx", "arm", "group", "exposure")
+        for c in df.columns
+    )
+
+    if has_survival:
+        inferred_design = "Type 2: Time-to-Event / Survival Cohort"
+        recommended_model = "cox_ph (or firth Cox if sparse)"
+    elif has_clusters:
+        inferred_design = "Type 6: Inter-Rater Reliability / Agreement Study"
+        recommended_model = "icc / bland-altman"
+    elif has_treatment and len(df.columns) > 5:
+        inferred_design = "Type 4: Observational Comparative Effectiveness (Causal PSM)"
+        recommended_model = "causal psm + multivariable logistic"
+    elif has_binary:
+        inferred_design = "Type 1: Multivariable Risk Prediction / Binary Outcome"
+        recommended_model = "logistic / firth"
+    else:
+        inferred_design = "Type 1: Cross-Sectional / Observational Study"
+        recommended_model = "linear / glm"
+
+    mcar_summary = None
+    if audit.littles_mcar:
+        mcar = audit.littles_mcar
+        mcar_summary = {
+            "statistic": round(mcar.statistic, 2),
+            "p_value": round(mcar.p_value, 4),
+            "is_mcar": mcar.is_mcar,
+            "interpretation": (
+                "Missing Completely at Random (MCAR) supported (P > 0.05)"
+                if mcar.is_mcar
+                else "Missing at Random (MAR) or MNAR likely (P <= 0.05); MICE recommended"
+            ),
+        }
+
+    profile_data = {
+        "dataset": {
+            "path": str(data),
+            "n_observations": n_rows,
+            "n_variables": n_cols,
+            "overall_missing_pct": audit.overall_missing_pct,
+            "has_critical_missing": audit.has_critical_missing,
+        },
+        "littles_mcar": mcar_summary,
+        "candidate_endpoints": endpoints,
+        "inferred_study_design": inferred_design,
+        "recommended_primary_model": recommended_model,
+        "variables": {k: v.to_dict() for k, v in audit.variables.items()},
+    }
+
+    click.echo("\n========================================================")
+    click.echo("           CLINICAL DATASET HEALTH PROFILE              ")
+    click.echo("========================================================")
+    click.echo(f"  Source:             {data}")
+    click.echo(
+        f"  Cohort Size:        N = {n_rows:,} patients across {n_cols} variables"
+    )
+    click.echo(
+        f"  Missingness:        {audit.overall_missing_pct}% overall missing cells"
+    )
+    if mcar_summary:
+        click.echo(
+            f"  Little's MCAR:      P = {mcar_summary['p_value']} ({'MCAR' if mcar_summary['is_mcar'] else 'Non-MCAR'})"
+        )
+    click.echo(f"  Inferred Design:    {inferred_design}")
+    click.echo(f"  Recommended Model:  {recommended_model}")
+    if endpoints:
+        click.echo(
+            f"  Candidate Endpoints: {', '.join(e['column'] for e in endpoints[:5])}"
+        )
+    click.echo("========================================================\n")
+
+    if output:
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        with open(output, "w") as f:
+            json.dump(profile_data, f, indent=2, default=str)
+        click.echo(f"Profile report saved to: {output}")
+
+
+# ==============================================================================
 # 1. clean
 # ==============================================================================
 @cli.command("clean")
@@ -139,6 +273,18 @@ def cli() -> None:
 @click.option(
     "--neighbors", default=5, type=int, help="Number of nearest neighbors for KNN."
 )
+@click.option(
+    "--outlier-action",
+    type=click.Choice(["flag", "remove", "winsorize", "cap"], case_sensitive=False),
+    default=None,
+    help="Outlier handling action (flag, remove, winsorize, cap).",
+)
+@click.option(
+    "--iqr-multiplier",
+    default=1.5,
+    type=float,
+    help="Tukey's IQR multiplier for outlier detection (default: 1.5).",
+)
 @click.option("--output", type=click.Path(), help="Output cleaned CSV file path.")
 def clean_cmd(
     data: str,
@@ -149,10 +295,12 @@ def clean_cmd(
     audit_out: str | None,
     imputations: int,
     neighbors: int,
+    outlier_action: str | None,
+    iqr_multiplier: float,
     output: str | None,
 ) -> None:
     """Audit data missingness and apply clinically justified cleaning strategies."""
-    df = pd.read_csv(data)
+    df = load_clinical_data(data)
     audit = audit_missingness(df)
 
     if audit_out and audit_only:
@@ -180,6 +328,33 @@ def clean_cmd(
         )
     except MissingStrategyRequiredError as e:
         raise click.ClickException(str(e))
+
+    if outlier_action:
+        act = outlier_action.lower()
+        num_cols = [
+            c
+            for c in cleaned_df.columns
+            if pd.api.types.is_numeric_dtype(cleaned_df[c])
+        ]
+        if act == "remove":
+            is_outlier = pd.Series(False, index=cleaned_df.index)
+            for c in num_cols:
+                mask, _ = detect_outliers(
+                    cleaned_df[c], method="iqr", threshold=iqr_multiplier
+                )
+                is_outlier |= mask
+            n_removed = int(is_outlier.sum())
+            if n_removed > 0:
+                tracker.record_exclusion(
+                    f"Tukey's IQR outlier removal (>{iqr_multiplier}x IQR)", n_removed
+                )
+                cleaned_df = cleaned_df.loc[~is_outlier].copy()
+        elif act in ("winsorize", "cap"):
+            for c in num_cols:
+                cleaned_df[c] = handle_outliers(
+                    cleaned_df[c], method="iqr", action=act, threshold=iqr_multiplier
+                )
+        info["outlier_action"] = act
 
     assumed_mech = (
         mechanism or ("mcar" if strategy == "complete-case" else "mar")
@@ -251,8 +426,12 @@ def table1_cmd(
     include_p: bool,
     output: str | None,
 ) -> None:
-    df = pd.read_csv(data)
+    df = load_clinical_data(data)
     var_list = [v.strip() for v in vars.split(",")] if vars else None
+    if var_list:
+        validate_columns(df, var_list, "table1")
+    if group:
+        validate_columns(df, [group], "table1")
     cols_to_check = ([group] if group else []) + (
         var_list if var_list else list(df.columns)
     )
@@ -301,13 +480,18 @@ def table1_cmd(
 )
 @click.option(
     "--type",
+    "--model-type",
     "model_type",
     default="logistic",
     help="Model type (logistic, linear, cox, cox_ph).",
 )
 @click.option("--outcome", default=None, help="Outcome variable name.")
 @click.option(
-    "--time", "time_col", default=None, help="Survival duration variable name."
+    "--time",
+    "--time-col",
+    "time_col",
+    default=None,
+    help="Survival duration variable name.",
 )
 @click.option(
     "--exposure", default=None, help="Primary exposure/treatment variable name."
@@ -373,12 +557,13 @@ def model_cmd(
             "Must specify either --spec <plan.yaml> or both --data and --outcome."
         )
 
-    df = pd.read_csv(data)
+    df = load_clinical_data(data)
     covar_list = [c.strip() for c in covariates.split(",")] if covariates else []
     if exposure and exposure not in covar_list:
         covar_list.insert(0, exposure)
 
     cols_to_check = [outcome] + ([time_col] if time_col else []) + covar_list
+    validate_columns(df, cols_to_check, "model")
     check_data_missingness(df, cols_to_check, "model")
 
     mtype = model_type.lower().strip()
@@ -532,6 +717,20 @@ def model_cmd(
                 result_data["spline_estimates"] = _serialize_summary_df(rcs_summary)
             result_data["knots"] = rcs_res.get("knots", [])
             result_data["non_linear_pvalue"] = rcs_res.get("non_linear_pvalue")
+        elif mtype in ("logistic", "logit", "binary"):
+            other_covars = [c for c in covar_list if c != spline_var]
+            rcs_res = fit_logistic_rcs(
+                df,
+                outcome=outcome,
+                spline_var=spline_var,
+                covariates=other_covars,
+                n_knots=knots,
+            )
+            rcs_summary = rcs_res.get("summary_df")
+            if isinstance(rcs_summary, pd.DataFrame):
+                result_data["spline_estimates"] = _serialize_summary_df(rcs_summary)
+            result_data["knots"] = rcs_res.get("knots", [])
+            result_data["non_linear_pvalue"] = rcs_res.get("non_linear_pvalue")
 
     if output:
         Path(output).parent.mkdir(parents=True, exist_ok=True)
@@ -548,11 +747,27 @@ def model_cmd(
     "--data", required=True, type=click.Path(exists=True), help="Input CSV dataset."
 )
 @click.option(
-    "--gold-standard", required=True, help="Binary reference standard column."
+    "--gold-standard",
+    "--gold",
+    "gold_standard",
+    required=True,
+    help="Binary reference standard column.",
 )
-@click.option("--test-col", required=True, help="Biomarker/diagnostic score column.")
+@click.option(
+    "--test-col",
+    "--test",
+    "test_col",
+    required=True,
+    help="Biomarker/diagnostic score column.",
+)
 @click.option(
     "--cutoff", type=float, default=None, help="Diagnostic classification cutoff."
+)
+@click.option(
+    "--direction",
+    type=click.Choice(["high", "low"], case_sensitive=False),
+    default="high",
+    help="Direction of abnormality: 'high' if high values indicate disease, 'low' if lower values indicate disease (e.g. platelets, eGFR).",
 )
 @click.option("--roc", is_flag=True, help="Compute empirical ROC curve and AUC.")
 @click.option(
@@ -572,6 +787,7 @@ def diag_cmd(
     gold_standard: str,
     test_col: str,
     cutoff: float | None,
+    direction: str,
     roc: bool,
     compare_roc: str | None,
     dca: bool,
@@ -579,21 +795,34 @@ def diag_cmd(
     output: str | None,
 ) -> None:
     """Evaluate diagnostic test accuracy, ROC curves, DeLong comparisons, and DCA."""
-    df = pd.read_csv(data)
+    if cutoff is None and not roc and not compare_roc and not dca and not calibration:
+        raise click.ClickException(
+            "At least one analytical evaluation must be specified: "
+            "--cutoff, --roc, --compare-roc, --dca, or --calibration."
+        )
+
+    df = load_clinical_data(data)
     cols_to_check = [gold_standard, test_col] + ([compare_roc] if compare_roc else [])
+    validate_columns(df, cols_to_check, "diag")
     check_data_missingness(df, cols_to_check, "diag")
     y_true = df[gold_standard].values
     y_score = df[test_col].values
     diag_res: dict[str, Any] = {}
+    dir_norm = direction.lower().strip()
 
     if cutoff is not None:
-        y_pred = (y_score >= cutoff).astype(int)
+        y_pred = (
+            (y_score <= cutoff).astype(int)
+            if dir_norm == "low"
+            else (y_score >= cutoff).astype(int)
+        )
         acc = calculate_diagnostic_accuracy(y_true, y_pred)
         diag_res["accuracy_at_cutoff"] = acc
 
     if roc or compare_roc:
-        roc_res = calculate_roc_curve(y_true, y_score)
-        delong_res = auc_ci_delong(y_true, y_score)
+        eff_score = -y_score if dir_norm == "low" else y_score
+        roc_res = calculate_roc_curve(y_true, eff_score)
+        delong_res = auc_ci_delong(y_true, eff_score)
         diag_res["roc"] = {
             "auc": roc_res["auc"],
             "auc_ci": [delong_res["ci_lower"], delong_res["ci_upper"]],
@@ -601,10 +830,12 @@ def diag_cmd(
             "ci_upper": delong_res["ci_upper"],
             "se": delong_res["se"],
             "youden_index": roc_res.get("youden_index"),
+            "direction": dir_norm,
         }
         if compare_roc:
             y_comp = df[compare_roc].values
-            comp_res = delong_paired_test(y_true, y_score, y_comp)
+            eff_comp = -y_comp if dir_norm == "low" else y_comp
+            comp_res = delong_paired_test(y_true, eff_score, eff_comp)
             diag_res["delong_comparison"] = comp_res
 
     if dca:
@@ -663,7 +894,8 @@ def icc_cmd(
     output: str | None,
 ) -> None:
     """Compute pure-Python/SciPy Intraclass Correlation Coefficient (ICC)."""
-    df = pd.read_csv(data)
+    df = load_clinical_data(data)
+    validate_columns(df, [targets, raters, ratings], "agreement icc")
     check_data_missingness(df, [targets, raters, ratings], "agreement icc")
     icc_df = calculate_icc(
         df, targets=targets, raters=raters, ratings=ratings, icc_type=icc_type
@@ -678,14 +910,16 @@ def icc_cmd(
 @click.option(
     "--data", required=True, type=click.Path(exists=True), help="Input CSV dataset."
 )
-@click.option("--m1", default=None, help="First measurement column name.")
-@click.option("--m2", default=None, help="Second measurement column name.")
+@click.option("--m1", "--method1", default=None, help="First measurement column name.")
+@click.option("--m2", "--method2", default=None, help="Second measurement column name.")
 @click.option("--output", type=click.Path(), help="Output path for Bland-Altman JSON.")
 def bland_altman_cmd(
     data: str, m1: str | None, m2: str | None, output: str | None
 ) -> None:
     """Compute Bland-Altman mean bias and limits of agreement (LoA)."""
-    df = pd.read_csv(data)
+    df = load_clinical_data(data)
+    if m1 and m2:
+        validate_columns(df, [m1, m2], "agreement bland-altman")
     num_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
     if len(num_cols) < 2 and (not m1 or not m2):
         cat_cols = [c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c])]
@@ -710,18 +944,45 @@ def bland_altman_cmd(
 
 @agreement_grp.command("kappa")
 @click.option(
-    "--data", required=True, type=click.Path(exists=True), help="Input CSV dataset."
+    "--data",
+    required=True,
+    type=click.Path(exists=True),
+    help="Input clinical dataset (.csv, .xlsx, .tsv, .parquet).",
 )
 @click.option("--rater1", default=None, help="First rater column name.")
 @click.option("--rater2", default=None, help="Second rater column name.")
+@click.option(
+    "--targets", default=None, help="Subject/target ID column (for long format)."
+)
+@click.option("--raters", default=None, help="Rater ID column (for long format).")
+@click.option("--ratings", default=None, help="Ratings/score column (for long format).")
 @click.option("--output", type=click.Path(), help="Output path for Kappa JSON.")
 def kappa_cmd(
-    data: str, rater1: str | None, rater2: str | None, output: str | None
+    data: str,
+    rater1: str | None,
+    rater2: str | None,
+    targets: str | None,
+    raters: str | None,
+    ratings: str | None,
+    output: str | None,
 ) -> None:
     """Compute Fleiss' or Cohen's Kappa for categorical agreement."""
-    raise click.ClickException(
-        "Cohen's/Fleiss' kappa calculation is not yet implemented in the agreement engine."
+    df = load_clinical_data(data)
+    res = calculate_kappa(
+        df,
+        rater1=rater1,
+        rater2=rater2,
+        targets=targets,
+        raters=raters,
+        ratings=ratings,
     )
+    if output:
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        with open(output, "w") as f:
+            json.dump(res, f, indent=2, default=str)
+        click.echo(f"Kappa agreement analysis saved to: {output}")
+    else:
+        click.echo(json.dumps(res, indent=2))
 
 
 # ==============================================================================
@@ -763,8 +1024,9 @@ def psm_cmd(
     output: str | None,
 ) -> None:
     """Execute Propensity Score Matching (PSM) with caliper and balance diagnostics."""
-    df = pd.read_csv(data)
+    df = load_clinical_data(data)
     covar_list = [c.strip() for c in covariates.split(",")]
+    validate_columns(df, [treatment] + covar_list, "causal psm")
     check_data_missingness(df, [treatment] + covar_list, "causal psm")
     matched_df, info = propensity_score_match(
         df,
@@ -774,8 +1036,7 @@ def psm_cmd(
         ratio=ratio,
     )
 
-    if love_plot:
-        Path(love_plot).parent.mkdir(parents=True, exist_ok=True)
+    if balance_check or love_plot:
         love_data = {
             "covariates": covar_list,
             "smd_raw": [float(calculate_smd(df, treatment, c)) for c in covar_list],
@@ -790,15 +1051,55 @@ def psm_cmd(
                 float(calculate_smd(matched_df, treatment, c)) for c in covar_list
             ],
         }
-        with open(love_plot, "w") as f:
-            json.dump(love_data, f, indent=2)
+        if love_plot:
+            Path(love_plot).parent.mkdir(parents=True, exist_ok=True)
+            with open(love_plot, "w") as f:
+                json.dump(love_data, f, indent=2)
+
+        if balance_check:
+            click.echo("\n--- Austin (2009) Covariate Balance Diagnostics ---")
+            for c, pre, post in zip(
+                covar_list, love_data["smd_pre"], love_data["smd_post"]
+            ):
+                status = "BALANCED" if abs(post) < 0.10 else "UNBALANCED"
+                click.echo(
+                    f"  {c:<20} | Pre-SMD: {pre:.3f} | Post-SMD: {post:.3f} | [{status}]"
+                )
+            click.echo("---------------------------------------------------\n")
 
     if output:
         Path(output).parent.mkdir(parents=True, exist_ok=True)
-        matched_df.to_csv(output, index=False)
-        click.echo(
-            f"Matched cohort saved to: {output} (Matched pairs: {len(matched_df) // 2})"
-        )
+        if output.endswith(".json"):
+            if not (balance_check or love_plot):
+                love_data = {
+                    "covariates": covar_list,
+                    "smd_raw": [
+                        float(calculate_smd(df, treatment, c)) for c in covar_list
+                    ],
+                    "smd_pre": [
+                        float(calculate_smd(df, treatment, c)) for c in covar_list
+                    ],
+                    "smd_matched": [
+                        float(calculate_smd(matched_df, treatment, c))
+                        for c in covar_list
+                    ],
+                    "smd_post": [
+                        float(calculate_smd(matched_df, treatment, c))
+                        for c in covar_list
+                    ],
+                    "post_smd": [
+                        float(calculate_smd(matched_df, treatment, c))
+                        for c in covar_list
+                    ],
+                }
+            with open(output, "w") as f:
+                json.dump(love_data, f, indent=2)
+            click.echo(f"Causal balance diagnostics saved: {output}")
+        else:
+            matched_df.to_csv(output, index=False)
+            click.echo(
+                f"Matched cohort saved to: {output} (Matched pairs: {len(matched_df) // 2})"
+            )
 
 
 # ==============================================================================
@@ -843,7 +1144,8 @@ def meta_cmd(
     output: str | None,
 ) -> None:
     """Perform fixed and random effects meta-analysis with Forest plot data."""
-    df = pd.read_csv(data)
+    df = load_clinical_data(data)
+    validate_columns(df, [effect_col, se_col, study_col], "meta")
     check_data_missingness(df, [effect_col, se_col, study_col], "meta")
     res = run_meta_analysis(
         df,
@@ -878,7 +1180,7 @@ def meta_cmd(
     "--type",
     "test_type",
     default="t-test",
-    help="Test type (t-test, proportions, survival).",
+    help="Test type (t-test, means, proportions, survival, correlation).",
 )
 @click.option("--alpha", default=0.05, type=float, help="Type I error rate.")
 @click.option("--power", default=0.80, type=float, help="Statistical power (1 - beta).")
@@ -892,23 +1194,76 @@ def sample_size_cmd(
     output: str | None,
 ) -> None:
     """Calculate statistical power and required sample size."""
-    valid_types = ("t-test", "t_test", "ttest")
-    if test_type.lower() not in valid_types:
+    tt_lower = test_type.lower().strip()
+    valid_types = (
+        "t-test",
+        "t_test",
+        "ttest",
+        "means",
+        "proportions",
+        "survival",
+        "correlation",
+    )
+    if tt_lower not in valid_types:
         raise click.ClickException(
             f"Sample size calculation for test type '{test_type}' is not supported. Supported: {list(valid_types)}"
         )
 
-    n_per_group = calculate_sample_size_t_test(
-        effect_size=effect_size, alpha=alpha, power=power
-    )
-    res = {
-        "test_type": test_type,
-        "alpha": alpha,
-        "power": power,
-        "effect_size": effect_size,
-        "sample_size_per_group": n_per_group,
-        "total_sample_size": n_per_group * 2,
-    }
+    if tt_lower in ("t-test", "t_test", "ttest", "means"):
+        n_per_group = calculate_sample_size_t_test(
+            effect_size=effect_size, alpha=alpha, power=power
+        )
+        res = {
+            "test_type": test_type,
+            "alpha": alpha,
+            "power": power,
+            "effect_size": effect_size,
+            "sample_size_per_group": n_per_group,
+            "total_sample_size": n_per_group * 2,
+        }
+    elif tt_lower in ("proportions", "proportion"):
+        p1 = 0.20
+        h = effect_size
+        p2 = min(0.95, max(0.05, p1 + h / 2.0))
+        prop_res = calculate_sample_size_proportions(
+            p1=p1, p2=p2, alpha=alpha, power=power
+        )
+        res = {
+            "test_type": test_type,
+            "alpha": alpha,
+            "power": power,
+            "effect_size": effect_size,
+            "sample_size_per_group": prop_res["n1"],
+            "total_sample_size": prop_res["total_n"],
+            "details": prop_res,
+        }
+    elif tt_lower in ("survival", "logrank", "log-rank"):
+        hr = effect_size if effect_size != 1.0 else 0.70
+        surv_res = calculate_sample_size_survival(
+            hazard_ratio=hr, alpha=alpha, power=power
+        )
+        res = {
+            "test_type": test_type,
+            "alpha": alpha,
+            "power": power,
+            "hazard_ratio": hr,
+            "required_events": surv_res["required_events"],
+            "total_sample_size": surv_res["total_n"],
+            "sample_size_per_group": surv_res["n_treated"],
+        }
+    elif tt_lower in ("correlation", "pearson"):
+        r_val = effect_size if -1 < effect_size < 1 and effect_size != 0 else 0.30
+        corr_res = calculate_sample_size_correlation(r=r_val, alpha=alpha, power=power)
+        res = {
+            "test_type": test_type,
+            "alpha": alpha,
+            "power": power,
+            "correlation_r": r_val,
+            "total_sample_size": corr_res["required_n"],
+        }
+    else:
+        raise click.ClickException(f"Unsupported test type: {test_type}")
+
     if output:
         Path(output).parent.mkdir(parents=True, exist_ok=True)
         with open(output, "w") as f:
@@ -937,7 +1292,9 @@ def sample_size_cmd(
     "--format", "out_format", default="html", help="Report format (html, markdown)."
 )
 @click.option(
-    "--checklist", default=None, help="Checklist audit name (strobe, consort, tripod)."
+    "--checklist",
+    default=None,
+    help="Checklist audit name (strobe, consort, tripod, stard, prisma).",
 )
 @click.option("--narrative", is_flag=True, help="Generate methods narrative.")
 @click.option(
@@ -970,6 +1327,98 @@ def report_cmd(
     if results:
         with open(results, "r") as f:
             res_data = json.load(f)
+
+        # 1. Handle JSON list (Table 1, ICC, or general records)
+        if isinstance(res_data, list):
+            if len(res_data) > 0 and any(
+                "Characteristic" in str(k) or "characteristic" in str(k)
+                for k in res_data[0].keys()
+            ):
+                html_out = render_records_table(
+                    "Table 1. Baseline Demographic and Clinical Characteristics",
+                    res_data,
+                    style=style.upper(),
+                )
+                out_p.write_text(html_out, encoding="utf-8")
+                click.echo(f"Demographic Table 1 report saved to: {output}")
+                return
+            if len(res_data) > 0 and any(
+                "ICC" in str(k) or "Type" in str(k) for k in res_data[0].keys()
+            ):
+                html_out = render_records_table(
+                    "Table. Intraclass Correlation Coefficient (ICC) Reliability",
+                    res_data,
+                    style=style.upper(),
+                    note="Computed via pure-Python/SciPy two-way ANOVA decomposition with exact F-distribution confidence intervals.",
+                )
+                out_p.write_text(html_out, encoding="utf-8")
+                click.echo(f"ICC Reliability report saved to: {output}")
+                return
+            if len(res_data) > 0 and isinstance(res_data[0], dict):
+                html_out = render_records_table(
+                    "Table. Clinical Study Results", res_data, style=style.upper()
+                )
+                out_p.write_text(html_out, encoding="utf-8")
+                click.echo(f"Publication report saved to: {output}")
+                return
+
+        # 2. Handle Diagnostic Accuracy / ROC results
+        if isinstance(res_data, dict):
+            if any(
+                k in res_data
+                for k in (
+                    "accuracy_at_cutoff",
+                    "roc",
+                    "delong_comparison",
+                    "dca",
+                    "calibration",
+                )
+            ):
+                html_out = render_diagnostic_table(
+                    "Table. Diagnostic Test Accuracy and Clinical Performance",
+                    res_data,
+                    style=style.upper(),
+                )
+                if narrative:
+                    narr_text = generate_methods_narrative(model_type="diagnostic")
+                    html_out += f"\n<!-- Methods Narrative -->\n<div class='methods-narrative'><p>{narr_text}</p></div>"
+                out_p.write_text(html_out, encoding="utf-8")
+                click.echo(f"Diagnostic publication report saved to: {output}")
+                return
+
+            # 3. Handle Bland-Altman Agreement results
+            if any(
+                k in res_data
+                for k in (
+                    "mean_difference",
+                    "mean_diff",
+                    "bias",
+                    "limits_of_agreement",
+                    "upper_loa",
+                )
+            ):
+                html_out = render_bland_altman_table(
+                    "Table. Bland-Altman Method Comparison and Limits of Agreement",
+                    res_data,
+                    style=style.upper(),
+                )
+                out_p.write_text(html_out, encoding="utf-8")
+                click.echo(f"Bland-Altman report saved to: {output}")
+                return
+
+            # 4. Handle Causal Balance results (Love plot)
+            if "covariates" in res_data and any(
+                k in res_data
+                for k in ("smd_pre", "smd_raw", "smd_matched", "smd_post", "post_smd")
+            ):
+                html_out = render_balance_table(
+                    "Table. Baseline Covariate Balance Assessment (Austin 2009)",
+                    res_data,
+                    style=style.upper(),
+                )
+                out_p.write_text(html_out, encoding="utf-8")
+                click.echo(f"Covariate balance report saved to: {output}")
+                return
 
         est_rows: list[Estimate] = []
         coefs = res_data.get("coefficients", [])

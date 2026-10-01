@@ -1,0 +1,128 @@
+"""
+Causal Mediation Analysis Module.
+
+Estimates Average Causal Mediation Effect (ACME / Indirect Effect),
+Average Direct Effect (ADE), Total Effect, and Proportion Mediated
+using the parametric product-of-coefficients method with quasi-Bayesian
+Monte Carlo simulation for standard errors and confidence intervals (Imai et al. 2010, Baron & Kenny 1986).
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import numpy as np
+import pandas as pd
+import statsmodels.api as sm
+
+
+def run_mediation(
+    df: pd.DataFrame,
+    treatment: str,
+    mediator: str,
+    outcome: str,
+    covariates: list[str] | None = None,
+    n_sims: int = 1000,
+    seed: int = 42,
+) -> dict[str, Any]:
+    """
+    Perform parametric causal mediation analysis.
+
+    Parameters:
+        df: Clinical DataFrame.
+        treatment: Binary or continuous exposure/treatment variable.
+        mediator: Intermediate mediator variable.
+        outcome: Primary clinical outcome variable.
+        covariates: Optional baseline confounders.
+        n_sims: Number of Monte Carlo draws for confidence intervals (default 1000).
+        seed: Random seed for reproducibility.
+
+    Returns:
+        dict containing ACME, ADE, Total Effect, Proportion Mediated, and 95% CIs.
+    """
+    covar_list = covariates or []
+    all_cols = [treatment, mediator, outcome] + covar_list
+    df_clean = df[all_cols].dropna().copy()
+
+    if len(df_clean) < 10:
+        raise ValueError("Insufficient observations for causal mediation analysis.")
+
+    # 1. Mediator model: M ~ Treatment + Covariates (OLS)
+    X_med = sm.add_constant(df_clean[[treatment] + covar_list])
+    y_med = df_clean[mediator]
+    med_model = sm.OLS(y_med, X_med).fit()
+
+    alpha_1 = float(med_model.params[treatment])
+    se_alpha_1 = float(med_model.bse[treatment])
+
+    # 2. Outcome model: Y ~ Treatment + Mediator + Covariates
+    X_out = sm.add_constant(df_clean[[treatment, mediator] + covar_list])
+    y_out = df_clean[outcome]
+
+    is_binary_outcome = y_out.nunique() == 2
+    if is_binary_outcome and (set(y_out.unique()).issubset({0, 1, 0.0, 1.0})):
+        try:
+            out_model = sm.Logit(y_out, X_out).fit(disp=False)
+        except Exception:
+            out_model = sm.OLS(y_out, X_out).fit()
+    else:
+        out_model = sm.OLS(y_out, X_out).fit()
+
+    beta_trt = float(out_model.params[treatment])
+    se_beta_trt = float(out_model.bse[treatment])
+
+    beta_med = float(out_model.params[mediator])
+    se_beta_med = float(out_model.bse[mediator])
+
+    # 3. Effect estimation
+    # Indirect Effect (ACME) = alpha_1 * beta_med
+    acme_point = alpha_1 * beta_med
+    ade_point = beta_trt
+    total_point = ade_point + acme_point
+    prop_med = (acme_point / total_point) if abs(total_point) > 1e-9 else 0.0
+
+    # 4. Quasi-Bayesian Monte Carlo Confidence Intervals
+    rng = np.random.default_rng(seed)
+    sim_alpha_1 = rng.normal(alpha_1, se_alpha_1, size=n_sims)
+    sim_beta_med = rng.normal(beta_med, se_beta_med, size=n_sims)
+    sim_beta_trt = rng.normal(beta_trt, se_beta_trt, size=n_sims)
+
+    sim_acme = sim_alpha_1 * sim_beta_med
+    sim_ade = sim_beta_trt
+    sim_total = sim_ade + sim_acme
+
+    acme_ci = (
+        float(np.percentile(sim_acme, 2.5)),
+        float(np.percentile(sim_acme, 97.5)),
+    )
+    ade_ci = (float(np.percentile(sim_ade, 2.5)), float(np.percentile(sim_ade, 97.5)))
+    total_ci = (
+        float(np.percentile(sim_total, 2.5)),
+        float(np.percentile(sim_total, 97.5)),
+    )
+
+    # Sobel test p-value for indirect effect
+    sobel_se = np.sqrt(alpha_1**2 * se_beta_med**2 + beta_med**2 * se_alpha_1**2)
+    z_stat = (acme_point / sobel_se) if sobel_se > 0 else 0.0
+    from scipy import stats
+
+    p_value_acme = float(2.0 * (1.0 - stats.norm.cdf(abs(z_stat))))
+
+    return {
+        "treatment": treatment,
+        "mediator": mediator,
+        "outcome": outcome,
+        "n_observations": len(df_clean),
+        "acme": acme_point,
+        "acme_ci": acme_ci,
+        "acme_pvalue": p_value_acme,
+        "indirect_effect": acme_point,
+        "indirect_ci": acme_ci,
+        "ade": ade_point,
+        "ade_ci": ade_ci,
+        "direct_effect": ade_point,
+        "total_effect": total_point,
+        "total_ci": total_ci,
+        "prop_mediated": prop_med,
+        "method": "Quasi-Bayesian Monte Carlo & Baron-Kenny",
+    }

@@ -57,10 +57,12 @@ When a dataset is presented, inspect it before proposing or executing any models
 0. **Pre-Flight PHI Check**:
    - Explicitly run `phi-privacy-auditor` before ingesting any CSV/Excel file to ensure no Protected Health Information is present.
 
-1. **Load & Inspect Metadata**:
-   - File format (`.csv`, `.xlsx`, `.tsv`, `.parquet`).
-   - Dimensions: Sample size $N$ (rows) and feature count $P$ (columns).
-   - Column types: numeric continuous, integer count, binary indicators, categorical factors, dates/times, free text.
+1. **One-Shot Automated Data Profiling**:
+   - Run `medstat profile` to instantly inspect cohort dimensions, missingness, outcome candidates, and infer the study design:
+   ```bash
+   uv run medstat profile --data <dataset.csv>
+   ```
+   - Automatically supports `.csv`, `.xlsx`, `.tsv`, and `.parquet`.
 
 2. **Screen Clinical Invariants & Data Health**:
    - **Missingness Audit**: Calculate missing count and % per column.
@@ -142,22 +144,44 @@ Present a concise, structured 1-page **Statistical Analysis Proposal (SAP)**:
 When executing the pipeline, strictly enforce the following sequence across downstream tools:
 
 ### Step 1: Clean & Standardize (`medstat-clean`)
-- Run missingness audit.
 - Recode any text outcome columns (`"Dead"` $\to$ `1`, `"Alive"` $\to$ `0`) so downstream tools never receive text labels.
-- Execute cleaning with explicit strategy and documented clinical justification.
-- Run `uv run medstat clean --help` to dynamically understand the current CLI schema.
+- Execute cleaning with explicit strategy and documented clinical justification:
+```bash
+uv run medstat clean --data <dataset.csv> --strategy complete-case --outlier-action winsorize --iqr-multiplier 1.5 --output clean.csv --audit-out retention.json
+```
 
 ### Step 2: Baseline Descriptive & Balance (`medstat-models` / `medstat-causal-meta`)
-- Generate Table 1 with SMDs.
-- Run `uv run medstat table1 --help` to dynamically understand the current CLI schema.
+- Generate Table 1 with Standardized Mean Differences (SMDs):
+```bash
+uv run medstat table1 --data clean.csv --group <group_col> --output table1.json
+```
 
 ### Step 3: Core Statistical & Causal Modeling
-- Execute multivariable regression, survival models, diagnostic testing, causal PSM matching, or inter-rater agreement based on the inferred study design.
-- Run `uv run medstat model --help`, `uv run medstat diag --help`, `uv run medstat causal --help`, or `uv run medstat agreement --help` to dynamically understand the current CLI schemas.
+- Execute models based on the inferred clinical design:
+```bash
+# Type 2: Multivariable Logistic Regression with E-value & Splines
+uv run medstat model --data clean.csv --outcome <outcome> --exposure <exp> --covariates <c1,c2> --type logistic --e-value --spline-var <continuous_var> --output model.json
+
+# Type 3: Cox Proportional Hazards Survival Analysis
+uv run medstat model --data clean.csv --outcome <status> --time <time> --exposure <exp> --covariates <c1,c2> --type cox --schoenfeld --output cox.json
+
+# Type 4: Diagnostic Test Accuracy (Biomarker evaluation with directionality)
+uv run medstat diag --data clean.csv --gold-standard <gold_col> --test-col <test_col> --cutoff <val> --direction high --roc --dca --output diag.json
+
+# Type 5: Propensity Score Matching (Austin 2009 standard)
+uv run medstat causal psm --data clean.csv --treatment <tx> --covariates <c1,c2> --caliper 0.2 --balance-check --output psm.json
+
+# Type 6: Inter-Rater Reliability / Agreement
+uv run medstat agreement kappa --data clean.csv --rater1 <r1> --rater2 <r2> --output kappa.json
+uv run medstat agreement bland-altman --data clean.csv --m1 <m1> --m2 <m2> --output ba.json
+```
 
 ### Step 4: Publication Reporting (`medstat-report`)
-- Format model results into journal-styled HTML tables (NEJM, JAMA, APA 7) and compile automated methods narratives and checklist audits (CONSORT, STROBE, TRIPOD+AI).
-- Run `uv run medstat report --help` to dynamically understand the current CLI schema.
+- Format model results into journal-styled HTML tables (NEJM, JAMA, APA 7) and compile automated methods narratives and checklist audits (STROBE, CONSORT, TRIPOD, STARD, PRISMA):
+```bash
+uv run medstat report --results <result.json> --style nejm --format html --output report.html
+uv run medstat report --checklist stard --output stard_checklist.md
+```
 
 ---
 

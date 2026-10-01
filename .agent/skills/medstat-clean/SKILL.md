@@ -65,9 +65,29 @@ medstat clean --data <dataset.csv> \
 
 ### Step 3: Sanitize & Winsorize Outliers
 
-Detect and handle non-physiological or extreme values:
-- Use Tukey's IQR rule ($1.5 \times \text{IQR}$) or robust median deviation (e.g., $|\text{modified z-score}| > 3.5$ or $|x_i - \text{median}| > 3 \times \text{MAD}$).
-- Extreme laboratory readings or physiological vitals (e.g., SBP > 260 or < 40 mmHg) should be flagged for clinical chart review and verification against source records; apply prespecified variable-specific handling rules rather than blanket automatic winsorization.
+Detect and handle non-physiological or extreme values using the `--outlier-action` and `--iqr-multiplier` CLI flags:
+
+```bash
+# Winsorize extreme values to Tukey IQR fences (Q1 - 1.5*IQR, Q3 + 1.5*IQR)
+medstat clean --data <dataset.csv> \
+  --strategy complete-case \
+  --outlier-action winsorize \
+  --iqr-multiplier 1.5 \
+  --output clean_winsorized.csv --audit-out retention.json
+
+# Or remove non-physiological outliers with audited sample flow tracking
+medstat clean --data <dataset.csv> \
+  --strategy complete-case \
+  --outlier-action remove \
+  --iqr-multiplier 3.0 \
+  --output clean_no_outliers.csv --audit-out retention.json
+```
+
+- `--outlier-action [flag|remove|winsorize|cap]`:
+  - `winsorize` / `cap`: Clamps extreme values to the Tukey fences ($Q_1 - k \times \text{IQR}$, $Q_3 + k \times \text{IQR}$) while retaining the full cohort.
+  - `remove`: Excludes rows with extreme non-physiological values and logs them into the sample retention tracker ($N_{\text{excluded}}$).
+  - `flag`: Identifies outlier rows without altering numerical values.
+- `--iqr-multiplier`: Tukey's multiplier $k$ (default: `1.5` for inner fences, `3.0` for extreme outer fences).
 - Standardize explicitly binary event-status fields to numeric `0/1` (`1 = Event`, `0 = Non-event`), ensuring survival follow-up duration and multicategory endpoints remain intact; never forward text outcomes to modeling.
 
 ### Step 4: Verify Sample Retention Flow
