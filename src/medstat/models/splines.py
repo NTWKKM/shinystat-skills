@@ -318,7 +318,9 @@ def fit_logistic_rcs(
     if len(clean_df) < 10:
         raise ValueError("Insufficient observations for logistic RCS analysis.")
 
-    num_knots = n_knots if n_knots >= 3 else 4
+    if n_knots < 3:
+        raise ValueError("n_knots must be >= 3 for Restricted Cubic Splines.")
+    num_knots = n_knots
     if ref_value is None:
         ref_value = float(clean_df[spline_var].median())
 

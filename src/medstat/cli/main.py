@@ -25,6 +25,7 @@ from medstat.causal.psm import propensity_score_match
 from medstat.cli.spec import AnalysisPlan
 from medstat.data.clean import (
     MissingStrategyRequiredError,
+    _is_id_column,
     audit_missingness,
     detect_outliers,
     handle_outliers,
@@ -141,11 +142,14 @@ def profile_cmd(data: str, output: str | None) -> None:
                     "unique_values": [str(x) for x in s.unique()[:2]],
                 }
             )
-        elif any(
-            time_hint in col.lower()
-            for time_hint in ("time", "duration", "followup", "survival", "surv")
-        ):
-            endpoints.append({"column": col, "type": "survival_time"})
+        else:
+            col_lower = col.lower()
+            col_tokens = set(re.split(r"[_\-\.\s]+", col_lower))
+            if any(
+                t in ("time", "duration", "followup", "survival", "surv")
+                for t in col_tokens
+            ) or col_lower.startswith("time_to_"):
+                endpoints.append({"column": col, "type": "survival_time"})
 
     # Infer clinical design type (Type 1 to 7)
     has_survival = any(e["type"] == "survival_time" for e in endpoints)
@@ -338,12 +342,22 @@ def clean_cmd(
                 "Apply outlier handling before multiple imputation, or use --outlier-action flag."
             )
 
-        num_cols = [
-            c
-            for c in cleaned_df.columns
-            if pd.api.types.is_numeric_dtype(cleaned_df[c])
-            and cleaned_df[c].dropna().nunique() > 2
-        ]
+        num_cols = []
+        for c in cleaned_df.columns:
+            if not pd.api.types.is_numeric_dtype(cleaned_df[c]):
+                continue
+            if cleaned_df[c].dropna().nunique() <= 2:
+                continue
+            if _is_id_column(c, cleaned_df[c]):
+                continue
+            s_val = cleaned_df[c].dropna()
+            if len(s_val) == 0:
+                continue
+            q25 = float(s_val.quantile(0.25))
+            q75 = float(s_val.quantile(0.75))
+            if (q75 - q25) == 0:
+                continue
+            num_cols.append(c)
         outlier_counts: dict[str, int] = {}
         for c in num_cols:
             mask, stats_c = detect_outliers(
@@ -1098,15 +1112,59 @@ def kappa_cmd(
             except ValueError:
                 cat_list.append(c)
 
-    res = calculate_kappa(
-        df,
-        rater1=rater1,
-        rater2=rater2,
-        targets=targets,
-        raters=raters,
-        ratings=ratings,
-        categories=cat_list,
-    )
+    # Resolve agreement columns and validate missingness
+    resolved_cols: list[str] = []
+    if rater1 is not None or rater2 is not None:
+        if not rater1 or not rater2:
+            raise click.ClickException(
+                "[agreement kappa] Both --rater1 and --rater2 must be provided for two-rater agreement."
+            )
+        resolved_cols = [rater1, rater2]
+    elif targets is not None or raters is not None or ratings is not None:
+        missing_long = [
+            param
+            for param, val in [
+                ("--targets", targets),
+                ("--raters", raters),
+                ("--ratings", ratings),
+            ]
+            if not val
+        ]
+        if missing_long:
+            raise click.ClickException(
+                f"[agreement kappa] Long format requires all three: --targets, --raters, --ratings. Missing: {', '.join(missing_long)}"
+            )
+        resolved_cols = [targets, raters, ratings]
+    elif (
+        "subject_id" in df.columns
+        and "rater_id" in df.columns
+        and any(
+            c in df.columns for c in ("rating", "ratings", "score", "measurement_score")
+        )
+    ):
+        score_col = next(
+            c
+            for c in df.columns
+            if c in ("rating", "ratings", "score", "measurement_score")
+        )
+        resolved_cols = ["subject_id", "rater_id", score_col]
+
+    if resolved_cols:
+        validate_columns(df, resolved_cols, "agreement kappa")
+        check_data_missingness(df, resolved_cols, "agreement kappa")
+
+    try:
+        res = calculate_kappa(
+            df,
+            rater1=rater1,
+            rater2=rater2,
+            targets=targets,
+            raters=raters,
+            ratings=ratings,
+            categories=cat_list,
+        )
+    except ValueError as e:
+        raise click.ClickException(str(e))
     if output:
         Path(output).parent.mkdir(parents=True, exist_ok=True)
         with open(output, "w") as f:
@@ -1341,6 +1399,13 @@ def meta_cmd(
     help="Target hazard ratio for survival log-rank test.",
 )
 @click.option(
+    "--event-probability",
+    "--p-event",
+    default=None,
+    type=float,
+    help="Expected cumulative event probability for survival analysis in (0, 1].",
+)
+@click.option(
     "--correlation-r",
     "--r",
     default=None,
@@ -1356,6 +1421,7 @@ def sample_size_cmd(
     p1: float | None,
     p2: float | None,
     hazard_ratio: float | None,
+    event_probability: float | None,
     correlation_r: float | None,
     output: str | None,
 ) -> None:
@@ -1425,14 +1491,26 @@ def sample_size_cmd(
             raise click.ClickException(
                 f"Hazard ratio must be positive and not equal to 1.0, found {hazard_ratio}."
             )
+        ev_prob = event_probability
+        if ev_prob is None and p1 is not None:
+            ev_prob = p1
+        if ev_prob is None:
+            raise click.ClickException(
+                "Survival sample size calculation requires an explicitly supplied event probability (--event-probability or --p-event) in (0, 1]."
+            )
+        if not (0.0 < ev_prob <= 1.0):
+            raise click.ClickException(
+                f"Event probability must be strictly between 0 and 1 (found: {ev_prob})."
+            )
         surv_res = calculate_sample_size_survival(
-            hazard_ratio=hazard_ratio, alpha=alpha, power=power
+            hazard_ratio=hazard_ratio, p_event=ev_prob, alpha=alpha, power=power
         )
         res = {
             "test_type": test_type,
             "alpha": alpha,
             "power": power,
             "hazard_ratio": hazard_ratio,
+            "event_probability": ev_prob,
             "required_events": surv_res["required_events"],
             "total_sample_size": surv_res["total_n"],
             "sample_size_per_group": surv_res["n_treated"],
@@ -1576,8 +1654,36 @@ def report_cmd(
                     style=style.upper(),
                 )
                 if narrative:
-                    narr_text = generate_methods_narrative(model_type="diagnostic")
-                    html_out += f"\n<!-- Methods Narrative -->\n<div class='methods-narrative'><p>{narr_text}</p></div>"
+                    try:
+                        narr_text = generate_methods_narrative(
+                            model_type="diagnostic",
+                            cutoff=res_data.get("cutoff")
+                            or (
+                                res_data.get("accuracy_at_cutoff", {}).get("cutoff")
+                                if isinstance(res_data.get("accuracy_at_cutoff"), dict)
+                                else None
+                            ),
+                            direction=res_data.get("direction")
+                            or (
+                                res_data.get("roc", {}).get("direction")
+                                if isinstance(res_data.get("roc"), dict)
+                                else None
+                            ),
+                            has_roc="roc" in res_data,
+                            has_delong="delong_comparison" in res_data,
+                            has_dca="dca" in res_data,
+                            has_calibration="calibration" in res_data,
+                            diagnostic_data=res_data,
+                        )
+                        if not narr_text:
+                            raise click.ClickException(
+                                "Methods narrative is unavailable for the provided diagnostic results."
+                            )
+                        html_out += f"\n<!-- Methods Narrative -->\n<div class='methods-narrative'><p>{narr_text}</p></div>"
+                    except NotImplementedError:
+                        raise click.ClickException(
+                            "Methods narrative generation is not available for diagnostic results."
+                        )
                 out_p.write_text(html_out, encoding="utf-8")
                 click.echo(f"Diagnostic publication report saved to: {output}")
                 return

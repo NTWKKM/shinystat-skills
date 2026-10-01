@@ -75,7 +75,6 @@ def run_mediation(
         method_desc = "Quasi-Bayesian Monte Carlo & Baron-Kenny (Linear Scale)"
 
     beta_trt = float(out_model.params[treatment])
-    se_beta_trt = float(out_model.bse[treatment])
 
     beta_med = float(out_model.params[mediator])
     se_beta_med = float(out_model.bse[mediator])
@@ -90,8 +89,14 @@ def run_mediation(
     # 4. Quasi-Bayesian Monte Carlo Confidence Intervals
     rng = np.random.default_rng(seed)
     sim_alpha_1 = rng.normal(alpha_1, se_alpha_1, size=n_sims)
-    sim_beta_med = rng.normal(beta_med, se_beta_med, size=n_sims)
-    sim_beta_trt = rng.normal(beta_trt, se_beta_trt, size=n_sims)
+
+    # Jointly sample treatment and mediator parameters from outcome model covariance
+    cov_params = out_model.cov_params()
+    mean_joint = np.array([beta_trt, beta_med], dtype=float)
+    cov_joint = cov_params.loc[[treatment, mediator], [treatment, mediator]].to_numpy()
+    sim_joint = rng.multivariate_normal(mean_joint, cov_joint, size=n_sims)
+    sim_beta_trt = sim_joint[:, 0]
+    sim_beta_med = sim_joint[:, 1]
 
     sim_acme = sim_alpha_1 * sim_beta_med
     sim_ade = sim_beta_trt

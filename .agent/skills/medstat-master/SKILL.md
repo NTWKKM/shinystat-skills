@@ -55,7 +55,7 @@ Activate **medstat-master** whenever:
 When a dataset is presented, inspect it before proposing or executing any models:
 
 0. **Pre-Flight PHI Check**:
-   - Explicitly run `phi-privacy-auditor` before ingesting CSV, XLSX, TSV, or Parquet files to ensure no Protected Health Information is present; stop ingestion immediately if the auditor is unavailable or fails.
+   - Ensure the `phi-privacy-auditor` skill is provisioned in your agent's skills directory (e.g., `~/.agents/skills/`, `~/.claude/skills/`, or `.agents/skills/` per the README setup guidance) before processing data. Explicitly run `phi-privacy-auditor` before ingesting CSV, XLSX, TSV, or Parquet files to ensure no Protected Health Information is present; stop ingestion immediately (fail-closed) if the auditor is unavailable or fails.
 
 1. **One-Shot Automated Data Profiling**:
    - Run `medstat profile` to instantly inspect cohort dimensions, missingness, outcome candidates, and infer the study design:
@@ -85,7 +85,7 @@ Map the data geometry and clinical context to one of the canonical clinical desi
 | **Type 3: Time-to-Event / Survival Cohort** | Follow-up time column + binary event indicator ($0/1$) | Clean $\to$ KM Curves $\to$ Cox PH + Schoenfeld $\to$ Firth Cox (if sparse) $\to$ Report | `medstat-clean`<br>`medstat-models`<br>`medstat-report` |
 | **Type 4: Diagnostic Accuracy & Biomarker** | Continuous/ordinal index test + binary gold standard | Clean $\to$ 2×2 Contingency (Wilson CI) $\to$ ROC + DeLong AUC $\to$ DCA Net Benefit $\to$ Report | `medstat-clean`<br>`medstat-diagnostic`<br>`medstat-report` |
 | **Type 5: Observational Causal Inference** | Non-randomized treatment indicator + baseline confounders | Clean $\to$ PSM Matching (caliper 0.2×SD) $\to$ Love Plot (SMD < 0.10) $\to$ Outcome Model $\to$ Report | `medstat-clean`<br>`medstat-causal-meta`<br>`medstat-models`<br>`medstat-report` |
-| **Type 6: Agreement & Reliability** | Paired device measurements OR subject ID + multiple raters | Clean $\to$ Bland-Altman LoA (Carkeet CIs) OR Pure-SciPy ICC (all 6 forms) $\to$ Report | `medstat-clean`<br>`medstat-causal-meta`<br>`medstat-report` |
+| **Type 6: Agreement & Reliability** | Paired device measurements OR subject ID + multiple raters | Clean $\to$ Bland-Altman LoA (Bland–Altman large-sample approximate CIs) OR Pure-SciPy ICC (all 6 forms) $\to$ Report | `medstat-clean`<br>`medstat-causal-meta`<br>`medstat-report` |
 | **Type 7: Multi-Study Meta-Analysis** | Effect sizes, SEs / variance, study labels, sample sizes | Fixed/Random Effects (DerSimonian-Laird) $\to$ Forest Plot $\to$ Egger's Test $\to$ Report | `medstat-causal-meta`<br>`medstat-report` |
 
 *See [references/study-design-decision-tree.md](references/study-design-decision-tree.md) for detailed clinical heuristics and decision thresholds.*
@@ -145,9 +145,9 @@ When executing the pipeline, strictly enforce the following sequence across down
 
 ### Step 1: Clean & Standardize (`medstat-clean`)
 - Recode any text outcome columns (`"Dead"` $\to$ `1`, `"Alive"` $\to$ `0`) so downstream tools never receive text labels.
-- Execute cleaning with explicit strategy and documented clinical justification:
+- Execute cleaning with an explicit strategy and documented clinical justification selected after reviewing the dataset's missingness audit:
 ```bash
-uv run medstat clean --data <dataset.csv> --strategy complete-case --missing-justification "Missingness <5% attributable to random specimen handling delay unrelated to clinical acuity; complete-case analysis clinically justified" --output clean.csv --audit-out retention.json
+uv run medstat clean --data <dataset.csv> --strategy <strategy> --missing-justification "<dataset_specific_clinical_rationale>" --output clean.csv --audit-out retention.json
 ```
 
 ### Step 2: Baseline Descriptive & Balance (`medstat-models` / `medstat-causal-meta`)

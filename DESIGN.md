@@ -182,7 +182,7 @@ Clinical datasets originate from diverse hospital IT systems (EHR exports, regis
 
 ### Consequences
 - **Status**: Accepted & Verified.
-- **Robustness**: Agents and clinicians can pass any standard spreadsheet directly without manual format pre-conversion.
+- **Robustness**: Excel support is limited to modern .xlsx files (legacy .xls files require conversion before loading); supported tabular formats include .csv, .tsv, .xlsx, and .parquet without manual pre-conversion.
 - **Self-Healing Ergonomics**: Typo suggestions guide agents to self-correct variable names immediately without looping on failures.
 
 ---

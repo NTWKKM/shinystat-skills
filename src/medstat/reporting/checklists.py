@@ -824,9 +824,15 @@ def get_prisma_checklist() -> ReportingChecklist:
             "Methods",
         ),
         ChecklistItem(
-            "16",
-            "Study selection",
+            "16a",
+            "Study selection - results",
             "Results of search and selection process (records screened, eligible, included, PRISMA flow diagram)",
+            "Results",
+        ),
+        ChecklistItem(
+            "16b",
+            "Study selection - excluded studies",
+            "Cite studies that met the eligibility criteria but were excluded, and explain why they were excluded",
             "Results",
         ),
         ChecklistItem(

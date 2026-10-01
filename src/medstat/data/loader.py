@@ -35,7 +35,9 @@ def load_clinical_data(
     ext = p.suffix.lower()
     try:
         if ext == ".xlsx":
-            df = pd.read_excel(p, sheet_name=sheet_name)
+            df = pd.read_excel(
+                p, sheet_name=sheet_name, keep_default_na=False, na_values=[""]
+            )
         elif ext == ".xls":
             raise click.ClickException(
                 "Legacy Excel format (.xls) is not supported. "
@@ -52,7 +54,9 @@ def load_clinical_data(
             last_decode_err: Exception | None = None
             for enc in encodings:
                 try:
-                    df = pd.read_csv(p, sep=sep, encoding=enc)
+                    df = pd.read_csv(
+                        p, sep=sep, encoding=enc, keep_default_na=False, na_values=[""]
+                    )
                     break
                 except UnicodeDecodeError as err:
                     last_decode_err = err
@@ -74,7 +78,19 @@ def load_clinical_data(
         raise click.ClickException(f"Failed to load dataset '{path}': {e}")
 
     # Standardize column headers: strip leading/trailing whitespace
-    df.columns = [str(c).strip() for c in df.columns]
+    normalized_cols = [str(c).strip() for c in df.columns]
+    seen = set()
+    duplicates = []
+    for c in normalized_cols:
+        if c in seen and c not in duplicates:
+            duplicates.append(c)
+        seen.add(c)
+    if duplicates:
+        raise click.ClickException(
+            f"Dataset contains duplicate column names after normalization: {duplicates}. "
+            "Please ensure each column has a unique header in the source file."
+        )
+    df.columns = normalized_cols
     return df
 
 

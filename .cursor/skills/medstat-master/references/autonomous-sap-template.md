@@ -112,8 +112,7 @@ models:
     missing_strategy: "complete-case"
     missing_justification: "Complete-case analysis under plausible MCAR assumption; sensitivity analysis assesses robustness to plausible departures from MCAR"
     options:
-      ci_method: "profile"
-      method: "standard"  # options: standard (default), firth (select when separation, sparse data, or prespecified bias-reduction applies)
+      method: "standard"  # options: standard (statsmodels coefficient-based CIs, default), firth (select when separation, sparse data, or prespecified bias-reduction applies)
       e_value: true
 
 reporting:

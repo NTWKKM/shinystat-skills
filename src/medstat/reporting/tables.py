@@ -359,17 +359,27 @@ def render_diagnostic_table(
     if isinstance(acc, dict):
 
         def _fmt_ci(
-            est: float | None, ci: tuple | list | None, is_pct: bool = True
+            est: float | dict | None, ci: tuple | list | None, is_pct: bool = True
         ) -> str:
+            if isinstance(est, dict):
+                if ci is None and "ci_lower" in est and "ci_upper" in est:
+                    ci = [est["ci_lower"], est["ci_upper"]]
+                elif ci is None and "ci" in est:
+                    ci = est["ci"]
+                est = est.get("estimate", est.get("value"))
             if est is None:
                 return "—"
+            try:
+                est_val = float(est)
+            except (ValueError, TypeError):
+                return "—"
             if is_pct:
-                val = f"{est * 100:.1f}%"
+                val = f"{est_val * 100:.1f}%"
                 if ci and len(ci) == 2:
                     return f"{val} ({ci[0] * 100:.1f}–{ci[1] * 100:.1f}%)"
                 return val
             else:
-                val = f"{est:.2f}"
+                val = f"{est_val:.2f}"
                 if ci and len(ci) == 2:
                     return f"{val} ({ci[0]:.2f}–{ci[1]:.2f})"
                 return val
@@ -474,14 +484,27 @@ def render_diagnostic_table(
                 brier_val = None
 
         if brier_val is not None:
+            prob_source = diag_data.get("probability_source") or cal.get(
+                "probability_source"
+            )
+            brier_label = (
+                "Brier Score (Calibration - in-sample apparent estimate)"
+                if prob_source
+                else "Brier Score (Calibration)"
+            )
             records.append(
                 {
-                    "Diagnostic Metric": "Brier Score (Calibration)",
+                    "Diagnostic Metric": brier_label,
                     "Estimate (95% CI)": f"{float(brier_val):.4f}",
                 }
             )
 
     note = "Confidence intervals for proportions are calculated via Wilson score method; AUC confidence interval via DeLong test."
+    apparent_note = diag_data.get("apparent_estimates_note") or (
+        cal.get("apparent_estimates_note") if isinstance(cal, dict) else None
+    )
+    if apparent_note:
+        note += f" Note: {apparent_note}"
     return render_records_table(title, records, style=style, note=note)
 
 

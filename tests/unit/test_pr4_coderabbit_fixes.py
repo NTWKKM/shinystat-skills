@@ -370,7 +370,7 @@ class TestCLIFixes:
             {
                 "patient_id": [f"P_{i}" for i in range(50)],
                 "is_dead": [0] * 48 + [1, 1],  # binary column with 2 unique values
-                "sbp": [120.0] * 48
+                "sbp": [115.0 + (i % 10) for i in range(48)]
                 + [260.0, 270.0],  # continuous column with 2 outliers
             }
         )
@@ -565,8 +565,23 @@ class TestCLIFixes:
         assert res.exit_code != 0
         assert "requires explicitly supplied --hazard-ratio" in res.output
 
-        res_ok = runner.invoke(
+        res_no_p = runner.invoke(
             cli, ["sample-size", "--type", "survival", "--hr", "0.70"]
+        )
+        assert res_no_p.exit_code != 0
+        assert "event probability" in res_no_p.output.lower()
+
+        res_ok = runner.invoke(
+            cli,
+            [
+                "sample-size",
+                "--type",
+                "survival",
+                "--hr",
+                "0.70",
+                "--event-probability",
+                "0.50",
+            ],
         )
         assert res_ok.exit_code == 0
         assert "required_events" in res_ok.output
@@ -760,7 +775,7 @@ class TestPR4FollowupFixes:
         df = pd.DataFrame(
             {
                 "patient_id": list(range(1, 21)),
-                "age": [50.0] * 18 + [150.0, 160.0],
+                "age": [45.0 + i for i in range(18)] + [150.0, 160.0],
             }
         )
         csv_path = tmp_path / "outlier_removal.csv"
@@ -858,10 +873,13 @@ class TestPR4FollowupFixes:
         prisma = get_prisma_checklist()
         distinct_prisma_numbers = {it.number.rstrip("abcdef") for it in prisma.items}
         assert len(distinct_prisma_numbers) == 27
-        assert len(prisma.items) == 41
+        assert len(prisma.items) == 42
         item_names_prisma = [it.item for it in prisma.items]
         assert "Results of individual studies" in item_names_prisma
         assert "Results of syntheses - statistical results" in item_names_prisma
+        prisma_dict = {it.number: it.item for it in prisma.items}
+        assert prisma_dict["16a"] == "Study selection - results"
+        assert prisma_dict["16b"] == "Study selection - excluded studies"
 
     def test_render_diagnostic_table_nested_and_scalar_brier(self):
         # 1. Nested brier dict
@@ -1325,4 +1343,291 @@ class TestCoderabbitReviewRound2Fixes:
         )
         assert (
             "Type 6: Inter-Rater Reliability / Agreement Study" in res_clusters.output
+        )
+
+
+# ==============================================================================
+# 11. Follow-up PR#4 Review Verification Tests
+# ==============================================================================
+class TestPR4ReviewFollowupFixes:
+    def test_mediation_joint_covariance_sampling(self):
+        np.random.seed(42)
+        n = 120
+        trt = np.random.binomial(1, 0.5, size=n)
+        med = 0.7 * trt + np.random.normal(0, 1, size=n)
+        y = 0.5 * trt + 0.8 * med + np.random.normal(0, 1, size=n)
+        df = pd.DataFrame({"trt": trt, "med": med, "y": y})
+
+        res = run_mediation(df, treatment="trt", mediator="med", outcome="y", seed=42)
+        assert "total_ci" in res
+        assert "acme_ci" in res
+        assert "ade_ci" in res
+        assert res["total_ci"][0] < res["total_effect"] < res["total_ci"][1]
+
+    def test_fit_logistic_rcs_rejects_knots_below_3(self):
+        np.random.seed(42)
+        n = 50
+        df = pd.DataFrame(
+            {
+                "y": np.random.binomial(1, 0.5, size=n),
+                "x": np.linspace(10, 50, n),
+            }
+        )
+        with pytest.raises(ValueError, match="n_knots must be >= 3"):
+            fit_logistic_rcs(df, outcome="y", spline_var="x", n_knots=2)
+
+        # n_knots=3 should succeed
+        res = fit_logistic_rcs(df, outcome="y", spline_var="x", n_knots=3)
+        assert res["knots"] == 3
+
+    def test_loader_preserves_literal_na_and_treats_empty_as_nan(self, tmp_path):
+        csv_file = tmp_path / "literal_na.csv"
+        csv_file.write_text(
+            "id,code,val\n1,NA,\n2,N/A,10.5\n3,Normal,20.0\n", encoding="utf-8"
+        )
+        df = load_clinical_data(csv_file)
+        # Empty cell should be NaN
+        assert pd.isna(df.loc[0, "val"])
+        # Literal "NA" should remain string "NA" for explicit clinical missingness rules
+        assert df.loc[0, "code"] == "NA"
+        assert df.loc[1, "code"] == "N/A"
+
+    def test_loader_rejects_duplicate_column_headers_after_normalization(
+        self, tmp_path
+    ):
+        csv_file = tmp_path / "dup_cols.csv"
+        csv_file.write_text("age ,age,score\n50,51,100\n", encoding="utf-8")
+        with pytest.raises(
+            click.ClickException,
+            match="duplicate column names after normalization: \\['age'\\]",
+        ):
+            load_clinical_data(csv_file)
+
+    def test_profile_survival_endpoint_token_matching(self, tmp_path):
+        runner = CliRunner()
+        # Columns that should NOT trigger survival_time
+        df_non_surv = pd.DataFrame(
+            {
+                "patient_id": list(range(1, 21)),
+                "survey_score": [1.0] * 20,
+                "estimator_val": [2.0] * 20,
+                "outcome": [0, 1] * 10,
+            }
+        )
+        p1 = tmp_path / "non_surv.csv"
+        df_non_surv.to_csv(p1, index=False)
+        out1 = tmp_path / "prof1.json"
+        res1 = runner.invoke(cli, ["profile", "--data", str(p1), "--output", str(out1)])
+        assert res1.exit_code == 0
+        data1 = json.loads(out1.read_text())
+        surv_cols1 = [
+            e["column"]
+            for e in data1.get("candidate_endpoints", [])
+            if e.get("type") == "survival_time"
+        ]
+        assert len(surv_cols1) == 0
+
+        # Columns that SHOULD trigger survival_time
+        df_surv = pd.DataFrame(
+            {
+                "patient_id": list(range(1, 21)),
+                "time_to_event": [10.0 + i for i in range(20)],
+                "overall_survival": [20.0 + i for i in range(20)],
+                "status": [0, 1] * 10,
+            }
+        )
+        p2 = tmp_path / "surv.csv"
+        df_surv.to_csv(p2, index=False)
+        out2 = tmp_path / "prof2.json"
+        res2 = runner.invoke(cli, ["profile", "--data", str(p2), "--output", str(out2)])
+        assert res2.exit_code == 0
+        data2 = json.loads(out2.read_text())
+        surv_cols2 = [
+            e["column"]
+            for e in data2.get("candidate_endpoints", [])
+            if e.get("type") == "survival_time"
+        ]
+        assert "time_to_event" in surv_cols2
+        assert "overall_survival" in surv_cols2
+
+    def test_clean_outlier_excludes_id_and_zero_iqr(self, tmp_path):
+        runner = CliRunner()
+        # id column, zero-IQR column, and normal numeric column with an extreme outlier
+        df = pd.DataFrame(
+            {
+                "patient_id": list(range(1, 21)),
+                "zero_iqr": [0.0] * 18 + [5.0, 10.0],  # 18 zeros, q25=0, q75=0 -> IQR=0
+                "biomarker": [10.0 + (i % 5) for i in range(19)]
+                + [1000.0],  # normal numeric column with outlier
+            }
+        )
+        p = tmp_path / "outlier_test.csv"
+        df.to_csv(p, index=False)
+        out_clean = tmp_path / "clean.csv"
+        audit_out = tmp_path / "retention.json"
+        res = runner.invoke(
+            cli,
+            [
+                "clean",
+                "--data",
+                str(p),
+                "--strategy",
+                "complete-case",
+                "--missing-justification",
+                "Clinical audit complete",
+                "--outlier-action",
+                "remove",
+                "--output",
+                str(out_clean),
+                "--audit-out",
+                str(audit_out),
+            ],
+        )
+        assert res.exit_code == 0
+        audit_data = json.loads(audit_out.read_text())
+        outlier_counts = audit_data.get("outlier_counts", {})
+        assert "patient_id" not in outlier_counts
+        assert "zero_iqr" not in outlier_counts
+        assert "biomarker" in outlier_counts
+
+    def test_kappa_cmd_validates_columns_and_rejects_missing(self, tmp_path):
+        runner = CliRunner()
+        # Missing values in ratings should be rejected
+        df_missing = pd.DataFrame(
+            {
+                "rater1": [0, 1, np.nan, 2],
+                "rater2": [0, 1, 1, 2],
+            }
+        )
+        p = tmp_path / "kappa_miss.csv"
+        df_missing.to_csv(p, index=False)
+        res = runner.invoke(
+            cli,
+            [
+                "agreement",
+                "kappa",
+                "--data",
+                str(p),
+                "--rater1",
+                "rater1",
+                "--rater2",
+                "rater2",
+            ],
+        )
+        assert res.exit_code != 0
+        assert "missing" in res.output.lower()
+
+        # Missing column name should raise validation error
+        res_missing_col = runner.invoke(
+            cli,
+            [
+                "agreement",
+                "kappa",
+                "--data",
+                str(p),
+                "--rater1",
+                "rater1",
+                "--rater2",
+                "nonexistent",
+            ],
+        )
+        assert res_missing_col.exit_code != 0
+
+    def test_sample_size_survival_requires_and_validates_event_probability(self):
+        runner = CliRunner()
+        # Missing event probability must fail
+        res_no_pevent = runner.invoke(
+            cli, ["sample-size", "--type", "survival", "--hr", "1.5"]
+        )
+        assert res_no_pevent.exit_code != 0
+        assert "event probability" in res_no_pevent.output.lower()
+
+        # Invalid event probability <= 0 or > 1 must fail
+        res_bad_pevent = runner.invoke(
+            cli,
+            [
+                "sample-size",
+                "--type",
+                "survival",
+                "--hr",
+                "1.5",
+                "--event-probability",
+                "1.5",
+            ],
+        )
+        assert res_bad_pevent.exit_code != 0
+
+        # Valid event probability should succeed and report event_probability
+        res_ok = runner.invoke(
+            cli,
+            [
+                "sample-size",
+                "--type",
+                "survival",
+                "--hr",
+                "1.5",
+                "--event-probability",
+                "0.4",
+            ],
+        )
+        assert res_ok.exit_code == 0
+        out_dict = json.loads(res_ok.output)
+        assert out_dict["event_probability"] == 0.4
+        assert out_dict["hazard_ratio"] == 1.5
+        assert out_dict["required_events"] > 0
+        assert out_dict["total_sample_size"] > 0
+
+    def test_report_diagnostic_narrative_and_table_apparent_estimates(self, tmp_path):
+        runner = CliRunner()
+        diag_data = {
+            "accuracy_at_cutoff": {
+                "cutoff": 2.5,
+                "sensitivity": 0.85,
+                "sensitivity_ci": [0.70, 0.93],
+                "specificity": 0.80,
+                "specificity_ci": [0.65, 0.90],
+            },
+            "roc": {
+                "auc": 0.88,
+                "direction": "high",
+            },
+            "dca": [{"threshold": 0.1, "net_benefit": 0.05}],
+            "calibration": {
+                "brier": {"brier_score": 0.15},
+            },
+            "probability_source": "in-sample logistic recalibration",
+            "apparent_estimates_note": "Brier and net benefit are apparent estimates on derivation cohort.",
+        }
+        res_file = tmp_path / "diag.json"
+        res_file.write_text(json.dumps(diag_data), encoding="utf-8")
+        out_html = tmp_path / "diag_report.html"
+
+        res = runner.invoke(
+            cli,
+            [
+                "report",
+                "--results",
+                str(res_file),
+                "--narrative",
+                "--output",
+                str(out_html),
+            ],
+        )
+        assert res.exit_code == 0
+        content = out_html.read_text(encoding="utf-8")
+        # Check Brier apparent estimate label and note
+        assert "Brier Score (Calibration - in-sample apparent estimate)" in content
+        assert (
+            "Brier and net benefit are apparent estimates on derivation cohort."
+            in content
+        )
+        # Check diagnostic narrative
+        assert "Wilson score method" in content
+        assert "DeLong's non-parametric method" in content
+        assert "Decision Curve Analysis" in content
+        # Check that generic regression narrative is NOT present
+        assert "Multivariable logistic regression was conducted" not in content
+        assert (
+            "Normally distributed continuous variables were expressed as mean"
+            not in content
         )
