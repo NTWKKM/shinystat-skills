@@ -538,11 +538,7 @@ def _is_id_column(col_name: str, series: pd.Series) -> bool:
         return True
     non_null = series.dropna()
     if len(non_null) > 5 and non_null.nunique() == len(non_null):
-        if (
-            pd.api.types.is_integer_dtype(series)
-            or name.startswith("id")
-            or name.endswith("id")
-        ):
+        if re.search(r"^id([_\W]|$)|([_\W]|^)id$", name):
             return True
     return False
 

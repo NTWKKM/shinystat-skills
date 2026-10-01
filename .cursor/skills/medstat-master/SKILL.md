@@ -1,6 +1,6 @@
 ---
 name: medstat-master
-description: Master clinical biostatistics orchestrator. Ingests raw clinical data (CSV, XLSX, TSV), automatically inspects schema and distributions, identifies the clinical study design, formulates or executes a Statistical Analysis Plan (SAP), and dynamically orchestrates the medstat skills pipeline (medstat-clean -> medstat-models / medstat-diagnostic / medstat-causal-meta -> medstat-report) with zero manual skill selection required. Operates autonomously or with interactive clinical proposals.
+description: Master clinical biostatistics orchestrator. Ingests raw clinical data (CSV, XLSX, TSV, .parquet), automatically inspects schema and distributions, identifies the clinical study design, formulates or executes a Statistical Analysis Plan (SAP), and dynamically orchestrates the medstat skills pipeline (medstat-clean -> medstat-models / medstat-diagnostic / medstat-causal-meta -> medstat-report) with zero manual skill selection required. Operates autonomously or with interactive clinical proposals.
 ---
 
 # medstat-master: Autonomous Biostatistical Orchestrator

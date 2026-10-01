@@ -6,7 +6,7 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
 
 | Term | Symbol / Code | Definition & Clinical Context |
 | :--- | :--- | :--- |
-| **Complete-Case** | `complete-case` | Analysis restricted exclusively to records with zero missing values. Valid strictly under Missing Completely at Random (MCAR). |
+| **Complete-Case** | `complete-case` | Analysis restricted exclusively to records with zero missing values. Validity is conditional on assessing the missingness mechanism, target estimand, and sensitivity analysis; may also be appropriate when missingness is trivial and clinically uninformative, rather than stating validity strictly under MCAR. |
 | **MICE** | `mice` | Multiple Imputation by Chained Equations. Iterative imputation using series of regression models under Missing at Random (MAR). |
 | **Sample Flow Tracker** | `SampleFlowTracker` | CONSORT/STROBE audit tracker recording participant transitions: $N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$. |
 | **Standardized Mean Difference** | `SMD` | Difference in means or proportions divided by pooled standard deviation. Evaluates baseline balance; $\text{SMD} < 0.10$ signifies negligible imbalance. |

@@ -75,11 +75,11 @@ This project ships **6 agent skills** in `.agent/skills/` (and `skills/`) that t
 
 | Skill | Domain | Key Capabilities |
 |:------|:-------|:-----------------|
-| **medstat-master** | **Master Orchestrator** | **Ingests raw CSV/XLSX without requiring manual skill selection. Automatically audits data, infers clinical study design, formulates or executes a Statistical Analysis Plan (SAP), and orchestrates the downstream skills pipeline.** |
+| **medstat-master** | **Master Orchestrator** | **Ingests raw CSV, XLSX, TSV, and Parquet without requiring manual skill selection. Automatically audits data, infers clinical study design, formulates or executes a Statistical Analysis Plan (SAP), and orchestrates the downstream skills pipeline.** |
 | **medstat-clean** | Data Cleaning | Missingness audit (Little's MCAR), imputation (MICE/KNN/indicator), sample-flow tracking, rejects silent listwise deletion |
 | **medstat-models** | Regression & Survival | Table 1 (SMD), GLM/logistic, Cox PH + Schoenfeld, Firth penalized (sparse events), RCS splines, E-value sensitivity |
 | **medstat-diagnostic** | Diagnostic Accuracy | 2×2 contingency (Wilson CI), ROC + DeLong CI, paired DeLong biomarker comparison, DCA net benefit |
-| **medstat-causal-meta** | Causal & Meta-analysis | PSM (caliper 0.2×SD logit, SMD<0.10 balance), Love plot, ICC (pure SciPy), Bland-Altman, meta-analysis (DL + Egger's) |
+| **medstat-causal-meta** | Causal & Meta-analysis | PSM (caliper 0.2×SD logit, SMD<0.10 balance), Love plot, Cohen's and Fleiss' Kappa, ICC (pure SciPy), Bland-Altman, meta-analysis (DL + Egger's) |
 | **medstat-report** | Publication Reporting | NEJM/JAMA/APA 7 styled tables, auto Methods narrative, STROBE/CONSORT/TRIPOD/STARD/PRISMA checklist audit |
 
 ### Skills Directory Structure

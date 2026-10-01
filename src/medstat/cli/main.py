@@ -160,16 +160,16 @@ def profile_cmd(data: str, output: str | None) -> None:
     )
 
     if has_survival:
-        inferred_design = "Type 2: Time-to-Event / Survival Cohort"
+        inferred_design = "Type 3: Time-to-Event / Survival Cohort"
         recommended_model = "cox_ph (or firth Cox if sparse)"
     elif has_clusters:
         inferred_design = "Type 6: Inter-Rater Reliability / Agreement Study"
         recommended_model = "icc / bland-altman"
     elif has_treatment and len(df.columns) > 5:
-        inferred_design = "Type 4: Observational Comparative Effectiveness (Causal PSM)"
+        inferred_design = "Type 5: Observational Comparative Effectiveness (Causal PSM)"
         recommended_model = "causal psm + multivariable logistic"
     elif has_binary:
-        inferred_design = "Type 1: Multivariable Risk Prediction / Binary Outcome"
+        inferred_design = "Type 2: Multivariable Risk Prediction / Binary Outcome"
         recommended_model = "logistic / firth"
     else:
         inferred_design = "Type 1: Cross-Sectional / Observational Study"
@@ -216,7 +216,7 @@ def profile_cmd(data: str, output: str | None) -> None:
     )
     if mcar_summary:
         click.echo(
-            f"  Little's MCAR:      P = {mcar_summary['p_value']} ({'MCAR' if mcar_summary['is_mcar'] else 'Non-MCAR'})"
+            f"  Little's MCAR:      P = {mcar_summary['p_value']} ({mcar_summary['interpretation']})"
         )
     click.echo(f"  Inferred Design:    {inferred_design}")
     click.echo(f"  Recommended Model:  {recommended_model}")

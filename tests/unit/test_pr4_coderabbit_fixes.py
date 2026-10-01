@@ -32,7 +32,7 @@ from medstat.agreement.kappa import (
 )
 from medstat.causal.mediation import run_mediation
 from medstat.cli.main import cli
-from medstat.data.clean import audit_missingness
+from medstat.data.clean import _is_id_column, audit_missingness
 from medstat.data.loader import load_clinical_data
 from medstat.models.splines import fit_logistic_rcs
 from medstat.reporting.checklists import get_prisma_checklist, get_stard_checklist
@@ -692,6 +692,9 @@ class TestPR4FollowupFixes:
             or "Evidence against MCAR (P <= 0.05)" in mcar_interp
         )
         assert "MICE recommended" not in mcar_interp
+        assert mcar_interp in res.output
+        assert "(MCAR)" not in res.output
+        assert "(Non-MCAR)" not in res.output
 
     def test_cli_clean_imputed_datasets_rejects_outlier_modifications(self, tmp_path):
         runner = CliRunner()
@@ -1126,3 +1129,200 @@ class TestCoderabbitReviewRound2Fixes:
             ],
         )
         assert res4.exit_code == 0
+
+    def test_is_id_column_token_boundary(self):
+        """Verify _is_id_column requires whole-token 'id' naming and no integer dtype shortcut."""
+        n = 10
+        unique_int_series = pd.Series(list(range(1, n + 1)))
+        unique_float_series = pd.Series([float(x) for x in range(1, n + 1)])
+
+        # Words ending with 'id' that are not whole tokens
+        for col in [
+            "lipid",
+            "fluid",
+            "acid",
+            "opioid",
+            "steroid",
+            "carotid",
+            "pyramid",
+            "solid",
+            "rapid",
+        ]:
+            assert not _is_id_column(col, unique_float_series), (
+                f"{col} should not be an ID column"
+            )
+            assert not _is_id_column(col, unique_int_series), (
+                f"{col} should not be an ID column"
+            )
+
+        # Words starting with 'id' that are not whole tokens
+        for col in ["idiopathic", "idea", "identical", "identity"]:
+            assert not _is_id_column(col, unique_int_series), (
+                f"{col} should not be an ID column"
+            )
+
+        # Unique integer columns with non-ID names (integer-dtype shortcut removed)
+        for col in ["heart_rate", "sbp", "age", "creatinine_int", "rank", "score"]:
+            assert not _is_id_column(col, unique_int_series), (
+                f"{col} should not be an ID column"
+            )
+
+        # Whole token 'id' at start or end matches when unique and len > 5
+        for col in [
+            "id",
+            "id_patient",
+            "id.patient",
+            "id-patient",
+            "id patient",
+            "patient_id",
+            "patient.id",
+            "patient-id",
+            "patient id",
+        ]:
+            assert _is_id_column(col, unique_int_series), (
+                f"{col} should be an ID column"
+            )
+
+        # Non-ASCII and Unicode token boundary tests
+        for col in ["id_ผู้ป่วย", "id.ผู้ป่วย", "id-ผู้ป่วย", "ผู้ป่วย_id", "ผู้ป่วย.id", "ผู้ป่วย-id"]:
+            assert _is_id_column(col, unique_int_series), (
+                f"{col} should be an ID column"
+            )
+        for col in ["idผู้ป่วย", "ผู้ป่วยid"]:
+            assert not _is_id_column(col, unique_int_series), (
+                f"{col} should not be an ID column"
+            )
+
+        # Preserves existing uniqueness threshold (len <= 5 does not trigger uniqueness fallback)
+        short_series = pd.Series([1, 2, 3, 4, 5])
+        assert not _is_id_column("id-patient", short_series)
+        assert not _is_id_column("patient id", short_series)
+        # Exact matches and .endswith(('_id', '.id')) still return True regardless of length
+        assert _is_id_column("patient_id", short_series)
+        assert _is_id_column("id", short_series)
+
+    def test_cli_profile_study_design_type_mapping(self, tmp_path):
+        """Verify profile_cmd maps survival to Type 3, causal PSM to Type 5, binary to Type 2, and retains Type 1 and Type 6."""
+        runner = CliRunner()
+
+        # 1. Survival cohort -> Type 3
+        df_surv = pd.DataFrame(
+            {
+                "patient_id": list(range(1, 21)),
+                "followup_time": [10.5 + i for i in range(20)],
+                "event_status": [0, 1] * 10,
+                "age": [50 + i for i in range(20)],
+            }
+        )
+        p_surv = tmp_path / "surv.csv"
+        df_surv.to_csv(p_surv, index=False)
+        out_surv = tmp_path / "surv_prof.json"
+        res_surv = runner.invoke(
+            cli, ["profile", "--data", str(p_surv), "--output", str(out_surv)]
+        )
+        assert res_surv.exit_code == 0
+        data_surv = json.loads(out_surv.read_text())
+        assert (
+            data_surv["inferred_study_design"]
+            == "Type 3: Time-to-Event / Survival Cohort"
+        )
+        assert "Type 3: Time-to-Event / Survival Cohort" in res_surv.output
+
+        # 2. Causal PSM (>5 cols, treatment column, no survival/clusters) -> Type 5
+        df_causal = pd.DataFrame(
+            {
+                "patient_id": list(range(1, 25)),
+                "treatment": [0, 1] * 12,
+                "age": [45 + i for i in range(24)],
+                "bmi": [22.0 + (i * 0.5) for i in range(24)],
+                "sbp": [120 + i for i in range(24)],
+                "hr": [70 + (i % 10) for i in range(24)],
+            }
+        )
+        p_causal = tmp_path / "causal.csv"
+        df_causal.to_csv(p_causal, index=False)
+        out_causal = tmp_path / "causal_prof.json"
+        res_causal = runner.invoke(
+            cli, ["profile", "--data", str(p_causal), "--output", str(out_causal)]
+        )
+        assert res_causal.exit_code == 0
+        data_causal = json.loads(out_causal.read_text())
+        assert (
+            data_causal["inferred_study_design"]
+            == "Type 5: Observational Comparative Effectiveness (Causal PSM)"
+        )
+        assert (
+            "Type 5: Observational Comparative Effectiveness (Causal PSM)"
+            in res_causal.output
+        )
+
+        # 3. Binary risk prediction (binary endpoint, <=5 cols or no treatment, no survival) -> Type 2
+        df_binary = pd.DataFrame(
+            {
+                "patient_id": list(range(1, 21)),
+                "mortality": [0, 1] * 10,
+                "age": [50 + i for i in range(20)],
+                "score": [1.5 * i for i in range(20)],
+            }
+        )
+        p_binary = tmp_path / "binary.csv"
+        df_binary.to_csv(p_binary, index=False)
+        out_binary = tmp_path / "binary_prof.json"
+        res_binary = runner.invoke(
+            cli, ["profile", "--data", str(p_binary), "--output", str(out_binary)]
+        )
+        assert res_binary.exit_code == 0
+        data_binary = json.loads(out_binary.read_text())
+        assert (
+            data_binary["inferred_study_design"]
+            == "Type 2: Multivariable Risk Prediction / Binary Outcome"
+        )
+        assert (
+            "Type 2: Multivariable Risk Prediction / Binary Outcome"
+            in res_binary.output
+        )
+
+        # 4. Cross-sectional / observational (continuous outcome, no survival/clusters/treatment) -> Type 1
+        df_cross = pd.DataFrame(
+            {
+                "patient_id": list(range(1, 21)),
+                "sbp": [120.0 + i for i in range(20)],
+                "age": [50 + i for i in range(20)],
+            }
+        )
+        p_cross = tmp_path / "cross.csv"
+        df_cross.to_csv(p_cross, index=False)
+        out_cross = tmp_path / "cross_prof.json"
+        res_cross = runner.invoke(
+            cli, ["profile", "--data", str(p_cross), "--output", str(out_cross)]
+        )
+        assert res_cross.exit_code == 0
+        data_cross = json.loads(out_cross.read_text())
+        assert (
+            data_cross["inferred_study_design"]
+            == "Type 1: Cross-Sectional / Observational Study"
+        )
+        assert "Type 1: Cross-Sectional / Observational Study" in res_cross.output
+
+        # 5. Agreement / clusters (cluster/rater columns, no survival) -> Type 6
+        df_clusters = pd.DataFrame(
+            {
+                "rater_id": [1, 2] * 10,
+                "score": [3.5 + i for i in range(20)],
+            }
+        )
+        p_clusters = tmp_path / "clusters.csv"
+        df_clusters.to_csv(p_clusters, index=False)
+        out_clusters = tmp_path / "clusters_prof.json"
+        res_clusters = runner.invoke(
+            cli, ["profile", "--data", str(p_clusters), "--output", str(out_clusters)]
+        )
+        assert res_clusters.exit_code == 0
+        data_clusters = json.loads(out_clusters.read_text())
+        assert (
+            data_clusters["inferred_study_design"]
+            == "Type 6: Inter-Rater Reliability / Agreement Study"
+        )
+        assert (
+            "Type 6: Inter-Rater Reliability / Agreement Study" in res_clusters.output
+        )
