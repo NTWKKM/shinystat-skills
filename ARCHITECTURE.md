@@ -37,7 +37,7 @@ System architecture and structural specifications for `medstat-core` and the `me
       │  medstat.causal   │  medstat.meta     │  medstat.reporting        │
       │  - psm matching   │  - DL random-eff  │  - NEJM / JAMA / APA 7    │
       │  - balance & SMD  │  - forest data    │  - STROBE/CONSORT/TRIPOD  │
-      │  - love plots     │  - Egger's test   │  - methods narrative      │
+      │  - love plots     │  - Egger (k >= 10)│  - methods narrative      │
       ├───────────────────┴───────────────────┴───────────────────────────┤
       │                     medstat.agreement                             │
       │  - Bland-Altman LoA with Bland–Altman large-sample approximate CIs  │
@@ -79,10 +79,10 @@ System architecture and structural specifications for `medstat-core` and the `me
 ### `medstat.meta`
 - **`models.py`**: Fixed-effects inverse variance and DerSimonian-Laird random-effects meta-analysis, Cochran's Q test, and Higgins $I^2$.
 - **`forest.py`**: Forest plot structured data generation.
-- **`bias.py`**: Egger's linear regression test for funnel plot asymmetry.
+- **`bias.py`**: Egger's linear regression test for funnel plot asymmetry (applicable when $k \ge 10$ studies with continuous effect measures or log ORs).
 
 ### `medstat.agreement`
-- **`bland_altman.py`**: Paired measurement difference analysis and limits of agreement with exact Carkeet CIs.
+- **`bland_altman.py`**: Paired measurement difference analysis and limits of agreement with Bland–Altman large-sample approximate CIs.
 - **`icc.py`**: Pure-SciPy two-way ANOVA Intraclass Correlation Coefficients (ICC1, ICC2, ICC3, and average-measure forms).
 - **`kappa.py`**: Cohen's Kappa (unweighted, linear, quadratic with non-null and null SEs) and Fleiss' generalized multi-rater Kappa for discrete categories.
 
