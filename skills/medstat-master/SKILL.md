@@ -55,7 +55,7 @@ Activate **medstat-master** whenever:
 When a dataset is presented, inspect it before proposing or executing any models:
 
 0. **Pre-Flight PHI Check**:
-   - Explicitly run `phi-privacy-auditor` before ingesting any CSV/Excel file to ensure no Protected Health Information is present.
+   - Explicitly run `phi-privacy-auditor` before ingesting CSV, XLSX, TSV, or Parquet files to ensure no Protected Health Information is present; stop ingestion immediately if the auditor is unavailable or fails.
 
 1. **One-Shot Automated Data Profiling**:
    - Run `medstat profile` to instantly inspect cohort dimensions, missingness, outcome candidates, and infer the study design:
@@ -147,7 +147,7 @@ When executing the pipeline, strictly enforce the following sequence across down
 - Recode any text outcome columns (`"Dead"` $\to$ `1`, `"Alive"` $\to$ `0`) so downstream tools never receive text labels.
 - Execute cleaning with explicit strategy and documented clinical justification:
 ```bash
-uv run medstat clean --data <dataset.csv> --strategy complete-case --missing-justification "MCAR verified by Little's test (p>0.05) and missingness <5%" --output clean.csv --audit-out retention.json
+uv run medstat clean --data <dataset.csv> --strategy complete-case --missing-justification "Missingness <5% attributable to random specimen handling delay unrelated to clinical acuity; complete-case analysis clinically justified" --output clean.csv --audit-out retention.json
 ```
 
 ### Step 2: Baseline Descriptive & Balance (`medstat-models` / `medstat-causal-meta`)
@@ -165,8 +165,8 @@ uv run medstat model --data clean.csv --outcome <outcome> --exposure <exp> --cov
 # Type 3: Cox Proportional Hazards Survival Analysis
 uv run medstat model --data clean.csv --outcome <status> --time <time> --exposure <exp> --covariates <c1,c2> --type cox --schoenfeld --output cox.json
 
-# Type 4: Diagnostic Test Accuracy (Biomarker evaluation with directionality)
-uv run medstat diag --data clean.csv --gold-standard <gold_col> --test-col <test_col> --cutoff <val> --direction high --roc --dca --output diag.json
+# Type 4: Diagnostic Test Accuracy (Biomarker evaluation: select --direction high or low according to which indicates abnormal class; require clinician confirmation when direction cannot be determined)
+uv run medstat diag --data clean.csv --gold-standard <gold_col> --test-col <test_col> --cutoff <val> --direction <high|low> --roc --dca --output diag.json
 
 # Type 5: Propensity Score Matching (Austin 2009 standard)
 uv run medstat causal psm --data clean.csv --treatment <tx> --covariates <c1,c2> --caliper 0.2 --balance-check --output psm.json

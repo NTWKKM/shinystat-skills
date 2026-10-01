@@ -887,3 +887,242 @@ class TestPR4FollowupFixes:
         }
         html_missing = render_diagnostic_table("Diagnostic Report", missing_diag)
         assert "Brier Score" not in html_missing
+
+
+class TestCoderabbitReviewRound2Fixes:
+    def test_loader_rejects_unsupported_extensions(self, tmp_path):
+        json_file = tmp_path / "cohort.json"
+        json_file.write_text('{"patient_id": [1, 2], "age": [50, 60]}')
+        with pytest.raises(
+            click.ClickException, match="Unsupported file format '.json'"
+        ):
+            load_clinical_data(json_file)
+
+        xyz_file = tmp_path / "cohort.xyz"
+        xyz_file.write_text("a,b\n1,2")
+        with pytest.raises(
+            click.ClickException, match="Unsupported file format '.xyz'"
+        ):
+            load_clinical_data(xyz_file)
+
+    def test_cohens_kappa_degenerate_single_category(self):
+        r1 = [1, 1, 1, 1]
+        r2 = [1, 1, 1, 1]
+        res = cohens_kappa(r1, r2)
+        assert res["kappa"] is None
+        assert res["p_value"] is None
+        assert res["se"] is None
+        assert res["n_subjects"] == 4
+        assert res["weighting"] == "unweighted"
+        assert "note" in res
+        assert "Degenerate" in res["note"]
+
+    def test_cohens_kappa_denominator_zero_degenerate(self):
+        s1 = pd.Series([1, 1, 1, 1])
+        s2 = pd.Series([1, 1, 1, 1])
+        res = cohens_kappa(s1, s2, categories=[1, 2])
+        assert res["kappa"] is None
+        assert res["p_value"] is None
+        assert res["se"] is None
+        assert res["n_subjects"] == 4
+        assert res["weighting"] == "unweighted"
+        assert "note" in res
+        assert "Degenerate agreement" in res["note"]
+
+    def test_fleiss_kappa_degenerate_single_category(self):
+        mat = np.array([[3], [3], [3]])
+        res = fleiss_kappa(mat)
+        assert res["kappa"] is None
+        assert res["p_value"] is None
+        assert res["se"] is None
+        assert res["n_subjects"] == 3
+        assert res["n_raters"] == 3
+        assert "note" in res
+        assert "Degenerate" in res["note"]
+
+    def test_fleiss_kappa_denominator_zero_degenerate(self):
+        mat = np.array([[3, 0], [3, 0], [3, 0]])
+        res = fleiss_kappa(mat)
+        assert res["kappa"] is None
+        assert res["p_value"] is None
+        assert res["se"] is None
+        assert res["n_subjects"] == 3
+        assert res["n_raters"] == 3
+        assert "note" in res
+        assert "Degenerate agreement" in res["note"]
+
+    def test_has_clusters_does_not_match_embedded_delivery_method(self, tmp_path):
+        runner = CliRunner()
+        df = pd.DataFrame(
+            {
+                "patient_id": list(range(1, 21)),
+                "delivery_method": [0, 1] * 10,
+                "age": [30.0 + i for i in range(20)],
+            }
+        )
+        csv_path = tmp_path / "delivery.csv"
+        df.to_csv(csv_path, index=False)
+        res = runner.invoke(cli, ["profile", "--data", str(csv_path)])
+        assert res.exit_code == 0
+        assert "Type 6: Inter-Rater Reliability / Agreement Study" not in res.output
+
+        # Verify rater_1 and rater_2 match
+        df_cluster = pd.DataFrame(
+            {
+                "patient_id": list(range(1, 21)),
+                "rater_1": [1, 2] * 10,
+                "rater_2": [1, 2] * 10,
+            }
+        )
+        csv_cluster = tmp_path / "raters.csv"
+        df_cluster.to_csv(csv_cluster, index=False)
+        res_cluster = runner.invoke(cli, ["profile", "--data", str(csv_cluster)])
+        assert res_cluster.exit_code == 0
+        assert "Type 6: Inter-Rater Reliability / Agreement Study" in res_cluster.output
+
+        # Verify rater_id_1, observer_id_2, method_id_1 match
+        for col_name in ("rater_id_1", "observer_id_2", "method_id_1", "rater_id1"):
+            df_comp = pd.DataFrame(
+                {
+                    "patient_id": list(range(1, 21)),
+                    col_name: [1, 2] * 10,
+                }
+            )
+            p_comp = tmp_path / f"{col_name}.csv"
+            df_comp.to_csv(p_comp, index=False)
+            res_comp = runner.invoke(cli, ["profile", "--data", str(p_comp)])
+            assert res_comp.exit_code == 0
+            assert (
+                "Type 6: Inter-Rater Reliability / Agreement Study" in res_comp.output
+            )
+
+    def test_diag_cmd_gold_standard_validation(self, tmp_path):
+        runner = CliRunner()
+        # 1. Non-numeric strings
+        df_str = pd.DataFrame(
+            {
+                "outcome": ["pos", "neg", "pos", "neg"],
+                "biomarker": [1.5, 0.8, 2.1, 0.4],
+            }
+        )
+        p_str = tmp_path / "str_diag.csv"
+        df_str.to_csv(p_str, index=False)
+        res1 = runner.invoke(
+            cli,
+            [
+                "diag",
+                "--data",
+                str(p_str),
+                "--gold-standard",
+                "outcome",
+                "--test",
+                "biomarker",
+                "--cutoff",
+                "1.0",
+            ],
+        )
+        assert res1.exit_code != 0
+        assert "must be numeric containing only 0 and 1" in res1.output
+
+        # 1b. Boolean series (non-numeric for diagnostic modeling)
+        df_bool = pd.DataFrame(
+            {
+                "outcome": [True, False, True, False],
+                "biomarker": [1.5, 0.8, 2.1, 0.4],
+            }
+        )
+        p_bool = tmp_path / "bool_diag.csv"
+        df_bool.to_csv(p_bool, index=False)
+        res_bool = runner.invoke(
+            cli,
+            [
+                "diag",
+                "--data",
+                str(p_bool),
+                "--gold-standard",
+                "outcome",
+                "--test",
+                "biomarker",
+                "--cutoff",
+                "1.0",
+            ],
+        )
+        assert res_bool.exit_code != 0
+        assert "must be numeric containing only 0 and 1" in res_bool.output
+
+        # 2. Non-0/1 integers
+        df_int = pd.DataFrame(
+            {
+                "outcome": [1, 2, 1, 2],
+                "biomarker": [1.5, 0.8, 2.1, 0.4],
+            }
+        )
+        p_int = tmp_path / "int_diag.csv"
+        df_int.to_csv(p_int, index=False)
+        res2 = runner.invoke(
+            cli,
+            [
+                "diag",
+                "--data",
+                str(p_int),
+                "--gold-standard",
+                "outcome",
+                "--test",
+                "biomarker",
+                "--cutoff",
+                "1.0",
+            ],
+        )
+        assert res2.exit_code != 0
+        assert "must contain only 0 and 1" in res2.output
+
+        # 3. Continuous float values
+        df_float = pd.DataFrame(
+            {
+                "outcome": [0.5, 0.2, 0.8, 0.1],
+                "biomarker": [1.5, 0.8, 2.1, 0.4],
+            }
+        )
+        p_float = tmp_path / "float_diag.csv"
+        df_float.to_csv(p_float, index=False)
+        res3 = runner.invoke(
+            cli,
+            [
+                "diag",
+                "--data",
+                str(p_float),
+                "--gold-standard",
+                "outcome",
+                "--test",
+                "biomarker",
+                "--cutoff",
+                "1.0",
+            ],
+        )
+        assert res3.exit_code != 0
+        assert "must contain only 0 and 1" in res3.output
+
+        # 4. Valid 0/1 labels
+        df_valid = pd.DataFrame(
+            {
+                "outcome": [0, 1, 0, 1],
+                "biomarker": [0.2, 0.8, 0.3, 0.9],
+            }
+        )
+        p_valid = tmp_path / "valid_diag.csv"
+        df_valid.to_csv(p_valid, index=False)
+        res4 = runner.invoke(
+            cli,
+            [
+                "diag",
+                "--data",
+                str(p_valid),
+                "--gold-standard",
+                "outcome",
+                "--test",
+                "biomarker",
+                "--cutoff",
+                "0.5",
+            ],
+        )
+        assert res4.exit_code == 0

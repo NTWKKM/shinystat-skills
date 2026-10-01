@@ -98,7 +98,7 @@ System architecture and structural specifications for `medstat-core` and the `me
 ```mermaid
 flowchart LR
     Data[Clinical Ingestion: CSV / XLSX / TSV / Parquet] --> Profile[medstat profile: Data Health & Design Inference]
-    Profile --> Clean[medstat.data.clean: Little's MCAR + Winsorization]
+    Profile --> Clean[medstat.data.clean: Little's MCAR + Missing Strategy (Optional Outlier Action)]
     Clean -->|Audited Cohort + Flow| Model[medstat.models / causal / diag / agreement]
     Model -->|JSON Estimates Contract| Report[medstat.reporting: Polymorphic Renderer]
     Report -->|HTML Table + Narrative + Checklist| Manuscript[Publication Draft]

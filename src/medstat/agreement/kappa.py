@@ -139,14 +139,21 @@ def cohens_kappa(
     k = len(cat_list)
     if k <= 1:
         return {
-            "kappa": 1.0,
-            "se": 0.0,
-            "ci_lower": 1.0,
-            "ci_upper": 1.0,
-            "p_value": 0.0,
-            "observed_agreement": 1.0,
-            "expected_agreement": 1.0,
+            "kappa": None,
+            "se": None,
+            "se_null": None,
+            "ci_lower": None,
+            "ci_upper": None,
+            "p_value": None,
+            "observed_agreement": 1.0 if k == 1 and len(s1) > 0 else None,
+            "expected_agreement": 1.0 if k == 1 and len(s1) > 0 else None,
+            "n_subjects": int(len(s1)),
             "categories": [str(c) for c in cat_list],
+            "weighting": weights or "unweighted",
+            "note": (
+                "Degenerate single-category agreement: Kappa and p-value are undefined "
+                "when fewer than 2 distinct categories are present."
+            ),
         }
 
     cat_map = {cat: idx for idx, cat in enumerate(cat_list)}
@@ -190,7 +197,26 @@ def cohens_kappa(
         p_e = p_expected
 
     denom = 1.0 - p_e
-    kappa = (p_o - p_e) / denom if abs(denom) > 1e-12 else 1.0
+    if abs(denom) <= 1e-12:
+        return {
+            "kappa": None,
+            "se": None,
+            "se_null": None,
+            "ci_lower": None,
+            "ci_upper": None,
+            "p_value": None,
+            "observed_agreement": p_observed,
+            "expected_agreement": p_expected,
+            "n_subjects": int(n),
+            "categories": [str(c) for c in cat_list],
+            "weighting": weights or "unweighted",
+            "note": (
+                "Degenerate agreement: expected agreement is 1.0 (denominator is zero); "
+                "Kappa and p-value are undefined."
+            ),
+        }
+
+    kappa = (p_o - p_e) / denom
 
     # 1. Null standard error (Fleiss, Cohen, & Everitt 1969) under H0: kappa = 0
     # Used for the z-test and p-value
@@ -247,8 +273,29 @@ def fleiss_kappa(subject_category_matrix: np.ndarray) -> dict[str, Any]:
     """
     mat = np.asarray(subject_category_matrix, dtype=float)
     N, k = mat.shape
-    if N == 0 or k <= 1:
-        return {"kappa": 1.0, "se": 0.0, "p_value": 0.0}
+    if N == 0:
+        raise ValueError("No subjects provided for Fleiss' Kappa.")
+    if k <= 1:
+        row_sums = np.sum(mat, axis=1) if k == 1 else np.array([])
+        m = int(row_sums[0]) if len(row_sums) > 0 else 0
+        return {
+            "kappa": None,
+            "se": None,
+            "se_null": None,
+            "ci_lower": None,
+            "ci_upper": None,
+            "ci_note": None,
+            "p_value": None,
+            "observed_agreement": 1.0 if k == 1 else None,
+            "expected_agreement": 1.0 if k == 1 else None,
+            "n_subjects": int(N),
+            "n_raters": m,
+            "n_categories": int(k),
+            "note": (
+                "Degenerate single-category agreement: Fleiss' Kappa and p-value are undefined "
+                "when fewer than 2 distinct categories are present."
+            ),
+        }
 
     # Number of raters per subject
     row_sums = np.sum(mat, axis=1)
@@ -270,7 +317,27 @@ def fleiss_kappa(subject_category_matrix: np.ndarray) -> dict[str, Any]:
     P_o = float(np.mean(P_i))
 
     denom = 1.0 - P_e
-    kappa = (P_o - P_e) / denom if abs(denom) > 1e-12 else 1.0
+    if abs(denom) <= 1e-12:
+        return {
+            "kappa": None,
+            "se": None,
+            "se_null": None,
+            "ci_lower": None,
+            "ci_upper": None,
+            "ci_note": None,
+            "p_value": None,
+            "observed_agreement": P_o,
+            "expected_agreement": P_e,
+            "n_subjects": int(N),
+            "n_raters": int(m),
+            "n_categories": int(k),
+            "note": (
+                "Degenerate agreement: expected agreement is 1.0 (denominator is zero); "
+                "Fleiss' Kappa and p-value are undefined."
+            ),
+        }
+
+    kappa = (P_o - P_e) / denom
 
     # Variance and SE under null hypothesis
     var_p = (2.0 / (N * m * (m - 1) * denom**2)) * (

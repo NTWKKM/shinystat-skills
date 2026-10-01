@@ -43,7 +43,7 @@ def load_clinical_data(
             )
         elif ext == ".parquet":
             df = pd.read_parquet(p)
-        elif ext == ".tsv" or ext in (".csv", ".txt") or True:
+        elif ext in (".csv", ".tsv", ".txt"):
             sep = "\t" if ext == ".tsv" else ","
             encodings = (
                 [encoding] if encoding else ["utf-8", "utf-8-sig", "cp1252", "latin1"]
@@ -63,6 +63,13 @@ def load_clinical_data(
                 raise click.ClickException(
                     f"Failed to decode '{path}' with supported encodings."
                 )
+        else:
+            raise click.ClickException(
+                f"Unsupported file format '{ext}'. "
+                "Supported formats are: .csv, .tsv, .txt, .xlsx, .parquet."
+            )
+    except click.ClickException:
+        raise
     except Exception as e:
         raise click.ClickException(f"Failed to load dataset '{path}': {e}")
 

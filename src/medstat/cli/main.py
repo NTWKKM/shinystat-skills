@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -149,10 +150,10 @@ def profile_cmd(data: str, output: str | None) -> None:
     # Infer clinical design type (Type 1 to 7)
     has_survival = any(e["type"] == "survival_time" for e in endpoints)
     has_binary = any(e["type"] == "binary" for e in endpoints)
-    has_clusters = any(
-        "rater" in c.lower() or "observer" in c.lower() or "method" in c.lower()
-        for c in df.columns
+    cluster_pattern = re.compile(
+        r"^(?:rater|observer|method)(?:[_\s-]?id)?(?:[_\s-]?\d+)?$", re.IGNORECASE
     )
+    has_clusters = any(bool(cluster_pattern.match(c.strip())) for c in df.columns)
     has_treatment = any(
         c.lower() in ("treatment", "treat", "rx", "arm", "group", "exposure")
         for c in df.columns
@@ -844,6 +845,21 @@ def diag_cmd(
     cols_to_check = [gold_standard, test_col] + ([compare_roc] if compare_roc else [])
     validate_columns(df, cols_to_check, "diag")
     check_data_missingness(df, cols_to_check, "diag")
+
+    gold_series = df[gold_standard]
+    if not pd.api.types.is_numeric_dtype(gold_series) or pd.api.types.is_bool_dtype(
+        gold_series
+    ):
+        raise click.ClickException(
+            f"Gold standard column '{gold_standard}' must be numeric containing only 0 and 1."
+        )
+    valid_gold = gold_series.dropna()
+    unique_vals = set(valid_gold.unique())
+    if not unique_vals.issubset({0, 1}):
+        raise click.ClickException(
+            f"Gold standard column '{gold_standard}' must contain only 0 and 1 (found: {sorted(list(unique_vals))})."
+        )
+
     y_true = df[gold_standard].values
     y_score = df[test_col].values
     diag_res: dict[str, Any] = {}
