@@ -40,7 +40,7 @@ System architecture and structural specifications for `medstat-core` and the `me
       │  - love plots     │  - Egger's test   │  - methods narrative      │
       ├───────────────────┴───────────────────┴───────────────────────────┤
       │                     medstat.agreement                             │
-      │  - Bland-Altman LoA with Carkeet CIs                              │
+      │  - Bland-Altman LoA with Bland–Altman large-sample approximate CIs  │
       │  - Pure-SciPy Intraclass Correlation Coefficient (ICC) (No GPL)   │
       │  - Cohen's & Fleiss' Kappa (Categorical Inter-Rater Agreement)    │
       └───────────────────────────────────────────────────────────────────┘
