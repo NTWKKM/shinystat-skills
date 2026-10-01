@@ -63,7 +63,10 @@ def run_mediation(
         y_out.nunique() == 2 and set(y_out.unique()).issubset({0, 1, 0.0, 1.0})
     )
     if is_binary_outcome:
-        out_model = sm.Logit(y_out, X_out).fit(disp=False)
+        try:
+            out_model = sm.Logit(y_out, X_out).fit(disp=False)
+        except Exception as e:
+            raise ValueError(f"Failed to fit logistic outcome model: {e}")
         scale = "log_odds"
         method_desc = "Baron-Kenny Product of Coefficients (Log-Odds Scale)"
     else:

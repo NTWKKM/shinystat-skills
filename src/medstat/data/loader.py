@@ -17,6 +17,7 @@ import pandas as pd
 def load_clinical_data(
     path: str | Path,
     sheet_name: str | int = 0,
+    encoding: str | None = None,
 ) -> pd.DataFrame:
     """
     Universally load clinical datasets across file formats.
@@ -39,7 +40,9 @@ def load_clinical_data(
             df = pd.read_parquet(p)
         elif ext == ".tsv" or ext in (".csv", ".txt") or True:
             sep = "\t" if ext == ".tsv" else ","
-            encodings = ["utf-8", "utf-8-sig", "latin1", "cp1252"]
+            encodings = (
+                [encoding] if encoding else ["utf-8", "utf-8-sig", "cp1252", "latin1"]
+            )
             df = None
             last_decode_err: Exception | None = None
             for enc in encodings:

@@ -884,20 +884,33 @@ def diag_cmd(
         if min_score >= 0.0 and max_score <= 1.0:
             prob_risk = (1.0 - y_score) if dir_norm == "low" else y_score
         else:
+            if len(np.unique(valid_scores)) < 2:
+                raise click.ClickException(
+                    "Test score has no variation (all values identical). "
+                    "Cannot calibrate continuous score to event probabilities."
+                )
             eff_score = -y_score if dir_norm == "low" else y_score
             try:
                 import statsmodels.api as sm
 
                 X_log = sm.add_constant(eff_score[valid_mask])
+                if X_log.shape[1] < 2:
+                    raise ValueError("Score has insufficient variance for calibration.")
                 model_prob = sm.Logit(y_true[valid_mask].astype(int), X_log).fit(
                     disp=False
                 )
+                if len(model_prob.params) < 2 or np.isnan(model_prob.params).any():
+                    raise ValueError("Model parameters could not be estimated.")
                 prob_risk = pd.Series(np.nan, index=df.index, dtype=float)
                 prob_risk.loc[valid_mask] = model_prob.predict(X_log)
                 prob_risk = prob_risk.values
-            except Exception:
-                norm_score = (eff_score - min_score) / (max_score - min_score + 1e-9)
-                prob_risk = np.clip(norm_score, 1e-6, 1.0 - 1e-6)
+            except Exception as e:
+                raise click.ClickException(
+                    f"DCA and calibration require predicted event probabilities in [0, 1]. "
+                    f"Test score values are outside [0, 1] (min={min_score:.4f}, max={max_score:.4f}), "
+                    f"and fitting a logistic risk calibration model failed: {e}. "
+                    "Please supply calibrated event probabilities or model-predicted risks."
+                )
     else:
         prob_risk = y_score
 
@@ -923,6 +936,8 @@ def diag_cmd(
         with open(output, "w") as f:
             json.dump(diag_res, f, indent=2, default=str)
         click.echo(f"Diagnostic results saved to: {output}")
+    else:
+        click.echo(json.dumps(diag_res, indent=2, default=str))
 
 
 # ==============================================================================

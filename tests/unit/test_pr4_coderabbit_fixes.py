@@ -98,6 +98,32 @@ class TestKappaFixes:
         with pytest.raises(ValueError, match="Continuous ratings are not supported"):
             calculate_kappa(df_long)
 
+    def test_calculate_kappa_two_raters_continuous_rejected(self):
+        # Two explicit columns with continuous ratings
+        df = pd.DataFrame(
+            {
+                "r1": [12.4, 15.6, 11.2, 25.1, 24.8, 26.2, 8.5, 9.1, 8.9],
+                "r2": [12.1, 15.8, 11.0, 24.9, 24.5, 26.0, 8.7, 9.0, 9.1],
+            }
+        )
+        with pytest.raises(ValueError, match="Continuous ratings are not supported"):
+            calculate_kappa(df, rater1="r1", rater2="r2")
+
+        # Two-rater long format with continuous ratings
+        df_2rater_long = pd.DataFrame(
+            {
+                "subject_id": [1, 1, 2, 2, 3, 3, 4, 4, 5, 5],
+                "rater_id": ["A", "B", "A", "B", "A", "B", "A", "B", "A", "B"],
+                "score": [12.4, 12.1, 15.6, 15.8, 11.2, 11.0, 25.1, 24.9, 8.5, 8.7],
+            }
+        )
+        with pytest.raises(ValueError, match="Continuous ratings are not supported"):
+            calculate_kappa(df_2rater_long)
+
+        # Direct call to cohens_kappa with continuous ratings
+        with pytest.raises(ValueError, match="Continuous ratings are not supported"):
+            cohens_kappa(df["r1"], df["r2"])
+
     def test_calculate_kappa_valid_discrete_ratings_accepted(self):
         df_long = pd.DataFrame(
             {
@@ -108,6 +134,30 @@ class TestKappaFixes:
         )
         res = calculate_kappa(df_long)
         assert res["type"] == "fleiss"
+        assert "kappa" in res
+
+    def test_calculate_kappa_fractional_discrete_ratings_accepted(self):
+        # Clinical Dementia Rating (CDR) scale: 0, 0.5, 1.0, 2.0, 3.0
+        np.random.seed(42)
+        n = 60
+        r1 = np.random.choice([0.0, 0.5, 1.0, 2.0, 3.0], size=n)
+        r2 = r1.copy()
+        r2[:10] = np.random.choice([0.0, 0.5, 1.0, 2.0, 3.0], size=10)
+        df = pd.DataFrame({"r1": r1, "r2": r2})
+        res = calculate_kappa(df, rater1="r1", rater2="r2")
+        assert res["type"] == "cohen"
+        assert "kappa" in res
+
+    def test_calculate_kappa_many_categories_discrete_accepted(self):
+        # 12 discrete integer categories across 100 subjects
+        np.random.seed(42)
+        n = 100
+        r1 = np.random.choice(range(1, 13), size=n)
+        r2 = r1.copy()
+        r2[:15] = np.random.choice(range(1, 13), size=15)
+        df = pd.DataFrame({"r1": r1, "r2": r2})
+        res = calculate_kappa(df, rater1="r1", rater2="r2")
+        assert res["type"] == "cohen"
         assert "kappa" in res
 
 
@@ -137,6 +187,25 @@ class TestMediationFixes:
         assert "Log-Odds" in res["method"]
         assert "acme" in res
         assert "ade" in res
+
+    def test_binary_outcome_mediation_logit_failure_raises(self, monkeypatch):
+        # Force Logit fit to fail and verify that it raises ValueError without falling back to OLS
+        from statsmodels.discrete.discrete_model import Logit
+
+        def mock_fit(*args, **kwargs):
+            raise ValueError("Forced singular matrix in Logit fit")
+
+        monkeypatch.setattr(Logit, "fit", mock_fit)
+
+        df = pd.DataFrame(
+            {
+                "trt": [0, 1] * 10,
+                "med": [1.0, 2.0, 1.5, 2.5] * 5,
+                "y": [0, 1] * 10,
+            }
+        )
+        with pytest.raises(ValueError, match="Failed to fit logistic outcome model"):
+            run_mediation(df, treatment="trt", mediator="med", outcome="y")
 
     def test_continuous_outcome_mediation_scale(self):
         np.random.seed(42)
@@ -241,6 +310,20 @@ class TestLoaderEncodings:
         df_tsv = load_clinical_data(str(p_tsv))
         assert len(df_tsv) == 1
 
+        # Windows-1252 with smart quotes and em-dash (0x93, 0x94, 0x97)
+        # These are C1 control codes in Latin-1, but valid punctuation in CP1252
+        p_cp1252 = tmp_path / "test_cp1252.csv"
+        p_cp1252.write_bytes(
+            "patient_id,note\nPAT_001,“mild” syndrome — stable\n".encode("cp1252")
+        )
+        df_cp = load_clinical_data(str(p_cp1252))
+        assert len(df_cp) == 1
+        assert "“mild” syndrome — stable" in df_cp["note"].values[0]
+
+        # Explicit encoding parameter
+        df_cp_exp = load_clinical_data(str(p_cp1252), encoding="cp1252")
+        assert len(df_cp_exp) == 1
+
 
 # ==============================================================================
 # 6. CLI Verification
@@ -287,6 +370,93 @@ class TestCLIFixes:
         # SBP should have recorded outliers
         assert "sbp" in audit_data["outlier_counts"]
         assert audit_data["outlier_counts"]["sbp"] == 2
+
+    def test_cli_diag_direction_and_probabilities(self, tmp_path):
+        runner = CliRunner()
+        np.random.seed(42)
+        n = 100
+        outcome = np.random.binomial(1, 0.4, size=n)
+        # Probabilities in [0, 1]
+        probs = np.clip(0.3 * outcome + np.random.uniform(0.1, 0.6, size=n), 0.05, 0.95)
+        # Continuous biomarker outside [0, 1] (e.g. lactate 1.0 to 7.0)
+        lactate = 1.5 + 2.5 * outcome + np.random.normal(0, 0.8, size=n)
+        df = pd.DataFrame({"outcome": outcome, "probs": probs, "lactate": lactate})
+        csv_path = tmp_path / "diag_data.csv"
+        df.to_csv(csv_path, index=False)
+
+        # 1. Probabilities in [0, 1] with direction low
+        res_prob = runner.invoke(
+            cli,
+            [
+                "diag",
+                "--data",
+                str(csv_path),
+                "--gold-standard",
+                "outcome",
+                "--test",
+                "probs",
+                "--direction",
+                "low",
+                "--dca",
+                "--calibration",
+            ],
+        )
+        assert res_prob.exit_code == 0
+        assert (
+            "Decision Curve Analysis" in res_prob.output
+            or "dca" in res_prob.output.lower()
+        )
+
+        # 2. Continuous biomarker score requiring logistic risk calibration
+        res_bio = runner.invoke(
+            cli,
+            [
+                "diag",
+                "--data",
+                str(csv_path),
+                "--gold-standard",
+                "outcome",
+                "--test",
+                "lactate",
+                "--direction",
+                "high",
+                "--dca",
+                "--calibration",
+            ],
+        )
+        assert res_bio.exit_code == 0
+
+    def test_cli_diag_uncalibratable_score_raises_click_exception(self, tmp_path):
+        runner = CliRunner()
+        # Dataset with constant score outside [0, 1], causing Logit fit to fail
+        df = pd.DataFrame(
+            {
+                "outcome": [0, 1, 0, 1, 0, 1, 0, 1],
+                "bad_score": [5.0] * 8,  # Constant score > 1.0 cannot be calibrated
+            }
+        )
+        csv_path = tmp_path / "bad_diag.csv"
+        df.to_csv(csv_path, index=False)
+
+        res = runner.invoke(
+            cli,
+            [
+                "diag",
+                "--data",
+                str(csv_path),
+                "--gold-standard",
+                "outcome",
+                "--test",
+                "bad_score",
+                "--dca",
+                "--calibration",
+            ],
+        )
+        assert res.exit_code != 0
+        assert (
+            "Cannot calibrate continuous score" in res.output
+            or "fitting a logistic risk calibration model failed" in res.output
+        )
 
     def test_cli_sample_size_proportions_requires_p1_p2(self):
         runner = CliRunner()

@@ -14,6 +14,58 @@ import pandas as pd
 from scipy import stats
 
 
+def validate_categorical_ratings(ratings: Any) -> None:
+    """
+    Validate that ratings represent discrete categorical classes, rejecting continuous measurements.
+
+    Continuous measurements are identified when numeric ratings exhibit continuous variation:
+    - Fractional values with more than 5 unique levels or high uniqueness ratio (k / n > 0.3).
+    - Or integer values with high cardinality (k > 20) and high uniqueness ratio (k / n > 0.35).
+
+    Discrete category codes with fractions (e.g. CDR 0, 0.5, 1, 2, 3) or >10 categories
+    with repeating observations are preserved as valid categorical ratings.
+    """
+    if isinstance(ratings, (pd.DataFrame, pd.Series)):
+        vals = ratings.values.flatten()
+    else:
+        vals = np.asarray(ratings).flatten()
+
+    valid_vals = vals[~pd.isna(vals)]
+    if len(valid_vals) == 0:
+        raise ValueError("No valid ratings found.")
+
+    try:
+        num_vals = pd.to_numeric(valid_vals)
+    except (ValueError, TypeError):
+        return
+
+    n = len(num_vals)
+    unique_vals = np.unique(num_vals)
+    k = len(unique_vals)
+
+    if n == 0 or k <= 1:
+        return
+
+    uniqueness_ratio = k / n
+    has_fractions = bool(np.any(~np.isclose(num_vals, np.round(num_vals), atol=1e-8)))
+
+    if has_fractions:
+        # A fractional scale with <= 5 discrete levels (like CDR 0, 0.5, 1, 2, 3) is a valid ordinal scale.
+        # But fractional measurements with > 5 unique levels and high uniqueness ratio are continuous.
+        if (k > 5 and uniqueness_ratio > 0.3) or k > 15:
+            raise ValueError(
+                "Continuous ratings are not supported for Kappa. "
+                "Ratings must be discrete categorical classes; for continuous scores, use ICC or Bland-Altman."
+            )
+    else:
+        # Integer scales with > 20 unique levels and high uniqueness ratio are continuous measurements
+        if k > 20 and uniqueness_ratio > 0.35:
+            raise ValueError(
+                "Continuous ratings are not supported for Kappa. "
+                "Ratings must be discrete categorical classes; for continuous scores, use ICC or Bland-Altman."
+            )
+
+
 def cohens_kappa(
     rater1: np.ndarray | pd.Series,
     rater2: np.ndarray | pd.Series,
@@ -35,6 +87,9 @@ def cohens_kappa(
     valid = s1.notna() & s2.notna()
     s1 = s1[valid]
     s2 = s2[valid]
+
+    # Validate that ratings are discrete categories
+    validate_categorical_ratings(pd.concat([s1, s2]))
 
     categories = sorted(list(set(s1.unique()) | set(s2.unique())))
     k = len(categories)
@@ -204,6 +259,7 @@ def calculate_kappa(
             raise ValueError(
                 f"Explicit rater columns not found in DataFrame: {missing}"
             )
+        validate_categorical_ratings(df[[rater1, rater2]])
         res = cohens_kappa(df[rater1], df[rater2])
         res["type"] = "cohen"
         res["raters"] = [rater1, rater2]
@@ -252,6 +308,7 @@ def calculate_kappa(
         )
 
     if len(cols) == 2:
+        validate_categorical_ratings(pivot_df[[cols[0], cols[1]]])
         res = cohens_kappa(pivot_df[cols[0]], pivot_df[cols[1]])
         res["type"] = "cohen"
         res["raters"] = [str(cols[0]), str(cols[1])]
@@ -259,27 +316,7 @@ def calculate_kappa(
 
     # If >2 raters:
     # Reject continuous ratings instead of quartile-binning them
-    vals = pivot_df.values.flatten()
-    valid_vals = vals[~pd.isna(vals)]
-    if len(valid_vals) == 0:
-        raise ValueError("No valid ratings found.")
-
-    is_numeric = False
-    try:
-        num_vals = pd.to_numeric(valid_vals)
-        is_numeric = True
-    except (ValueError, TypeError):
-        is_numeric = False
-
-    if is_numeric:
-        has_fractions = bool(
-            np.any(~np.isclose(num_vals, np.round(num_vals), atol=1e-8))
-        )
-        if has_fractions or len(np.unique(num_vals)) > 10:
-            raise ValueError(
-                "Continuous ratings are not supported for Kappa. "
-                "Ratings must be discrete categorical classes; for continuous scores, use ICC or Bland-Altman."
-            )
+    validate_categorical_ratings(pivot_df)
 
     # Validate that each subject has the same number of ratings before calling fleiss_kappa
     ratings_per_subj = pivot_df.notna().sum(axis=1)
