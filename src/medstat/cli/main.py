@@ -1034,6 +1034,11 @@ def bland_altman_cmd(
 )
 @click.option("--raters", default=None, help="Rater ID column (for long format).")
 @click.option("--ratings", default=None, help="Ratings/score column (for long format).")
+@click.option(
+    "--categories",
+    default=None,
+    help="Comma-separated declared category levels (e.g. '0,0.5,1,2,3').",
+)
 @click.option("--output", type=click.Path(), help="Output path for Kappa JSON.")
 def kappa_cmd(
     data: str,
@@ -1042,10 +1047,22 @@ def kappa_cmd(
     targets: str | None,
     raters: str | None,
     ratings: str | None,
+    categories: str | None,
     output: str | None,
 ) -> None:
     """Compute Fleiss' or Cohen's Kappa for categorical agreement."""
     df = load_clinical_data(data)
+    cat_list = None
+    if categories is not None:
+        raw_list = [c.strip() for c in categories.split(",")]
+        cat_list = []
+        for c in raw_list:
+            try:
+                val = float(c)
+                cat_list.append(int(val) if val.is_integer() else val)
+            except ValueError:
+                cat_list.append(c)
+
     res = calculate_kappa(
         df,
         rater1=rater1,
@@ -1053,6 +1070,7 @@ def kappa_cmd(
         targets=targets,
         raters=raters,
         ratings=ratings,
+        categories=cat_list,
     )
     if output:
         Path(output).parent.mkdir(parents=True, exist_ok=True)

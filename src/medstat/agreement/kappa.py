@@ -14,18 +14,31 @@ import pandas as pd
 from scipy import stats
 
 
-def validate_categorical_ratings(ratings: Any) -> None:
+def validate_categorical_ratings(
+    ratings: Any,
+    categories: list[Any] | None = None,
+) -> None:
     """
     Validate that ratings represent discrete categorical classes, rejecting continuous measurements.
 
-    Continuous measurements are identified when numeric ratings exhibit continuous variation:
-    - Fractional values with more than 5 unique levels or high uniqueness ratio (k / n > 0.3).
-    - Or integer values with high cardinality (k > 20) and high uniqueness ratio (k / n > 0.35).
-
-    Discrete category codes with fractions (e.g. CDR 0, 0.5, 1, 2, 3) or >10 categories
-    with repeating observations are preserved as valid categorical ratings.
+    Categorical Input Contract:
+    1. Declared Categories: If `categories` is explicitly provided, all observed ratings must belong
+       to the declared category levels.
+    2. Categorical / Discrete Dtypes: Pandas `category`, string, object, boolean, and integer dtypes
+       represent discrete category levels by contract.
+    3. Floating-Point Measurements: Un-declared floating-point values are validated to ensure they
+       represent discrete rating levels (where multiple subjects share identical ratings) rather than
+       continuous non-repeating measurements where nearly all values are distinct.
     """
-    if isinstance(ratings, (pd.DataFrame, pd.Series)):
+    if isinstance(ratings, pd.DataFrame):
+        if all(
+            isinstance(ratings[c].dtype, pd.CategoricalDtype) for c in ratings.columns
+        ):
+            return
+        vals = ratings.values.flatten()
+    elif isinstance(ratings, pd.Series):
+        if isinstance(ratings.dtype, pd.CategoricalDtype):
+            return
         vals = ratings.values.flatten()
     else:
         vals = np.asarray(ratings).flatten()
@@ -34,6 +47,17 @@ def validate_categorical_ratings(ratings: Any) -> None:
     if len(valid_vals) == 0:
         raise ValueError("No valid ratings found.")
 
+    # 1. Declared categories contract
+    if categories is not None:
+        declared_set = set(categories)
+        unrecognized = set(valid_vals) - declared_set
+        if unrecognized:
+            raise ValueError(
+                f"Observed ratings contain values not in declared categories: {unrecognized}"
+            )
+        return
+
+    # 2. Non-numeric types (strings, objects, booleans)
     try:
         num_vals = pd.to_numeric(valid_vals)
     except (ValueError, TypeError):
@@ -46,23 +70,20 @@ def validate_categorical_ratings(ratings: Any) -> None:
     if n == 0 or k <= 1:
         return
 
-    uniqueness_ratio = k / n
+    # Check whether the numbers have fractional components
     has_fractions = bool(np.any(~np.isclose(num_vals, np.round(num_vals), atol=1e-8)))
 
     if has_fractions:
-        # A fractional scale with <= 5 discrete levels (like CDR 0, 0.5, 1, 2, 3) is a valid ordinal scale.
-        # But fractional measurements with > 5 unique levels and high uniqueness ratio are continuous.
-        if (k > 5 and uniqueness_ratio > 0.3) or k > 15:
+        # A discrete fractional scale has repeating ratings across subjects (e.g. CDR 0, 0.5, 1, 2, 3
+        # or an 18-level scale where subjects share categories).
+        # Continuous measurements (e.g. lab concentrations, ultrasound dimensions) have essentially
+        # no repeating observations (each subject has a distinct float measurement, k == n or k/n > 0.85).
+        uniqueness_ratio = k / n
+        if n >= 4 and (k == n or uniqueness_ratio > 0.85):
             raise ValueError(
                 "Continuous ratings are not supported for Kappa. "
-                "Ratings must be discrete categorical classes; for continuous scores, use ICC or Bland-Altman."
-            )
-    else:
-        # Integer scales with > 20 unique levels and high uniqueness ratio are continuous measurements
-        if k > 20 and uniqueness_ratio > 0.35:
-            raise ValueError(
-                "Continuous ratings are not supported for Kappa. "
-                "Ratings must be discrete categorical classes; for continuous scores, use ICC or Bland-Altman."
+                "Ratings must be discrete categorical classes (or declare explicit category levels via categories=[...]); "
+                "for continuous scores, use ICC or Bland-Altman."
             )
 
 
@@ -70,6 +91,7 @@ def cohens_kappa(
     rater1: np.ndarray | pd.Series,
     rater2: np.ndarray | pd.Series,
     weights: str | None = None,
+    categories: list[Any] | None = None,
 ) -> dict[str, Any]:
     """
     Calculate Cohen's Kappa for two raters on categorical data.
@@ -78,6 +100,8 @@ def cohens_kappa(
         rater1: First rater evaluations.
         rater2: Second rater evaluations.
         weights: None (unweighted), 'linear', or 'quadratic'.
+        categories: Optional declared category levels. If specified, category order is
+                    preserved for weighted Kappa and unobserved levels are supported.
 
     Returns:
         dict with kappa, se, 95% CI, observed agreement, and expected agreement.
@@ -88,11 +112,20 @@ def cohens_kappa(
     s1 = s1[valid]
     s2 = s2[valid]
 
-    # Validate that ratings are discrete categories
-    validate_categorical_ratings(pd.concat([s1, s2]))
+    # Validate that ratings are discrete categories under the categorical input contract
+    validate_categorical_ratings(pd.concat([s1, s2]), categories=categories)
 
-    categories = sorted(list(set(s1.unique()) | set(s2.unique())))
-    k = len(categories)
+    if categories is not None:
+        cat_list = list(categories)
+    else:
+        if isinstance(s1.dtype, pd.CategoricalDtype):
+            cat_list = list(s1.cat.categories)
+        elif isinstance(s2.dtype, pd.CategoricalDtype):
+            cat_list = list(s2.cat.categories)
+        else:
+            cat_list = sorted(list(set(s1.unique()) | set(s2.unique())))
+
+    k = len(cat_list)
     if k <= 1:
         return {
             "kappa": 1.0,
@@ -102,13 +135,14 @@ def cohens_kappa(
             "p_value": 0.0,
             "observed_agreement": 1.0,
             "expected_agreement": 1.0,
-            "categories": [str(c) for c in categories],
+            "categories": [str(c) for c in cat_list],
         }
 
-    cat_map = {cat: idx for idx, cat in enumerate(categories)}
+    cat_map = {cat: idx for idx, cat in enumerate(cat_list)}
     conf = np.zeros((k, k), dtype=float)
     for c1, c2 in zip(s1, s2):
-        conf[cat_map[c1], cat_map[c2]] += 1.0
+        if c1 in cat_map and c2 in cat_map:
+            conf[cat_map[c1], cat_map[c2]] += 1.0
 
     n = np.sum(conf)
     if n == 0:
@@ -179,7 +213,7 @@ def cohens_kappa(
         "observed_agreement": p_observed,
         "expected_agreement": p_expected,
         "n_subjects": int(n),
-        "categories": [str(c) for c in categories],
+        "categories": [str(c) for c in cat_list],
         "weighting": weights or "unweighted",
     }
 
@@ -248,6 +282,7 @@ def calculate_kappa(
     targets: str | None = None,
     raters: str | None = None,
     ratings: str | None = None,
+    categories: list[Any] | None = None,
 ) -> dict[str, Any]:
     """
     High-level entry point to calculate either Cohen's or Fleiss' Kappa automatically.
@@ -259,8 +294,8 @@ def calculate_kappa(
             raise ValueError(
                 f"Explicit rater columns not found in DataFrame: {missing}"
             )
-        validate_categorical_ratings(df[[rater1, rater2]])
-        res = cohens_kappa(df[rater1], df[rater2])
+        validate_categorical_ratings(df[[rater1, rater2]], categories=categories)
+        res = cohens_kappa(df[rater1], df[rater2], categories=categories)
         res["type"] = "cohen"
         res["raters"] = [rater1, rater2]
         return res
@@ -308,15 +343,16 @@ def calculate_kappa(
         )
 
     if len(cols) == 2:
-        validate_categorical_ratings(pivot_df[[cols[0], cols[1]]])
-        res = cohens_kappa(pivot_df[cols[0]], pivot_df[cols[1]])
+        validate_categorical_ratings(
+            pivot_df[[cols[0], cols[1]]], categories=categories
+        )
+        res = cohens_kappa(pivot_df[cols[0]], pivot_df[cols[1]], categories=categories)
         res["type"] = "cohen"
         res["raters"] = [str(cols[0]), str(cols[1])]
         return res
 
     # If >2 raters:
-    # Reject continuous ratings instead of quartile-binning them
-    validate_categorical_ratings(pivot_df)
+    validate_categorical_ratings(pivot_df, categories=categories)
 
     # Validate that each subject has the same number of ratings before calling fleiss_kappa
     ratings_per_subj = pivot_df.notna().sum(axis=1)
@@ -327,7 +363,10 @@ def calculate_kappa(
         )
 
     # Build count matrix for Fleiss' Kappa
-    cats = sorted(list(set(pivot_df.stack().dropna().unique())))
+    if categories is not None:
+        cats = list(categories)
+    else:
+        cats = sorted(list(set(pivot_df.stack().dropna().unique())))
     cat_to_col = {c: i for i, c in enumerate(cats)}
     mat = np.zeros((len(pivot_df), len(cats)), dtype=int)
     for row_idx, (_, row) in enumerate(pivot_df.iterrows()):

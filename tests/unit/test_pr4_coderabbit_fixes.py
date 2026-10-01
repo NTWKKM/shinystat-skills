@@ -160,6 +160,32 @@ class TestKappaFixes:
         assert res["type"] == "cohen"
         assert "kappa" in res
 
+    def test_calculate_kappa_fractional_scale_more_than_15_levels_accepted(self):
+        # 18 valid fractional levels (0.5 to 9.0 in steps of 0.5) across 150 subjects
+        np.random.seed(42)
+        n = 150
+        levels = [0.5 * i for i in range(1, 19)]  # 18 levels
+        r1 = np.random.choice(levels, size=n)
+        r2 = r1.copy()
+        r2[:25] = np.random.choice(levels, size=25)
+        df = pd.DataFrame({"r1": r1, "r2": r2})
+
+        # Accepted via repeating observations contract
+        res = calculate_kappa(df, rater1="r1", rater2="r2")
+        assert res["type"] == "cohen"
+        assert len(res["categories"]) == 18
+        assert "kappa" in res
+
+        # Accepted via declared categories contract
+        res_cat = calculate_kappa(df, rater1="r1", rater2="r2", categories=levels)
+        assert res_cat["type"] == "cohen"
+        assert len(res_cat["categories"]) == 18
+
+    def test_calculate_kappa_declared_categories_contract_rejects_unrecognized(self):
+        df = pd.DataFrame({"r1": [1, 2, 3], "r2": [1, 2, 99]})
+        with pytest.raises(ValueError, match="not in declared categories"):
+            calculate_kappa(df, rater1="r1", rater2="r2", categories=[1, 2, 3])
+
 
 # ==============================================================================
 # 2. Mediation Verification
@@ -385,6 +411,7 @@ class TestCLIFixes:
         df.to_csv(csv_path, index=False)
 
         # 1. Probabilities in [0, 1] with direction low
+        out_json = tmp_path / "diag_prob_out.json"
         res_prob = runner.invoke(
             cli,
             [
@@ -399,15 +426,23 @@ class TestCLIFixes:
                 "low",
                 "--dca",
                 "--calibration",
+                "--output",
+                str(out_json),
             ],
         )
         assert res_prob.exit_code == 0
-        assert (
-            "Decision Curve Analysis" in res_prob.output
-            or "dca" in res_prob.output.lower()
-        )
+        assert out_json.exists()
+        res_data = json.loads(out_json.read_text())
+        assert "calibration" in res_data
+        brier_low = res_data["calibration"]["brier"]["brier_score"]
+        # Inverted risk probabilities under direction low must be (1.0 - probs)
+        expected_brier = float(np.mean((outcome - (1.0 - probs)) ** 2))
+        counterfactual_brier = float(np.mean((outcome - probs) ** 2))
+        assert np.isclose(brier_low, expected_brier, atol=1e-5)
+        assert not np.isclose(brier_low, counterfactual_brier, atol=1e-3)
 
         # 2. Continuous biomarker score requiring logistic risk calibration
+        out_bio_json = tmp_path / "diag_bio_out.json"
         res_bio = runner.invoke(
             cli,
             [
@@ -422,9 +457,15 @@ class TestCLIFixes:
                 "high",
                 "--dca",
                 "--calibration",
+                "--output",
+                str(out_bio_json),
             ],
         )
         assert res_bio.exit_code == 0
+        assert out_bio_json.exists()
+        bio_data = json.loads(out_bio_json.read_text())
+        assert "dca" in bio_data
+        assert "calibration" in bio_data
 
     def test_cli_diag_uncalibratable_score_raises_click_exception(self, tmp_path):
         runner = CliRunner()
@@ -457,6 +498,45 @@ class TestCLIFixes:
             "Cannot calibrate continuous score" in res.output
             or "fitting a logistic risk calibration model failed" in res.output
         )
+
+    def test_cli_diag_logistic_fit_failure_on_varying_score_raises_click_exception(
+        self, tmp_path, monkeypatch
+    ):
+        runner = CliRunner()
+        from statsmodels.discrete.discrete_model import Logit
+
+        def mock_fit(*args, **kwargs):
+            raise ValueError("Forced Hessian inversion failure in Logit")
+
+        monkeypatch.setattr(Logit, "fit", mock_fit)
+
+        # Dataset with varying score (passes variance check, but Logit fitting fails)
+        df = pd.DataFrame(
+            {
+                "outcome": [0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+                "lactate": [1.5, 2.5, 3.2, 4.1, 5.0, 1.8, 2.9, 3.8, 4.5, 5.2],
+            }
+        )
+        csv_path = tmp_path / "varying_diag.csv"
+        df.to_csv(csv_path, index=False)
+
+        res = runner.invoke(
+            cli,
+            [
+                "diag",
+                "--data",
+                str(csv_path),
+                "--gold-standard",
+                "outcome",
+                "--test",
+                "lactate",
+                "--dca",
+                "--calibration",
+            ],
+        )
+        assert res.exit_code != 0
+        assert "fitting a logistic risk calibration model failed" in res.output
+        assert "Forced Hessian inversion failure in Logit" in res.output
 
     def test_cli_sample_size_proportions_requires_p1_p2(self):
         runner = CliRunner()
