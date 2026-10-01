@@ -30,16 +30,8 @@ def validate_categorical_ratings(
        represent discrete rating levels (where multiple subjects share identical ratings) rather than
        continuous non-repeating measurements where nearly all values are distinct.
     """
-    if isinstance(ratings, pd.DataFrame):
-        if all(
-            isinstance(ratings[c].dtype, pd.CategoricalDtype) for c in ratings.columns
-        ):
-            return
-        vals = ratings.values.flatten()
-    elif isinstance(ratings, pd.Series):
-        if isinstance(ratings.dtype, pd.CategoricalDtype):
-            return
-        vals = ratings.values.flatten()
+    if isinstance(ratings, (pd.DataFrame, pd.Series)):
+        vals = ratings.to_numpy().flatten()
     else:
         vals = np.asarray(ratings).flatten()
 
@@ -47,7 +39,7 @@ def validate_categorical_ratings(
     if len(valid_vals) == 0:
         raise ValueError("No valid ratings found.")
 
-    # 1. Declared categories contract
+    # 1. Declared categories contract: validate observed values against declared categories FIRST
     if categories is not None:
         declared_set = set(categories)
         unrecognized = set(valid_vals) - declared_set
@@ -56,6 +48,16 @@ def validate_categorical_ratings(
                 f"Observed ratings contain values not in declared categories: {unrecognized}"
             )
         return
+
+    # 2. Categorical / discrete dtypes: early return only after declared categories contract
+    if isinstance(ratings, pd.DataFrame):
+        if all(
+            isinstance(ratings[c].dtype, pd.CategoricalDtype) for c in ratings.columns
+        ):
+            return
+    elif isinstance(ratings, pd.Series):
+        if isinstance(ratings.dtype, pd.CategoricalDtype):
+            return
 
     # 2. Non-numeric types (strings, objects, booleans)
     try:
@@ -118,12 +120,21 @@ def cohens_kappa(
     if categories is not None:
         cat_list = list(categories)
     else:
-        if isinstance(s1.dtype, pd.CategoricalDtype):
-            cat_list = list(s1.cat.categories)
-        elif isinstance(s2.dtype, pd.CategoricalDtype):
-            cat_list = list(s2.cat.categories)
-        else:
-            cat_list = sorted(list(set(s1.unique()) | set(s2.unique())))
+        cats1: list[Any] = (
+            list(s1.cat.categories)
+            if isinstance(s1.dtype, pd.CategoricalDtype)
+            else list(s1.unique())
+        )
+        cats2: list[Any] = (
+            list(s2.cat.categories)
+            if isinstance(s2.dtype, pd.CategoricalDtype)
+            else list(s2.unique())
+        )
+        combined_set = set(cats1) | set(cats2)
+        try:
+            cat_list = sorted(list(combined_set))
+        except TypeError:
+            cat_list = list(combined_set)
 
     k = len(cat_list)
     if k <= 1:
@@ -140,9 +151,17 @@ def cohens_kappa(
 
     cat_map = {cat: idx for idx, cat in enumerate(cat_list)}
     conf = np.zeros((k, k), dtype=float)
+    unmapped_pairs = 0
     for c1, c2 in zip(s1, s2):
         if c1 in cat_map and c2 in cat_map:
             conf[cat_map[c1], cat_map[c2]] += 1.0
+        else:
+            unmapped_pairs += 1
+
+    if unmapped_pairs > 0:
+        raise ValueError(
+            f"{unmapped_pairs} non-missing rating pair(s) excluded from confusion count."
+        )
 
     n = np.sum(conf)
     if n == 0:
@@ -257,15 +276,21 @@ def fleiss_kappa(subject_category_matrix: np.ndarray) -> dict[str, Any]:
     var_p = (2.0 / (N * m * (m - 1) * denom**2)) * (
         denom**2 - np.sum(p_j * (1.0 - p_j) * (1.0 - 2 * p_j))
     )
-    se = float(np.sqrt(max(0.0, var_p)))
-    z = (kappa / se) if se > 0 else 0.0
+    se_null = float(np.sqrt(max(0.0, var_p)))
+    z = (kappa / se_null) if se_null > 0 else 0.0
     p_val = float(2.0 * (1.0 - stats.norm.cdf(abs(z))))
 
     return {
         "kappa": float(kappa),
-        "se": se,
-        "ci_lower": max(-1.0, float(kappa - 1.96 * se)),
-        "ci_upper": min(1.0, float(kappa + 1.96 * se)),
+        "se": se_null,
+        "se_null": se_null,
+        "ci_lower": None,
+        "ci_upper": None,
+        "ci_note": (
+            "Confidence interval not computed: null-hypothesis standard error is valid for "
+            "hypothesis testing (z-test), not for interval estimation. Non-null variance "
+            "method required for valid coverage."
+        ),
         "p_value": p_val,
         "observed_agreement": P_o,
         "expected_agreement": P_e,

@@ -90,7 +90,9 @@ def test_autonomous_sap_yaml_template_parses():
     assert "variables" in parsed_dict
     assert "models" in parsed_dict
 
-    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as tmp:
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".yaml", encoding="utf-8", delete=False
+    ) as tmp:
         tmp.write(yaml_text)
         tmp_path = Path(tmp.name)
 

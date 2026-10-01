@@ -315,4 +315,4 @@ def test_e2e_stard_and_prisma_checklists(medstat_cli_runner, tmp_path):
     assert prisma_md.exists()
     prisma_text = prisma_md.read_text(encoding="utf-8")
     assert "# PRISMA Compliance Checklist" in prisma_text
-    assert "Synthesis results" in prisma_text
+    assert "Results of syntheses" in prisma_text

@@ -529,6 +529,24 @@ def check_missing_data_impact(
 # ==============================================================================
 
 
+def _is_id_column(col_name: str, series: pd.Series) -> bool:
+    """Identify if a column represents an identifier rather than an analytical clinical feature."""
+    name = col_name.lower().strip()
+    if name in ("id", "patient_id", "subject_id", "record_id", "case_id", "mrn", "hn"):
+        return True
+    if name.endswith(("_id", ".id")):
+        return True
+    non_null = series.dropna()
+    if len(non_null) > 5 and non_null.nunique() == len(non_null):
+        if (
+            pd.api.types.is_integer_dtype(series)
+            or name.startswith("id")
+            or name.endswith("id")
+        ):
+            return True
+    return False
+
+
 def audit_missingness(
     df: pd.DataFrame,
     var_meta: dict[str, Any] | None = None,
@@ -637,7 +655,13 @@ def audit_missingness(
 
     # Compute Little's MCAR test if continuous variables have missing values
     littles_res: LittlesMCARResult | None = None
-    num_cols = [c for c in df_work.columns if pd.api.types.is_numeric_dtype(df_work[c])]
+    num_cols = [
+        c
+        for c in df_work.columns
+        if pd.api.types.is_numeric_dtype(df_work[c])
+        and df_work[c].dropna().nunique() > 2
+        and not _is_id_column(c, df_work[c])
+    ]
     cols_with_na = [c for c in num_cols if df_work[c].isna().sum() > 0]
     if len(cols_with_na) >= 1 and len(num_cols) >= 2 and total_rows >= 10:
         try:

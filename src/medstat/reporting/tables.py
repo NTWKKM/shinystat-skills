@@ -12,6 +12,8 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+import numpy as np
+
 
 @dataclass
 class Estimate:
@@ -459,13 +461,25 @@ def render_diagnostic_table(
     # Calibration
     cal = diag_data.get("calibration", {})
     if isinstance(cal, dict) and "brier" in cal:
-        brier_val = cal["brier"]
-        records.append(
-            {
-                "Diagnostic Metric": "Brier Score (Calibration)",
-                "Estimate (95% CI)": f"{float(brier_val):.4f}",
-            }
-        )
+        brier_entry = cal["brier"]
+        brier_val = None
+        if isinstance(brier_entry, dict):
+            brier_val = brier_entry.get("brier_score")
+        elif isinstance(brier_entry, (int, float, np.number)):
+            brier_val = float(brier_entry)
+        elif brier_entry is not None:
+            try:
+                brier_val = float(brier_entry)
+            except (ValueError, TypeError):
+                brier_val = None
+
+        if brier_val is not None:
+            records.append(
+                {
+                    "Diagnostic Metric": "Brier Score (Calibration)",
+                    "Estimate (95% CI)": f"{float(brier_val):.4f}",
+                }
+            )
 
     note = "Confidence intervals for proportions are calculated via Wilson score method; AUC confidence interval via DeLong test."
     return render_records_table(title, records, style=style, note=note)

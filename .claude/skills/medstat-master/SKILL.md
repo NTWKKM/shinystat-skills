@@ -147,7 +147,7 @@ When executing the pipeline, strictly enforce the following sequence across down
 - Recode any text outcome columns (`"Dead"` $\to$ `1`, `"Alive"` $\to$ `0`) so downstream tools never receive text labels.
 - Execute cleaning with explicit strategy and documented clinical justification:
 ```bash
-uv run medstat clean --data <dataset.csv> --strategy complete-case --output clean.csv --audit-out retention.json
+uv run medstat clean --data <dataset.csv> --strategy complete-case --missing-justification "MCAR verified by Little's test (p>0.05) and missingness <5%" --output clean.csv --audit-out retention.json
 ```
 
 ### Step 2: Baseline Descriptive & Balance (`medstat-models` / `medstat-causal-meta`)

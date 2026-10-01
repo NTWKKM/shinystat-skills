@@ -182,9 +182,9 @@ def profile_cmd(data: str, output: str | None) -> None:
             "p_value": round(mcar.p_value, 4),
             "is_mcar": mcar.is_mcar,
             "interpretation": (
-                "Missing Completely at Random (MCAR) supported (P > 0.05)"
+                "No evidence against MCAR (P > 0.05)"
                 if mcar.is_mcar
-                else "Missing at Random (MAR) or MNAR likely (P <= 0.05); MICE recommended"
+                else "Evidence against MCAR (P <= 0.05); does not distinguish MAR from MNAR"
             ),
         }
 
@@ -331,6 +331,12 @@ def clean_cmd(
 
     if outlier_action:
         act = outlier_action.lower().strip()
+        if info.get("imputed_datasets") and act in ("remove", "winsorize", "cap"):
+            raise click.ClickException(
+                f"Outlier action '{act}' cannot be applied post-imputation when multiple imputed datasets exist. "
+                "Apply outlier handling before multiple imputation, or use --outlier-action flag."
+            )
+
         num_cols = [
             c
             for c in cleaned_df.columns
@@ -353,12 +359,12 @@ def clean_cmd(
                     cleaned_df[c], method="iqr", threshold=iqr_multiplier
                 )
                 is_outlier |= mask
-            n_removed = int(is_outlier.sum())
-            if n_removed > 0:
-                tracker.record_exclusion(
-                    f"Tukey's IQR outlier removal (>{iqr_multiplier}x IQR)", n_removed
-                )
-                cleaned_df = cleaned_df.loc[~is_outlier].copy()
+            cleaned_df = tracker.apply_filter(
+                cleaned_df,
+                ~is_outlier,
+                stage_name="Outlier Exclusion",
+                reason=f"Tukey's IQR outlier removal (>{iqr_multiplier}x IQR)",
+            )
         elif act in ("winsorize", "cap"):
             for c in num_cols:
                 cleaned_df[c] = handle_outliers(
@@ -871,6 +877,7 @@ def diag_cmd(
             comp_res = delong_paired_test(y_true, eff_score, eff_comp)
             diag_res["delong_comparison"] = comp_res
 
+    is_in_sample_recalibration = False
     if dca or calibration:
         valid_mask = ~(pd.isna(y_true) | pd.isna(y_score))
         valid_scores = y_score[valid_mask]
@@ -904,6 +911,11 @@ def diag_cmd(
                 prob_risk = pd.Series(np.nan, index=df.index, dtype=float)
                 prob_risk.loc[valid_mask] = model_prob.predict(X_log)
                 prob_risk = prob_risk.values
+                is_in_sample_recalibration = True
+                diag_res["probability_source"] = "in-sample logistic recalibration"
+                diag_res["apparent_estimates_note"] = (
+                    "Brier, ICI, and net benefit are apparent estimates evaluated on the same data used for logistic recalibration."
+                )
             except Exception as e:
                 raise click.ClickException(
                     f"DCA and calibration require predicted event probabilities in [0, 1]. "
@@ -923,7 +935,14 @@ def diag_cmd(
 
     if calibration:
         brier = calculate_brier_score(y_true, prob_risk)
-        slope_inter = calculate_calibration_slope_and_intercept(y_true, prob_risk)
+        if is_in_sample_recalibration:
+            slope_inter = {
+                "slope": None,
+                "intercept": None,
+                "note": "Calibration slope and intercept are not informative for in-sample logistic recalibration (derivation data yields tautological slope=1 and intercept=0).",
+            }
+        else:
+            slope_inter = calculate_calibration_slope_and_intercept(y_true, prob_risk)
         ici = calculate_ici(y_true, prob_risk)
         diag_res["calibration"] = {
             "brier": brier,
@@ -1341,7 +1360,11 @@ def sample_size_cmd(
         )
 
     if tt_lower in ("t-test", "t_test", "ttest", "means"):
-        es = effect_size if effect_size is not None else 0.5
+        if effect_size is None or effect_size <= 0:
+            raise click.ClickException(
+                "t-test/means sample size calculation requires an explicitly supplied positive --effect-size (Cohen's d > 0)."
+            )
+        es = effect_size
         n_per_group = calculate_sample_size_t_test(
             effect_size=es, alpha=alpha, power=power
         )

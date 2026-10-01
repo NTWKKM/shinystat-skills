@@ -18,17 +18,25 @@ from __future__ import annotations
 import json
 import math
 
+import click
 import numpy as np
 import pandas as pd
 import pytest
 from click.testing import CliRunner
 
-from medstat.agreement.kappa import calculate_kappa, cohens_kappa, fleiss_kappa
+from medstat.agreement.kappa import (
+    calculate_kappa,
+    cohens_kappa,
+    fleiss_kappa,
+    validate_categorical_ratings,
+)
 from medstat.causal.mediation import run_mediation
 from medstat.cli.main import cli
+from medstat.data.clean import audit_missingness
 from medstat.data.loader import load_clinical_data
 from medstat.models.splines import fit_logistic_rcs
-from medstat.reporting.tables import render_balance_table
+from medstat.reporting.checklists import get_prisma_checklist, get_stard_checklist
+from medstat.reporting.tables import render_balance_table, render_diagnostic_table
 
 
 # ==============================================================================
@@ -574,3 +582,308 @@ class TestCLIFixes:
         )
         assert res_ok.exit_code == 0
         assert "correlation_r" in res_ok.output
+
+    def test_cli_sample_size_ttest_requires_positive_effect_size(self):
+        runner = CliRunner()
+        # Missing effect size
+        res_missing = runner.invoke(cli, ["sample-size", "--type", "t-test"])
+        assert res_missing.exit_code != 0
+        assert (
+            "requires an explicitly supplied positive --effect-size"
+            in res_missing.output
+        )
+
+        # Non-positive effect size
+        res_neg = runner.invoke(
+            cli, ["sample-size", "--type", "t-test", "--effect-size", "-0.5"]
+        )
+        assert res_neg.exit_code != 0
+        assert (
+            "requires an explicitly supplied positive --effect-size" in res_neg.output
+        )
+
+        # Valid positive effect size
+        res_ok = runner.invoke(
+            cli, ["sample-size", "--type", "t-test", "--effect-size", "0.6"]
+        )
+        assert res_ok.exit_code == 0
+        assert "sample_size_per_group" in res_ok.output
+
+
+# ==============================================================================
+# 7. Additional Rigorous Verification for PR#4 Follow-up Fixes
+# ==============================================================================
+class TestPR4FollowupFixes:
+    def test_validate_categorical_ratings_declared_categories_on_categorical_dtype(
+        self,
+    ):
+        # Categorical series containing values outside declared categories
+        s = pd.Series(["A", "B", "C"], dtype="category")
+        with pytest.raises(ValueError, match="not in declared categories"):
+            validate_categorical_ratings(s, categories=["A", "B"])
+
+        # Categorical series within declared categories
+        s_ok = pd.Series(["A", "B", "A"], dtype="category")
+        validate_categorical_ratings(s_ok, categories=["A", "B"])
+
+    def test_cohens_kappa_category_union_and_error_on_unmapped(self):
+        # Two categorical series with disjoint observed categories
+        s1 = pd.Series(pd.Categorical(["A", "B", "A"], categories=["A", "B"]))
+        s2 = pd.Series(pd.Categorical(["B", "C", "B"], categories=["B", "C"]))
+        res = cohens_kappa(s1, s2)
+        assert "A" in res["categories"]
+        assert "B" in res["categories"]
+        assert "C" in res["categories"]
+
+        # Raising error if rating pair excluded
+        with pytest.raises(
+            ValueError, match="not in declared categories|excluded from confusion count"
+        ):
+            cohens_kappa(
+                pd.Series(["A", "B", "UNKNOWN"]),
+                pd.Series(["A", "B", "A"]),
+                categories=["A", "B"],
+            )
+
+    def test_fleiss_kappa_returns_se_null_and_none_ci(self):
+        mat = np.array(
+            [
+                [3, 0, 0],
+                [2, 1, 0],
+                [0, 2, 1],
+                [0, 0, 3],
+            ]
+        )
+        res = fleiss_kappa(mat)
+        assert "se_null" in res
+        assert res["se_null"] > 0
+        assert res["ci_lower"] is None
+        assert res["ci_upper"] is None
+        assert "ci_note" in res
+        assert (
+            "null-hypothesis standard error is valid for hypothesis testing"
+            in res["ci_note"]
+        )
+
+    def test_cli_profile_mcar_interpretation_wording(self, tmp_path):
+        runner = CliRunner()
+        np.random.seed(42)
+        df = pd.DataFrame(
+            {
+                "patient_id": list(range(1, 101)),
+                "age": np.random.normal(55, 10, 100),
+                "sbp": np.random.normal(120, 15, 100),
+            }
+        )
+        df.loc[1:10, "sbp"] = np.nan
+        csv_path = tmp_path / "mcar_cohort.csv"
+        df.to_csv(csv_path, index=False)
+        out_json = tmp_path / "profile.json"
+
+        res = runner.invoke(
+            cli, ["profile", "--data", str(csv_path), "--output", str(out_json)]
+        )
+        assert res.exit_code == 0
+        assert out_json.exists()
+        prof_data = json.loads(out_json.read_text())
+        mcar_interp = prof_data["littles_mcar"]["interpretation"]
+        assert (
+            "No evidence against MCAR (P > 0.05)" in mcar_interp
+            or "Evidence against MCAR (P <= 0.05)" in mcar_interp
+        )
+        assert "MICE recommended" not in mcar_interp
+
+    def test_cli_clean_imputed_datasets_rejects_outlier_modifications(self, tmp_path):
+        runner = CliRunner()
+        df = pd.DataFrame(
+            {
+                "patient_id": list(range(1, 61)),
+                "age": [50.0] * 50 + [np.nan] * 10,
+                "sbp": [120.0] * 50 + [130.0] * 10,
+            }
+        )
+        csv_path = tmp_path / "mice_outlier.csv"
+        df.to_csv(csv_path, index=False)
+
+        out_csv = tmp_path / "clean_mice.csv"
+        # remove should fail when imputed_datasets present
+        res_remove = runner.invoke(
+            cli,
+            [
+                "clean",
+                "--data",
+                str(csv_path),
+                "--strategy",
+                "mice",
+                "--imputations",
+                "3",
+                "--missing-justification",
+                "Clinical test for MICE",
+                "--outlier-action",
+                "remove",
+                "--output",
+                str(out_csv),
+            ],
+        )
+        assert res_remove.exit_code != 0
+        assert (
+            "cannot be applied post-imputation when multiple imputed datasets exist"
+            in res_remove.output
+        )
+
+        # flag should succeed
+        res_flag = runner.invoke(
+            cli,
+            [
+                "clean",
+                "--data",
+                str(csv_path),
+                "--strategy",
+                "mice",
+                "--imputations",
+                "3",
+                "--missing-justification",
+                "Clinical test for MICE",
+                "--outlier-action",
+                "flag",
+                "--output",
+                str(out_csv),
+            ],
+        )
+        assert res_flag.exit_code == 0
+
+    def test_cli_clean_outlier_removal_uses_sample_flow_tracker(self, tmp_path):
+        runner = CliRunner()
+        df = pd.DataFrame(
+            {
+                "patient_id": list(range(1, 21)),
+                "age": [50.0] * 18 + [150.0, 160.0],
+            }
+        )
+        csv_path = tmp_path / "outlier_removal.csv"
+        df.to_csv(csv_path, index=False)
+        out_csv = tmp_path / "cleaned.csv"
+        audit_json = tmp_path / "audit.json"
+
+        res = runner.invoke(
+            cli,
+            [
+                "clean",
+                "--data",
+                str(csv_path),
+                "--strategy",
+                "complete-case",
+                "--missing-justification",
+                "No missing values",
+                "--outlier-action",
+                "remove",
+                "--output",
+                str(out_csv),
+                "--audit-out",
+                str(audit_json),
+            ],
+        )
+        assert res.exit_code == 0
+        assert out_csv.exists()
+        cleaned_data = pd.read_csv(out_csv)
+        assert len(cleaned_data) == 18
+
+    def test_cli_diag_insample_logistic_recalibration_labels(self, tmp_path):
+        runner = CliRunner()
+        df = pd.DataFrame(
+            {
+                "outcome": [0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+                "lactate": [1.5, 2.5, 3.2, 4.1, 5.0, 1.8, 2.9, 3.8, 4.5, 5.2],
+            }
+        )
+        csv_path = tmp_path / "diag_recal.csv"
+        df.to_csv(csv_path, index=False)
+        out_json = tmp_path / "diag_out.json"
+
+        res = runner.invoke(
+            cli,
+            [
+                "diag",
+                "--data",
+                str(csv_path),
+                "--gold-standard",
+                "outcome",
+                "--test",
+                "lactate",
+                "--calibration",
+                "--output",
+                str(out_json),
+            ],
+        )
+        assert res.exit_code == 0
+        diag_res = json.loads(out_json.read_text())
+        assert diag_res["probability_source"] == "in-sample logistic recalibration"
+        assert "apparent estimates" in diag_res["apparent_estimates_note"].lower()
+        cal = diag_res["calibration"]
+        assert cal["slope_and_intercept"]["slope"] is None
+        assert cal["slope_and_intercept"]["intercept"] is None
+        assert "not informative" in cal["slope_and_intercept"]["note"].lower()
+
+    def test_audit_missingness_excludes_binary_and_id_columns(self):
+        df = pd.DataFrame(
+            {
+                "patient_id": list(range(1, 51)),
+                "is_female": [0, 1] * 25,
+                "age": [50.0 + i for i in range(50)],
+                "sbp": [120.0 + i for i in range(40)] + [np.nan] * 10,
+            }
+        )
+        audit = audit_missingness(df)
+        assert audit.littles_mcar is not None
+        # Should only evaluate continuous non-ID columns: age, sbp (2 columns)
+        assert audit.littles_mcar.n_variables == 2
+
+    def test_loader_rejects_legacy_xls(self, tmp_path):
+        fake_xls = tmp_path / "legacy.xls"
+        fake_xls.write_bytes(b"\xd0\xcf\x11\xe0")  # OLE CF header
+        with pytest.raises(click.ClickException, match="Legacy Excel format"):
+            load_clinical_data(fake_xls)
+
+    def test_stard_and_prisma_checklists_guideline_alignment(self):
+        stard = get_stard_checklist()
+        distinct_stard_numbers = {it.number.rstrip("abcdef") for it in stard.items}
+        assert len(distinct_stard_numbers) == 30
+        assert len(stard.items) == 34
+        item_names = [it.item for it in stard.items]
+        assert "Decision curve analysis" not in item_names
+
+        prisma = get_prisma_checklist()
+        distinct_prisma_numbers = {it.number.rstrip("abcdef") for it in prisma.items}
+        assert len(distinct_prisma_numbers) == 27
+        assert len(prisma.items) == 41
+        item_names_prisma = [it.item for it in prisma.items]
+        assert "Results of individual studies" in item_names_prisma
+        assert "Results of syntheses - statistical results" in item_names_prisma
+
+    def test_render_diagnostic_table_nested_and_scalar_brier(self):
+        # 1. Nested brier dict
+        nested_diag = {
+            "calibration": {
+                "brier": {"brier_score": 0.1234, "null_brier": 0.25},
+            }
+        }
+        html_nested = render_diagnostic_table("Diagnostic Report", nested_diag)
+        assert "0.1234" in html_nested
+
+        # 2. Scalar brier
+        scalar_diag = {
+            "calibration": {
+                "brier": 0.0567,
+            }
+        }
+        html_scalar = render_diagnostic_table("Diagnostic Report", scalar_diag)
+        assert "0.0567" in html_scalar
+
+        # 3. Missing brier_score in dict should be skipped gracefully
+        missing_diag = {
+            "calibration": {
+                "brier": {"other_key": 123},
+            }
+        }
+        html_missing = render_diagnostic_table("Diagnostic Report", missing_diag)
+        assert "Brier Score" not in html_missing

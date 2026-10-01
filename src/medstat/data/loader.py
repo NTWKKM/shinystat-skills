@@ -1,7 +1,7 @@
 """
 Universal Clinical Data Ingestion Module.
 
-Handles multi-format clinical files (.csv, .tsv, .xlsx, .xls, .parquet, .txt),
+Handles multi-format clinical files (.csv, .tsv, .xlsx, .parquet, .txt),
 normalizes column naming, and provides typo-tolerant validation with difflib suggestions.
 """
 
@@ -25,7 +25,7 @@ def load_clinical_data(
     Supported formats:
     - Comma-separated (.csv, .txt)
     - Tab-separated (.tsv)
-    - Microsoft Excel (.xlsx, .xls)
+    - Microsoft Excel (.xlsx)
     - Columnar Parquet (.parquet)
     """
     p = Path(path)
@@ -34,8 +34,13 @@ def load_clinical_data(
 
     ext = p.suffix.lower()
     try:
-        if ext in (".xlsx", ".xls"):
+        if ext == ".xlsx":
             df = pd.read_excel(p, sheet_name=sheet_name)
+        elif ext == ".xls":
+            raise click.ClickException(
+                "Legacy Excel format (.xls) is not supported. "
+                "Please convert the file to modern Excel (.xlsx) or CSV."
+            )
         elif ext == ".parquet":
             df = pd.read_parquet(p)
         elif ext == ".tsv" or ext in (".csv", ".txt") or True:
