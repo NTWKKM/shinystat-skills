@@ -15,7 +15,7 @@ Biostatistical engine for observational causal inference, rater reliability anal
 4. **Meta-Analysis Model Selection**: Model choice (fixed-effect vs. DerSimonian-Laird random-effects) must reflect the study design and clinical/methodological variation assumptions; Cochrane advises against selecting models solely by statistical heterogeneity tests ($I^2$).
 5. **Confounder Selection Invariant for PSM**: Include *only* baseline pre-treatment confounders that are causally related to treatment choice and/or outcome. Strictly exclude post-treatment variables, mediators (variables on the causal pathway between treatment and outcome), or colliders, which introduce conditioning bias and artifactual confounding.
 6. **Association vs Agreement Trap**: Never substitute Pearson ($r$) or Spearman ($\rho$) correlation for rater or device agreement. Correlation evaluates linear association, not agreement. Enforce **Bland-Altman 95% Limits of Agreement** (with large-sample CIs) or **Intraclass Correlation (ICC)**.
-7. **Egger's Test Scope & Limitations**: Egger's linear regression test for funnel plot asymmetry requires at least $k \ge 10$ studies with continuous effect measures. Avoid running or interpreting Egger's test on sparse study counts ($k < 10$) or binary log odds ratios where artifactual correlation occurs.
+7. **Egger's Test Scope & Limitations**: Egger's linear regression test for funnel plot asymmetry requires at least $k \ge 10$ studies with continuous effect measures. The `--egger` command path rejects fewer than 10 studies ($k < 10$) and binary log odds-ratio effect measures (e.g. `log_or`, `or`, `odds_ratio`) where artifactual correlation between log odds ratio and standard error induces false-positive asymmetry.
 
 ## Execution Sequence
 
@@ -149,7 +149,9 @@ def run_psm_pipeline(df, treatment_col, covariate_cols, caliper_sd=0.20):
     available_ctrl_idx = set(control.index)
     
     # 1:1 Nearest-Neighbor Matching within Caliper
-    for t_idx, t_row in treated.iterrows():
+    # Deterministic treated-subject order (sort by logit_ps descending to prevent input row order dependency)
+    treated_sorted = treated.sort_values('logit_ps', ascending=False)
+    for t_idx, t_row in treated_sorted.iterrows():
         if not available_ctrl_idx:
             break
         ctrl_subset = control.loc[list(available_ctrl_idx)]
@@ -166,25 +168,67 @@ def run_psm_pipeline(df, treatment_col, covariate_cols, caliper_sd=0.20):
     matched_idx = [t for t, c in matched_pairs] + [c for t, c in matched_pairs]
     df_matched = df.loc[matched_idx]
     for cov in covariate_cols:
-        g1 = df_matched[df_matched[treatment_col] == 1][cov].dropna()
-        g0 = df_matched[df_matched[treatment_col] == 0][cov].dropna()
-        pooled_sd = np.sqrt((g1.var() + g0.var()) / 2.0)
-        smd = abs(g1.mean() - g0.mean()) / pooled_sd if pooled_sd > 0 else 0.0
-        status = "PASSED (< 0.10)" if smd < 0.10 else "UNBALANCED (>= 0.10)"
-        print(f"Post-match SMD for {cov}: {smd:.3f} -> {status}")
+        # Encode or assess categorical covariates per category before numeric mean/var
+        if not pd.api.types.is_numeric_dtype(df_matched[cov]):
+            cats = pd.get_dummies(df_matched[cov], drop_first=(df_matched[cov].nunique() == 2), prefix=cov)
+            sub_covs = cats.columns.tolist()
+            df_eval = pd.concat([df_matched[[treatment_col]], cats], axis=1)
+        else:
+            sub_covs = [cov]
+            df_eval = df_matched[[treatment_col, cov]]
+
+        for sc in sub_covs:
+            g1 = df_eval[df_eval[treatment_col] == 1][sc].dropna()
+            g0 = df_eval[df_eval[treatment_col] == 0][sc].dropna()
+            if len(g1) < 2 or len(g0) < 2:
+                print(f"Post-match SMD for {sc}: NOT ESTIMABLE (insufficient sample, n < 2)")
+                continue
+            diff = abs(g1.mean() - g0.mean())
+            pooled_sd = np.sqrt((g1.var(ddof=1) + g0.var(ddof=1)) / 2.0)
+            if pooled_sd == 0:
+                smd = 0.0 if diff == 0 else np.nan
+            else:
+                smd = diff / pooled_sd
+
+            if np.isnan(smd):
+                status = "NOT ESTIMABLE / UNBALANCED (zero SD with non-zero mean difference)"
+                print(f"Post-match SMD for {sc}: NaN -> {status}")
+            else:
+                status = "PASSED (< 0.10)" if smd < 0.10 else "UNBALANCED (>= 0.10)"
+                print(f"Post-match SMD for {sc}: {smd:.3f} -> {status}")
     return df_matched
 
 # ------------------------------------------------------------------------------
-# 2. BLAND-ALTMAN LIMITS OF AGREEMENT
+# 2. BLAND-ALTMAN LIMITS OF AGREEMENT (with 95% Confidence Intervals)
 # ------------------------------------------------------------------------------
-def run_bland_altman(m1_series, m2_series):
-    diff = m1_series - m2_series
-    mean_bias = diff.mean()
-    sd_diff = diff.std()
-    loa_upper = mean_bias + 1.96 * sd_diff
-    loa_lower = mean_bias - 1.96 * sd_diff
-    print(f"Bland-Altman: Mean Bias = {mean_bias:.2f}, 95% LoA = [{loa_lower:.2f}, {loa_upper:.2f}]")
-    return {"mean_bias": mean_bias, "loa_lower": loa_lower, "loa_upper": loa_upper}
+def run_bland_altman(m1_series, m2_series, ci=0.95):
+    diff = (m1_series - m2_series).dropna()
+    n = len(diff)
+    if n < 2:
+        raise ValueError(f"Bland-Altman requires at least 2 non-missing pairs (got {n}).")
+    mean_bias = float(diff.mean())
+    sd_diff = float(diff.std(ddof=1))
+    se_bias = sd_diff / np.sqrt(n)
+    t_crit = float(stats.t.ppf(1.0 - (1.0 - ci) / 2.0, df=n - 1))
+    ci_bias = (mean_bias - t_crit * se_bias, mean_bias + t_crit * se_bias)
+    
+    z_loa = float(stats.norm.ppf(1.0 - (1.0 - ci) / 2.0))
+    loa_upper = mean_bias + z_loa * sd_diff
+    loa_lower = mean_bias - z_loa * sd_diff
+    se_loa = float(np.sqrt((1.0 / n + (z_loa**2) / (2.0 * (n - 1))) * (sd_diff**2)))
+    ci_loa_upper = (loa_upper - t_crit * se_loa, loa_upper + t_crit * se_loa)
+    ci_loa_lower = (loa_lower - t_crit * se_loa, loa_lower + t_crit * se_loa)
+    print(f"Bland-Altman: Mean Bias = {mean_bias:.2f} (95% CI [{ci_bias[0]:.2f}, {ci_bias[1]:.2f}]), "
+          f"95% LoA = [{loa_lower:.2f}, {loa_upper:.2f}] (LoA Lower 95% CI [{ci_loa_lower[0]:.2f}, {ci_loa_lower[1]:.2f}], "
+          f"LoA Upper 95% CI [{ci_loa_upper[0]:.2f}, {ci_loa_upper[1]:.2f}])")
+    return {
+        "mean_bias": mean_bias,
+        "ci_mean_bias": ci_bias,
+        "loa_lower": loa_lower,
+        "ci_loa_lower": ci_loa_lower,
+        "loa_upper": loa_upper,
+        "ci_loa_upper": ci_loa_upper,
+    }
 ```
 
 The agent may freely incorporate `medstat` modules (e.g. `from medstat.causal.psm import match_propensity_scores`, `from medstat.agreement.icc import calculate_icc`, `from medstat.meta.models import run_meta_analysis`) or standard libraries as appropriate.

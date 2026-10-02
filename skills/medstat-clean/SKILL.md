@@ -142,8 +142,17 @@ print(f"Loaded raw dataset: N = {n_initial}")
 df = df_raw.copy()
 
 # 3. MISSINGNESS AUDIT & SAMPLE RETENTION FLOW
-# ตรวจสอบสัดส่วนค่าสูญหาย และตัดแถวที่ไม่มี Primary Outcome พร้อมบันทึกเหตุผล
+# ตรวจสอบสัดส่วนค่าสูญหาย บันทึก named exclusion stage พร้อม clinical rationale และ persist retention flow
+from medstat.data.retention import SampleFlowTracker
+tracker = SampleFlowTracker(initial_n=n_initial, initial_name="Initial Enrolled Cohort")
+
 df_clean = df.dropna(subset=['outcome']).copy()
+tracker.record_stage(
+    stage_name="Complete Primary Outcome Verification",
+    n_remaining=len(df_clean),
+    reason="Excluded missing primary outcome (mandatory endpoint per SAP)",
+)
+
 n_analyzed = len(df_clean)
 n_excluded = n_initial - n_analyzed
 print(f"Sample Retention Flow: Initial={n_initial} -> Excluded={n_excluded} -> Analyzed={n_analyzed}")
@@ -162,8 +171,10 @@ def winsorize_tukey(series, k=1.5):
 # ตัวอย่าง: บังคับใช้เฉพาะคอลัมน์ที่ผ่านการประเมินทางคลินิกแล้ว
 # df_clean['sbp_winsorized'] = winsorize_tukey(df_clean['sbp'], k=1.5)
 
-# บันทึกข้อมูลที่พร้อมสำหรับการวิเคราะห์
+# บันทึกข้อมูลที่พร้อมสำหรับการวิเคราะห์ และ persist retention flow ควบคู่กัน
 df_clean.to_csv("clean_cohort.csv", index=False)
+with open("sample_retention_flow.json", "w") as f:
+    f.write(tracker.to_json())
 ```
 
 The agent may freely incorporate `medstat` modules (e.g. `from medstat.clean.missing import audit_missingness`, `from medstat.clean.outliers import winsorize_outliers`) or standard libraries as appropriate.

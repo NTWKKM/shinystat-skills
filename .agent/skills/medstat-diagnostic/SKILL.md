@@ -12,7 +12,7 @@ Validation engine for clinical biomarkers, laboratory diagnostic assays, point-o
 1. **Wilson Score Intervals for Proportions**: Never use normal Wald approximation intervals for sensitivity or specificity near 0 or 1; Wilson score intervals are mandatory.
 2. **DeLong Variance for ROC**: Empirical AUC confidence intervals and paired comparisons must use non-parametric placement values via DeLong's method.
 3. **Clinical Utility Beyond Accuracy**: High AUC does not guarantee clinical utility. Decision Curve Analysis (DCA) is required to establish positive net benefit over "Treat All" and "Treat None" across threshold probabilities.
-4. **Automated Directionality Check (Low-is-Abnormal)**: Before calculating ROC or cutpoint metrics, verify whether the marker is abnormal when high (Troponin, Lactate) or abnormal when low (Platelet count, eGFR, PaO2/FiO2). If empirical $\text{AUC} < 0.50$, this indicates inverted disease concordance; the agent must invert the score ($Score_{\text{eff}} = -Score$) so disease concordance is preserved, and document this transformation in the methods narrative.
+4. **Prespecified Directionality Rule (Low-is-Abnormal)**: Before calculating ROC or cutpoint metrics, establish biomarker directionality based on clinical biological mechanisms (e.g. abnormal when high: Troponin, Lactate; abnormal when low: Platelet count, eGFR, PaO2/FiO2). Recode or invert low-is-abnormal scores prior to analysis as a prespecified transformation. Never automatically invert scores post-hoc based solely on observing empirical $\text{AUC} < 0.50$; an unexpected low AUC must be reported and investigated for assay miscalibration, labeling reversal, or data errors rather than reversed after observing the data.
 5. **Cutpoint Selection & Anti-P-Hacking**: Cutpoints must either be pre-specified by clinical guidelines or derived via objective metrics (Youden's Index $J = \text{Sens} + \text{Spec} - 1$, or a prespecified minimum sensitivity tier like 95% for triage screening). Never data-dredge through arbitrary cutpoints to maximize statistical significance without multiplicity disclosure.
 
 ## Execution Sequence
@@ -152,29 +152,35 @@ scores = df['test_score'].values
 fpr, tpr, thresholds = roc_curve(df['gold_standard'], scores)
 roc_auc = auc(fpr, tpr)
 
-# Directionality Sanity Check: If AUC < 0.50, marker is low-is-abnormal (e.g. eGFR, Platelet, PaO2/FiO2)
+# Directionality: Verify prespecified clinical orientation (low-is-abnormal markers like eGFR or Platelets must be prespecified and recoded prior to analysis)
+# If an empirical AUC < 0.50 occurs contrary to clinical expectation, report and investigate potential coding/assay error rather than post-hoc flipping
 if roc_auc < 0.50:
-    print("Warning: AUC < 0.50 detected; inverting score directionality for low-is-abnormal clinical biomarker.")
-    scores = -scores
-    fpr, tpr, thresholds = roc_curve(df['gold_standard'], scores)
-    roc_auc = auc(fpr, tpr)
+    print(f"Warning: Empirical AUC is {roc_auc:.3f} (< 0.50). Verify biomarker clinical directionality or coding before reporting.")
 
 youden_j = tpr - fpr
 opt_idx = np.argmax(youden_j)
 opt_cutoff = thresholds[opt_idx]
 print(f"ROC AUC: {roc_auc:.3f} | Optimal Cutoff (Youden J): {opt_cutoff:.2f}")
 
-# 4. DECISION CURVE ANALYSIS (DCA: Net Benefit)
+# 4. DECISION CURVE ANALYSIS (DCA: Net Benefit with Treat All and Treat None Reference Strategies)
 def calculate_net_benefit(gold, probs, thresholds_range):
     n = len(gold)
+    tp_all = np.sum(gold == 1)
+    fp_all = np.sum(gold == 0)
     net_benefits = []
     for pt in thresholds_range:
         pred = (probs >= pt).astype(int)
         tp = np.sum((gold == 1) & (pred == 1))
         fp = np.sum((gold == 0) & (pred == 1))
-        w = pt / (1.0 - pt)
-        nb = (tp / n) - (fp / n) * w
-        net_benefits.append({"pt": pt, "net_benefit": nb})
+        w = pt / (1.0 - pt) if pt < 1.0 else 0.0
+        nb_model = (tp / n) - (fp / n) * w
+        nb_all = (tp_all / n) - (fp_all / n) * w
+        net_benefits.append({
+            "pt": pt,
+            "net_benefit": nb_model,
+            "treat_all": nb_all,
+            "treat_none": 0.0,
+        })
     return pd.DataFrame(net_benefits)
 ```
 

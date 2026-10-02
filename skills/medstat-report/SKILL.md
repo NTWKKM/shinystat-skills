@@ -14,7 +14,7 @@ Dissemination engine for rendering publication-quality tables conforming to top 
 3. **Guideline Compliance**: Accompany observational studies with STROBE audits, randomized trials with CONSORT, and prediction models with TRIPOD (or TRIPOD+AI where applicable).
 4. **Clinical Interpretation & Anti-Hallucination Invariants**:
    - *Absence of Evidence*: Never report $P > 0.05$ as "demonstrating no difference" or "proving equivalence." State: "insufficient evidence to reject the null hypothesis" and discuss the 95% CI width.
-   - *Odds Ratio vs Risk*: When outcome incidence exceeds 10%, Odds Ratios markedly overstate Relative Risk. Estimates must be explicitly labeled as Odds Ratios without loose substitution of "risk".
+   - *Odds Ratio vs Risk*: The degree to which an Odds Ratio diverges from Relative Risk depends on both outcome incidence and effect size (divergence grows as incidence and effect size increase). Estimates must be explicitly labeled as Odds Ratios without loose substitution of "risk" or "relative risk".
    - *Uncertainty-First ICC Reporting*: For Intraclass Correlation Coefficients (ICC), report the 95% confidence interval and its spanning clinical reliability tier (Koo & Li 2016) rather than interpreting point estimates in isolation.
 
 ## Execution Sequence
@@ -110,29 +110,54 @@ model_records = [
     {"Variable": "Baseline SBP >= 140 mmHg", "Estimate": "1.45", "CI": "(1.08 - 1.95)", "p_value": "0.014"},
 ]
 
-# 2. RENDER NEJM / JAMA THREE-HORIZONTAL-RULE HTML TABLE
-def render_nejm_html_table(records, title="Table 2. Multivariable Logistic Regression Analysis"):
+# 2. RENDER NEJM / JAMA PUBLICATION HTML TABLE
+def format_p_value(p_val_str, style="NEJM"):
+    try:
+        p = float(p_val_str)
+        if style.upper() == "JAMA":
+            if p < 0.001:
+                return "<.001"
+            elif p >= 0.99:
+                return ">.99"
+            else:
+                return f"{p:.3f}".lstrip("0")
+        else:  # NEJM
+            if p < 0.001:
+                return "<0.001"
+            elif p >= 0.99:
+                return ">0.99"
+            else:
+                return f"{p:.3f}"
+    except (ValueError, TypeError):
+        return p_val_str
+
+def render_publication_html_table(records, style="NEJM", title="Table 2. Multivariable Logistic Regression Analysis"):
+    is_nejm = style.upper() == "NEJM"
+    top_border = "border-top: 3px double #000;" if is_nejm else "border-top: 1px solid #000;"
+    p_header = "P Value" if is_nejm else "<em>P</em> Value"
+    
     html = f"""
     <div style="font-family: 'Times New Roman', Times, serif; max-width: 800px; margin: 20px auto;">
       <h3 style="margin-bottom: 8px; font-weight: bold;">{title}</h3>
       <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 14px;">
         <thead>
-          <tr style="border-top: 2px solid #000; border-bottom: 1px solid #000;">
+          <tr style="{top_border} border-bottom: 1px solid #000;">
             <th style="padding: 6px 8px;">Characteristic / Variable</th>
             <th style="padding: 6px 8px; text-align: right;">Adjusted Odds Ratio</th>
             <th style="padding: 6px 8px; text-align: right;">95% Confidence Interval</th>
-            <th style="padding: 6px 8px; text-align: right;">P Value</th>
+            <th style="padding: 6px 8px; text-align: right;">{p_header}</th>
           </tr>
         </thead>
         <tbody>
     """
     for r in records:
+        p_str = format_p_value(r['p_value'], style=style)
         html += f"""
           <tr>
             <td style="padding: 6px 8px;">{r['Variable']}</td>
             <td style="padding: 6px 8px; text-align: right;">{r['Estimate']}</td>
             <td style="padding: 6px 8px; text-align: right;">{r['CI']}</td>
-            <td style="padding: 6px 8px; text-align: right;">{r['p_value']}</td>
+            <td style="padding: 6px 8px; text-align: right;">{p_str}</td>
           </tr>
         """
     html += """
@@ -149,21 +174,35 @@ def render_nejm_html_table(records, title="Table 2. Multivariable Logistic Regre
     """
     return html
 
-# 3. GENERATE STATISTICAL METHODS NARRATIVE
-def generate_methods_narrative(study_design="Retrospective Cohort", primary_outcome="30-day Mortality"):
+# 3. GENERATE STATISTICAL METHODS NARRATIVE FROM ACTUAL ANALYSIS METADATA
+def generate_methods_narrative(
+    study_design="Retrospective Cohort",
+    primary_outcome="30-day Mortality",
+    model_type="Multivariable logistic regression",
+    confounders=None,
+    missing_data_strategy="complete-case analysis",
+    guideline="STROBE",
+    tests=None,
+):
+    if confounders is None:
+        confounders = ["age", "sex", "hypertension"]
+    if tests is None:
+        tests = "Welch's t-test or Mann-Whitney U test for continuous variables and Pearson Chi-Square or Fisher's exact test for categorical variables"
+
+    confounder_str = ", ".join(confounders)
     text = (
-        f"Statistical Analysis: Continuous baseline variables were reported as Mean ± SD or Median [IQR] "
-        f"and compared using Welch's t-test or Mann-Whitney U test, as appropriate. Categorical variables "
-        f"were expressed as frequencies and percentages and compared using Pearson Chi-Square tests. "
-        f"Multivariable logistic regression was fitted to evaluate independent risk factors for {primary_outcome}. "
-        f"Adjusted odds ratios (aOR) with corresponding 95% confidence intervals were reported. "
+        f"Statistical Analysis: Continuous and categorical baseline variables were compared using {tests}. "
+        f"Missing data were addressed via {missing_data_strategy}. "
+        f"{model_type} was fitted to evaluate associations with {primary_outcome}, "
+        f"adjusting for prespecified confounders ({confounder_str}). "
+        f"Effect estimates were reported with corresponding 95% confidence intervals. "
         f"All tests were two-sided, with p < 0.05 considered statistically significant. "
-        f"Analyses adhered to STROBE guidelines for observational cohort studies."
+        f"Reporting conformed to {guideline} guidelines for {study_design.lower()} studies."
     )
     return text
 
 # Export HTML table and narrative
-html_output = render_nejm_html_table(model_records)
+html_output = render_publication_html_table(model_records, style="NEJM")
 with open("publication_table.html", "w", encoding="utf-8") as f:
     f.write(html_output)
 

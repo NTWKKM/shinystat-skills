@@ -1408,6 +1408,16 @@ def meta_cmd(
     )
 
     if egger:
+        if len(df) < 10:
+            raise click.BadParameter(
+                f"Egger's test requires at least 10 studies (got {len(df)}) to ensure adequate statistical power.",
+                param_hint="--egger",
+            )
+        if effect_col.lower() in ("log_or", "log_odds_ratio", "or", "odds_ratio"):
+            raise click.BadParameter(
+                "Egger's test is invalid for binary log odds ratios due to artifactual correlation between log OR and standard error. Use continuous effect sizes or alternative tests.",
+                param_hint="--egger",
+            )
         res["egger_test"] = eggers_test(df[effect_col], df[se_col])
 
     if forest_plot:

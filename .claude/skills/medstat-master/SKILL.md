@@ -78,10 +78,10 @@ Write and run a quick inspection script to ground the layout:
 ```python
 import pandas as pd
 
-# Inspect raw header lines to locate the real table
+# Inspect raw header lines to locate the real table (print non-empty cell count only; protect Zero-PHI)
 df_peek = pd.read_excel("data.xlsx", header=None, nrows=10) # or read_csv
 for idx, row in df_peek.iterrows():
-    print(f"Row {idx}: {row.dropna().tolist()[:6]}")
+    print(f"Row {idx}: non-empty cells = {row.dropna().count()}")
 ```
 
 ---
@@ -237,13 +237,22 @@ def summarize_continuous(series, group):
     g0 = series[group == 0].dropna()
     g1 = series[group == 1].dropna()
     
-    # Check normality using Shapiro-Wilk (or skewness if n > 5000)
-    stat0, p0 = stats.shapiro(g0) if len(g0) <= 5000 else (0, 0.05)
-    stat1, p1 = stats.shapiro(g1) if len(g1) <= 5000 else (0, 0.05)
-    is_normal = (p0 > 0.05) and (p1 > 0.05)
+    # Check normality using Shapiro-Wilk (requires 3 <= n <= 5000)
+    if len(g0) < 3 or len(g1) < 3:
+        is_normal = False
+    else:
+        stat0, p0 = stats.shapiro(g0) if len(g0) <= 5000 else (0, 0.05)
+        stat1, p1 = stats.shapiro(g1) if len(g1) <= 5000 else (0, 0.05)
+        is_normal = (p0 > 0.05) and (p1 > 0.05)
     
-    pooled_sd = np.sqrt((g1.var() + g0.var()) / 2.0)
-    smd = abs(g1.mean() - g0.mean()) / pooled_sd if pooled_sd > 0 else 0.0
+    if len(g0) < 2 or len(g1) < 2:
+        smd_str = "Not estimable"
+    else:
+        pooled_sd = np.sqrt((g1.var(ddof=1) + g0.var(ddof=1)) / 2.0)
+        if pooled_sd == 0:
+            smd_str = "0.000" if g1.mean() == g0.mean() else "Not estimable"
+        else:
+            smd_str = f"{abs(g1.mean() - g0.mean()) / pooled_sd:.3f}"
     
     if is_normal:
         t_stat, p_val = stats.ttest_ind(g1, g0, equal_var=False)
@@ -252,7 +261,7 @@ def summarize_continuous(series, group):
             "Group 0 (Control)": f"{g0.mean():.1f} ± {g0.std():.1f}",
             "Group 1 (Event)": f"{g1.mean():.1f} ± {g1.std():.1f}",
             "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001",
-            "SMD": f"{smd:.3f}"
+            "SMD": smd_str
         }
     else:
         u_stat, p_val = stats.mannwhitneyu(g1, g0, alternative='two-sided')
@@ -261,7 +270,7 @@ def summarize_continuous(series, group):
             "Group 0 (Control)": f"{g0.median():.1f} [{g0.quantile(0.25):.1f}, {g0.quantile(0.75):.1f}]",
             "Group 1 (Event)": f"{g1.median():.1f} [{g1.quantile(0.25):.1f}, {g1.quantile(0.75):.1f}]",
             "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001",
-            "SMD": f"{smd:.3f}"
+            "SMD": smd_str
         }
 
 def summarize_categorical(series, group):
@@ -274,32 +283,56 @@ def summarize_categorical(series, group):
     return {"crosstab": ct, "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001"}
 
 # 4. EPV DIAGNOSTIC & MULTIVARIABLE MODELING
-# คำนวณ Events Per Variable ป้องกัน Overfitting / Separation
-n_events = (df_clean['outcome'] == 1).sum()
-n_nonevents = (df_clean['outcome'] == 0).sum()
-covariates = ["age", "C(sex)", "C(admission_status)"]
-epv = min(n_events, n_nonevents) / len(covariates)
-print(f"Events Per Variable (EPV): {epv:.1f}")
+import patsy
+from medstat.models.firth import fit_firth_logistic
 
+# Define missing-data strategy and track complete-case exclusions before model fitting
+model_cols = ["outcome", "age", "sex", "admission_status"]
+df_model = df_clean.dropna(subset=model_cols).copy()
+n_model_excluded = len(df_clean) - len(df_model)
+if n_model_excluded > 0:
+    print(f"Model complete-case exclusion: excluded {n_model_excluded} rows with missing model variables.")
+    # Reconcile retention counts with sample retention flow if tracker is used:
+    # tracker.record_stage("Model Complete Cases", n_remaining=len(df_model), reason="Missing model variables")
+
+formula = "outcome ~ age + C(sex) + C(admission_status)"
+y_mat, X_mat = patsy.dmatrices(formula, data=df_model, return_type='dataframe')
+# Count expanded model parameter degrees of freedom (excluding intercept)
+n_params = X_mat.shape[1] - 1
+n_events = (df_model['outcome'] == 1).sum()
+n_nonevents = (df_model['outcome'] == 0).sum()
+epv = min(n_events, n_nonevents) / n_params if n_params > 0 else np.nan
+print(f"Events Per Parameter (EPV): {epv:.1f} (effective events={min(n_events, n_nonevents)}, parameters={n_params})")
+
+# Route model fit: If EPV < 10 or quasi-complete separation occurs, route to Firth penalized regression
 if epv < 10:
-    print("Warning: EPV < 10 detected; standard MLE logistic regression may suffer from separation bias. Recommend Firth penalized logistic.")
-
-formula = "outcome ~ " + " + ".join(covariates)
-model = smf.logit(formula, data=df_clean).fit(disp=False)
-
-results = []
-for term in model.params.index:
-    if term == "Intercept":
-        continue
-    coef = model.params[term]
-    ci_low, ci_high = model.conf_int().loc[term]
-    p_val = model.pvalues[term]
-    results.append({
-        "Variable / Predictor": term,
-        "Adjusted OR": f"{np.exp(coef):.2f}",
-        "95% CI": f"({np.exp(ci_low):.2f} - {np.exp(ci_high):.2f})",
-        "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001"
-    })
+    print(f"Warning: Low EPV ({epv:.1f} < 10); routing to Firth penalized logistic regression to prevent separation bias.")
+    firth_res = fit_firth_logistic(y_mat.iloc[:, 0], X_mat.drop(columns=['Intercept']), fit_intercept=True, ci_method="pl")
+    results = []
+    for term, coef in firth_res["params"].items():
+        ci_low, ci_high = firth_res["ci"][term]
+        p_val = firth_res["pvalues"][term]
+        results.append({
+            "Variable / Predictor": term,
+            "Adjusted OR": f"{np.exp(coef):.2f}",
+            "95% CI": f"({np.exp(ci_low):.2f} - {np.exp(ci_high):.2f})",
+            "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001"
+        })
+else:
+    model = smf.logit(formula, data=df_model).fit(disp=False)
+    results = []
+    for term in model.params.index:
+        if term == "Intercept":
+            continue
+        coef = model.params[term]
+        ci_low, ci_high = model.conf_int().loc[term]
+        p_val = model.pvalues[term]
+        results.append({
+            "Variable / Predictor": term,
+            "Adjusted OR": f"{np.exp(coef):.2f}",
+            "95% CI": f"({np.exp(ci_low):.2f} - {np.exp(ci_high):.2f})",
+            "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001"
+        })
 
 res_df = pd.DataFrame(results)
 print(res_df.to_markdown(index=False))
