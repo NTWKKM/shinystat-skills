@@ -121,7 +121,7 @@ df = pd.read_csv("clean_cohort.csv")
 def wilson_score_interval(k, n, confidence=0.95):
     """Compute Wilson score interval for binomial proportions"""
     if n == 0:
-        return 0.0, 0.0
+        return np.nan, np.nan
     z = stats.norm.ppf(1 - (1 - confidence) / 2)
     p_hat = k / n
     denom = 1 + z**2 / n
@@ -136,10 +136,10 @@ def evaluate_cutoff(gold, score, cutoff):
     tn = np.sum((gold == 0) & (pred == 0))
     fn = np.sum((gold == 1) & (pred == 0))
     
-    sens, (sens_l, sens_u) = tp / (tp + fn) if (tp + fn) > 0 else 0, wilson_score_interval(tp, tp + fn)
-    spec, (spec_l, spec_u) = tn / (tn + fp) if (tn + fp) > 0 else 0, wilson_score_interval(tn, tn + fp)
-    ppv, (ppv_l, ppv_u) = tp / (tp + fp) if (tp + fp) > 0 else 0, wilson_score_interval(tp, tp + fp)
-    npv, (npv_l, npv_u) = tn / (tn + fn) if (tn + fn) > 0 else 0, wilson_score_interval(tn, tn + fn)
+    sens, (sens_l, sens_u) = (tp / (tp + fn), wilson_score_interval(tp, tp + fn)) if (tp + fn) > 0 else (np.nan, (np.nan, np.nan))
+    spec, (spec_l, spec_u) = (tn / (tn + fp), wilson_score_interval(tn, tn + fp)) if (tn + fp) > 0 else (np.nan, (np.nan, np.nan))
+    ppv, (ppv_l, ppv_u) = (tp / (tp + fp), wilson_score_interval(tp, tp + fp)) if (tp + fp) > 0 else (np.nan, (np.nan, np.nan))
+    npv, (npv_l, npv_u) = (tn / (tn + fn), wilson_score_interval(tn, tn + fn)) if (tn + fn) > 0 else (np.nan, (np.nan, np.nan))
     
     print(f"Cutoff >= {cutoff}:")
     print(f"  Sensitivity: {sens*100:.1f}% (95% CI: {sens_l*100:.1f}% - {sens_u*100:.1f}%)")
