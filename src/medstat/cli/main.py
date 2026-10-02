@@ -354,6 +354,11 @@ def clean_cmd(
         for item in outlier_cols:
             selected_cols.extend([c.strip() for c in item.split(",") if c.strip()])
 
+        if act in ("remove", "winsorize", "cap") and not selected_cols:
+            raise click.ClickException(
+                f"Destructive outlier action '{act}' requires explicit variable selection via --outlier-cols."
+            )
+
         num_cols = []
         candidate_cols = selected_cols if selected_cols else list(cleaned_df.columns)
         for c in candidate_cols:

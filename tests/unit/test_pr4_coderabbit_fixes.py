@@ -796,6 +796,8 @@ class TestPR4FollowupFixes:
                 "No missing values",
                 "--outlier-action",
                 "remove",
+                "--outlier-cols",
+                "age",
                 "--output",
                 str(out_csv),
                 "--audit-out",
@@ -1478,6 +1480,8 @@ class TestPR4ReviewFollowupFixes:
                 "Clinical audit complete",
                 "--outlier-action",
                 "remove",
+                "--outlier-cols",
+                "biomarker",
                 "--output",
                 str(out_clean),
                 "--audit-out",
@@ -1978,3 +1982,55 @@ class TestPR4ReviewFollowupFixes:
             "Point estimates and 95% confidence intervals were calculated using the Wilson score method"
             not in narr
         )
+
+    def test_clean_destructive_outlier_action_without_selector_raises_error(
+        self, tmp_path
+    ):
+        """Verify that remove, winsorize, and cap require explicit --outlier-cols, while flag does not."""
+        runner = CliRunner()
+        df = pd.DataFrame(
+            {
+                "patient_id": list(range(1, 21)),
+                "biomarker": [10.0 + (i % 3) for i in range(19)] + [1000.0],
+            }
+        )
+        csv_in = tmp_path / "outliers_destr.csv"
+        df.to_csv(csv_in, index=False)
+
+        for act in ("remove", "winsorize", "cap"):
+            res = runner.invoke(
+                cli,
+                [
+                    "clean",
+                    "--data",
+                    str(csv_in),
+                    "--strategy",
+                    "complete-case",
+                    "--missing-justification",
+                    "Audit complete",
+                    "--outlier-action",
+                    act,
+                ],
+            )
+            assert res.exit_code != 0
+            assert (
+                f"Destructive outlier action '{act}' requires explicit variable selection via --outlier-cols"
+                in res.output
+            )
+
+        # Non-destructive flag without --outlier-cols must succeed
+        res_flag = runner.invoke(
+            cli,
+            [
+                "clean",
+                "--data",
+                str(csv_in),
+                "--strategy",
+                "complete-case",
+                "--missing-justification",
+                "Audit complete",
+                "--outlier-action",
+                "flag",
+            ],
+        )
+        assert res_flag.exit_code == 0
