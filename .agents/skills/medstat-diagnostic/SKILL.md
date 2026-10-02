@@ -111,6 +111,9 @@ medstat diag --data <cohort.csv> \
 
 > **Core Philosophy**: Never execute rigid canned scripts that make naive assumptions about file structure. The agent is empowered with full autonomy to write, adapt, and run Python scripts (`scratch/diagnostic.py`) tailored to specific clinical biomarkers, cutoff evaluations, and risk scoring tools.
 >
+> 🔒 **Subprocess & Script Execution Safety**:
+> When generating and running analysis scripts (`scratch/diagnostic.py`), enforce execution controls: disable shell/subprocess access, limit file reads strictly to the designated dataset and referenced prototype/core modules, limit file writes strictly to scratch and designated output paths, and ensure no access to credentials or environment secrets. Require explicit user confirmation if the runtime cannot enforce these sandbox controls.
+>
 > ⚠️ **Mandatory Directive — ต้องดู Script ต้นแบบประกอบเสมอ (Review Prototype Scripts First)**:
 > แม้จะให้อิสระ Agent ในการเขียนและปรับ Python Script เองตามสภาพข้อมูลจริง แต่ **Agent ต้องเปิดดูและอ้างอิงสคริปต์ต้นแบบ (Prototype Scripts)** หรือศึกษาการคำนวณในโมดูลแกนกลาง `src/medstat/diagnostic/` เสมอ เพื่อยึดมาตรฐานความถูกต้องทางชีวสถิติการแพทย์:
 > - **ตาราง 2x2 และ Wilson Score Interval**: ดูการคำนวณ Sensitivity, Specificity, PPV, NPV, LR+, LR- พร้อม Wilson Score 95% CIs จาก `src/medstat/diagnostic/accuracy.py`
@@ -258,14 +261,20 @@ from medstat.diagnostic.calibration import (
 # Calibration evaluates predicted risk probabilities against binary outcomes.
 # Define and align risk_probs from the dataset (e.g. clean_diag['predicted_risk']) or prediction model:
 if "predicted_risk" in clean_diag.columns:
-    risk_probs = clean_diag["predicted_risk"].values
+    risk_raw = clean_diag["predicted_risk"].values
+    gold_raw = gold_vals
+    cal_valid = np.isfinite(risk_raw) & np.isfinite(gold_raw)
+    risk_probs = risk_raw[cal_valid]
+    gold_cal = gold_raw[cal_valid]
+    if len(risk_probs) == 0:
+        raise ValueError("No valid finite pairs for calibration.")
     if not np.all((risk_probs >= 0.0) & (risk_probs <= 1.0)):
         raise ValueError("Predicted risk probabilities for calibration must be within [0, 1].")
     
-    brier = calculate_brier_score(gold_vals, risk_probs)
-    cal_slope = calculate_calibration_slope_and_intercept(gold_vals, risk_probs)
-    ici_res = calculate_ici(gold_vals, risk_probs)
-    hl = hosmer_lemeshow_test(gold_vals, risk_probs, g=10)
+    brier = calculate_brier_score(gold_cal, risk_probs)
+    cal_slope = calculate_calibration_slope_and_intercept(gold_cal, risk_probs)
+    ici_res = calculate_ici(gold_cal, risk_probs)
+    hl = hosmer_lemeshow_test(gold_cal, risk_probs, g=10)
 
     print(f"Brier Score: {brier['brier_score']:.4f} ({brier['interpretation']})")
     print(f"Calibration Slope: {cal_slope['calibration_slope']:.3f} (Ideal = 1.0)")

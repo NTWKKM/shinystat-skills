@@ -49,7 +49,9 @@ def fit_proportional_odds(
         Dictionary containing fitted model, summary_df with cumulative ORs,
         threshold parameters, log-likelihood, AIC, and BIC.
     """
-    y_series = pd.Series(y).dropna()
+    y_raw = pd.Series(y)
+    valid_mask = y_raw.notna().to_numpy()
+    y_series = y_raw[valid_mask]
     categories = np.sort(y_series.unique())
     k_categories = len(categories)
 
@@ -65,12 +67,12 @@ def fit_proportional_odds(
         var_names = list(X_df.columns)
     else:
         X_mat = np.asarray(X)
-        if len(X_mat) != len(y):
+        if len(X_mat) != len(y_raw):
             raise ValueError(
-                f"Length mismatch: y has {len(y)} rows, X has {len(X_mat)} rows."
+                f"Length mismatch: y has {len(y_raw)} rows, X has {len(X_mat)} rows."
             )
-        if len(y_series) < len(y):
-            X_mat = X_mat[y_series.index]
+        if len(y_series) < len(y_raw):
+            X_mat = X_mat[valid_mask]
         var_names = [f"x{i}" for i in range(X_mat.shape[1])]
         X_df = pd.DataFrame(X_mat, index=y_series.index, columns=var_names)
 
@@ -307,13 +309,19 @@ def fit_multinomial_logistic(
     Fit multinomial logit model as an unconstrained fallback when
     the proportional odds assumption is rejected.
     """
-    y_series = pd.Series(y).dropna()
+    y_raw = pd.Series(y)
+    valid_mask = y_raw.notna().to_numpy()
+    y_series = y_raw[valid_mask]
     if isinstance(X, pd.DataFrame):
         X_df = X.loc[y_series.index].copy()
     else:
         X_mat = np.asarray(X)
-        if len(y_series) < len(y):
-            X_mat = X_mat[y_series.index]
+        if len(X_mat) != len(y_raw):
+            raise ValueError(
+                f"Length mismatch: y has {len(y_raw)} rows, X has {len(X_mat)} rows."
+            )
+        if len(y_series) < len(y_raw):
+            X_mat = X_mat[valid_mask]
         X_df = pd.DataFrame(X_mat, index=y_series.index)
 
     if add_constant:

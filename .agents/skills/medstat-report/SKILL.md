@@ -88,6 +88,9 @@ medstat report --checklist tripod --output tripod_checklist.md
 
 > **Core Philosophy**: Never execute rigid canned scripts that make naive assumptions about file structure. The agent is empowered with full autonomy to write, adapt, and run Python scripts (`scratch/report.py`) tailored to formatting clinical study findings, survival metrics, adjusted odds ratios, or rater reliability statistics into publication-ready tables (NEJM, JAMA, APA 7) and automated methods narratives.
 >
+> 🔒 **Subprocess & Script Execution Safety**:
+> When generating and running reporting scripts (`scratch/report.py`), enforce execution controls: disable shell/subprocess access, limit file reads strictly to the designated dataset and referenced prototype/core modules, limit file writes strictly to scratch and designated output paths, and ensure no access to credentials or environment secrets. Require explicit user confirmation if the runtime cannot enforce these sandbox controls.
+>
 > ⚠️ **Mandatory Directive — ต้องดู Script ต้นแบบประกอบเสมอ (Review Prototype Scripts First)**:
 > แม้จะให้อิสระ Agent ในการเขียนและปรับ Python Script เองตามสภาพข้อมูลจริง แต่ **Agent ต้องเปิดดูและอ้างอิงสคริปต์ต้นแบบ (Prototype Scripts)** หรือศึกษาการคำนวณในโมดูลแกนกลาง `src/medstat/reporting/` เสมอ เพื่อยึดมาตรฐานความถูกต้องทางชีวสถิติการแพทย์:
 > - **การจัดรูปแบบตารางมาตรฐานวารสาร (NEJM / JAMA / APA 7)**: ดูโครงสร้าง HTML table 3 เส้นนอน (three horizontal rules: top border, mid header border, bottom table border) และไม่มีเส้นแนวตั้ง (no vertical borders) จาก `src/medstat/reporting/tables.py`
@@ -102,6 +105,8 @@ medstat report --checklist tripod --output tripod_checklist.md
 Agent ควรนำโครงสร้างและฟังก์ชันของสคริปต์ต้นแบบนี้ไปปรับแต่งลงใน workspace (เช่น `scratch/report.py`) เพื่อจัดรูปแบบตารางและเนื้อหารายงาน:
 
 ```python
+import html
+import numpy as np
 import pandas as pd
 
 # 1. ORGANIZE MODEL ESTIMATES & CLINICAL METRICS
@@ -112,9 +117,7 @@ model_records = [
     {"Variable": "Baseline SBP >= 140 mmHg", "Estimate": "1.45", "CI": "(1.08 - 1.95)", "p_value": "0.014"},
 ]
 
-# 2. RENDER NEJM / JAMA PUBLICATION HTML TABLE
-import numpy as np
-import html
+# 2. RENDER NEJM / JAMA / APA PUBLICATION HTML TABLE
 
 def format_p_value(p_val_str, style="NEJM"):
     if p_val_str is None or pd.isna(p_val_str) or str(p_val_str).strip() in ("NA", "—", "-", "", "nan", "NaN"):
@@ -132,10 +135,10 @@ def format_p_value(p_val_str, style="NEJM"):
                 return ">.99"
             else:
                 return f"{p:.2f}".lstrip("0")
-        else:  # NEJM
+        else:  # NEJM / APA
             if p < 0.001:
                 return "<0.001"
-            elif p <= 0.01:
+            elif p < 0.01:
                 return f"{p:.3f}"
             elif p > 0.99:
                 return ">0.99"
@@ -144,18 +147,27 @@ def format_p_value(p_val_str, style="NEJM"):
     except (ValueError, TypeError):
         return "—"
 
-def render_publication_html_table(records, style="NEJM", title="Table 2. Multivariable Logistic Regression Analysis", adjustment_vars=None, ci_method="profile likelihood"):
-    is_nejm = style.upper() == "NEJM"
-    top_border = "border-top: 3px double #000;" if is_nejm else "border-top: 1px solid #000;"
-    p_header = "P Value" if is_nejm else "<em>P</em> Value"
-    est_header = "Adjusted Odds Ratio" if adjustment_vars else "Unadjusted Odds Ratio"
+def render_publication_html_table(records, style="NEJM", title="Table 2. Multivariable Logistic Regression Analysis", adjustment_vars=None, ci_method="profile likelihood", measure_name="Odds Ratio"):
+    style_upper = style.upper()
+    if style_upper == "NEJM":
+        top_border = "border-top: 3px double #000;"
+        p_header = "P Value"
+    elif style_upper in ("JAMA", "APA", "APA7"):
+        top_border = "border-top: 1px solid #000;"
+        p_header = "<em>P</em> Value"
+    else:
+        raise ValueError(f"Unsupported table style: {style}. Supported styles are 'NEJM', 'JAMA', 'APA', 'APA7'.")
+
+    adj_prefix = "Adjusted " if adjustment_vars else "Unadjusted "
+    est_header = f"{adj_prefix}{measure_name}"
     title_escaped = html.escape(str(title))
     
+    measure_plural = f"{measure_name}s" if not measure_name.endswith("s") else measure_name
     if adjustment_vars:
         covar_str = ", ".join(html.escape(str(v)) for v in adjustment_vars)
-        footnote_text = f"* Odds ratios were adjusted for {covar_str}. Confidence intervals are {html.escape(str(ci_method))}-based."
+        footnote_text = f"* {measure_plural} were adjusted for {covar_str}. Confidence intervals are {html.escape(str(ci_method))}-based."
     else:
-        footnote_text = f"* Unadjusted estimates. Confidence intervals are {html.escape(str(ci_method))}-based."
+        footnote_text = f"* Unadjusted {measure_plural.lower()}. Confidence intervals are {html.escape(str(ci_method))}-based."
     
     html_out = f"""
     <div style="font-family: 'Times New Roman', Times, serif; max-width: 800px; margin: 20px auto;">
@@ -212,7 +224,7 @@ def generate_methods_narrative(
     alpha=0.05,
 ):
     if confounders is None:
-        confounders = ["age", "sex", "hypertension"]
+        raise ValueError("confounders list must be explicitly provided from actual analysis metadata (do not use arbitrary defaults)")
     if tests is None:
         tests = "Welch's t-test or Mann-Whitney U test for continuous variables and Pearson Chi-Square or Fisher's exact test for categorical variables"
 

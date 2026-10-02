@@ -853,7 +853,16 @@ def model_cmd(
                 and not np.isnan(float(or_val))
             ):
                 ev = calculate_e_value(
-                    float(or_val), float(ci_lo), float(ci_hi), estimate_type="OR"
+                    float(or_val),
+                    float(ci_lo),
+                    float(ci_hi),
+                    estimate_type="OR",
+                    rare_outcome=False,
+                )
+                ev["rare_outcome"] = False
+                ev["assumption_note"] = (
+                    "E-value computed from proportional odds cumulative OR assuming common outcome "
+                    "(VanderWeele & Ding 2017 square-root approximation applied: RR ≈ sqrt(OR))."
                 )
                 result_data["e_value"] = ev
 
@@ -901,8 +910,15 @@ def model_cmd(
             raise click.ClickException(
                 "Mixed-effects model requires --cluster <cluster_col>."
             )
+        y_raw = df[outcome]
+        if not pd.api.types.is_numeric_dtype(y_raw):
+            raise click.BadParameter(
+                f"Mixed-effects model outcome '{outcome}' must be numeric (continuous). "
+                f"Got non-numeric dtype '{y_raw.dtype}'.",
+                param_hint="--outcome",
+            )
         fit_res = fit_random_intercept(
-            y=df[outcome],
+            y=y_raw,
             X=X_df,
             cluster_ids=df[cluster_col],
             add_constant=True,
@@ -916,7 +932,7 @@ def model_cmd(
         result_data["aic"] = fit_res["aic"]
         result_data["bic"] = fit_res["bic"]
 
-        deff_res = calculate_design_effect(df[outcome], df[cluster_col])
+        deff_res = calculate_design_effect(y_raw, df[cluster_col])
         result_data["clustering_diagnostics"] = deff_res
     else:
         raise click.UsageError(f"Unsupported model type: {mtype}")
@@ -1429,19 +1445,28 @@ def psm_cmd(
         ratio=ratio,
     )
 
+    def _clean_smd(val: Any) -> float | None:
+        if val is None or pd.isna(val) or not np.isfinite(val):
+            return None
+        return float(val)
+
     if balance_check or love_plot:
         love_data = {
             "covariates": covar_list,
-            "smd_raw": [float(calculate_smd(df, treatment, c)) for c in covar_list],
-            "smd_pre": [float(calculate_smd(df, treatment, c)) for c in covar_list],
+            "smd_raw": [
+                _clean_smd(calculate_smd(df, treatment, c)) for c in covar_list
+            ],
+            "smd_pre": [
+                _clean_smd(calculate_smd(df, treatment, c)) for c in covar_list
+            ],
             "smd_matched": [
-                float(calculate_smd(matched_df, treatment, c)) for c in covar_list
+                _clean_smd(calculate_smd(matched_df, treatment, c)) for c in covar_list
             ],
             "smd_post": [
-                float(calculate_smd(matched_df, treatment, c)) for c in covar_list
+                _clean_smd(calculate_smd(matched_df, treatment, c)) for c in covar_list
             ],
             "post_smd": [
-                float(calculate_smd(matched_df, treatment, c)) for c in covar_list
+                _clean_smd(calculate_smd(matched_df, treatment, c)) for c in covar_list
             ],
         }
         if love_plot:
@@ -1454,9 +1479,15 @@ def psm_cmd(
             for c, pre, post in zip(
                 covar_list, love_data["smd_pre"], love_data["smd_post"]
             ):
-                status = "BALANCED" if abs(post) < 0.10 else "UNBALANCED"
+                status = (
+                    "BALANCED"
+                    if (post is not None and abs(post) < 0.10)
+                    else "UNBALANCED"
+                )
+                pre_str = f"{pre:.3f}" if pre is not None else "NaN"
+                post_str = f"{post:.3f}" if post is not None else "NaN"
                 click.echo(
-                    f"  {c:<20} | Pre-SMD: {pre:.3f} | Post-SMD: {post:.3f} | [{status}]"
+                    f"  {c:<20} | Pre-SMD: {pre_str} | Post-SMD: {post_str} | [{status}]"
                 )
             click.echo("---------------------------------------------------\n")
 
@@ -1467,21 +1498,21 @@ def psm_cmd(
                 love_data = {
                     "covariates": covar_list,
                     "smd_raw": [
-                        float(calculate_smd(df, treatment, c)) for c in covar_list
+                        _clean_smd(calculate_smd(df, treatment, c)) for c in covar_list
                     ],
                     "smd_pre": [
-                        float(calculate_smd(df, treatment, c)) for c in covar_list
+                        _clean_smd(calculate_smd(df, treatment, c)) for c in covar_list
                     ],
                     "smd_matched": [
-                        float(calculate_smd(matched_df, treatment, c))
+                        _clean_smd(calculate_smd(matched_df, treatment, c))
                         for c in covar_list
                     ],
                     "smd_post": [
-                        float(calculate_smd(matched_df, treatment, c))
+                        _clean_smd(calculate_smd(matched_df, treatment, c))
                         for c in covar_list
                     ],
                     "post_smd": [
-                        float(calculate_smd(matched_df, treatment, c))
+                        _clean_smd(calculate_smd(matched_df, treatment, c))
                         for c in covar_list
                     ],
                 }
@@ -1556,11 +1587,20 @@ def meta_cmd(
     )
 
     if egger:
-        n_studies = (
-            df[study_col].dropna().nunique()
-            if (study_col and study_col in df.columns)
-            else len(df)
-        )
+        if study_col and study_col in df.columns:
+            study_series = df[study_col].dropna()
+            n_unique_studies = study_series.nunique()
+            if len(study_series) != n_unique_studies:
+                raise click.BadParameter(
+                    f"Egger's test requires independent study estimates, but duplicate study IDs were detected in '{study_col}' "
+                    f"({len(study_series)} rows with only {n_unique_studies} distinct studies). "
+                    "Each study must contribute exactly one estimate to prevent invalid funnel asymmetry testing.",
+                    param_hint="--egger",
+                )
+            n_studies = n_unique_studies
+        else:
+            n_studies = len(df)
+
         if n_studies < 10:
             raise click.BadParameter(
                 f"Egger's test requires at least 10 independent studies (got {n_studies}) to ensure adequate statistical power.",

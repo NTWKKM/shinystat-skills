@@ -108,6 +108,9 @@ medstat meta --data <clinical_trials.csv> \
 
 > **Core Philosophy**: Never execute rigid canned scripts that make naive assumptions about file structure. The agent is empowered with full autonomy to write, adapt, and run Python scripts (`scratch/causal_meta.py`) tailored to observational cohorts, paired measurement trials, or multi-study systematic review datasets.
 >
+> 🔒 **Subprocess & Script Execution Safety**:
+> When generating and running analysis scripts (`scratch/causal_meta.py`), enforce execution controls: disable shell/subprocess access, limit file reads strictly to the designated dataset and referenced prototype/core modules, limit file writes strictly to scratch and designated output paths, and ensure no access to credentials or environment secrets. Require explicit user confirmation if the runtime cannot enforce these sandbox controls.
+>
 > ⚠️ **Mandatory Directive — ต้องดู Script ต้นแบบประกอบเสมอ (Review Prototype Scripts First)**:
 > แม้จะให้อิสระ Agent ในการเขียนและปรับ Python Script เองตามสภาพข้อมูลจริง แต่ **Agent ต้องเปิดดูและอ้างอิงสคริปต์ต้นแบบ (Prototype Scripts)** หรือศึกษาการคำนวณในโมดูลแกนกลาง `src/medstat/` เสมอ เพื่อยึดมาตรฐานความถูกต้องทางชีวสถิติการแพทย์:
 > - **Propensity Score Matching & Balance**: ดูการจับคู่ 1:1 nearest neighbor บน logit propensity score, Caliper $0.2 \times \text{SD}$, และการตรวจสอบ post-match $|\text{SMD}| < 0.10$ จาก `src/medstat/causal/psm.py` และ `src/medstat/causal/balance.py`
@@ -133,17 +136,25 @@ import statsmodels.formula.api as smf
 # 1. PROPENSITY SCORE MATCHING (Austin 2009 Standard)
 # ------------------------------------------------------------------------------
 def run_psm_pipeline(df, treatment_col, covariate_cols, caliper_sd=0.20):
-    # Fit propensity score model with safe column identifiers to prevent formula injection
-    col_map = {treatment_col: "_trt"}
+    if len(covariate_cols) != len(set(covariate_cols)):
+        raise ValueError("Duplicate covariate columns detected.")
+    # Fit propensity score model with collision-free column identifiers
+    prefix = "_psm_tmp_"
+    col_map = {treatment_col: f"{prefix}trt"}
     for i, col in enumerate(covariate_cols):
-        col_map[col] = f"_cov_{i}"
+        col_map[col] = f"{prefix}cov_{i}"
     df_safe = df.rename(columns=col_map)
-    formula = "_trt ~ " + " + ".join(col_map[col] for col in covariate_cols)
+    formula = f"{prefix}trt ~ " + " + ".join(col_map[col] for col in covariate_cols)
     ps_model = smf.logit(formula, data=df_safe).fit(disp=False)
     df = df.copy()
-    df['ps'] = ps_model.predict(df_safe)
+    # Clip propensity scores strictly within [1e-7, 1 - 1e-7] so logit_ps remains finite
+    df['ps'] = ps_model.predict(df_safe).clip(1e-7, 1.0 - 1e-7)
     df['logit_ps'] = np.log(df['ps'] / (1.0 - df['ps']))
     
+    valid_ps = np.isfinite(df['logit_ps']) & df[treatment_col].isin([0, 1])
+    if not valid_ps.all():
+        raise ValueError(f"Rejecting non-finite propensity scores or non-binary treatment in {(~valid_ps).sum()} rows.")
+
     caliper = caliper_sd * df['logit_ps'].std()
     
     treated = df[df[treatment_col] == 1].copy()
@@ -158,11 +169,13 @@ def run_psm_pipeline(df, treatment_col, covariate_cols, caliper_sd=0.20):
     for t_idx, t_row in treated_sorted.iterrows():
         if not available_ctrl_idx:
             break
-        ctrl_subset = control.loc[list(available_ctrl_idx)]
+        # Deterministic control order and tie-breaking by index
+        ctrl_subset = control.loc[sorted(available_ctrl_idx)]
         diffs = (ctrl_subset['logit_ps'] - t_row['logit_ps']).abs()
         min_diff = diffs.min()
         if min_diff <= caliper:
-            best_match_idx = diffs.idxmin()
+            tied_candidates = diffs[diffs == min_diff].index
+            best_match_idx = sorted(tied_candidates)[0]
             matched_pairs.append((t_idx, best_match_idx))
             available_ctrl_idx.remove(best_match_idx)
             

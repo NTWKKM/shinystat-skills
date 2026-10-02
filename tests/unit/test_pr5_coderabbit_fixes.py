@@ -105,6 +105,42 @@ class TestEggerCLIGuards:
         )
         assert res.exit_code != 0
         assert (
+            "Egger's test requires independent study estimates, but duplicate study IDs were detected in 'study'"
+            in res.output
+        )
+
+    def test_egger_rejects_fewer_than_10_independent_studies(self, tmp_path):
+        runner = CliRunner()
+        # 4 rows with 4 unique studies
+        df = pd.DataFrame(
+            {
+                "study": ["Study_A", "Study_B", "Study_C", "Study_D"],
+                "effect_size": [0.2, 0.3, 0.1, 0.4],
+                "se": [0.05, 0.08, 0.06, 0.07],
+            }
+        )
+        csv_path = tmp_path / "meta_few_studies.csv"
+        df.to_csv(csv_path, index=False)
+
+        res = runner.invoke(
+            cli,
+            [
+                "meta",
+                "--data",
+                str(csv_path),
+                "--effect-col",
+                "effect_size",
+                "--se-col",
+                "se",
+                "--study-col",
+                "study",
+                "--measure",
+                "continuous",
+                "--egger",
+            ],
+        )
+        assert res.exit_code != 0
+        assert (
             "Egger's test requires at least 10 independent studies (got 4)"
             in res.output
         )
@@ -456,12 +492,30 @@ class TestReportMethodsNarrativeFixes:
         assert format_journal_p_value(0.995, style="JAMA") == "P>0.99"
 
     def test_html_table_escaping(self):
-        import html
+        from medstat.reporting.tables import (
+            Estimate,
+            EstimateTable,
+            PublicationRenderer,
+        )
 
         raw_var = "<script>alert('xss')</script>"
-        escaped_var = html.escape(raw_var)
-        assert "<script>" not in escaped_var
-        assert "&lt;script&gt;" in escaped_var
+        raw_title = "Table 1. <img src=x onerror=alert(1)>"
+        row = Estimate(
+            term="x1",
+            label=raw_var,
+            estimate=1.5,
+            ci_lower=1.1,
+            ci_upper=2.0,
+            p_value=0.04,
+        )
+        table = EstimateTable(title=raw_title, rows=[row])
+
+        for style in ["NEJM", "JAMA", "APA7"]:
+            rendered = PublicationRenderer.render_html(table, style=style)
+            assert "<script>" not in rendered
+            assert "&lt;script&gt;alert(&#x27;xss&#x27;)&lt;/script&gt;" in rendered
+            assert "<img src=x" not in rendered
+            assert "&lt;img src=x onerror=alert(1)&gt;" in rendered
 
     def test_diagnostic_gold_standard_binary_validation(self):
         import pytest
@@ -487,3 +541,31 @@ class TestReportMethodsNarrativeFixes:
         assert extract_primary_effect({"C(treatment)[T.1]": 1.85, "age": 1.02}) == 1.85
         assert extract_primary_effect({"treatment[T.True]": 3.10}) == 3.10
         assert np.isnan(extract_primary_effect({"other": 1.5}))
+
+    def test_ordinal_non_standard_index_positional_mask(self):
+        from medstat.models.ordinal import (
+            fit_multinomial_logistic,
+            fit_proportional_odds,
+        )
+
+        # Create non-standard index [100, 101, 102, ...] with some missing y
+        idx = [100 + i for i in range(30)]
+        y = pd.Series([0, 1, 2] * 10, index=idx)
+        y.iloc[5] = np.nan  # introduce missing value
+        X = np.random.RandomState(42).randn(30, 2)  # numpy array X
+
+        res_po = fit_proportional_odds(y, X)
+        assert res_po["summary_df"] is not None
+
+        res_multi = fit_multinomial_logistic(y, X)
+        assert res_multi["params"] is not None
+
+    def test_multilevel_calculate_design_effect_string_outcome(self):
+        import pytest
+
+        from medstat.models.multilevel import calculate_design_effect
+
+        y_str = pd.Series(["High", "Low", "Medium", "High"])
+        clusters = pd.Series([1, 1, 2, 2])
+        with pytest.raises(ValueError, match="must be numeric"):
+            calculate_design_effect(y_str, clusters)

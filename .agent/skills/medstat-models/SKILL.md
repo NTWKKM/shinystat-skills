@@ -99,6 +99,9 @@ See [references/model-spec-schema.md](references/model-spec-schema.md) for full 
 
 > **Core Philosophy**: Never execute rigid canned scripts that make naive assumptions about file structure. The agent is empowered with full autonomy to write, adapt, and run Python scripts (`scratch/model.py`) tailored to the specific columns, encodings, and clinical objectives of the analyzed dataset.
 >
+> 🔒 **Subprocess & Script Execution Safety**:
+> When generating and running analysis scripts (`scratch/model.py`), enforce execution controls: disable shell/subprocess access, limit file reads strictly to the designated dataset and referenced prototype/core modules, limit file writes strictly to scratch and designated output paths, and ensure no access to credentials or environment secrets. Require explicit user confirmation if the runtime cannot enforce these sandbox controls.
+>
 > ⚠️ **Mandatory Directive — ต้องดู Script ต้นแบบประกอบเสมอ (Review Prototype Scripts First)**:
 > แม้จะให้อิสระ Agent ในการเขียนและปรับ Python Script เองตามสภาพข้อมูลจริง แต่ **Agent ต้องเปิดดูและอ้างอิงสคริปต์ต้นแบบ (Prototype Scripts)** หรือศึกษาการคำนวณในโมดูลแกนกลาง `src/medstat/` เสมอ เพื่อยึดมาตรฐานความถูกต้องทางชีวสถิติการแพทย์:
 > - **Table 1 และสถิติ Bivariate**: ดูการคำนวณ Mean ± SD vs Median [IQR], t-test vs Mann-Whitney U, Chi-Square vs Fisher's exact, และ SMD จาก `src/medstat/reporting/table1.py` และ `src/medstat/stats/bivariate.py`
@@ -228,6 +231,11 @@ n_model_excluded = len(df) - len(df_model)
 if n_model_excluded > 0:
     print(f"Excluded {n_model_excluded} incomplete cases for model variables.")
 
+# Validate outcome is strictly binary {0, 1}
+unique_outcomes = set(df_model["outcome"].dropna().unique())
+if not unique_outcomes.issubset({0, 1, 0.0, 1.0}):
+    raise ValueError(f"Outcome must be strictly binary {{0, 1}}, got: {unique_outcomes}")
+
 formula = "outcome ~ treatment + age + C(sex) + bmi"
 y_mat, X_mat = patsy.dmatrices(formula, data=df_model, return_type='dataframe')
 # Count fitted predictor parameters from expanded design matrix (excluding intercept)
@@ -237,14 +245,17 @@ n_nonevents = (df_model['outcome'] == 0).sum()
 epv = min(n_events, n_nonevents) / n_params if n_params > 0 else np.nan
 print(f"Events Per Parameter (EPV): {epv:.1f} (effective events={min(n_events, n_nonevents)}, parameters={n_params})")
 
-# Check for quasi-complete separation / zero cells across categorical predictors
+# Check for quasi-complete separation / zero cells across categorical/discrete predictors
 has_zero_cells = False
-for col in df_model.select_dtypes(include=['category', 'object', 'int', 'bool']).columns:
-    if col != "outcome":
-        ct = pd.crosstab(df_model[col], df_model["outcome"])
-        if (ct == 0).any().any():
-            has_zero_cells = True
-            break
+cat_cols = [c for c in ["treatment", "sex"] if c in df_model.columns] + [
+    c for c in df_model.select_dtypes(include=['category', 'object', 'bool']).columns
+    if c != "outcome" and c not in ["treatment", "sex"]
+]
+for col in cat_cols:
+    ct = pd.crosstab(df_model[col], df_model["outcome"])
+    if (ct == 0).any().any():
+        has_zero_cells = True
+        break
 
 # Helper to resolve treatment OR across numeric and patsy contrast terms:
 from medstat.models import extract_primary_effect

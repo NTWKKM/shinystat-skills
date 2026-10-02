@@ -32,7 +32,12 @@ def calculate_design_effect(
     DEFF = 1 + (m_bar - 1) * ICC_cluster
     N_eff = N_total / DEFF
     """
-    y_arr = np.asarray(y, dtype=float).ravel()
+    try:
+        y_arr = np.asarray(y, dtype=float).ravel()
+    except (ValueError, TypeError) as e:
+        raise ValueError(
+            f"Outcome 'y' for cluster design effect must be numeric (continuous). Failed conversion: {e}"
+        ) from e
     c_arr = np.asarray(cluster_ids).ravel()
 
     valid = ~(np.isnan(y_arr) | pd.isna(c_arr))

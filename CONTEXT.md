@@ -37,8 +37,9 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
 | **Statistical Analysis Plan** | `SAP` | Formal specification of primary estimand, data cleaning/retention strategy, planned models, and reporting standards before execution. |
 | **Gold Standard Validation** | `validate_gold_standard` | Pre-flight validation asserting that clinical reference standards have complete binary class support ($\{0, 1\}$), sufficient prevalence, and non-empty samples before ROC or accuracy estimation. |
 | **Primary Effect Extraction** | `extract_primary_effect` | Polymorphic extraction extracting primary exposure/treatment point estimates, Wald/profile CIs, and p-values uniformly across GLM, Firth, Cox, and GEE model objects. |
-| **Zero-Variance SMD** | `smd_zero_variance` | Boundary condition in covariate balance: when pooled SD is 0 and group means differ, SMD is mathematically undefined and returns `np.nan` (rather than masking extreme imbalance as `0.0`). |
-| **Distinct Study Count** | `distinct_studies` | Independent sample size threshold ($k_{\text{distinct}} \ge 10$) enforced before running Egger's linear regression test to prevent spurious validity from multi-effect studies. |
+| **Zero-Variance SMD** | `smd_zero_variance` | Boundary condition in covariate balance: when pooled SD is 0 and group means differ, SMD is mathematically undefined and returns `np.nan` (rather than masking extreme imbalance as `0.0`), serialized as JSON `null`. |
+| **Distinct Study Count** | `distinct_studies` | Independent sample size threshold ($k_{\text{distinct}} \ge 10$) and uniqueness verification enforced before running Egger's linear regression test to prevent spurious validity from multi-effect studies. |
+| **Positional Boolean Masking** | `valid_mask` | Decoupling numpy design matrix slicing from pandas DataFrame index state via `.notna().to_numpy()` to prevent index misalignment across custom or non-standard indices. |
 
 ---
 

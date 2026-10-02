@@ -98,13 +98,14 @@ def check_balance(
             weights_control=weights[control_mask] if weights is not None else None,
         )
 
-        status = "Balanced" if abs(smd) < 0.10 else "Imbalanced"
+        is_finite = pd.notna(smd) and np.isfinite(smd)
+        status = "Balanced" if (is_finite and abs(smd) < 0.10) else "Imbalanced"
         results.append(
             {
                 "Covariate": cov,
                 "Variable": cov,
-                "SMD": smd,
-                "Absolute_SMD": abs(smd),
+                "SMD": float(smd) if is_finite else None,
+                "Absolute_SMD": abs(float(smd)) if is_finite else None,
                 "Status": status,
             }
         )

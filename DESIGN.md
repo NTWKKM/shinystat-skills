@@ -434,3 +434,33 @@ Automated code and clinical biostatistics review by CodeRabbit AI on PR #5 ident
 - **Test Integrity**: Full suite passing (388/388 tests) with real production imports.
 
 [MEMORY_LEARN: Zero-variance in covariate balance with differing group means represents an undefined/infinite imbalance that must yield NaN rather than 0.0 to prevent masking severe clinical cohort disparities.]
+
+---
+
+## ADR 22: CodeRabbit PR#5 Second-Pass Remediation & Security Hardening
+
+### Context
+Following initial remediation in commit `5c4f604`, CodeRabbit automated review completed a full re-review (`5397817652`) narrowing findings down to 19 items (9 Major, 9 Minor, 1 Nitpick). Key concerns addressed:
+1. `src/medstat/models/ordinal.py`: `X_mat[y_series.index]` used label indexing which silently failed or re-indexed incorrectly when `X_mat` or `y_series` had non-standard, custom, or reset indices.
+2. `src/medstat/causal/balance.py` & `src/medstat/cli/main.py`: `check_balance` produced non-finite float `np.nan` values for undefined SMDs, generating non-standard JSON (`NaN`) instead of valid JSON `null`.
+3. `src/medstat/models/multilevel.py` & `main.py`: `calculate_design_effect` and mixed model CLI lacked explicit numeric outcome validation, allowing non-numeric outcomes to cause internal crashes during ANOVA decomposition.
+4. `src/medstat/cli/main.py`: Egger's test allowed duplicate study IDs (when multiple rows had identical study names), violating linear regression observational independence.
+5. `src/medstat/cli/main.py`: Ordinal cumulative odds E-value calculation lacked explicit documentation regarding common-outcome approximation ($RR \approx \sqrt{OR}$).
+6. Skills Suite Security & Statistical Hardening: Prototype Python scripts lacked sandbox execution boundaries, risk-stratified zero-cell checks, strict binary outcome validation, and deterministic matching tie-breaking.
+
+### Decision
+1. **Positional Boolean Masking**: In `src/medstat/models/ordinal.py`, replaced label-based `y_series.index` with explicit positional boolean mask `valid_mask = y_raw.notna().to_numpy()` in both `fit_proportional_odds` and `fit_multinomial_logistic`.
+2. **JSON Null Serialization for Balance SMDs**: In `src/medstat/causal/balance.py`, updated `check_balance` to convert non-finite SMDs to `None`. In `main.py` CLI causal command, applied `_clean_smd` helper so that `json.dump` outputs compliant `null`.
+3. **Multilevel Numeric Guards**: Added explicit `is_numeric_dtype(y_raw)` validation in `calculate_design_effect` and the mixed model CLI branch.
+4. **Egger Duplicate Study ID Rejection**: Added pre-flight `df[study_col].is_unique` check in `main.py` CLI before fitting Egger's regression, raising `click.BadParameter` if duplicate study IDs are present.
+5. **Ordinal E-Value Assumption Annotation**: Set `rare_outcome=False` for ordinal CLI models and attached an explicit `assumption_note` documenting the square-root transformation.
+6. **Skills Suite Sandboxing & Parity**: Embedded subprocess/sandbox security guidance across all 6 skills, enforced deterministic control matching tie-breaks, restricted zero-cell checks strictly to discrete variables, and synchronized all changes across all 4 mirrors (`.agent/`, `.agents/`, `.claude/`, `.cursor/`), confirmed by `test_skill_docs_drift.py`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Robust Indexing**: Positional masking completely decouples model fitting from pandas DataFrame index state.
+- **Strict JSON Standard**: Output JSON contains strictly valid `null` values for undefined SMDs.
+- **Statistical Independence**: Prohibits invalid funnel plot asymmetry tests on multi-effect/clustered study records.
+- **100% Test Pass**: 391/391 tests passing with zero lint or format warnings.
+
+[MEMORY_LEARN: In pandas/numpy hybrid modeling pipelines, positional boolean masking (via `.to_numpy()`) prevents silent data corruption and slicing errors that occur with label-based Index alignment.]

@@ -110,6 +110,9 @@ Verify that the output contains the audited sample retention tracker:
 
 > **Core Philosophy**: Never execute rigid canned scripts that make naive assumptions about file structure. The agent is empowered with full autonomy to inspect, write, adapt, and run Python scripts (`scratch/clean.py`) tailored to the specific layout, encodings, and clinical requirements of the raw dataset (e.g. multi-row headers, notes, Thai locale strings, embedded dashboard summary cards, or side-by-side tables).
 >
+> 🔒 **Subprocess & Script Execution Safety**:
+> When generating and running analysis scripts (`scratch/clean.py`), enforce execution controls: disable shell/subprocess access, limit file reads strictly to the designated dataset and referenced prototype/core modules, limit file writes strictly to scratch and designated output paths, and ensure no access to credentials or environment secrets. Require explicit user confirmation if the runtime cannot enforce these sandbox controls.
+>
 > ⚠️ **Mandatory Directive — ต้องดู Script ต้นแบบประกอบเสมอ (Review Prototype Scripts First)**:
 > แม้จะให้อิสระ Agent ในการเขียนและปรับ Python Script เองตามสภาพข้อมูลจริง แต่ **Agent ต้องเปิดดูและอ้างอิงสคริปต์ต้นแบบ (Prototype Scripts)** หรือศึกษาการคำนวณในโมดูลแกนกลาง `src/medstat/clean/` เสมอ เพื่อยึดมาตรฐานความถูกต้องทางชีวสถิติการแพทย์:
 > - **การตรวจสอบการสูญหายและการทดสอบ MCAR**: ดูการวิเคราะห์ missing patterns และ Little's MCAR test จาก `src/medstat/data/missing.py` และ `src/medstat/data/quality.py`
@@ -140,6 +143,9 @@ print(f"Loaded raw dataset: N = {n_initial}")
 # บังคับใช้ Numeric 0/1 สำหรับ Binary Outcome เสมอ (1 = Event, 0 = Non-event)
 # ตัวอย่าง: df['outcome'] = df['raw_outcome'].map({'Positive': 1, 'Negative': 0})
 df = df_raw.copy()
+outcome_vals = set(df['outcome'].dropna().unique())
+if not outcome_vals.issubset({0, 1, 0.0, 1.0}):
+    raise ValueError(f"Primary endpoint contains non-binary values {outcome_vals}. Must be strictly binary {{0, 1}}.")
 
 # 3. MISSINGNESS AUDIT & SAMPLE RETENTION FLOW (SCAFFOLD TEMPLATE)
 # NOTE: This block is an illustrative scaffold template that must be adapted to the specific study protocol;
@@ -169,6 +175,11 @@ else:
 
 # Address remaining missing values in covariates per study-specific strategy (e.g. MICE, indicator, or documented complete-case)
 # before declaring the cohort clean and persisting.
+unresolved_missing = df_clean.isnull().sum()
+if unresolved_missing.any():
+    print(f"Warning: Covariates with unresolved missing values:\n{unresolved_missing[unresolved_missing > 0]}")
+    # Apply explicit imputation (e.g. MICE) or documented complete-case per study design
+
 n_analyzed = len(df_clean)
 n_excluded = n_initial - n_analyzed
 print(f"Sample Retention Flow: Initial={n_initial} -> Excluded={n_excluded} -> Analyzed={n_analyzed}")

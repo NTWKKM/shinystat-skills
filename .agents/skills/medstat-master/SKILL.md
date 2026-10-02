@@ -205,6 +205,9 @@ Present a concise 1-page SAP covering:
 
 > **Core Philosophy**: Never execute rigid canned scripts that make naive assumptions about file structure. The agent is empowered with full autonomy to write, adapt, and run Python scripts (`scratch/analyze.py`) tailored to the specific columns, encodings, and clinical objectives of the ingested dataset.
 >
+> 🔒 **Subprocess & Script Execution Safety**:
+> When generating and running analysis scripts (`scratch/analyze.py`), enforce execution controls: disable shell/subprocess access, limit file reads strictly to the designated dataset and referenced prototype/core modules, limit file writes strictly to scratch and designated output paths, and ensure no access to credentials or environment secrets. Require explicit user confirmation if the runtime cannot enforce these sandbox controls.
+>
 > ⚠️ **Mandatory Directive — ต้องดู Script ต้นแบบประกอบเสมอ (Review Prototype Scripts First)**:
 > แม้จะให้อิสระ Agent ในการเขียนและปรับ Python Script เองตามสภาพข้อมูลจริง แต่ **Agent ต้องเปิดดูและอ้างอิงสคริปต์ต้นแบบ (Prototype Scripts)** ที่ระบุไว้ในส่วนนี้ หรือศึกษาการคำนวณในโมดูลแกนกลาง `src/medstat/` เสมอ เพื่อยึดมาตรฐานความถูกต้องทางชีวสถิติการแพทย์:
 > - **สถิติเปรียบเทียบและการทดสอบสมมติฐาน**: ดูการจัดกลุ่มตัวแปรต่อเนื่อง (Normality test, Mean ± SD vs Median [IQR], t-test vs Mann-Whitney U) และตัวแปรกลุ่ม (Chi-Square vs Fisher's exact) จาก `src/medstat/reporting/table1.py` และ `src/medstat/stats/bivariate.py`
@@ -290,6 +293,10 @@ def summarize_categorical(series, group):
     is_sparse = (expected < 5).mean() > 0.20 or (expected < 1).any()
     if ct.shape == (2, 2) and is_sparse:
         _, p_val = stats.fisher_exact(ct)
+    elif is_sparse:
+        # Tables > 2x2 with sparse cells cannot use standard 2x2 Fisher's exact test.
+        # Report warning; use Freeman-Halton extension or Chi-Square with simulation if available.
+        print(f"Warning: Sparse contingency table with shape {ct.shape}. Standard 2x2 Fisher exact is inapplicable.")
     return {
         "crosstab": ct,
         "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001",
@@ -315,6 +322,8 @@ if not outcome_vals.issubset({0, 1, 0.0, 1.0}):
     raise ValueError(f"Outcome contains invalid values {outcome_vals}. Must be strictly binary {{0, 1}}.")
 if len(outcome_vals) < 2:
     raise ValueError(f"Outcome must contain both events (1) and non-events (0) for multivariable modeling (found: {outcome_vals}).")
+if outcome_vals not in ({0, 1}, {0.0, 1.0}):
+    raise ValueError(f"Outcome values must map completely to {{0, 1}} with no third values or non-binary codes.")
 print("Confirmed clinical outcome mapping: 1 = Event/Death, 0 = Non-event/Survival.")
 
 # Count expanded model parameter degrees of freedom (excluding intercept)
@@ -333,10 +342,10 @@ for col in ["sex", "admission_status"]:
             has_zero_cells = True
             break
 
-# Route model fit: If EPV < 10 or quasi-complete separation occurs, route to Firth penalized regression
-if epv < 10 or has_zero_cells:
-    reason = "Low EPV (< 10)" if epv < 10 else "Quasi-complete separation / zero cells detected"
-    print(f"Warning: {reason}; routing to Firth penalized logistic regression to prevent separation bias.")
+# Route model fit: EPV < 10 is an alert/screen for overfitting risk.
+# Route to Firth penalized regression if quasi-complete separation occurs or if standard MLE fails to converge
+if has_zero_cells:
+    print("Quasi-complete separation / zero cells detected; routing to Firth penalized logistic regression to prevent separation bias.")
     firth_res = fit_firth_logistic(y_mat.iloc[:, 0], X_mat.drop(columns=['Intercept']), fit_intercept=True, ci_method="pl")
     summary = firth_res["summary_df"]
     results = []
@@ -352,21 +361,41 @@ if epv < 10 or has_zero_cells:
             "p_value": p_str
         })
 else:
-    model = smf.logit(formula, data=df_model).fit(disp=False)
-    results = []
-    for term in model.params.index:
-        if term == "Intercept":
-            continue
-        coef = model.params[term]
-        ci_low, ci_high = model.conf_int().loc[term]
-        p_val = model.pvalues[term]
-        p_str = "NA" if (pd.isna(p_val) or not np.isfinite(p_val)) else ("< 0.001" if p_val < 0.001 else f"{p_val:.3f}")
-        results.append({
-            "Variable / Predictor": term,
-            "Adjusted OR": f"{np.exp(coef):.2f}",
-            "95% CI": f"({np.exp(ci_low):.2f} - {np.exp(ci_high):.2f})",
-            "p_value": p_str
-        })
+    try:
+        model = smf.logit(formula, data=df_model).fit(disp=False)
+        # Check for extreme coefficients indicating unhandled separation
+        if (np.abs(model.params.drop("Intercept", errors="ignore")) > 15).any() or (np.abs(model.bse.drop("Intercept", errors="ignore")) > 50).any():
+            raise sm.tools.sm_exceptions.PerfectSeparationError("Extreme coefficients/SEs indicate separation.")
+        results = []
+        for term in model.params.index:
+            if term == "Intercept":
+                continue
+            coef = model.params[term]
+            ci_low, ci_high = model.conf_int().loc[term]
+            p_val = model.pvalues[term]
+            p_str = "NA" if (pd.isna(p_val) or not np.isfinite(p_val)) else ("< 0.001" if p_val < 0.001 else f"{p_val:.3f}")
+            results.append({
+                "Variable / Predictor": term,
+                "Adjusted OR": f"{np.exp(coef):.2f}",
+                "95% CI": f"({np.exp(ci_low):.2f} - {np.exp(ci_high):.2f})",
+                "p_value": p_str
+            })
+    except Exception as e:
+        print(f"Standard MLE separation or convergence failure ({e}); falling back to Firth penalized regression.")
+        firth_res = fit_firth_logistic(y_mat.iloc[:, 0], X_mat.drop(columns=['Intercept']), fit_intercept=True, ci_method="pl")
+        summary = firth_res["summary_df"]
+        results = []
+        for term, row in summary.iterrows():
+            if term == "(Intercept)":
+                continue
+            p_val = row["p_value"]
+            p_str = "NA" if (pd.isna(p_val) or not np.isfinite(p_val)) else ("< 0.001" if p_val < 0.001 else f"{p_val:.3f}")
+            results.append({
+                "Variable / Predictor": term,
+                "Adjusted OR": f"{row['odds_ratio']:.2f}",
+                "95% CI": f"({row['or_ci_lower']:.2f} - {row['or_ci_upper']:.2f})",
+                "p_value": p_str
+            })
 
 res_df = pd.DataFrame(results)
 print(res_df.to_markdown(index=False))
@@ -383,7 +412,7 @@ The agent may freely incorporate `medstat` modules (e.g. `from medstat.reporting
    $$N_{\text{initial}} \longrightarrow N_{\text{excluded}} \longrightarrow N_{\text{analyzed}}$$
    Document reasons for exclusion. **Strict Ban**: Never impute missing values in the primary clinical outcome variable using MICE or KNN; drop missing outcome cases under audited retention flow with documented rationale.
 3. **Wilson Score Confidence Intervals**: All binomial proportions (Sensitivity, Specificity, PPV, NPV) must use Wilson score intervals.
-4. **DeLong Covariance & Automated Directionality Check**: ROC AUC standard errors and paired AUC comparisons must use DeLong variance. If empirical $\text{AUC} < 0.50$, audit marker directionality and invert score ($Score_{\text{eff}} = -Score$) to maintain concordance.
+4. **DeLong Covariance & Prespecified Directionality**: ROC AUC standard errors and paired AUC comparisons must use DeLong variance. Marker score directionality ("higher is abnormal" vs "lower is abnormal") must be prespecified based on pathophysiology (Gate 3); do not perform post-hoc score inversion simply because empirical AUC is below 0.50.
 5. **Austin (2009) PSM Standard & Confounder Selection**: Propensity score caliper must default to $0.2 \times \text{SD}(\text{logit } e)$; post-match balance requires $\text{SMD} < 0.10$. Include *only* baseline pre-treatment confounders; strictly exclude post-treatment variables, mediators, or colliders.
 6. **Publication Table Styling**: Tables must follow journal conventions (NEJM/JAMA: 3 horizontal rules, no vertical dividers, standard decimal precision: OR/HR to 2 decimal places, percentages to 1 decimal place, p-values formatted to 3 decimal places with `< 0.001` cutoff).
 7. **No Correlation as Agreement**: Never substitute Pearson/Spearman correlation for agreement; enforce Bland-Altman LoA with large-sample CIs and pure-SciPy ICC.
