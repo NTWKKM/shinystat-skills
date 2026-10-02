@@ -285,6 +285,13 @@ def profile_cmd(data: str, output: str | None) -> None:
     help="Outlier handling action (flag, remove, winsorize, cap).",
 )
 @click.option(
+    "--outlier-cols",
+    "--outlier-col",
+    "--outlier-columns",
+    multiple=True,
+    help="Explicit numeric column(s) to evaluate and transform for outliers (default: all eligible numeric columns).",
+)
+@click.option(
     "--iqr-multiplier",
     default=1.5,
     type=float,
@@ -301,6 +308,7 @@ def clean_cmd(
     imputations: int,
     neighbors: int,
     outlier_action: str | None,
+    outlier_cols: tuple[str, ...],
     iqr_multiplier: float,
     output: str | None,
 ) -> None:
@@ -342,9 +350,22 @@ def clean_cmd(
                 "Apply outlier handling before multiple imputation, or use --outlier-action flag."
             )
 
+        selected_cols: list[str] = []
+        for item in outlier_cols:
+            selected_cols.extend([c.strip() for c in item.split(",") if c.strip()])
+
         num_cols = []
-        for c in cleaned_df.columns:
+        candidate_cols = selected_cols if selected_cols else list(cleaned_df.columns)
+        for c in candidate_cols:
+            if c not in cleaned_df.columns:
+                raise click.ClickException(
+                    f"Specified outlier column '{c}' not found in data."
+                )
             if not pd.api.types.is_numeric_dtype(cleaned_df[c]):
+                if selected_cols:
+                    raise click.ClickException(
+                        f"Specified outlier column '{c}' is not numeric."
+                    )
                 continue
             if cleaned_df[c].dropna().nunique() <= 2:
                 continue
@@ -874,6 +895,21 @@ def diag_cmd(
             f"Gold standard column '{gold_standard}' must contain only 0 and 1 (found: {sorted(list(unique_vals))})."
         )
 
+    test_series = df[test_col]
+    if not pd.api.types.is_numeric_dtype(test_series) or pd.api.types.is_bool_dtype(
+        test_series
+    ):
+        raise click.ClickException(f"Test score column '{test_col}' must be numeric.")
+
+    if compare_roc:
+        comp_series = df[compare_roc]
+        if not pd.api.types.is_numeric_dtype(comp_series) or pd.api.types.is_bool_dtype(
+            comp_series
+        ):
+            raise click.ClickException(
+                f"Comparison ROC column '{compare_roc}' must be numeric."
+            )
+
     y_true = df[gold_standard].values
     y_score = df[test_col].values
     diag_res: dict[str, Any] = {}
@@ -886,6 +922,11 @@ def diag_cmd(
             else (y_score >= cutoff).astype(int)
         )
         acc = calculate_diagnostic_accuracy(y_true, y_pred)
+        if isinstance(acc, dict):
+            acc["cutoff"] = cutoff
+            acc["direction"] = dir_norm
+        diag_res["cutoff"] = cutoff
+        diag_res["direction"] = dir_norm
         diag_res["accuracy_at_cutoff"] = acc
 
     if roc or compare_roc:
@@ -1439,6 +1480,19 @@ def sample_size_cmd(
     if tt_lower not in valid_types:
         raise click.ClickException(
             f"Sample size calculation for test type '{test_type}' is not supported. Supported: {list(valid_types)}"
+        )
+
+    if not (0.0 < alpha < 1.0):
+        raise click.ClickException(
+            f"Alpha must be strictly between 0 and 1 (found: {alpha})."
+        )
+    if not (0.0 < power < 1.0):
+        raise click.ClickException(
+            f"Power must be strictly between 0 and 1 (found: {power})."
+        )
+    if power <= alpha:
+        raise click.ClickException(
+            f"Power must exceed alpha (found power={power}, alpha={alpha})."
         )
 
     if tt_lower in ("t-test", "t_test", "ttest", "means"):

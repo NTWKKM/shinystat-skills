@@ -435,10 +435,16 @@ def calculate_kappa(
         )
 
     if len(cols) == 2:
-        validate_categorical_ratings(
-            pivot_df[[cols[0], cols[1]]], categories=categories
-        )
-        res = cohens_kappa(pivot_df[cols[0]], pivot_df[cols[1]], categories=categories)
+        pair_df = pivot_df[[cols[0], cols[1]]]
+        missing_mask = pair_df.isna().any(axis=1)
+        if missing_mask.any():
+            missing_count = int(missing_mask.sum())
+            raise ValueError(
+                f"Two-rater agreement requires complete pairs for all subjects. "
+                f"Found {missing_count} subject(s) with incomplete ratings."
+            )
+        validate_categorical_ratings(pair_df, categories=categories)
+        res = cohens_kappa(pair_df[cols[0]], pair_df[cols[1]], categories=categories)
         res["type"] = "cohen"
         res["raters"] = [str(cols[0]), str(cols[1])]
         return res

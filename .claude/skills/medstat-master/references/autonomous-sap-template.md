@@ -109,8 +109,8 @@ models:
     formula: "mortality_30d ~ treatment_arm + age + sofa_score"
     reference_categories:
       treatment_arm: 0
-    missing_strategy: "complete-case"  # Select after missingness audit: complete-case | mice | knn | indicator
-    missing_justification: "[audit-justified clinical rationale, e.g., verified plausible MCAR with planned sensitivity analysis]"
+    missing_strategy: "[complete-case | mice | knn | indicator]"  # Select after missingness audit: complete-case | mice | knn | indicator
+    missing_justification: "[audit-justified clinical rationale, e.g., MCAR clinically plausible based on collection process with planned sensitivity analysis as robustness assessment]"
     options:
       method: "standard"  # options: standard (statsmodels coefficient-based CIs, default), firth (select when separation, sparse data, or prespecified bias-reduction applies)
       e_value: true

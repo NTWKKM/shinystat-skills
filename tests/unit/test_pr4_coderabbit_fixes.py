@@ -1702,3 +1702,279 @@ class TestPR4ReviewFollowupFixes:
         )
         assert "apparent estimates" in narr_app
         assert "calibration slope and intercept were not reported" in narr_app
+
+    def test_calculate_kappa_two_raters_incomplete_pairs_rejected(self):
+        """Verify that calculate_kappa in two-rater branch rejects incomplete pairs with ValueError."""
+        # Long format with 3 subjects: subject 1 and 2 rated by both, subject 3 only rated by r1
+        df_incomplete = pd.DataFrame(
+            {
+                "subject": ["s1", "s1", "s2", "s2", "s3"],
+                "rater": ["r1", "r2", "r1", "r2", "r1"],
+                "score": [1, 1, 2, 2, 1],
+            }
+        )
+        with pytest.raises(
+            ValueError,
+            match="Two-rater agreement requires complete pairs for all subjects",
+        ):
+            calculate_kappa(
+                df_incomplete, targets="subject", raters="rater", ratings="score"
+            )
+
+        # Complete pairs should succeed
+        df_complete = pd.DataFrame(
+            {
+                "subject": ["s1", "s1", "s2", "s2", "s3", "s3"],
+                "rater": ["r1", "r2", "r1", "r2", "r1", "r2"],
+                "score": [1, 1, 2, 2, 1, 2],
+            }
+        )
+        res = calculate_kappa(
+            df_complete, targets="subject", raters="rater", ratings="score"
+        )
+        assert res["type"] == "cohen"
+        assert res["n_subjects"] == 3
+
+    def test_diag_cmd_score_numeric_validation_and_cutoff_metadata(self, tmp_path):
+        """Verify diag_cmd validates test_col and compare_roc numeric types, and preserves cutoff/direction metadata."""
+        runner = CliRunner()
+
+        # 1. Boolean test_col rejected
+        df_bool_score = pd.DataFrame(
+            {
+                "gold": [0, 1, 0, 1],
+                "score": [True, False, False, True],
+            }
+        )
+        p_bool = tmp_path / "bool_score.csv"
+        df_bool_score.to_csv(p_bool, index=False)
+        res_bool = runner.invoke(
+            cli,
+            [
+                "diag",
+                "--data",
+                str(p_bool),
+                "--gold-standard",
+                "gold",
+                "--test",
+                "score",
+                "--cutoff",
+                "0.5",
+            ],
+        )
+        assert res_bool.exit_code != 0
+        assert "must be numeric" in res_bool.output
+
+        # 2. String compare_roc rejected
+        df_comp_str = pd.DataFrame(
+            {
+                "gold": [0, 1, 0, 1],
+                "score": [1.0, 2.0, 1.5, 3.0],
+                "comp": ["low", "high", "low", "high"],
+            }
+        )
+        p_comp = tmp_path / "comp_str.csv"
+        df_comp_str.to_csv(p_comp, index=False)
+        res_comp = runner.invoke(
+            cli,
+            [
+                "diag",
+                "--data",
+                str(p_comp),
+                "--gold-standard",
+                "gold",
+                "--test",
+                "score",
+                "--compare-roc",
+                "comp",
+            ],
+        )
+        assert res_comp.exit_code != 0
+        assert "Comparison ROC column 'comp' must be numeric" in res_comp.output
+
+        # 3. Valid cutoff preserves cutoff and direction in diag_res and accuracy_at_cutoff
+        df_valid = pd.DataFrame(
+            {
+                "gold": [0, 1, 0, 1, 0, 1],
+                "score": [1.0, 2.5, 1.2, 3.1, 0.9, 4.0],
+            }
+        )
+        p_valid = tmp_path / "valid_diag.csv"
+        df_valid.to_csv(p_valid, index=False)
+        out_json = tmp_path / "diag_meta.json"
+        res_valid = runner.invoke(
+            cli,
+            [
+                "diag",
+                "--data",
+                str(p_valid),
+                "--gold-standard",
+                "gold",
+                "--test",
+                "score",
+                "--cutoff",
+                "2.0",
+                "--direction",
+                "high",
+                "--output",
+                str(out_json),
+            ],
+        )
+        assert res_valid.exit_code == 0
+        diag_data = json.loads(out_json.read_text())
+        assert diag_data["cutoff"] == 2.0
+        assert diag_data["direction"] == "high"
+        assert diag_data["accuracy_at_cutoff"]["cutoff"] == 2.0
+        assert diag_data["accuracy_at_cutoff"]["direction"] == "high"
+
+    def test_sample_size_alpha_power_validation_across_types(self):
+        """Verify that sample-size command validates alpha in (0,1), power in (0,1), and power > alpha."""
+        runner = CliRunner()
+
+        # Alpha <= 0
+        res1 = runner.invoke(
+            cli,
+            [
+                "sample-size",
+                "--type",
+                "survival",
+                "--hr",
+                "1.5",
+                "--p-event",
+                "0.4",
+                "--alpha",
+                "0.0",
+            ],
+        )
+        assert res1.exit_code != 0
+        assert "Alpha must be strictly between 0 and 1" in res1.output
+
+        # Power >= 1
+        res2 = runner.invoke(
+            cli,
+            [
+                "sample-size",
+                "--type",
+                "correlation",
+                "--r",
+                "0.3",
+                "--power",
+                "1.0",
+            ],
+        )
+        assert res2.exit_code != 0
+        assert "Power must be strictly between 0 and 1" in res2.output
+
+        # Power <= Alpha
+        res3 = runner.invoke(
+            cli,
+            [
+                "sample-size",
+                "--type",
+                "survival",
+                "--hr",
+                "1.5",
+                "--p-event",
+                "0.4",
+                "--alpha",
+                "0.10",
+                "--power",
+                "0.08",
+            ],
+        )
+        assert res3.exit_code != 0
+        assert "Power must exceed alpha" in res3.output
+
+    def test_clean_outlier_cols_selection(self, tmp_path):
+        """Verify that medstat clean --outlier-cols limits outlier transformations to specified columns."""
+        runner = CliRunner()
+        df = pd.DataFrame(
+            {
+                "patient_id": list(range(1, 21)),
+                "biomarker_a": [10.0 + (i % 3) for i in range(19)] + [1000.0],
+                "biomarker_b": [20.0 + (i % 3) for i in range(19)] + [2000.0],
+            }
+        )
+        csv_in = tmp_path / "outliers_multi.csv"
+        df.to_csv(csv_in, index=False)
+        out_clean = tmp_path / "cleaned_multi.csv"
+        audit_out = tmp_path / "audit_multi.json"
+
+        # Scope winsorize only to biomarker_a
+        res = runner.invoke(
+            cli,
+            [
+                "clean",
+                "--data",
+                str(csv_in),
+                "--strategy",
+                "complete-case",
+                "--missing-justification",
+                "Audit complete",
+                "--outlier-action",
+                "winsorize",
+                "--outlier-cols",
+                "biomarker_a",
+                "--output",
+                str(out_clean),
+                "--audit-out",
+                str(audit_out),
+            ],
+        )
+        assert res.exit_code == 0
+        df_out = pd.read_csv(out_clean)
+        # biomarker_a was winsorized (no longer 1000.0)
+        assert df_out.loc[19, "biomarker_a"] < 1000.0
+        # biomarker_b was untouched (still 2000.0)
+        assert df_out.loc[19, "biomarker_b"] == 2000.0
+
+        # Reject invalid column in --outlier-cols
+        res_bad_col = runner.invoke(
+            cli,
+            [
+                "clean",
+                "--data",
+                str(csv_in),
+                "--strategy",
+                "complete-case",
+                "--missing-justification",
+                "Audit complete",
+                "--outlier-action",
+                "winsorize",
+                "--outlier-cols",
+                "nonexistent_column",
+            ],
+        )
+        assert res_bad_col.exit_code != 0
+        assert (
+            "Specified outlier column 'nonexistent_column' not found"
+            in res_bad_col.output
+        )
+
+    def test_prisma_checklist_item_16b_official_wording(self):
+        """Verify PRISMA 2020 item 16b description matches official reporting wording."""
+        prisma = get_prisma_checklist()
+        item_16b = next(it for it in prisma.items if it.number == "16b")
+        assert (
+            "might appear to meet the inclusion criteria, but which were excluded"
+            in item_16b.description
+        )
+
+    def test_diagnostic_narrative_wilson_score_proportions_only(self):
+        """Verify diagnostic methods narrative restricts Wilson score method strictly to proportion CIs."""
+        narr = generate_methods_narrative(
+            model_type="diagnostic",
+            cutoff=2.0,
+            direction="high",
+            diagnostic_data={
+                "accuracy_at_cutoff": {"sensitivity": 0.85, "specificity": 0.90}
+            },
+        )
+        assert (
+            "Confidence intervals (95%) for proportions (sensitivity, specificity, PPV, and NPV) were calculated using the Wilson score method."
+            in narr
+        )
+        assert (
+            "Point estimates and 95% confidence intervals were calculated using the Wilson score method"
+            not in narr
+        )

@@ -57,7 +57,7 @@ The agent screens column names and value distributions against clinical patterns
   - Do NOT rely on rigid percentage thresholds or assume Little's test $p > 0.05$ proves MCAR ($p > 0.05$ indicates only lack of evidence against MCAR; clinical mechanism must be considered).
   - Clinically assess the plausibility of MCAR, MAR, or MNAR based on data collection protocols and clinical workflows (see `references/missing-data-mechanisms.md`).
   - Choose strategy with documented clinical rationale:
-    - **Complete-case**: Defensible only when MCAR is clinically plausible or missingness is trivial (<5%) and uninformative.
+    - **Complete-case**: Assess validity for the target estimand and fitted model. Defensible when MCAR is clinically plausible, or when inclusion (being a complete case) is conditionally independent of the outcome given model covariates. Trivial missingness is a practical consideration regarding efficiency rather than a blanket validity guarantee; recommend sensitivity analyses across alternative missingness assumptions when conditional independence or MCAR is uncertain.
     - **MICE**: Applicable under plausible MAR, scaling imputations $m$ to Fraction of Missing Information (FMI).
     - **KNN / Indicator**: As clinically justified for point-of-care or structured patterns (note: indicator imputation is not an appropriate default for missing confounders in observational analyses due to the risk of residual confounding bias).
   - Always perform sensitivity analyses across mechanisms and track audited sample retention flow ($N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$). Never perform silent listwise deletion.

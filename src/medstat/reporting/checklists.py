@@ -832,7 +832,7 @@ def get_prisma_checklist() -> ReportingChecklist:
         ChecklistItem(
             "16b",
             "Study selection - excluded studies",
-            "Cite studies that met the eligibility criteria but were excluded, and explain why they were excluded",
+            "Cite studies that might appear to meet the inclusion criteria, but which were excluded, and explain why they were excluded",
             "Results",
         ),
         ChecklistItem(

@@ -103,7 +103,7 @@ def generate_methods_narrative(
             )
             diag_parts.append(
                 f"Diagnostic test performance (sensitivity, specificity, positive predictive value, negative predictive value, and likelihood ratios) was evaluated {thresh_str}{dir_clause}. "
-                "Point estimates and 95% confidence intervals were calculated using the Wilson score method."
+                "Confidence intervals (95%) for proportions (sensitivity, specificity, PPV, and NPV) were calculated using the Wilson score method."
             )
         else:
             diag_parts.append(
