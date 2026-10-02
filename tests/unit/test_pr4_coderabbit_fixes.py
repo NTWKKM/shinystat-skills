@@ -36,6 +36,7 @@ from medstat.data.clean import _is_id_column, audit_missingness
 from medstat.data.loader import load_clinical_data
 from medstat.models.splines import fit_logistic_rcs
 from medstat.reporting.checklists import get_prisma_checklist, get_stard_checklist
+from medstat.reporting.narrative import generate_methods_narrative
 from medstat.reporting.tables import render_balance_table, render_diagnostic_table
 
 
@@ -1631,3 +1632,73 @@ class TestPR4ReviewFollowupFixes:
             "Normally distributed continuous variables were expressed as mean"
             not in content
         )
+
+    def test_fleiss_rejects_unmapped_rating(self):
+        """Verify that calculate_kappa raises ValueError when a rating is absent from categories."""
+        df = pd.DataFrame(
+            {
+                "subject": [1, 2, 3, 1, 2, 3, 1, 2, 3],
+                "rater": ["r1", "r1", "r1", "r2", "r2", "r2", "r3", "r3", "r3"],
+                "score": [
+                    "A",
+                    "B",
+                    "C",
+                    "A",
+                    "B",
+                    "D",
+                    "A",
+                    "B",
+                    "C",
+                ],  # "D" not in categories
+            }
+        )
+        with pytest.raises(
+            ValueError, match="not in (declared|the specified) categories"
+        ):
+            calculate_kappa(
+                df,
+                targets="subject",
+                raters="rater",
+                ratings="score",
+                categories=["A", "B", "C"],
+            )
+
+    def test_sample_size_survival_rejects_p1_without_event_probability(self):
+        """Verify that survival sample size calculation rejects --p1 and strictly requires --event-probability."""
+        runner = CliRunner()
+        res = runner.invoke(
+            cli,
+            [
+                "sample-size",
+                "--type",
+                "survival",
+                "--hr",
+                "1.5",
+                "--p1",
+                "0.3",
+            ],
+        )
+        assert res.exit_code != 0
+        assert "event probability" in res.output.lower()
+
+    def test_calibration_narrative_apparent_estimates(self):
+        """Verify that methods narrative distinguishes in-sample apparent calibration from standard slope/intercept."""
+        # Standard calibration
+        narr_std = generate_methods_narrative(
+            model_type="diagnostic",
+            has_calibration=True,
+            diagnostic_data={"calibration": {"brier": 0.1}},
+        )
+        assert "Brier score, calibration slope and intercept" in narr_std
+
+        # Apparent calibration with probability_source
+        narr_app = generate_methods_narrative(
+            model_type="diagnostic",
+            has_calibration=True,
+            diagnostic_data={
+                "calibration": {"brier": 0.1},
+                "probability_source": "in-sample logistic recalibration",
+            },
+        )
+        assert "apparent estimates" in narr_app
+        assert "calibration slope and intercept were not reported" in narr_app

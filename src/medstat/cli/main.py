@@ -1492,8 +1492,6 @@ def sample_size_cmd(
                 f"Hazard ratio must be positive and not equal to 1.0, found {hazard_ratio}."
             )
         ev_prob = event_probability
-        if ev_prob is None and p1 is not None:
-            ev_prob = p1
         if ev_prob is None:
             raise click.ClickException(
                 "Survival sample size calculation requires an explicitly supplied event probability (--event-probability or --p-event) in (0, 1]."

@@ -70,16 +70,16 @@ Detect and handle extreme values using the `--outlier-action` and `--iqr-multipl
 ```bash
 # Winsorize extreme values to Tukey IQR fences (Q1 - 1.5*IQR, Q3 + 1.5*IQR) with clinical review
 medstat clean --data <dataset.csv> \
-  --strategy complete-case \
-  --missing-justification "Missingness <5% clinically determined MCAR due to specimen collection delays; complete-case analysis appropriate" \
+  --strategy [complete-case|mice|knn|indicator] \
+  --missing-justification "[audit-based clinical justification selected after missingness audit]" \
   --outlier-action winsorize \
   --iqr-multiplier 1.5 \
   --output clean_winsorized.csv --audit-out retention.json
 
 # Or remove statistical outliers with audited sample flow tracking after clinical verification
 medstat clean --data <dataset.csv> \
-  --strategy complete-case \
-  --missing-justification "Missingness <5% clinically determined MCAR due to specimen collection delays; complete-case analysis appropriate" \
+  --strategy [complete-case|mice|knn|indicator] \
+  --missing-justification "[audit-based clinical justification selected after missingness audit]" \
   --outlier-action remove \
   --iqr-multiplier 3.0 \
   --output clean_no_outliers.csv --audit-out retention.json

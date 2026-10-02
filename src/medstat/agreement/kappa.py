@@ -463,8 +463,11 @@ def calculate_kappa(
     mat = np.zeros((len(pivot_df), len(cats)), dtype=int)
     for row_idx, (_, row) in enumerate(pivot_df.iterrows()):
         for val in row.dropna():
-            if val in cat_to_col:
-                mat[row_idx, cat_to_col[val]] += 1
+            if val not in cat_to_col:
+                raise ValueError(
+                    f"Rating '{val}' is not in the specified categories {cats}."
+                )
+            mat[row_idx, cat_to_col[val]] += 1
 
     res = fleiss_kappa(mat)
     res["type"] = "fleiss"

@@ -37,10 +37,10 @@ System architecture and structural specifications for `medstat-core` and the `me
       │  medstat.causal   │  medstat.meta     │  medstat.reporting        │
       │  - psm matching   │  - DL random-eff  │  - NEJM / JAMA / APA 7    │
       │  - balance & SMD  │  - forest data    │  - STROBE/CONSORT/TRIPOD  │
-      │  - love plots     │  - Egger (k >= 10)│  - methods narrative      │
+      │  - love plots     │  - Egger(cont>=10)│  - methods narrative      │
       ├───────────────────┴───────────────────┴───────────────────────────┤
       │                     medstat.agreement                             │
-      │  - Bland-Altman LoA with Bland–Altman large-sample approximate CIs  │
+      │  - Bland-Altman LoA with Bland–Altman (1999) large-sample CIs     │
       │  - Pure-SciPy Intraclass Correlation Coefficient (ICC) (No GPL)   │
       │  - Cohen's & Fleiss' Kappa (Categorical Inter-Rater Agreement)    │
       └───────────────────────────────────────────────────────────────────┘
@@ -68,22 +68,19 @@ System architecture and structural specifications for `medstat-core` and the `me
 - **`roc.py`**: Non-parametric empirical ROC curve, Youden's J cutpoint, and DeLong covariance matrix calculation for paired AUC comparisons.
 - **`dca.py`**: Vickers Decision Curve Analysis calculating net benefit across threshold probabilities relative to "Treat All" and "Treat None".
 
-### `medstat.causal` & `medstat.agreement`
+### `medstat.causal`
 - **`psm.py`**: Propensity score estimation via logistic regression, 1:1 nearest neighbor matching with logit standard deviation caliper, and matched cohort extraction.
 - **`balance.py`**: Standardized Mean Difference (SMD) calculation for continuous and binary variables, and Austin 2009 Love plot data generation.
 - **`mediation.py`**: Pure-Python parametric causal mediation analysis (Baron-Kenny / Imai) with quasi-Bayesian Monte Carlo confidence intervals for Average Causal Mediation Effect (ACME) and Average Direct Effect (ADE).
-- **`bland_altman.py`**: Mean difference, 95% Limits of Agreement, and Carkeet (2015) confidence intervals. Supports both wide paired columns and long-format rater data.
-- **`icc.py`**: Pure SciPy/NumPy two-way ANOVA decomposition computing Shrout & Fleiss (1979) forms (ICC1, ICC2, ICC3, ICC1k, ICC2k, ICC3k) with exact F-distribution confidence intervals.
-- **`kappa.py`**: Inter-rater categorical agreement computing Cohen's Kappa for 2 raters and Fleiss' Kappa for $m \ge 2$ raters.
 
 ### `medstat.meta`
 - **`models.py`**: Fixed-effects inverse variance and DerSimonian-Laird random-effects meta-analysis, Cochran's Q test, and Higgins $I^2$.
 - **`forest.py`**: Forest plot structured data generation.
-- **`bias.py`**: Egger's linear regression test for funnel plot asymmetry (applicable when $k \ge 10$ studies with continuous effect measures or log ORs).
+- **`bias.py`**: Egger's linear regression test for funnel plot asymmetry (applicable when $k \ge 10$ studies with continuous effect measures such as mean difference or SMD; not recommended for binary log odds ratios due to artifactual correlation).
 
 ### `medstat.agreement`
-- **`bland_altman.py`**: Paired measurement difference analysis and limits of agreement with Bland–Altman large-sample approximate CIs.
-- **`icc.py`**: Pure-SciPy two-way ANOVA Intraclass Correlation Coefficients (ICC1, ICC2, ICC3, and average-measure forms).
+- **`bland_altman.py`**: Paired measurement difference analysis and limits of agreement with Bland–Altman (1999) large-sample approximate CIs. Supports both wide paired columns and long-format rater data.
+- **`icc.py`**: Pure SciPy/NumPy two-way ANOVA decomposition computing Shrout & Fleiss (1979) forms (ICC1, ICC2, ICC3, ICC1k, ICC2k, ICC3k) with exact F-distribution confidence intervals.
 - **`kappa.py`**: Cohen's Kappa (unweighted, linear, quadratic with non-null and null SEs) and Fleiss' generalized multi-rater Kappa for discrete categories.
 
 ### `medstat.reporting`

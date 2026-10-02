@@ -125,9 +125,26 @@ def generate_methods_narrative(
             )
 
         if has_cal_eval:
-            diag_parts.append(
-                "Model calibration was evaluated using the Brier score, calibration slope and intercept, and the Integrated Calibration Index (ICI)."
+            cal_dict = (
+                diag_data.get("calibration", {}) if isinstance(diag_data, dict) else {}
             )
+            prob_source = (
+                diag_data.get("probability_source")
+                if isinstance(diag_data, dict)
+                else None
+            ) or (
+                cal_dict.get("probability_source")
+                if isinstance(cal_dict, dict)
+                else None
+            )
+            if prob_source:
+                diag_parts.append(
+                    "Model calibration was evaluated using apparent estimates (Brier score and Integrated Calibration Index [ICI]); calibration slope and intercept were not reported for in-sample apparent probability estimates."
+                )
+            else:
+                diag_parts.append(
+                    "Model calibration was evaluated using the Brier score, calibration slope and intercept, and the Integrated Calibration Index (ICI)."
+                )
 
         diag_parts.append(
             f"All statistical tests were two-tailed (alpha = {alpha}), and analyses were conducted using {software_name}."

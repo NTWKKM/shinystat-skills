@@ -86,7 +86,7 @@ Map the data geometry and clinical context to one of the canonical clinical desi
 | **Type 4: Diagnostic Accuracy & Biomarker** | Continuous/ordinal index test + binary gold standard | Clean $\to$ 2×2 Contingency (Wilson CI) $\to$ ROC + DeLong AUC $\to$ DCA Net Benefit $\to$ Report | `medstat-clean`<br>`medstat-diagnostic`<br>`medstat-report` |
 | **Type 5: Observational Causal Inference** | Non-randomized treatment indicator + baseline confounders | Clean $\to$ PSM Matching (caliper 0.2×SD) $\to$ Love Plot (SMD < 0.10) $\to$ Outcome Model $\to$ Report | `medstat-clean`<br>`medstat-causal-meta`<br>`medstat-models`<br>`medstat-report` |
 | **Type 6: Agreement & Reliability** | Paired device measurements OR subject ID + multiple raters | Clean $\to$ Bland-Altman LoA (Bland–Altman large-sample approximate CIs) OR Pure-SciPy ICC (all 6 forms) $\to$ Report | `medstat-clean`<br>`medstat-causal-meta`<br>`medstat-report` |
-| **Type 7: Multi-Study Meta-Analysis** | Effect sizes, SEs / variance, study labels, sample sizes | Fixed/Random Effects (DerSimonian-Laird) $\to$ Forest Plot [$\to$ Egger's test if $k \ge 10$] $\to$ Report | `medstat-causal-meta`<br>`medstat-report` |
+| **Type 7: Multi-Study Meta-Analysis** | Effect sizes, SEs / variance, study labels, sample sizes | Fixed/Random Effects (DerSimonian-Laird) $\to$ Forest Plot [$\to$ Egger's test if continuous effect & $k \ge 10$] $\to$ Report | `medstat-causal-meta`<br>`medstat-report` |
 
 *See [references/study-design-decision-tree.md](references/study-design-decision-tree.md) for detailed clinical heuristics and decision thresholds.*
 
@@ -209,7 +209,3 @@ All operations coordinated by **medstat-master** must strictly follow these rule
 - [ ] Sample retention flow ($N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$) tracked.
 - [ ] Primary statistical model executed conforming to clinical standards (Wilson CI, DeLong, Firth, or PSM).
 - [ ] Results compiled into publication-grade table (NEJM/JAMA) and methods narrative.
-
-
-```bash
-```
