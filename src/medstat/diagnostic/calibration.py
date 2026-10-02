@@ -14,6 +14,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import scipy.stats as stats
 import statsmodels.api as sm
+from scipy.special import logit
 from sklearn.calibration import calibration_curve
 from sklearn.metrics import brier_score_loss
 
@@ -95,7 +96,7 @@ def calculate_calibration_slope_and_intercept(
     y_p = np.clip(np.asarray(y_pred, dtype=float).ravel(), 1e-6, 1.0 - 1e-6)
 
     # Log-odds of predictions
-    log_odds = stats.logit(y_p)
+    log_odds = logit(y_p)
 
     # 1. Calibration Slope: logit(y) = a + b * logit(p)
     X_slope = sm.add_constant(log_odds)

@@ -3,6 +3,7 @@ tests/e2e/test_tier4_clinical_workflows.py: Tier 4 Real-World Clinical Workflows
 Executes the 5 canonical end-to-end clinical workflow CLI scenarios.
 """
 
+import pandas as pd
 import pytest
 
 # ==============================================================================
@@ -274,13 +275,20 @@ def test_tier4_workflow3_pocus_ultrasound_inter_rater_reliability(
     )
     assert ec3 == 0 or ba_json.exists()
 
-    # Step 4: Fleiss' Kappa categorical agreement
+    # Step 4: Fleiss' Kappa categorical agreement on discretized clinical grades
+    cat_pocus_csv = tmp_path / "pocus_categorical.csv"
+    pocus_df = pd.read_csv(input_data)
+    pocus_df["measurement_score"] = pd.qcut(
+        pocus_df["measurement_score"], q=3, labels=["Mild", "Moderate", "Severe"]
+    )
+    pocus_df.to_csv(cat_pocus_csv, index=False)
+
     ec4, out4, _ = medstat_cli_runner(
         [
             "agreement",
             "kappa",
             "--data",
-            str(input_data),
+            str(cat_pocus_csv),
             "--output",
             str(kappa_json),
         ]

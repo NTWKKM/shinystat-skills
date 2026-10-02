@@ -24,12 +24,19 @@ def generate_methods_narrative(
     check_schoenfeld: bool = False,
     normality_test: bool = False,
     fisher_exact: bool = False,
+    cutoff: float | None = None,
+    direction: str | None = None,
+    has_roc: bool = False,
+    has_delong: bool = False,
+    has_dca: bool = False,
+    has_calibration: bool = False,
+    **kwargs: Any,
 ) -> str:
     """
     Generate an academic Statistical Methods section paragraph.
 
     Parameters:
-        model_type: 'logistic', 'cox', 'linear', 'poisson', etc.
+        model_type: 'logistic', 'cox', 'linear', 'poisson', 'diagnostic', etc.
         exposure: Primary exposure/treatment variable.
         outcome: Primary clinical outcome.
         covariates: List of confounders adjusted for.
@@ -42,10 +49,104 @@ def generate_methods_narrative(
         check_schoenfeld: Whether Schoenfeld residuals testing was performed for Cox models.
         normality_test: Whether formal normality tests (Shapiro-Wilk) were performed.
         fisher_exact: Whether Fisher's exact test was used for small cell counts.
+        cutoff: Prespecified diagnostic cutoff value.
+        direction: Biomarker directionality ('high' or 'low').
+        has_roc: Whether ROC analysis was conducted.
+        has_delong: Whether DeLong paired ROC comparison was conducted.
+        has_dca: Whether Decision Curve Analysis was conducted.
+        has_calibration: Whether calibration analysis was conducted.
 
     Returns:
         Formatted English narrative paragraph.
     """
+    norm_mtype = model_type.lower()
+    if norm_mtype in ("diagnostic", "diag", "dta"):
+        diag_data = kwargs.get("diagnostic_data", {})
+        cutoff_val = cutoff
+        if cutoff_val is None and isinstance(diag_data, dict):
+            cutoff_val = diag_data.get("cutoff")
+            if cutoff_val is None:
+                acc = diag_data.get("accuracy_at_cutoff", {})
+                if isinstance(acc, dict):
+                    cutoff_val = acc.get("cutoff")
+
+        dir_val = direction
+        if dir_val is None and isinstance(diag_data, dict):
+            dir_val = diag_data.get("direction")
+            if dir_val is None:
+                roc_dict = diag_data.get("roc", {})
+                if isinstance(roc_dict, dict):
+                    dir_val = roc_dict.get("direction")
+
+        has_roc_eval = has_roc or (isinstance(diag_data, dict) and "roc" in diag_data)
+        has_delong_eval = has_delong or (
+            isinstance(diag_data, dict) and "delong_comparison" in diag_data
+        )
+        has_dca_eval = has_dca or (isinstance(diag_data, dict) and "dca" in diag_data)
+        has_cal_eval = has_calibration or (
+            isinstance(diag_data, dict) and "calibration" in diag_data
+        )
+
+        diag_parts = []
+        if cutoff_val is not None or (
+            isinstance(diag_data, dict) and "accuracy_at_cutoff" in diag_data
+        ):
+            dir_clause = ""
+            if dir_val == "low":
+                dir_clause = " (with test scores less than or equal to the cutoff threshold considered positive)"
+            elif dir_val == "high":
+                dir_clause = " (with test scores greater than or equal to the cutoff threshold considered positive)"
+            thresh_str = (
+                f"at a prespecified cutoff of {cutoff_val}"
+                if cutoff_val is not None
+                else "at the evaluated cutoff"
+            )
+            diag_parts.append(
+                f"Diagnostic test performance (sensitivity, specificity, positive predictive value, negative predictive value, and likelihood ratios) was evaluated {thresh_str}{dir_clause}. "
+                "Confidence intervals (95%) for proportions (sensitivity, specificity, PPV, and NPV) were calculated using the Wilson score method."
+            )
+
+        if has_roc_eval:
+            roc_sentence = (
+                "Discriminatory performance was evaluated by constructing the Receiver Operating Characteristic (ROC) curve, "
+                "with the Area Under the Curve (AUC) and 95% confidence intervals estimated using DeLong's non-parametric method."
+            )
+            if has_delong_eval:
+                roc_sentence += " Differences between paired ROC curves were tested using the paired DeLong test."
+            diag_parts.append(roc_sentence)
+
+        if has_dca_eval:
+            diag_parts.append(
+                "Clinical utility and net benefit across decision threshold probabilities were assessed using Decision Curve Analysis (DCA)."
+            )
+
+        if has_cal_eval:
+            cal_dict = (
+                diag_data.get("calibration", {}) if isinstance(diag_data, dict) else {}
+            )
+            prob_source = (
+                diag_data.get("probability_source")
+                if isinstance(diag_data, dict)
+                else None
+            ) or (
+                cal_dict.get("probability_source")
+                if isinstance(cal_dict, dict)
+                else None
+            )
+            if prob_source:
+                diag_parts.append(
+                    "Model calibration was evaluated using apparent estimates (Brier score and Integrated Calibration Index [ICI]); calibration slope and intercept were not reported for in-sample apparent probability estimates."
+                )
+            else:
+                diag_parts.append(
+                    "Model calibration was evaluated using the Brier score, calibration slope and intercept, and the Integrated Calibration Index (ICI)."
+                )
+
+        diag_parts.append(
+            f"All statistical tests were two-tailed (alpha = {alpha}), and analyses were conducted using {software_name}."
+        )
+        return "\n\n".join(diag_parts)
+
     paragraphs = []
 
     # 1. Descriptive stats sentence

@@ -10,7 +10,9 @@ from __future__ import annotations
 import html
 import math
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
+
+import numpy as np
 
 
 @dataclass
@@ -272,3 +274,329 @@ def render_ascii_table(table: EstimateTable) -> str:
 
     output.append(line)
     return "\n".join(output)
+
+
+def render_records_table(
+    title: str,
+    records: list[dict[str, Any]],
+    style: Literal["NEJM", "JAMA", "APA7"] = "NEJM",
+    note: str | None = None,
+) -> str:
+    """Render a list of dictionary records (e.g. Table 1, ICC) into a publication-grade HTML table."""
+    if not records:
+        return f"<table style='border-collapse: collapse; width: 100%; font-family: -apple-system, sans-serif;'><caption>{html.escape(title)}</caption><tbody><tr><td>No records</td></tr></tbody></table>"
+
+    headers = list(records[0].keys())
+    is_apa = style.upper() in ("APA", "APA7")
+    font_fam = (
+        "Times New Roman, serif"
+        if is_apa
+        else "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+    )
+    border_rule = "1px solid #000" if is_apa else "2px solid #000"
+    caption_style = (
+        "caption-side: top; text-align: left; font-style: italic; margin-bottom: 8px;"
+        if is_apa
+        else "caption-side: top; text-align: left; font-weight: bold; margin-bottom: 8px;"
+    )
+
+    lines = [
+        f"<table style='border-collapse: collapse; width: 100%; font-family: {font_fam}; font-size: 14px;'>",
+        f"  <caption style='{caption_style}'>{html.escape(title)}</caption>",
+        "  <thead>",
+        f"    <tr style='border-top: {border_rule}; border-bottom: 1px solid #000;'>",
+    ]
+
+    for idx, h in enumerate(headers):
+        align = "left" if idx == 0 else "right"
+        lines.append(
+            f"      <th style='text-align: {align}; padding: 6px 12px; font-weight: {'normal' if is_apa else 'bold'};'>{html.escape(str(h))}</th>"
+        )
+
+    lines.extend(
+        [
+            "    </tr>",
+            "  </thead>",
+            "  <tbody>",
+        ]
+    )
+
+    for row in records:
+        lines.append("    <tr>")
+        for idx, h in enumerate(headers):
+            align = "left" if idx == 0 else "right"
+            val = row.get(h, "")
+            val_str = f"{val:.3f}" if isinstance(val, float) else str(val)
+            lines.append(
+                f"      <td style='text-align: {align}; padding: 6px 12px;'>{html.escape(val_str)}</td>"
+            )
+        lines.append("    </tr>")
+
+    lines.extend(
+        [
+            "  </tbody>",
+            "  <tfoot>",
+            f"    <tr style='border-top: {border_rule};'>",
+            f"      <td colspan='{len(headers)}' style='font-size: 12px; color: #555; padding-top: 6px; font-style: {'italic' if is_apa else 'normal'};'>",
+        ]
+    )
+    if note:
+        lines.append(f"        {html.escape(note)}")
+    lines.extend(["      </td>", "    </tr>", "  </tfoot>", "</table>"])
+    return "\n".join(lines)
+
+
+def render_diagnostic_table(
+    title: str,
+    diag_data: dict[str, Any],
+    style: Literal["NEJM", "JAMA", "APA7"] = "NEJM",
+) -> str:
+    """Render diagnostic test accuracy, ROC AUC, and calibration as a publication-grade HTML table."""
+    records: list[dict[str, Any]] = []
+
+    # Accuracy metrics at cutoff
+    acc = diag_data.get("accuracy_at_cutoff", diag_data.get("accuracy", {}))
+    if isinstance(acc, dict):
+
+        def _fmt_ci(
+            est: float | dict | None, ci: tuple | list | None, is_pct: bool = True
+        ) -> str:
+            if isinstance(est, dict):
+                if ci is None and "ci_lower" in est and "ci_upper" in est:
+                    ci = [est["ci_lower"], est["ci_upper"]]
+                elif ci is None and "ci" in est:
+                    ci = est["ci"]
+                est = est.get("estimate", est.get("value"))
+            if est is None:
+                return "—"
+            try:
+                est_val = float(est)
+            except (ValueError, TypeError):
+                return "—"
+            if is_pct:
+                val = f"{est_val * 100:.1f}%"
+                if ci and len(ci) == 2:
+                    return f"{val} ({ci[0] * 100:.1f}–{ci[1] * 100:.1f}%)"
+                return val
+            else:
+                val = f"{est_val:.2f}"
+                if ci and len(ci) == 2:
+                    return f"{val} ({ci[0]:.2f}–{ci[1]:.2f})"
+                return val
+
+        if "sensitivity" in acc:
+            records.append(
+                {
+                    "Diagnostic Metric": "Sensitivity",
+                    "Estimate (95% CI)": _fmt_ci(
+                        acc.get("sensitivity"), acc.get("sensitivity_ci"), is_pct=True
+                    ),
+                }
+            )
+        if "specificity" in acc:
+            records.append(
+                {
+                    "Diagnostic Metric": "Specificity",
+                    "Estimate (95% CI)": _fmt_ci(
+                        acc.get("specificity"), acc.get("specificity_ci"), is_pct=True
+                    ),
+                }
+            )
+        if "ppv" in acc:
+            records.append(
+                {
+                    "Diagnostic Metric": "Positive Predictive Value (PPV)",
+                    "Estimate (95% CI)": _fmt_ci(
+                        acc.get("ppv"), acc.get("ppv_ci"), is_pct=True
+                    ),
+                }
+            )
+        if "npv" in acc:
+            records.append(
+                {
+                    "Diagnostic Metric": "Negative Predictive Value (NPV)",
+                    "Estimate (95% CI)": _fmt_ci(
+                        acc.get("npv"), acc.get("npv_ci"), is_pct=True
+                    ),
+                }
+            )
+        if "positive_likelihood_ratio" in acc or "lr_positive" in acc:
+            lr_pos = acc.get("positive_likelihood_ratio", acc.get("lr_positive"))
+            records.append(
+                {
+                    "Diagnostic Metric": "Positive Likelihood Ratio (LR+)",
+                    "Estimate (95% CI)": _fmt_ci(
+                        lr_pos, acc.get("lr_positive_ci"), is_pct=False
+                    ),
+                }
+            )
+        if "negative_likelihood_ratio" in acc or "lr_negative" in acc:
+            lr_neg = acc.get("negative_likelihood_ratio", acc.get("lr_negative"))
+            records.append(
+                {
+                    "Diagnostic Metric": "Negative Likelihood Ratio (LR-)",
+                    "Estimate (95% CI)": _fmt_ci(
+                        lr_neg, acc.get("lr_negative_ci"), is_pct=False
+                    ),
+                }
+            )
+        if "diagnostic_odds_ratio" in acc or "dor" in acc:
+            dor_val = acc.get("diagnostic_odds_ratio", acc.get("dor"))
+            records.append(
+                {
+                    "Diagnostic Metric": "Diagnostic Odds Ratio (DOR)",
+                    "Estimate (95% CI)": _fmt_ci(
+                        dor_val, acc.get("dor_ci"), is_pct=False
+                    ),
+                }
+            )
+
+    # ROC AUC
+    roc = diag_data.get("roc", {})
+    if isinstance(roc, dict) and "auc" in roc:
+        auc_val = float(roc["auc"])
+        auc_ci = roc.get("auc_ci", [roc.get("ci_lower"), roc.get("ci_upper")])
+        ci_str = (
+            f" ({auc_ci[0]:.3f}–{auc_ci[1]:.3f})"
+            if auc_ci and auc_ci[0] is not None and auc_ci[1] is not None
+            else ""
+        )
+        records.append(
+            {
+                "Diagnostic Metric": "Area Under ROC Curve (AUC)",
+                "Estimate (95% CI)": f"{auc_val:.3f}{ci_str}",
+            }
+        )
+
+    # Calibration
+    cal = diag_data.get("calibration", {})
+    if isinstance(cal, dict) and "brier" in cal:
+        brier_entry = cal["brier"]
+        brier_val = None
+        if isinstance(brier_entry, dict):
+            brier_val = brier_entry.get("brier_score")
+        elif isinstance(brier_entry, (int, float, np.number)):
+            brier_val = float(brier_entry)
+        elif brier_entry is not None:
+            try:
+                brier_val = float(brier_entry)
+            except (ValueError, TypeError):
+                brier_val = None
+
+        if brier_val is not None:
+            prob_source = diag_data.get("probability_source") or cal.get(
+                "probability_source"
+            )
+            brier_label = (
+                "Brier Score (Calibration - in-sample apparent estimate)"
+                if prob_source
+                else "Brier Score (Calibration)"
+            )
+            records.append(
+                {
+                    "Diagnostic Metric": brier_label,
+                    "Estimate (95% CI)": f"{float(brier_val):.4f}",
+                }
+            )
+
+    note = "Confidence intervals for proportions are calculated via Wilson score method; AUC confidence interval via DeLong test."
+    apparent_note = diag_data.get("apparent_estimates_note") or (
+        cal.get("apparent_estimates_note") if isinstance(cal, dict) else None
+    )
+    if apparent_note:
+        note += f" Note: {apparent_note}"
+    return render_records_table(title, records, style=style, note=note)
+
+
+def render_bland_altman_table(
+    title: str,
+    ba_data: dict[str, Any],
+    style: Literal["NEJM", "JAMA", "APA7"] = "NEJM",
+) -> str:
+    """Render Bland-Altman mean difference and Limits of Agreement as a publication-grade HTML table."""
+    records: list[dict[str, Any]] = []
+
+    mean_diff = ba_data.get(
+        "mean_difference", ba_data.get("bias", ba_data.get("mean_diff"))
+    )
+    ci_mean = ba_data.get(
+        "mean_diff_ci", ba_data.get("bias_ci", ba_data.get("ci_mean_diff"))
+    )
+    loa_lower = ba_data.get("lower_loa", ba_data.get("loa_lower"))
+    ci_loa_l = ba_data.get(
+        "lower_loa_ci", ba_data.get("loa_lower_ci", ba_data.get("ci_lower_loa"))
+    )
+    loa_upper = ba_data.get("upper_loa", ba_data.get("loa_upper"))
+    ci_loa_u = ba_data.get(
+        "upper_loa_ci", ba_data.get("loa_upper_ci", ba_data.get("ci_upper_loa"))
+    )
+
+    def _fmt(val: float | None, ci: tuple | list | None) -> str:
+        if val is None:
+            return "—"
+        res = f"{val:.3f}"
+        if ci and len(ci) == 2 and ci[0] is not None and ci[1] is not None:
+            res += f" ({ci[0]:.3f} to {ci[1]:.3f})"
+        return res
+
+    if mean_diff is not None:
+        records.append(
+            {
+                "Agreement Parameter": "Mean Difference (Bias)",
+                "Estimate (95% CI)": _fmt(mean_diff, ci_mean),
+            }
+        )
+    if loa_lower is not None:
+        records.append(
+            {
+                "Agreement Parameter": "Lower Limit of Agreement (LoA)",
+                "Estimate (95% CI)": _fmt(loa_lower, ci_loa_l),
+            }
+        )
+    if loa_upper is not None:
+        records.append(
+            {
+                "Agreement Parameter": "Upper Limit of Agreement (LoA)",
+                "Estimate (95% CI)": _fmt(loa_upper, ci_loa_u),
+            }
+        )
+
+    note = "Limits of agreement computed as mean difference ± 1.96 standard deviations. CIs based on Bland & Altman (1999) large-sample variance."
+    return render_records_table(title, records, style=style, note=note)
+
+
+def render_balance_table(
+    title: str,
+    bal_data: dict[str, Any],
+    style: Literal["NEJM", "JAMA", "APA7"] = "NEJM",
+) -> str:
+    """Render Austin 2009 Covariate Balance table (Pre/Post SMD) as a publication-grade HTML table."""
+    covariates = bal_data.get("covariates", [])
+    smd_pre = bal_data.get("smd_pre", bal_data.get("smd_raw", []))
+    smd_post = bal_data.get(
+        "smd_post", bal_data.get("smd_matched", bal_data.get("post_smd", []))
+    )
+
+    records: list[dict[str, Any]] = []
+    for idx, cov in enumerate(covariates):
+        pre_val = smd_pre[idx] if idx < len(smd_pre) else None
+        post_val = smd_post[idx] if idx < len(smd_post) else None
+        pre_valid = pre_val is not None and math.isfinite(pre_val)
+        post_valid = post_val is not None and math.isfinite(post_val)
+        pre_str = f"{pre_val:.3f}" if pre_valid else "—"
+        post_str = f"{post_val:.3f}" if post_valid else "—"
+        if post_valid:
+            status = "Balanced (SMD < 0.10)" if abs(post_val) < 0.10 else "Imbalanced"
+        else:
+            status = "—"
+        records.append(
+            {
+                "Covariate": str(cov),
+                "Pre-Matching SMD": pre_str,
+                "Post-Matching SMD": post_str,
+                "Balance Status": status,
+            }
+        )
+
+    note = "Standardized Mean Difference (SMD) evaluates covariate balance; SMD < 0.10 indicates negligible imbalance (Austin 2009)."
+    return render_records_table(title, records, style=style, note=note)

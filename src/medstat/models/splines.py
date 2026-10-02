@@ -284,3 +284,142 @@ def fit_cox_rcs(
     }
 
     return CoxRCSResult(fig, contrast_df, stats_meta)
+
+
+def fit_logistic_rcs(
+    df: pd.DataFrame,
+    outcome: str,
+    spline_var: str,
+    covariates: list[str] | None = None,
+    n_knots: int = 4,
+    ref_value: float | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """
+    Fit multivariable Logistic Regression with Restricted Cubic Splines (RCS).
+
+    Parameters:
+        df: Input DataFrame.
+        outcome: Binary outcome column.
+        spline_var: Continuous variable to model with splines.
+        covariates: Optional baseline confounders.
+        n_knots: Number of knots (default: 4).
+        ref_value: Reference value for Odds Ratio comparisons (default: median).
+
+    Returns:
+        dict containing model, summary_df, knots, non_linear_pvalue, and log_likelihood.
+    """
+    import statsmodels.api as sm
+
+    adjust = covariates or []
+    all_cols = [outcome, spline_var] + adjust
+    clean_df = df[all_cols].dropna().copy()
+
+    if len(clean_df) < 10:
+        raise ValueError("Insufficient observations for logistic RCS analysis.")
+
+    if n_knots < 3:
+        raise ValueError("n_knots must be >= 3 for Restricted Cubic Splines.")
+    num_knots = n_knots
+    if ref_value is None:
+        ref_value = float(clean_df[spline_var].median())
+
+    rhs = f"cr({_quote_col(spline_var)}, df={num_knots}, constraints='center')"
+    if adjust:
+        rhs += " + " + " + ".join(_quote_col(c) for c in adjust)
+
+    X = patsy.dmatrix(rhs, clean_df, return_type="dataframe")
+    y = clean_df[outcome].values
+
+    logit_model = sm.Logit(y, X).fit(disp=False)
+
+    # Linear comparison for non-linearity test
+    linear_rhs = f"{_quote_col(spline_var)}"
+    if adjust:
+        linear_rhs += " + " + " + ".join(_quote_col(c) for c in adjust)
+    X_linear = patsy.dmatrix(linear_rhs, clean_df, return_type="dataframe")
+    linear_model = sm.Logit(y, X_linear).fit(disp=False)
+
+    lr_stat = max(0.0, 2.0 * (logit_model.llf - linear_model.llf))
+    df_diff = len(logit_model.params) - len(linear_model.params)
+    non_linear_p = float(stats.chi2.sf(lr_stat, df=df_diff)) if df_diff > 0 else np.nan
+
+    conf = logit_model.conf_int()
+    or_series = np.exp(logit_model.params)
+    ci_lower = np.exp(conf[0])
+    ci_upper = np.exp(conf[1])
+
+    # Exclude spline-basis terms and Intercept from OR columns because individual
+    # basis coefficients do not represent valid odds ratios
+    is_basis_or_intercept = [
+        ("cr(" in str(idx) or "Intercept" in str(idx))
+        for idx in logit_model.params.index
+    ]
+    or_series = or_series.mask(is_basis_or_intercept, np.nan)
+    ci_lower = ci_lower.mask(is_basis_or_intercept, np.nan)
+    ci_upper = ci_upper.mask(is_basis_or_intercept, np.nan)
+
+    summary_df = pd.DataFrame(
+        {
+            "coef": logit_model.params,
+            "std_error": logit_model.bse,
+            "z_score": logit_model.tvalues,
+            "p_value": logit_model.pvalues,
+            "odds_ratio": or_series,
+            "ci_lower": ci_lower,
+            "ci_upper": ci_upper,
+        }
+    )
+
+    # Construct contrast matrix relative to ref_value (analogous to fit_cox_rcs)
+    design_info = X.design_info
+    var_min = float(clean_df[spline_var].min())
+    var_max = float(clean_df[spline_var].max())
+    grid_vals = np.linspace(var_min, var_max, 100)
+
+    pred_data = pd.DataFrame({spline_var: grid_vals})
+    for c in adjust:
+        pred_data[c] = (
+            clean_df[c].mean()
+            if pd.api.types.is_numeric_dtype(clean_df[c])
+            else clean_df[c].mode()[0]
+        )
+
+    ref_data = pd.DataFrame({spline_var: [ref_value]})
+    for c in adjust:
+        ref_data[c] = pred_data[c].iloc[0]
+
+    X_pred = patsy.build_design_matrices([design_info], pred_data)[0]
+    X_ref = patsy.build_design_matrices([design_info], ref_data)[0]
+
+    X_pred_df = pd.DataFrame(X_pred, columns=design_info.column_names)
+    X_ref_df = pd.DataFrame(X_ref, columns=design_info.column_names)
+
+    contrast = X_pred_df.values - X_ref_df.values
+    coefs = logit_model.params.values
+    cov_mat = logit_model.cov_params().values
+
+    log_or = contrast @ coefs
+    var_log_or = np.sum((contrast @ cov_mat) * contrast, axis=1)
+    se_log_or = np.sqrt(np.maximum(var_log_or, 0.0))
+
+    contrast_df = pd.DataFrame(
+        {
+            spline_var: grid_vals,
+            "OR": np.exp(log_or),
+            "OR_lower": np.exp(log_or - 1.96 * se_log_or),
+            "OR_upper": np.exp(log_or + 1.96 * se_log_or),
+            "log_OR": log_or,
+            "se_log_OR": se_log_or,
+        }
+    )
+
+    return {
+        "model": logit_model,
+        "summary_df": summary_df,
+        "contrast_df": contrast_df,
+        "ref_value": ref_value,
+        "knots": num_knots,
+        "non_linear_pvalue": non_linear_p,
+        "log_likelihood": float(logit_model.llf),
+    }

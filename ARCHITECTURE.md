@@ -8,8 +8,15 @@ System architecture and structural specifications for `medstat-core` and the `me
 
 ```
                           ┌───────────────────────────┐
-                          │    Agent Skills Layer     │
-                          │ (.agents/skills / skills) │
+                          │   medstat-master Skill    │
+                          │   (Master Orchestrator)   │
+                          └─────────────┬─────────────┘
+                                        │ orchestrates
+                                        ▼
+                          ┌───────────────────────────┐
+                          │    Atomic Agent Skills    │
+                          │   (clean, models, diag,   │
+                          │    causal-meta, report)   │
                           └─────────────┬─────────────┘
                                         │ invokes
                                         ▼
@@ -30,11 +37,12 @@ System architecture and structural specifications for `medstat-core` and the `me
       │  medstat.causal   │  medstat.meta     │  medstat.reporting        │
       │  - psm matching   │  - DL random-eff  │  - NEJM / JAMA / APA 7    │
       │  - balance & SMD  │  - forest data    │  - STROBE/CONSORT/TRIPOD  │
-      │  - love plots     │  - Egger's test   │  - methods narrative      │
+      │  - love plots     │  - Egger(cont>=10)│  - methods narrative      │
       ├───────────────────┴───────────────────┴───────────────────────────┤
       │                     medstat.agreement                             │
-      │  - Bland-Altman LoA with Carkeet CIs                              │
+      │  - Bland-Altman LoA with Bland–Altman (1999) large-sample CIs     │
       │  - Pure-SciPy Intraclass Correlation Coefficient (ICC) (No GPL)   │
+      │  - Cohen's & Fleiss' Kappa (Categorical Inter-Rater Agreement)    │
       └───────────────────────────────────────────────────────────────────┘
 ```
 
@@ -43,6 +51,7 @@ System architecture and structural specifications for `medstat-core` and the `me
 ## 2. Module Seams & Responsibilities
 
 ### `medstat.data`
+- **`loader.py`**: Universal clinical tabular ingestion (.csv, .tsv, .xlsx, .parquet) with auto-encoding detection, whitespace stripping, and fuzzy column suggestion.
 - **`clean.py`**: Missingness auditing, Little's MCAR multivariate test, Winsorization / IQR outlier handling, and strategy routing.
 - **`missing.py`**: Implementation of `complete-case`, `mice` (via Bayesian ridge chained equations), `knn`, and `indicator` methods. Raises `MissingStrategyRequiredError` if missing data exists without an explicit strategy and documented justification.
 - **`retention.py`**: `SampleFlowTracker` recording participant retention ($N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$) with categorized reasons.
@@ -51,29 +60,33 @@ System architecture and structural specifications for `medstat-core` and the `me
 - **`glm.py`**: OLS linear regression and standard binary logistic regression via `statsmodels`.
 - **`firth.py`**: Firth penalized logistic regression and penalized Cox proportional hazards via `firthmodels` with profile likelihood confidence intervals.
 - **`survival.py`**: Cox proportional hazards modeling via `lifelines` and Grambsch-Therneau Schoenfeld residual correlation tests.
-- **`splines.py`**: Restricted cubic splines (RCS) with flexible knot placement via pure-Python `rcs_lib.py`.
+- **`splines.py`**: Restricted cubic splines (RCS) with flexible knot placement via pure-Python `rcs_lib.py` for both Cox proportional hazards and multivariable logistic regression.
 - **`sensitivity.py`**: VanderWeele & Ding E-value computation for point estimates and lower/upper confidence bounds.
 
 ### `medstat.diagnostic`
-- **`accuracy.py`**: Complete 2x2 contingency metrics (Sensitivity, Specificity, PPV, NPV, LR+, LR-, DOR) with Wilson score confidence intervals.
+- **`accuracy.py`**: Complete 2x2 contingency metrics (Sensitivity, Specificity, PPV, NPV, LR+, LR-, DOR) with Wilson score confidence intervals and low-is-abnormal directionality handling.
 - **`roc.py`**: Non-parametric empirical ROC curve, Youden's J cutpoint, and DeLong covariance matrix calculation for paired AUC comparisons.
 - **`dca.py`**: Vickers Decision Curve Analysis calculating net benefit across threshold probabilities relative to "Treat All" and "Treat None".
 
-### `medstat.causal` & `medstat.agreement`
+### `medstat.causal`
 - **`psm.py`**: Propensity score estimation via logistic regression, 1:1 nearest neighbor matching with logit standard deviation caliper, and matched cohort extraction.
 - **`balance.py`**: Standardized Mean Difference (SMD) calculation for continuous and binary variables, and Austin 2009 Love plot data generation.
-- **`bland_altman.py`**: Mean difference, 95% Limits of Agreement, and Carkeet (2015) confidence intervals. Supports both wide paired columns and long-format rater data.
-- **`icc.py`**: Pure SciPy/NumPy two-way ANOVA decomposition computing Shrout & Fleiss (1979) forms (ICC1, ICC2, ICC3, ICC1k, ICC2k, ICC3k) with exact F-distribution confidence intervals.
+- **`mediation.py`**: Pure-Python parametric causal mediation analysis (Baron-Kenny / Imai) with quasi-Bayesian Monte Carlo confidence intervals for Average Causal Mediation Effect (ACME) and Average Direct Effect (ADE).
 
 ### `medstat.meta`
 - **`models.py`**: Fixed-effects inverse variance and DerSimonian-Laird random-effects meta-analysis, Cochran's Q test, and Higgins $I^2$.
 - **`forest.py`**: Forest plot structured data generation.
-- **`bias.py`**: Egger's linear regression test for funnel plot asymmetry.
+- **`bias.py`**: Egger's linear regression test for funnel plot asymmetry (applicable when $k \ge 10$ studies with continuous effect measures such as mean difference or SMD; not recommended for binary log odds ratios due to artifactual correlation).
+
+### `medstat.agreement`
+- **`bland_altman.py`**: Paired measurement difference analysis and limits of agreement with Bland–Altman (1999) large-sample approximate CIs. Supports both wide paired columns and long-format rater data.
+- **`icc.py`**: Pure SciPy/NumPy two-way ANOVA decomposition computing Shrout & Fleiss (1979) forms (ICC1, ICC2, ICC3, ICC1k, ICC2k, ICC3k) with exact F-distribution confidence intervals.
+- **`kappa.py`**: Cohen's Kappa (unweighted, linear, quadratic with non-null and null SEs) and Fleiss' generalized multi-rater Kappa for discrete categories.
 
 ### `medstat.reporting`
-- **`tables.py`**: Journal-compliant HTML table rendering (NEJM, JAMA, APA 7) with strict border rules and no vertical dividers.
+- **`tables.py`**: Journal-compliant polymorphic HTML table rendering (NEJM, JAMA, APA 7) with strict border rules, no vertical dividers, and support for Table 1, Regression, Diagnostic accuracy, Bland-Altman, ICC, and Covariate balance.
 - **`narrative.py`**: Automated biomedical Methods and Results narrative generation.
-- **`checklists.py`**: Audited item checklists for STROBE, CONSORT, and TRIPOD.
+- **`checklists.py`**: Audited item checklists for STROBE, CONSORT, TRIPOD, STARD (diagnostic studies), and PRISMA (systematic reviews).
 
 ---
 
@@ -81,10 +94,11 @@ System architecture and structural specifications for `medstat-core` and the `me
 
 ```mermaid
 flowchart LR
-    CSV[Raw Clinical CSV] --> Clean[medstat.data.clean]
-    Clean -->|Audited Cohort + Flow| Model[medstat.models / causal / diag]
-    Model -->|JSON Estimates| Report[medstat.reporting]
-    Report -->|HTML Table + Narrative| Manuscript[Publication Draft]
+    Data[Clinical Ingestion: CSV / XLSX / TSV / Parquet] --> Profile[medstat profile: Data Health & Design Inference]
+    Profile --> Clean[medstat.data.clean: Little's MCAR + Missing Strategy (Optional Outlier Action)]
+    Clean -->|Audited Cohort + Flow| Model[medstat.models / causal / diag / agreement]
+    Model -->|JSON Estimates Contract| Report[medstat.reporting: Polymorphic Renderer]
+    Report -->|HTML Table + Narrative + Checklist| Manuscript[Publication Draft]
 ```
 
 All subcommands emit structured JSON contracts allowing easy composition into pipelines, agent tools, or downstream rendering engines.

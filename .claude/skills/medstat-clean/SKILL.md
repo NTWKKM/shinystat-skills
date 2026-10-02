@@ -65,9 +65,34 @@ medstat clean --data <dataset.csv> \
 
 ### Step 3: Sanitize & Winsorize Outliers
 
-Detect and handle non-physiological or extreme values:
-- Use Tukey's IQR rule ($1.5 \times \text{IQR}$) or robust median deviation (e.g., $|\text{modified z-score}| > 3.5$ or $|x_i - \text{median}| > 3 \times \text{MAD}$).
-- Extreme laboratory readings or physiological vitals (e.g., SBP > 260 or < 40 mmHg) should be flagged for clinical chart review and verification against source records; apply prespecified variable-specific handling rules rather than blanket automatic winsorization.
+Detect and handle extreme values using `--outlier-action`, `--outlier-cols`, and `--iqr-multiplier`. **Note**: Commands below are templates; replace all placeholders (`<...>`) with valid values before execution. Because Tukey fences are purely statistical rather than domain-specific physiological plausibility boundaries, always explicitly select variables via `--outlier-cols` and perform clinical review before applying destructive actions (`winsorize`, `cap`, or `remove`), rather than running them across all numeric columns without selection:
+
+```bash
+# Winsorize extreme values to Tukey IQR fences (Q1 - 1.5*IQR, Q3 + 1.5*IQR) for explicitly selected variables
+medstat clean --data <dataset.csv> \
+  --strategy <strategy> \
+  --missing-justification "[audit-based clinical justification selected after missingness audit]" \
+  --outlier-action winsorize \
+  --outlier-cols <variable_1> \
+  --iqr-multiplier 1.5 \
+  --output clean_winsorized.csv --audit-out retention.json
+
+# Or remove statistical outliers on explicitly selected columns with audited sample flow tracking
+medstat clean --data <dataset.csv> \
+  --strategy <strategy> \
+  --missing-justification "[audit-based clinical justification selected after missingness audit]" \
+  --outlier-action remove \
+  --outlier-cols <variable_1> \
+  --iqr-multiplier 3.0 \
+  --output clean_no_outliers.csv --audit-out retention.json
+```
+
+- `--outlier-action [flag|remove|winsorize|cap]`:
+  - `winsorize` / `cap`: Clamps extreme values to the Tukey fences ($Q_1 - k \times \text{IQR}$, $Q_3 + k \times \text{IQR}$) across explicitly selected numeric columns while retaining the full cohort. Requires explicit variable selection (`--outlier-cols`) and clinical review before capping.
+  - `remove`: Excludes rows outside Tukey fences in selected numeric columns and logs them into the sample retention tracker ($N_{\text{excluded}}$). This is a statistical rather than a physiological-plausibility check; explicit column selection (`--outlier-cols`) and clinical verification are required before removal.
+  - `flag`: Records per-column counts in `outlier_counts` without marking rows or changing values.
+- `--outlier-cols`: Explicit numeric column(s) to evaluate and transform (e.g. `--outlier-cols <biomarker>`).
+- `--iqr-multiplier`: Tukey's multiplier $k$ (default: `1.5` for inner fences, `3.0` for extreme outer fences).
 - Standardize explicitly binary event-status fields to numeric `0/1` (`1 = Event`, `0 = Non-event`), ensuring survival follow-up duration and multicategory endpoints remain intact; never forward text outcomes to modeling.
 
 ### Step 4: Verify Sample Retention Flow

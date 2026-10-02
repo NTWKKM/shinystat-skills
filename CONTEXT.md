@@ -6,7 +6,7 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
 
 | Term | Symbol / Code | Definition & Clinical Context |
 | :--- | :--- | :--- |
-| **Complete-Case** | `complete-case` | Analysis restricted exclusively to records with zero missing values. Valid strictly under Missing Completely at Random (MCAR). |
+| **Complete-Case** | `complete-case` | Analysis restricted exclusively to records with zero missing values. Validity is conditional on assessing the missingness mechanism, target estimand, and sensitivity analysis; may also be appropriate when missingness is trivial and clinically uninformative, rather than stating validity strictly under MCAR. |
 | **MICE** | `mice` | Multiple Imputation by Chained Equations. Iterative imputation using series of regression models under Missing at Random (MAR). |
 | **Sample Flow Tracker** | `SampleFlowTracker` | CONSORT/STROBE audit tracker recording participant transitions: $N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$. |
 | **Standardized Mean Difference** | `SMD` | Difference in means or proportions divided by pooled standard deviation. Evaluates baseline balance; $\text{SMD} < 0.10$ signifies negligible imbalance. |
@@ -18,10 +18,12 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
 | **DeLong Test** | `delong` | Non-parametric placement-value covariance estimation for ROC AUC standard errors and paired comparative testing. |
 | **Decision Curve Analysis** | `dca` | Vickers decision-analytic metric evaluating clinical net benefit across threshold probabilities ($p_t$) against "Treat All" and "Treat None". |
 | **Propensity Score Matching** | `psm` | Logistic regression modeling treatment probability followed by caliper-bounded nearest neighbor pairing. |
-| **Limits of Agreement** | `bland_altman` | Bland-Altman interval $\bar{d} \pm 1.96 \cdot s_d$ containing 95% of paired measurement differences, accompanied by Carkeet (2015) exact CIs. |
+| **Limits of Agreement** | `bland_altman` | Bland-Altman interval $\bar{d} \pm 1.96 \cdot s_d$ containing 95% of paired measurement differences, accompanied by Bland–Altman (1999) large-sample approximate CIs. |
 | **Intraclass Correlation** | `icc` | Variance partition ratio quantifying reliability and agreement among clinical observers based on two-way ANOVA decomposition. |
 | **DerSimonian-Laird** | `dl` | Non-iterative method of moments estimator for between-study variance ($\tau^2$) in random-effects meta-analysis. |
 | **Egger's Test** | `egger` | Linear regression of standardized effect against precision assessing funnel plot asymmetry and publication bias. |
+| **Master Orchestration** | `medstat-master` | Autonomous intelligence layer that profiles datasets, infers clinical study design, and orchestrates downstream atomic skills without manual skill selection. |
+| **Statistical Analysis Plan** | `SAP` | Formal specification of primary estimand, data cleaning/retention strategy, planned models, and reporting standards before execution. |
 
 ---
 

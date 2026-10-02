@@ -723,6 +723,7 @@ def prepare_data_for_analysis(
     missing_codes: list[Any] | dict[str, Any] | None = None,
     strategy_params: dict[str, Any] | None = None,
     return_info: bool = True,
+    disallowed_strategies: set[str] | list[str] | None = None,
     **kwargs: Any,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """
@@ -739,6 +740,7 @@ def prepare_data_for_analysis(
         missing_codes: Custom missing value codes.
         strategy_params: Optional hyperparameters for imputation.
         return_info: Whether to return info dict.
+        disallowed_strategies: Optional set of strategies disallowed for specific analysis workflows (e.g. {'mice'}).
         **kwargs: Additional hyperparameters passed to strategy_params (e.g. n_imputations, n_neighbors).
 
     Returns:
@@ -791,6 +793,14 @@ def prepare_data_for_analysis(
     original_rows = len(df_subset)
 
     # 6. Safety Gate: Missing values present
+    if disallowed_strategies and handle_missing is not None:
+        disallowed_norm = {s.lower().replace("_", "-") for s in disallowed_strategies}
+        if handle_missing.lower().replace("_", "-") in disallowed_norm:
+            raise NotImplementedError(
+                f"Missing data strategy '{handle_missing}' is not supported for this analysis workflow. "
+                f"Disallowed strategies: {sorted(disallowed_norm)}"
+            )
+
     if total_missing_cells > 0:
         if handle_missing is None:
             raise MissingStrategyRequiredError(

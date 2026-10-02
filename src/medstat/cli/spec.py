@@ -17,6 +17,7 @@ import pandas as pd
 import yaml
 
 from medstat.data.clean import prepare_data_for_analysis
+from medstat.data.loader import load_clinical_data
 from medstat.data.missing import pool_estimates
 from medstat.data.retention import SampleFlowTracker
 from medstat.models.firth import fit_firth_logistic
@@ -205,7 +206,7 @@ class AnalysisPlan:
                 raw_path = (Path.cwd() / raw_path).resolve()
             if not raw_path.exists():
                 raise FileNotFoundError(f"Dataset path not found: {raw_path}")
-            current_df = pd.read_csv(raw_path)
+            current_df = load_clinical_data(raw_path)
         else:
             current_df = df.copy()
 
