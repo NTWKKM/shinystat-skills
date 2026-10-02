@@ -79,7 +79,7 @@ This project ships **6 agent skills** in `.agent/skills/` (and `skills/`) that t
 | **medstat-clean** | Data Cleaning | Missingness audit (Little's MCAR), imputation (MICE/KNN/indicator), sample-flow tracking, rejects silent listwise deletion |
 | **medstat-models** | Regression & Survival | Table 1 (SMD), GLM/logistic, Cox PH + Schoenfeld, Firth penalized (sparse events), RCS splines, E-value sensitivity |
 | **medstat-diagnostic** | Diagnostic Accuracy | 2×2 contingency (Wilson CI), ROC + DeLong CI, paired DeLong biomarker comparison, DCA net benefit |
-| **medstat-causal-meta** | Causal & Meta-analysis | PSM (caliper 0.2×SD logit, SMD<0.10 balance), Love plot, Cohen's and Fleiss' Kappa, ICC (pure SciPy), Bland-Altman, meta-analysis (DL, Egger's if k ≥ 10) |
+| **medstat-causal-meta** | Causal & Meta-analysis | PSM (caliper 0.2×SD logit, SMD<0.10 balance), Love plot, Cohen's and Fleiss' Kappa, ICC (pure SciPy), Bland-Altman, meta-analysis (DL, Egger's for continuous effect measures if k ≥ 10) |
 | **medstat-report** | Publication Reporting | NEJM/JAMA/APA 7 styled tables, auto Methods narrative, STROBE/CONSORT/TRIPOD/STARD/PRISMA checklist audit |
 
 ### Skills Directory Structure

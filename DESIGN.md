@@ -178,7 +178,7 @@ Clinical datasets originate from diverse hospital IT systems (EHR exports, regis
 ### Decision
 1. Implement universal loader `load_clinical_data` in `medstat.data.loader` supporting CSV, TSV, Excel, and Parquet with automated fallback encodings (`utf-8`, `utf-8-sig`, `cp1252`, `latin1`) and automatic column name whitespace stripping.
 2. Introduce `validate_columns` with `difflib.get_close_matches` providing intelligent suggestions when required columns are missing (e.g., *"Did you mean 'statin_rx' instead of 'tx_statin'?"*).
-3. Introduce `medstat profile` command providing an instant one-shot clinical data health overview: cohort dimensions, missingness percentage, candidate clinical outcomes, survival endpoints, biomarker columns, and automated clinical study design inference.
+3. Introduce `medstat profile` command providing an instant one-shot clinical data health overview: cohort dimensions, missingness percentage, candidate clinical outcomes, survival endpoints, and limited heuristic study-design inference. It does not identify biomarker columns or classify Type 4 diagnostic or Type 7 meta-analysis studies.
 
 ### Consequences
 - **Status**: Accepted & Verified.

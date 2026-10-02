@@ -65,12 +65,12 @@ medstat clean --data <dataset.csv> \
 
 ### Step 3: Sanitize & Winsorize Outliers
 
-Detect and handle extreme values using `--outlier-action`, `--outlier-cols`, and `--iqr-multiplier`. **Note**: Because Tukey fences are purely statistical rather than domain-specific physiological plausibility boundaries, always explicitly select variables via `--outlier-cols` and perform clinical review before applying destructive actions (`winsorize`, `cap`, or `remove`), rather than running them across all numeric columns without selection:
+Detect and handle extreme values using `--outlier-action`, `--outlier-cols`, and `--iqr-multiplier`. **Note**: Commands below are templates; replace all placeholders (`<...>`) with valid values before execution. Because Tukey fences are purely statistical rather than domain-specific physiological plausibility boundaries, always explicitly select variables via `--outlier-cols` and perform clinical review before applying destructive actions (`winsorize`, `cap`, or `remove`), rather than running them across all numeric columns without selection:
 
 ```bash
 # Winsorize extreme values to Tukey IQR fences (Q1 - 1.5*IQR, Q3 + 1.5*IQR) for explicitly selected variables
 medstat clean --data <dataset.csv> \
-  --strategy [complete-case|mice|knn|indicator] \
+  --strategy <strategy> \
   --missing-justification "[audit-based clinical justification selected after missingness audit]" \
   --outlier-action winsorize \
   --outlier-cols <variable_1> \
@@ -79,7 +79,7 @@ medstat clean --data <dataset.csv> \
 
 # Or remove statistical outliers on explicitly selected columns with audited sample flow tracking
 medstat clean --data <dataset.csv> \
-  --strategy [complete-case|mice|knn|indicator] \
+  --strategy <strategy> \
   --missing-justification "[audit-based clinical justification selected after missingness audit]" \
   --outlier-action remove \
   --outlier-cols <variable_1> \

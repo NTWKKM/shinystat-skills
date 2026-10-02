@@ -2034,3 +2034,263 @@ class TestPR4ReviewFollowupFixes:
             ],
         )
         assert res_flag.exit_code == 0
+
+    def test_clean_rejects_non_positive_iqr_multiplier(self, tmp_path):
+        """Verify that --iqr-multiplier rejects 0 and negative values."""
+        runner = CliRunner()
+        df = pd.DataFrame({"x": [1.0, 2.0, 3.0, 4.0, 5.0]})
+        csv_in = tmp_path / "iqr_test.csv"
+        df.to_csv(csv_in, index=False)
+
+        for invalid_k in ("0", "0.0", "-1.5"):
+            res = runner.invoke(
+                cli,
+                [
+                    "clean",
+                    "--data",
+                    str(csv_in),
+                    "--strategy",
+                    "complete-case",
+                    "--missing-justification",
+                    "Audit complete",
+                    "--iqr-multiplier",
+                    invalid_k,
+                ],
+            )
+            assert res.exit_code != 0
+            assert (
+                "is not in the range x > 0.0" in res.output
+                or "invalid" in res.output.lower()
+            )
+
+    def test_model_cmd_spline_var_column_and_missingness_validation(self, tmp_path):
+        """Verify that --spline-var is included in column validation and missingness check."""
+        runner = CliRunner()
+        df = pd.DataFrame(
+            {
+                "y": [0, 1, 0, 1, 0, 1, 0, 1],
+                "x1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+                "age_missing": [50.0, np.nan, 60.0, 70.0, 45.0, 55.0, 65.0, 75.0],
+            }
+        )
+        csv_in = tmp_path / "spline_val_test.csv"
+        df.to_csv(csv_in, index=False)
+
+        # 1. Typo in --spline-var triggers validate_columns
+        res_typo = runner.invoke(
+            cli,
+            [
+                "model",
+                "--data",
+                str(csv_in),
+                "--type",
+                "logistic",
+                "--outcome",
+                "y",
+                "--covariates",
+                "x1",
+                "--spline-var",
+                "age_typo",
+            ],
+        )
+        assert res_typo.exit_code != 0
+        assert (
+            "not found in dataset" in res_typo.output and "age_typo" in res_typo.output
+        )
+
+        # 2. Missing data in --spline-var triggers check_data_missingness
+        res_nan = runner.invoke(
+            cli,
+            [
+                "model",
+                "--data",
+                str(csv_in),
+                "--type",
+                "logistic",
+                "--outcome",
+                "y",
+                "--covariates",
+                "x1",
+                "--spline-var",
+                "age_missing",
+            ],
+        )
+        assert res_nan.exit_code != 0
+        assert (
+            "Unhandled missing data detected" in res_nan.output
+            and "age_missing" in res_nan.output
+        )
+
+    def test_sample_size_event_probability_validation(self):
+        """Verify event probability error message states (0, 1] and accepts 1.0."""
+        runner = CliRunner()
+        # Invalid <= 0
+        res_zero = runner.invoke(
+            cli,
+            [
+                "sample-size",
+                "--type",
+                "survival",
+                "--hazard-ratio",
+                "1.5",
+                "--p-event",
+                "0.0",
+            ],
+        )
+        assert res_zero.exit_code != 0
+        assert "Event probability must be in (0, 1] (found: 0.0)." in res_zero.output
+
+        # Invalid > 1
+        res_high = runner.invoke(
+            cli,
+            [
+                "sample-size",
+                "--type",
+                "survival",
+                "--hazard-ratio",
+                "1.5",
+                "--p-event",
+                "1.5",
+            ],
+        )
+        assert res_high.exit_code != 0
+        assert "Event probability must be in (0, 1] (found: 1.5)." in res_high.output
+
+        # Valid 1.0 succeeds
+        res_one = runner.invoke(
+            cli,
+            [
+                "sample-size",
+                "--type",
+                "survival",
+                "--hazard-ratio",
+                "1.5",
+                "--p-event",
+                "1.0",
+            ],
+        )
+        assert res_one.exit_code == 0
+        assert "total_sample_size" in res_one.output
+
+    def test_model_cmd_ci_method_forwarding_to_firth(self, tmp_path):
+        """Verify --ci-method profile and wald are forwarded to Firth logistic and Cox."""
+        runner = CliRunner()
+        # Logistic dataset with separation
+        df_log = pd.DataFrame(
+            {
+                "y": [0, 0, 0, 0, 1, 1, 1, 1, 1, 1],
+                "x": [1.0, 2.0, 1.5, 2.5, 8.0, 9.0, 8.5, 9.5, 10.0, 10.5],
+            }
+        )
+        csv_log = tmp_path / "firth_ci_log.csv"
+        df_log.to_csv(csv_log, index=False)
+
+        # Profile
+        res_prof = runner.invoke(
+            cli,
+            [
+                "model",
+                "--data",
+                str(csv_log),
+                "--type",
+                "logistic",
+                "--outcome",
+                "y",
+                "--covariates",
+                "x",
+                "--method",
+                "firth",
+                "--ci-method",
+                "profile",
+            ],
+        )
+        assert res_prof.exit_code == 0
+
+        # Wald
+        res_wald = runner.invoke(
+            cli,
+            [
+                "model",
+                "--data",
+                str(csv_log),
+                "--type",
+                "logistic",
+                "--outcome",
+                "y",
+                "--covariates",
+                "x",
+                "--method",
+                "firth",
+                "--ci-method",
+                "wald",
+            ],
+        )
+        assert res_wald.exit_code == 0
+
+        # Cox dataset
+        df_cox = pd.DataFrame(
+            {
+                "time": [5.0, 10.0, 12.0, 15.0, 20.0, 25.0],
+                "event": [1, 1, 0, 1, 0, 1],
+                "x": [1.0, 2.0, 1.5, 3.0, 2.5, 4.0],
+            }
+        )
+        csv_cox = tmp_path / "firth_ci_cox.csv"
+        df_cox.to_csv(csv_cox, index=False)
+
+        res_cox_prof = runner.invoke(
+            cli,
+            [
+                "model",
+                "--data",
+                str(csv_cox),
+                "--type",
+                "cox",
+                "--time",
+                "time",
+                "--outcome",
+                "event",
+                "--covariates",
+                "x",
+                "--method",
+                "firth",
+                "--ci-method",
+                "profile",
+            ],
+        )
+        assert res_cox_prof.exit_code == 0
+
+        res_cox_wald = runner.invoke(
+            cli,
+            [
+                "model",
+                "--data",
+                str(csv_cox),
+                "--type",
+                "cox",
+                "--time",
+                "time",
+                "--outcome",
+                "event",
+                "--covariates",
+                "x",
+                "--method",
+                "firth",
+                "--ci-method",
+                "wald",
+            ],
+        )
+        assert res_cox_wald.exit_code == 0
+
+    def test_diagnostic_narrative_omits_wilson_when_no_cutoff(self):
+        """Verify diagnostic narrative omits Wilson score claim when no cutoff was evaluated."""
+        narr = generate_methods_narrative(
+            model_type="diagnostic",
+            diagnostic_data={
+                "roc": {"auc": 0.88, "ci_lower": 0.80, "ci_upper": 0.95},
+                "dca": {"thresholds": [0.1, 0.2]},
+            },
+        )
+        assert "Wilson score method" not in narr
+        assert "Receiver Operating Characteristic (ROC)" in narr
+        assert "Decision Curve Analysis (DCA)" in narr

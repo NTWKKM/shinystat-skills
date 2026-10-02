@@ -105,10 +105,6 @@ def generate_methods_narrative(
                 f"Diagnostic test performance (sensitivity, specificity, positive predictive value, negative predictive value, and likelihood ratios) was evaluated {thresh_str}{dir_clause}. "
                 "Confidence intervals (95%) for proportions (sensitivity, specificity, PPV, and NPV) were calculated using the Wilson score method."
             )
-        else:
-            diag_parts.append(
-                "Diagnostic accuracy parameters and proportion metrics were evaluated with 95% confidence intervals calculated using the Wilson score method."
-            )
 
         if has_roc_eval:
             roc_sentence = (

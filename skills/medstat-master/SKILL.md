@@ -58,7 +58,7 @@ When a dataset is presented, inspect it before proposing or executing any models
    - Ensure the `phi-privacy-auditor` skill is provisioned in your agent's skills directory (e.g., `~/.agents/skills/`, `~/.claude/skills/`, or `.agents/skills/` per the README setup guidance) before processing data. Explicitly run `phi-privacy-auditor` before ingesting CSV, XLSX, TSV, or Parquet files to ensure no Protected Health Information is present; stop ingestion immediately (fail-closed) if the auditor is unavailable or fails.
 
 1. **One-Shot Automated Data Profiling**:
-   - Run `medstat profile` to instantly inspect cohort dimensions, missingness, outcome candidates, and infer the study design:
+   - Run `medstat profile` to inspect cohort dimensions, missingness, and outcome candidates. Treat `inferred_study_design` as a limited heuristic, not as the sole classifier. Review the clinical goal and relevant columns before routing, including Type 4 index-test/gold-standard pairs and Type 7 effect-size, variance, study-label, and sample-size fields:
    ```bash
    uv run medstat profile --data <dataset.csv>
    ```

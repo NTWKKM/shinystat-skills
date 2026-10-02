@@ -294,7 +294,7 @@ def profile_cmd(data: str, output: str | None) -> None:
 @click.option(
     "--iqr-multiplier",
     default=1.5,
-    type=float,
+    type=click.FloatRange(min=0.0, min_open=True),
     help="Tukey's IQR multiplier for outlier detection (default: 1.5).",
 )
 @click.option("--output", type=click.Path(), help="Output cleaned CSV file path.")
@@ -565,7 +565,10 @@ def table1_cmd(
     "--method", default="standard", help="Estimation method (standard, firth)."
 )
 @click.option(
-    "--ci-method", default="profile", help="Confidence interval method (profile, wald)."
+    "--ci-method",
+    type=click.Choice(["profile", "wald"]),
+    default="profile",
+    help="Confidence interval method (profile, wald).",
 )
 @click.option(
     "--schoenfeld",
@@ -626,7 +629,12 @@ def model_cmd(
     if exposure and exposure not in covar_list:
         covar_list.insert(0, exposure)
 
-    cols_to_check = [outcome] + ([time_col] if time_col else []) + covar_list
+    cols_to_check = (
+        [outcome]
+        + ([time_col] if time_col else [])
+        + covar_list
+        + ([spline_var] if spline_var and spline_var not in covar_list else [])
+    )
     validate_columns(df, cols_to_check, "model")
     check_data_missingness(df, cols_to_check, "model")
 
@@ -676,11 +684,13 @@ def model_cmd(
         ev_vals = ev_raw.astype(int).values
 
         if method == "firth":
+            firth_ci_method = "pl" if ci_method == "profile" else "wald"
             fit_res = fit_firth_cox(
                 t_vals,
                 ev_vals,
                 X_df.values,
                 feature_names=feature_names,
+                ci_method=firth_ci_method,
             )
             sum_df = fit_res["summary_df"]
             result_data["coefficients"] = _serialize_summary_df(sum_df)
@@ -721,7 +731,13 @@ def model_cmd(
         y = y_raw.astype(int).values
 
         if method == "firth":
-            fit_res = fit_firth_logistic(y, X_df, feature_names=feature_names)
+            firth_ci_method = "pl" if ci_method == "profile" else "wald"
+            fit_res = fit_firth_logistic(
+                y,
+                X_df,
+                feature_names=feature_names,
+                ci_method=firth_ci_method,
+            )
             sum_df = fit_res["summary_df"]
             result_data["coefficients"] = _serialize_summary_df(sum_df)
         else:
@@ -1557,7 +1573,7 @@ def sample_size_cmd(
             )
         if not (0.0 < ev_prob <= 1.0):
             raise click.ClickException(
-                f"Event probability must be strictly between 0 and 1 (found: {ev_prob})."
+                f"Event probability must be in (0, 1] (found: {ev_prob})."
             )
         surv_res = calculate_sample_size_survival(
             hazard_ratio=hazard_ratio, p_event=ev_prob, alpha=alpha, power=power
