@@ -296,6 +296,46 @@ Following ADR 15, `medstat-master` proved effective at handling complex, non-sta
 
 [MEMORY_LEARN: Expanding adaptive prototype scripting across all domain skills provides agents with end-to-end flexibility for raw clinical data while enforcing biostatistical ground truths from core modules.]
 
+---
+
+## ADR 17: Autonomous Triangulation Decision Engine & Anti-Hallucination Governance Suite
+
+### Context
+While ADR 15 and ADR 16 provided agents with adaptive Python scripting flexibility to handle non-standard spreadsheets, testing revealed that without structured arbitrating logic, AI agents risk statistical hallucinations:
+1. Mismatch between research proposal and raw data (e.g. attempting survival analysis when only binary vital status is available without follow-up duration, leading agents to fabricate synthetic time columns or loop on failed model fits).
+2. Silent statistical assumptions (e.g. performing listwise deletion without MCAR testing, or reporting mean ± SD on highly skewed biomarker data without normality audits).
+3. Inverted clinical concordance (e.g. evaluating low-is-abnormal biomarkers like eGFR or Platelets with Score >= Cutoff, causing inverted ROC curves with AUC < 0.50).
+4. Sparse-data over-parameterization (e.g. fitting multivariable logistic regression with EPV < 10, producing quasi-complete separation and astronomical odds ratios).
+5. Unsubstantiated clinical claims (e.g. concluding "treatments are equivalent" from p > 0.05, or confusing Pearson correlation with measurement agreement).
+
+### Decision
+1. **3-Pillar Triangulation Decision Engine**: Formally establish the arbitration protocol in `medstat-master` and references (`study-design-decision-tree.md`), requiring agents to triangulate:
+   - **Pillar 1 (Proposal)**: PICO/PECO, target estimand, and primary research archetype (Types 1–7).
+   - **Pillar 2 (Clinical Principles)**: Biological mechanisms, confounding by indication, non-linear thresholds, and directionality.
+   - **Pillar 3 (Raw Data Reality)**: Data geometry, sample size $N$, events count, outcome formats, EPV, and missingness patterns.
+2. **The 5 Anti-Hallucination Stop Gates**:
+   - *Gate 1 (Contradiction Resolution)*: Halt & Pivot when proposal conflicts with raw data (e.g., survival without time column transitions to logistic/Firth).
+   - *Gate 2 (Silent Assumption Barrier)*: Zero silent listwise deletion; mandatory distribution checks (Shapiro-Wilk) routing skewed data to Median [IQR] and Mann-Whitney U.
+   - *Gate 3 (Directionality Gate)*: Strict 0/1 numeric encoding; automated AUC sanity check (AUC < 0.50 triggers low-is-abnormal inversion $Score_{\text{eff}} = -Score$).
+   - *Gate 4 (Sparse Data & EPV Gate)*: Mandate calculation of $\text{EPV} = \frac{\min(N_{\text{events}}, N_{\text{non-events}})}{K_{\text{covariates}}}$; if $\text{EPV} < 10$, enforce Firth penalized likelihood.
+   - *Gate 5 (Clinical Interpretation Guardrails)*: Report $P > 0.05$ as "insufficient evidence to reject the null hypothesis" (never "no difference"); report OR with incidence warning if $> 10\%$; strictly reject Pearson correlation for rater/device agreement.
+3. **Domain Skill Hardening**:
+   - `medstat-clean`: Strict ban on imputing primary outcome variables; physiological plausibility protection against naive Tukey fence outlier deletion.
+   - `medstat-models`: Explicit EPV calculation and Firth fallback in master prototype script.
+   - `medstat-diagnostic`: Automated directionality sanity check and anti-p-hacking cutpoint guidance.
+   - `medstat-causal-meta`: Strict confounder selection (baseline only; no post-treatment mediators/colliders); agreement vs association invariant.
+   - `medstat-report`: Absence of evidence reporting rule, OR vs RR warning, and uncertainty-first ICC interval reporting.
+4. **Multi-Agent Mirror Synchronization**: Propagate byte-identical updates across canonical `skills/` and all 4 platform mirrors (`.agent/`, `.agents/`, `.claude/`, `.cursor/`).
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Decision Rigor**: Agents make principled, autonomous, and decisive methodology choices anchored in clinical biostatistical ground truths.
+- **Anti-Hallucination Defense**: Eliminates synthetic column fabrication, inverted ROC curves, separation artifacts, and misleading clinical claims.
+- **Verification**: Zero documentation drift across all platform mirrors; 100% passing test suite.
+
+[MEMORY_LEARN: 3-pillar triangulation (Proposal, Clinical Principles, Raw Data) paired with 5 deterministic anti-hallucination gates provides coding agents with decisive statistical judgment while preventing model mismatch and spurious claims.]
+
+
 
 
 

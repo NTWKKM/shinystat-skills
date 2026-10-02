@@ -15,6 +15,8 @@ Clinical data preparation engine enforcing explicit missing data justification a
    Specify `--audit-out <file>` to persist the audited flow artifact. Note: The `--audit-only` path produces missingness audit output but does not execute cleaning or generate `sample_flow` data.
 3. **Preserve Raw Values**: Keep original files untouched; write transformed cohorts to distinct output targets.
 4. **Binary Endpoint Standardization**: Supported binary and survival workflows require numeric outcomes and strictly reject text outcomes. Explicitly recode binary event-status endpoints to numeric `0/1` (`1 = Event`, `0 = Non-event`) before model execution; event direction must not be inferred from arbitrary text labels. Multicategory labels and survival follow-up time columns must be preserved in cleaned data, requiring separate documented model-input encoding for compatible multicategory models without overwriting original labels.
+5. **Strict Ban on Imputing Primary Outcomes**: Missing values in primary clinical endpoints (e.g., mortality, disease event, relapse) must never be blindly imputed using MICE or KNN. Drop missing outcome cases under audited retention flow ($N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$) with documented clinical rationale, or perform prespecified sensitivity analysis; never fabricate clinical outcomes.
+6. **Clinical Extreme Value Protection**: Tukey IQR fences ($1.5 \times \text{IQR}$) are purely statistical heuristics. Never delete or winsorize extreme values that represent genuine physiological crises (e.g., Troponin in massive STEMI, Lactate in septic shock) without confirming physiological impossibility (e.g., SBP = 999, Age = 250).
 
 ## Execution Sequence
 

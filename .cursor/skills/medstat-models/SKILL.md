@@ -14,6 +14,7 @@ Biostatistical modeling engine supporting generalized linear models, Cox proport
 3. **Sparse Events & Monotone Likelihood**: In sparse event survival (< 20 events) or quasi-complete logistic separation, use Firth's penalized likelihood with profile likelihood confidence intervals.
 4. **Non-Linearity Verification**: Continuous exposures with potential non-linear biology can be modeled using restricted cubic splines (RCS, supported for Cox regression in the CLI via `--spline-var`) with centered contrast reference points.
 5. **Binary & Event Outcome Encoding**: Binary outcomes (logistic regression) and event indicators (Cox proportional hazards) must be explicitly encoded as numeric `0` and `1` (`1 = Event`, `0 = Non-event`). Raw text outcomes (e.g., `"Dead"`, `"Alive"`, `"Yes"`, `"No"`) are rejected to prevent clinical event inversion.
+6. **Events-Per-Variable (EPV) Diagnostic Rule**: Before fitting multivariable logistic or Cox regression, calculate $\text{EPV} = \frac{\min(N_{\text{events}}, N_{\text{non-events}})}{K_{\text{covariates}}}$. If $\text{EPV} < 10$ or quasi-complete separation occurs, standard maximum likelihood estimation (MLE) is biased and produces unstable/infinite odds ratios. The agent must decisively transition to **Firth penalized likelihood** (`fit_firth_logistic` / `firth_cox`) or perform variable selection.
 
 ## Execution Sequence
 
@@ -127,7 +128,15 @@ def summarize_categorical(series, group):
     chi2, p_val, _, _ = stats.chi2_contingency(ct)
     return {"crosstab": ct, "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001"}
 
-# 3. MULTIVARIABLE MODELING (Logistic Regression / GLM)
+# 3. EPV DIAGNOSTIC & MULTIVARIABLE MODELING (Logistic Regression / GLM)
+n_events = (df['outcome'] == 1).sum()
+n_nonevents = (df['outcome'] == 0).sum()
+n_covariates = 4  # treatment, age, sex, bmi
+epv = min(n_events, n_nonevents) / n_covariates
+print(f"Events Per Variable (EPV): {epv:.1f}")
+if epv < 10:
+    print("Warning: EPV < 10 detected; standard MLE logistic regression may suffer from separation bias. Recommend Firth penalized logistic.")
+
 # Formula: outcome ~ exposure + covariates
 formula = "outcome ~ treatment + age + C(sex) + bmi"
 model = smf.logit(formula, data=df).fit(disp=False)

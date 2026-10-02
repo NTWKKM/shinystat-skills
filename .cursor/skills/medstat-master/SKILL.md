@@ -1,11 +1,11 @@
 ---
 name: medstat-master
-description: Master clinical biostatistics orchestrator. Ingests raw clinical data (CSV, XLSX, TSV, .parquet), inspects file layout and schema, identifies clinical study design, and guides the agent to adapt Python scripts for data cleaning, statistical modeling, and publication-grade reporting (NEJM/JAMA) tailored to the specific dataset.
+description: Master clinical biostatistics orchestrator. Ingests raw clinical data (CSV, XLSX, TSV, .parquet), inspects file layout and schema, identifies clinical study design via 3-pillar triangulation (Proposal, Clinical Principles, Raw Data), prevents statistical hallucination, and guides the agent to adapt Python scripts for data cleaning, statistical modeling, and publication-grade reporting (NEJM/JAMA) tailored to the specific dataset.
 ---
 
 # medstat-master: Autonomous Biostatistical Orchestrator
 
-The master intelligence layer for clinical biostatistics. Ingests clinical spreadsheets and cohorts, profiles data geometry, infers study design, selects appropriate statistical methods, and guides the agent to perform data cleaning, analysis, modeling, and reporting using **adaptive Python scripting tailored to the specific dataset** rather than rigid, brittle canned scripts.
+The master intelligence layer for clinical biostatistics. Ingests clinical spreadsheets and cohorts, profiles data geometry, infers study design, selects appropriate statistical methods, and guides the agent to perform data cleaning, analysis, modeling, and reporting using **adaptive Python scripting grounded in biostatistical methodology and anti-hallucination guardrails**.
 
 ---
 
@@ -13,9 +13,9 @@ The master intelligence layer for clinical biostatistics. Ingests clinical sprea
 
 Activate **medstat-master** whenever:
 - The user provides or points to a dataset (`.csv`, `.xlsx`, `.tsv`, `.parquet`).
-- The user asks: *"Analyze this data"*, *"What can we learn from this patient cohort?"*, *"Run statistical tests on this spreadsheet"*, or uploads a clinical dataset.
+- The user presents a research proposal, PICO question, or conceptual framework and asks for the appropriate statistical analysis.
 - Real-world clinical spreadsheets with messy layouts (multiple title rows, embedded notes, side-by-side summary tables, Thai dates/categories) need flexible parsing and robust biostatistical analysis.
-- End-to-end clinical pipelines from raw spreadsheet to publication-grade manuscript tables are needed.
+- The agent must decisively arbitrate between competing statistical methods, resolve contradictions between research proposals and raw data, and prevent statistical hallucination.
 
 ---
 
@@ -30,9 +30,11 @@ Activate **medstat-master** whenever:
                            │
                            ▼
 ┌────────────────────────────────────────────────────────┐
-│  Phase 2: Study Design & Variable Mapping (ระเบียนวิธี)  │
-│  - Identify outcome, exposure, confounders, time/event │
-│  - Map to clinical design (Types 1–7)                  │
+│  Phase 2: 3-Pillar Triangulation & Method Selection    │
+│  - Pillar 1: Research Proposal (PICO / Estimand)       │
+│  - Pillar 2: Clinical Principles & Mechanisms          │
+│  - Pillar 3: Raw Data Reality (Geometry & Constraints) │
+│  - Pass through 5 Anti-Hallucination Stop Gates        │
 └──────────────────────────┬─────────────────────────────┘
                            │
              ┌─────────────┴─────────────┐
@@ -84,9 +86,35 @@ for idx, row in df_peek.iterrows():
 
 ---
 
-## 4. Phase 2: Biostatistical Methodology & Study Design Guidelines (ระเบียนวิธีทางสถิติ)
+## 4. Phase 2: The 3-Pillar Triangulation Decision Engine (การตัดสินใจ 3 เสาหลัก)
 
-The agent should map the clinical question and data geometry to the appropriate study design:
+To select the mathematically and clinically valid statistical analysis, the agent must evaluate 3 distinct sources of truth:
+
+```
+                            ┌─────────────────────────────────────────┐
+                            │      Pillar 1: Research Proposal        │
+                            │  - คำถามวิจัย (PICO / PECO)             │
+                            │  - เป้าหมาย: Causal vs Prognostic vs     │
+                            │    Diagnostic vs Agreement              │
+                            └───────────────────┬─────────────────────┘
+                                                │
+                                                ▼
+     ┌──────────────────────────────────────────┴──────────────────────────────────────────┐
+     │                      Arbitration & Triangulation Gate                               │
+     │                      (ตรวจสอบความสอดคล้อง ป้องกัน Hallucination)                     │
+     └──────────────────┬───────────────────────────────────────────────────┬──────────────┘
+                        │                                                   │
+                        ▼                                                   ▼
+┌─────────────────────────────────────────┐       ┌─────────────────────────────────────────┐
+│     Pillar 2: Clinical Principles       │       │        Pillar 3: Raw Data Reality       │
+│  - Confounding by indication            │       │  - Data geometry & sample size (N)      │
+│  - Non-linear biological thresholds     │       │  - Events Per Variable (EPV diagnostic) │
+│  - Missingness mechanism (MCAR/MAR)     │       │  - Outcome type (Binary, Time, Ordinal) │
+│  - Biomarker directionality (High/Low)  │       │  - Distribution skewness & sparseness   │
+└─────────────────────────────────────────┘       └─────────────────────────────────────────┘
+```
+
+### Study Design Matrix & Method Routing
 
 | Clinical Design Pattern | Detected Data Signature | Statistical Methodology & Tests | Target Reporting |
 | :--- | :--- | :--- | :--- |
@@ -100,7 +128,41 @@ The agent should map the clinical question and data geometry to the appropriate 
 
 ---
 
-## 5. Dual Execution Modes: Direct Execution vs Proposal First
+## 5. The 5 Anti-Hallucination Stop Gates (เกราะป้องกันภาวะสร้างข้อมูลเท็จ)
+
+Before writing analysis scripts or fitting models, the agent must pass through 5 deterministic stop gates:
+
+### Gate 1: Contradiction Resolution Gate (ความขัดแย้งระหว่าง Proposal กับ ข้อมูลจริง)
+- **The Risk**: User requests Survival Analysis (Cox regression), but raw data only contains a binary discharge status without a follow-up time column.
+- **Directive**: **HALT & PIVOT**. Never hallucinate a synthetic time column. The agent must declare the mismatch, pivot to Type 2 (Multivariable Logistic or Firth), and notify the user:
+  *"Proposal requests survival analysis, but raw data lacks follow-up duration; transitioning primary model to Multivariable Logistic/Firth Regression to preserve statistical validity."*
+
+### Gate 2: Silent Assumption Barrier (ห้ามทึกทักสมมติฐานทางสถิติไปเอง)
+- **The Risk**: Silently executing `df.dropna()` without checking missingness mechanisms, or reporting Mean ± SD and t-tests on highly skewed clinical labs (Troponin, Length of Stay, Ferritin).
+- **Directive**:
+  1. Every dropped row must be tracked via Sample Retention Flow ($N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$).
+  2. Continuous variables must undergo distribution checking (Shapiro-Wilk test or skewness examination). Skewed data must be presented as **Median [IQR]** with **Mann-Whitney U / Wilcoxon rank-sum test**.
+
+### Gate 3: Directionality & Clinical Event Inversion Gate (ทิศทางตัวแปรและจุดตัด)
+- **The Risk**: Survival events encoded backwards ($0 = \text{Death}, 1 = \text{Alive}$), or low-is-abnormal biomarkers (eGFR, Platelets, PaO2/FiO2) classified with $Score \ge Cutoff$, yielding $\text{AUC} < 0.50$ and inverted sensitivity/specificity.
+- **Directive**:
+  1. Strict numeric `0/1` encoding: $1 = \text{Event / Disease / Case}$, $0 = \text{Censored / Healthy / Control}$.
+  2. Automated AUC Sanity Check: If empirical $\text{AUC} < 0.50$, invert score ($Score_{\text{eff}} = -Score$) to preserve concordance.
+
+### Gate 4: Sparse Data & Events-Per-Variable (EPV) Gate (สถิติตัวแปรพหุคูณบนข้อมูลเบาบาง)
+- **The Risk**: Fitting multivariable models with 10 covariates when only 12 events occurred, producing quasi-complete separation and astronomical odds ratios ($\text{OR} > 1000$).
+- **Directive**:
+  Compute $\text{EPV} = \frac{\min(N_{\text{events}}, N_{\text{non-events}})}{K_{\text{covariates}}}$. If $\text{EPV} < 10$ or zero cells appear in crosstabs, decisively switch to **Firth Penalized Likelihood** (`fit_firth_logistic` / `firth_cox`).
+
+### Gate 5: Clinical Interpretation Guardrails (การแปลผลทางคลินิกอย่างรัดกุม)
+- **The Risk**: Claiming $P > 0.05$ proves "no effect" or "treatments are identical", or substituting Pearson correlation for rater agreement.
+- **Directive**:
+  1. $P > 0.05$ must be reported as "insufficient evidence to reject the null hypothesis", focusing on the 95% CI.
+  2. For device/rater reliability, strictly reject Pearson correlation ($r$) and enforce **Bland-Altman 95% LoA** or **Intraclass Correlation (ICC)**.
+
+---
+
+## 6. Dual Execution Modes: Direct Execution vs Proposal First
 
 ### Mode A: Direct Execution (Immediate Analysis)
 **When to use**:
@@ -129,7 +191,7 @@ Present a concise 1-page SAP covering:
 
 ---
 
-## 6. Phase 3: Adaptive Python Scripting Protocol (ปรับแต่งสคริปต์ตามข้อมูลจริง)
+## 7. Phase 3: Adaptive Python Scripting Protocol (ปรับแต่งสคริปต์ตามข้อมูลจริง)
 
 > **Core Philosophy**: Never execute rigid canned scripts that make naive assumptions about file structure. The agent is empowered with full autonomy to write, adapt, and run Python scripts (`scratch/analyze.py`) tailored to the specific columns, encodings, and clinical objectives of the ingested dataset.
 >
@@ -159,43 +221,70 @@ import statsmodels.formula.api as smf
 # ==============================================================================
 
 # 1. LOAD & ISOLATE PATIENT COHORT
-# ตรวจสอบและปรับ skiprows / header ให้ตรงกับแถวข้อมูลจริง
-# ตัดคอลัมน์ตารางสรุปด้านข้าง (เช่น คอลัมน์ BS เป็นต้นไป) ออก ให้เหลือเฉพาะข้อมูลคนไข้
 df = pd.read_excel("dataset.xlsx", skiprows=2)  # ปรับ skiprows ตามจริง
 
 # 2. STANDARDIZE ENDPOINTS & SAMPLE FLOW TRACKING
 # บังคับใช้ Numeric 0/1 เสมอ (1 = Event / Case, 0 = Non-event / Control)
-# ตัวอย่าง: df['outcome'] = df['raw_outcome'].map({'Positive': 1, 'Negative': 0})
 n_initial = len(df)
 df_clean = df.dropna(subset=['outcome']).copy()
 n_analyzed = len(df_clean)
 n_excluded = n_initial - n_analyzed
 print(f"Sample Flow: Initial={n_initial} -> Excluded={n_excluded} -> Analyzed={n_analyzed}")
 
-# 3. TABLE 1: BASELINE CHARACTERISTICS & BIVARIATE TESTING
+# 3. TABLE 1: BASELINE CHARACTERISTICS WITH NORMALITY AUDIT
 def summarize_continuous(series, group):
-    """คำนวณ Mean ± SD, t-test, และ Standardized Mean Difference (SMD)"""
+    """ทดสอบ Normality ก่อนเลือก Mean ± SD (t-test) หรือ Median [IQR] (Mann-Whitney U)"""
     g0 = series[group == 0].dropna()
     g1 = series[group == 1].dropna()
-    t_stat, p_val = stats.ttest_ind(g1, g0, equal_var=False)
+    
+    # Check normality using Shapiro-Wilk (or skewness if n > 5000)
+    stat0, p0 = stats.shapiro(g0) if len(g0) <= 5000 else (0, 0.05)
+    stat1, p1 = stats.shapiro(g1) if len(g1) <= 5000 else (0, 0.05)
+    is_normal = (p0 > 0.05) and (p1 > 0.05)
+    
     pooled_sd = np.sqrt((g1.var() + g0.var()) / 2.0)
     smd = abs(g1.mean() - g0.mean()) / pooled_sd if pooled_sd > 0 else 0.0
-    return {
-        "Group 0 (Control)": f"{g0.mean():.1f} ± {g0.std():.1f}",
-        "Group 1 (Event)": f"{g1.mean():.1f} ± {g1.std():.1f}",
-        "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001",
-        "SMD": f"{smd:.3f}"
-    }
+    
+    if is_normal:
+        t_stat, p_val = stats.ttest_ind(g1, g0, equal_var=False)
+        return {
+            "Summary": f"Mean ± SD",
+            "Group 0 (Control)": f"{g0.mean():.1f} ± {g0.std():.1f}",
+            "Group 1 (Event)": f"{g1.mean():.1f} ± {g1.std():.1f}",
+            "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001",
+            "SMD": f"{smd:.3f}"
+        }
+    else:
+        u_stat, p_val = stats.mannwhitneyu(g1, g0, alternative='two-sided')
+        return {
+            "Summary": f"Median [IQR]",
+            "Group 0 (Control)": f"{g0.median():.1f} [{g0.quantile(0.25):.1f}, {g0.quantile(0.75):.1f}]",
+            "Group 1 (Event)": f"{g1.median():.1f} [{g1.quantile(0.25):.1f}, {g1.quantile(0.75):.1f}]",
+            "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001",
+            "SMD": f"{smd:.3f}"
+        }
 
 def summarize_categorical(series, group):
-    """คำนวณ n (%) และ Pearson Chi-Square test"""
+    """คำนวณ n (%) และ Chi-Square หรือ Fisher's exact test"""
     ct = pd.crosstab(series, group)
-    chi2, p_val, _, _ = stats.chi2_contingency(ct)
+    if ct.shape == (2, 2) and (ct.values < 5).any():
+        _, p_val = stats.fisher_exact(ct)
+    else:
+        _, p_val, _, _ = stats.chi2_contingency(ct)
     return {"crosstab": ct, "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001"}
 
-# 4. MULTIVARIABLE MODELING (Logistic Regression with Adjusted Odds Ratios)
-# ฟิตโมเดลแบบควบคุมตัวแปรและดึง Adjusted OR (95% CI)
-formula = "outcome ~ age + C(sex) + C(admission_status)"
+# 4. EPV DIAGNOSTIC & MULTIVARIABLE MODELING
+# คำนวณ Events Per Variable ป้องกัน Overfitting / Separation
+n_events = (df_clean['outcome'] == 1).sum()
+n_nonevents = (df_clean['outcome'] == 0).sum()
+covariates = ["age", "C(sex)", "C(admission_status)"]
+epv = min(n_events, n_nonevents) / len(covariates)
+print(f"Events Per Variable (EPV): {epv:.1f}")
+
+if epv < 10:
+    print("Warning: EPV < 10 detected; standard MLE logistic regression may suffer from separation bias. Recommend Firth penalized logistic.")
+
+formula = "outcome ~ " + " + ".join(covariates)
 model = smf.logit(formula, data=df_clean).fit(disp=False)
 
 results = []
@@ -220,25 +309,27 @@ The agent may freely incorporate `medstat` modules (e.g. `from medstat.reporting
 
 ---
 
-## 7. Mandatory Clinical Governance Rules
+## 8. Mandatory Clinical Governance Rules
 
 1. **Strict Numeric 0/1 Endpoints & Explicit Event Mapping**: Binary outcomes and survival endpoints must be numeric `0` and `1` (`1 = Event`, `0 = Non-event / Censored`). Before recoding text outcomes, establish an explicit, unambiguous mapping of which category represents the clinical event. In survival analysis, ensure `1 = Event` and `0 = Censored` (never invert).
-2. **Never Silent Deletion**: Always track participant retention:
+2. **Never Silent Deletion & No Outcome Imputation**: Always track participant retention:
    $$N_{\text{initial}} \longrightarrow N_{\text{excluded}} \longrightarrow N_{\text{analyzed}}$$
-   Document reasons for exclusion (e.g. missing primary outcome, outside inclusion criteria).
+   Document reasons for exclusion. **Strict Ban**: Never impute missing values in the primary clinical outcome variable using MICE or KNN; drop missing outcome cases under audited retention flow with documented rationale.
 3. **Wilson Score Confidence Intervals**: All binomial proportions (Sensitivity, Specificity, PPV, NPV) must use Wilson score intervals.
-4. **DeLong Covariance**: ROC AUC standard errors and paired AUC comparisons must use DeLong variance.
-5. **Austin (2009) PSM Standard**: Propensity score caliper must default to $0.2 \times \text{SD}(\text{logit } e)$; post-match balance requires $\text{SMD} < 0.10$.
+4. **DeLong Covariance & Automated Directionality Check**: ROC AUC standard errors and paired AUC comparisons must use DeLong variance. If empirical $\text{AUC} < 0.50$, audit marker directionality and invert score ($Score_{\text{eff}} = -Score$) to maintain concordance.
+5. **Austin (2009) PSM Standard & Confounder Selection**: Propensity score caliper must default to $0.2 \times \text{SD}(\text{logit } e)$; post-match balance requires $\text{SMD} < 0.10$. Include *only* baseline pre-treatment confounders; strictly exclude post-treatment variables, mediators, or colliders.
 6. **Publication Table Styling**: Tables must follow journal conventions (NEJM/JAMA: 3 horizontal rules, no vertical dividers, standard decimal precision: OR/HR to 2 decimal places, percentages to 1 decimal place, p-values formatted to 3 decimal places with `< 0.001` cutoff).
+7. **No Correlation as Agreement**: Never substitute Pearson/Spearman correlation for agreement; enforce Bland-Altman LoA with large-sample CIs and pure-SciPy ICC.
 
 ---
 
-## 8. Completion Checklist
+## 9. Completion Checklist
 
 - [ ] Sheet layout inspected: title rows, metadata, and side-by-side dashboard tables identified and handled.
-- [ ] Patient cohort isolated and column types properly mapped.
+- [ ] 3-Pillar Triangulation completed: Proposal PICO matched against clinical principles and empirical data reality.
+- [ ] 5 Anti-Hallucination Stop Gates passed (Contradiction checked, No silent assumptions, Directionality verified, EPV diagnosed, Interpretation guarded).
 - [ ] Binary endpoints recoded strictly to numeric `0/1` (`1 = Event`).
 - [ ] Sample retention flow ($N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$) tracked and documented.
-- [ ] Baseline characteristics (Table 1) generated with appropriate tests (t-test / Mann-Whitney, Chi-Square / Fisher) and SMDs.
-- [ ] Multivariable model executed conforming to clinical standards (Adjusted OR / HR with 95% CIs and p-values).
+- [ ] Baseline characteristics (Table 1) generated with distribution-appropriate tests (t-test vs Mann-Whitney, Chi-Square vs Fisher) and SMDs.
+- [ ] Multivariable model executed conforming to clinical standards (Adjusted OR / HR with 95% CIs and p-values; Firth penalization applied if EPV < 10 or sparse).
 - [ ] Results compiled into publication-grade table (NEJM/JAMA style) with clinical interpretation.

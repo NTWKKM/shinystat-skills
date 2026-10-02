@@ -12,6 +12,10 @@ Dissemination engine for rendering publication-quality tables conforming to top 
 1. **Strict Journal Typography**: Enforce the exact rules of the target journal (NEJM double top border and symbol footnotes; JAMA minimal horizontal rules, decimal precision, and exact p-values without leading zeros; APA 7 italicized statistics).
 2. **Automated Methods Narrative**: When `--narrative` is specified, pair quantitative tables with an automated Methods text describing model type, confounder selection, missing data handling, and significance criteria.
 3. **Guideline Compliance**: Accompany observational studies with STROBE audits, randomized trials with CONSORT, and prediction models with TRIPOD (or TRIPOD+AI where applicable).
+4. **Clinical Interpretation & Anti-Hallucination Invariants**:
+   - *Absence of Evidence*: Never report $P > 0.05$ as "demonstrating no difference" or "proving equivalence." State: "insufficient evidence to reject the null hypothesis" and discuss the 95% CI width.
+   - *Odds Ratio vs Risk*: When outcome incidence exceeds 10%, Odds Ratios markedly overstate Relative Risk. Estimates must be explicitly labeled as Odds Ratios without loose substitution of "risk".
+   - *Uncertainty-First ICC Reporting*: For Intraclass Correlation Coefficients (ICC), report the 95% confidence interval and its spanning clinical reliability tier (Koo & Li 2016) rather than interpreting point estimates in isolation.
 
 ## Execution Sequence
 

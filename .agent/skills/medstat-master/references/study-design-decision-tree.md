@@ -61,3 +61,23 @@ The agent screens column names and value distributions against clinical patterns
     - **MICE**: Applicable under plausible MAR, scaling imputations $m$ to Fraction of Missing Information (FMI).
     - **KNN / Indicator**: As clinically justified for point-of-care or structured patterns (note: indicator imputation is not an appropriate default for missing confounders in observational analyses due to the risk of residual confounding bias).
   - Always perform sensitivity analyses across mechanisms and track audited sample retention flow ($N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$). Never perform silent listwise deletion.
+
+---
+
+## 4. 3-Pillar Triangulation & Contradiction Resolution Protocol
+
+When evaluating the analysis path, the agent must triangulate:
+1. **Proposal PICO**: Research goal (Causal, Prognostic, Survival, Diagnostic, Agreement, Meta).
+2. **Clinical Principles**: Biological mechanisms (confounding by indication, non-linearity, low-is-abnormal lab directionality).
+3. **Data Geometry Reality**: Actual columns, event count, sample size, missingness patterns.
+
+### Contradiction Resolution Table
+
+| Proposal Request | Raw Data Reality | Clinical Principle | Decisive Resolution (Anti-Hallucination) |
+| :--- | :--- | :--- | :--- |
+| **Survival Analysis (Cox PH)** | Binary status only (`status_death`), no time/duration column | Cannot compute hazard without observation time | **HALT & PIVOT**: Do NOT hallucinate a time column. Pivot to Type 2 Multivariable Logistic/Firth regression and inform user. |
+| **Causal Treatment Effect (PSM)** | Single-arm cohort (no control/comparator group) | Cannot evaluate comparative counterfactuals | **HALT & PIVOT**: State lack of comparator arm. Transition to Type 1 Descriptive Cohort analysis. |
+| **Diagnostic Accuracy (ROC/AUC)** | Continuous marker where lower values mean worse disease (e.g. eGFR, Platelets) | Disease concordance inverted if evaluated with $Score \ge Cutoff$ | **AUTOMATED INVERSION**: Audit empirical $\text{AUC} < 0.50$. Invert score ($Score_{\text{eff}} = -Score$) and report low-is-abnormal transformation. |
+| **Multivariable Logistic Regression** | Total events $< 20$ or $\text{EPV} < 10$ across planned covariates | Standard MLE suffers from separation bias and infinite ORs | **AUTOMATED ENFORCEMENT**: Switch to Firth's penalized likelihood (`fit_firth_logistic`) with profile likelihood CIs. |
+| **Rater / Device Agreement** | Two continuous device scores | Correlation measures association, not agreement | **REJECT CORRELATION**: Enforce Bland-Altman Limits of Agreement with large-sample CIs or Intraclass Correlation (ICC). |
+

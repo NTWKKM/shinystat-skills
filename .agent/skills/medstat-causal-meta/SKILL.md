@@ -13,6 +13,9 @@ Biostatistical engine for observational causal inference, rater reliability anal
 2. **Standardized Mean Difference Criterion**: Evaluate post-match balance across all baseline covariates; every covariate must achieve $|\text{SMD}| < 0.10$.
 3. **Pure-SciPy ICC (GPL-Free)**: Compute intraclass correlation coefficients via pure two-way ANOVA decomposition without external GPL dependencies.
 4. **Meta-Analysis Model Selection**: Model choice (fixed-effect vs. DerSimonian-Laird random-effects) must reflect the study design and clinical/methodological variation assumptions; Cochrane advises against selecting models solely by statistical heterogeneity tests ($I^2$).
+5. **Confounder Selection Invariant for PSM**: Include *only* baseline pre-treatment confounders that are causally related to treatment choice and/or outcome. Strictly exclude post-treatment variables, mediators (variables on the causal pathway between treatment and outcome), or colliders, which introduce conditioning bias and artifactual confounding.
+6. **Association vs Agreement Trap**: Never substitute Pearson ($r$) or Spearman ($\rho$) correlation for rater or device agreement. Correlation evaluates linear association, not agreement. Enforce **Bland-Altman 95% Limits of Agreement** (with large-sample CIs) or **Intraclass Correlation (ICC)**.
+7. **Egger's Test Scope & Limitations**: Egger's linear regression test for funnel plot asymmetry requires at least $k \ge 10$ studies with continuous effect measures. Avoid running or interpreting Egger's test on sparse study counts ($k < 10$) or binary log odds ratios where artifactual correlation occurs.
 
 ## Execution Sequence
 
