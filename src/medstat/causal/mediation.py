@@ -40,12 +40,22 @@ def run_mediation(
         covariates: Optional baseline confounders.
         n_sims: Number of Monte Carlo draws for confidence intervals (default 1000).
         seed: Random seed for reproducibility.
-        missing_strategy: Strategy for handling missing data (e.g., 'complete-case', 'mice', 'knn', 'indicator').
+        missing_strategy: Strategy for handling missing data ('complete-case', 'knn', 'indicator'). Note: 'mice' is not supported.
         missing_justification: Documented clinical rationale for missing data strategy under STROBE/CONSORT.
 
     Returns:
         dict containing ACME, ADE, Total Effect, Proportion Mediated, 95% CIs, and sample retention info.
     """
+    if (
+        missing_strategy is not None
+        and missing_strategy.lower().replace("_", "-") == "mice"
+    ):
+        raise NotImplementedError(
+            "MICE multiple imputation is not supported for causal mediation analysis because combining "
+            "quasi-Bayesian Monte Carlo mediation estimates across multiple imputations (Rubin's rules) "
+            "is not yet implemented. Please use 'complete-case', 'knn', or 'indicator'."
+        )
+
     covar_list = covariates or []
     all_cols = [treatment, mediator, outcome] + covar_list
     df_clean, missing_info = prepare_data_for_analysis(
@@ -53,6 +63,7 @@ def run_mediation(
         required_cols=all_cols,
         handle_missing=missing_strategy,
         missing_justification=missing_justification,
+        disallowed_strategies={"mice"},
     )
 
     if len(df_clean) < 10:

@@ -2358,3 +2358,30 @@ class TestPR4ReviewFollowupFixes:
         assert res["n_observations"] == 48
         assert res["n_excluded"] == 2
         assert res["missing_counts"]["med"] == 2
+
+        # 3. Reject MICE strategy in run_mediation
+        with pytest.raises(
+            NotImplementedError, match="MICE multiple imputation is not supported"
+        ):
+            run_mediation(
+                df_missing,
+                treatment="trt",
+                mediator="med",
+                outcome="y",
+                missing_strategy="mice",
+                missing_justification="MAR assumption",
+            )
+
+        # 4. Reject disallowed strategies in prepare_data_for_analysis
+        from medstat.data.missing import prepare_data_for_analysis
+
+        with pytest.raises(
+            NotImplementedError, match="not supported for this analysis workflow"
+        ):
+            prepare_data_for_analysis(
+                df_missing,
+                required_cols=["trt", "med", "y"],
+                handle_missing="mice",
+                missing_justification="MAR assumption",
+                disallowed_strategies={"mice"},
+            )
