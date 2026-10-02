@@ -2172,9 +2172,30 @@ class TestPR4ReviewFollowupFixes:
         assert res_one.exit_code == 0
         assert "total_sample_size" in res_one.output
 
-    def test_model_cmd_ci_method_forwarding_to_firth(self, tmp_path):
+    def test_model_cmd_ci_method_forwarding_to_firth(self, tmp_path, monkeypatch):
         """Verify --ci-method profile and wald are forwarded to Firth logistic and Cox."""
+        import sys
+
+        import medstat.cli.main  # noqa: F401
+
         runner = CliRunner()
+        recorded_calls = []
+
+        cli_mod = sys.modules["medstat.cli.main"]
+        orig_fit_log = cli_mod.fit_firth_logistic
+        orig_fit_cox = cli_mod.fit_firth_cox
+
+        def spy_fit_log(*args, **kwargs):
+            recorded_calls.append(("logistic", kwargs.get("ci_method")))
+            return orig_fit_log(*args, **kwargs)
+
+        def spy_fit_cox(*args, **kwargs):
+            recorded_calls.append(("cox", kwargs.get("ci_method")))
+            return orig_fit_cox(*args, **kwargs)
+
+        monkeypatch.setattr(cli_mod, "fit_firth_logistic", spy_fit_log)
+        monkeypatch.setattr(cli_mod, "fit_firth_cox", spy_fit_cox)
+
         # Logistic dataset with separation
         df_log = pd.DataFrame(
             {
@@ -2282,6 +2303,14 @@ class TestPR4ReviewFollowupFixes:
         )
         assert res_cox_wald.exit_code == 0
 
+        # Verify exact ci_method arguments passed to each fitter
+        assert recorded_calls == [
+            ("logistic", "pl"),
+            ("logistic", "wald"),
+            ("cox", "pl"),
+            ("cox", "wald"),
+        ]
+
     def test_diagnostic_narrative_omits_wilson_when_no_cutoff(self):
         """Verify diagnostic narrative omits Wilson score claim when no cutoff was evaluated."""
         narr = generate_methods_narrative(
@@ -2294,3 +2323,38 @@ class TestPR4ReviewFollowupFixes:
         assert "Wilson score method" not in narr
         assert "Receiver Operating Characteristic (ROC)" in narr
         assert "Decision Curve Analysis (DCA)" in narr
+
+    def test_run_mediation_missing_data_gate(self):
+        """Verify that run_mediation routes data through prepare_data_for_analysis."""
+        from medstat.data.missing import MissingStrategyRequiredError
+
+        np.random.seed(42)
+        n = 50
+        trt = np.random.binomial(1, 0.5, size=n)
+        med = 0.8 * trt + np.random.normal(0, 1, size=n)
+        y = 0.5 * trt + 1.2 * med + np.random.normal(0, 1, size=n)
+
+        # Introduce missing data in mediator
+        med_missing = med.copy()
+        med_missing[0] = np.nan
+        med_missing[1] = np.nan
+
+        df_missing = pd.DataFrame({"trt": trt, "med": med_missing, "y": y})
+
+        # 1. Unspecified strategy raises MissingStrategyRequiredError
+        with pytest.raises(MissingStrategyRequiredError):
+            run_mediation(df_missing, treatment="trt", mediator="med", outcome="y")
+
+        # 2. Explicit complete-case strategy succeeds and returns retention counts
+        res = run_mediation(
+            df_missing,
+            treatment="trt",
+            mediator="med",
+            outcome="y",
+            missing_strategy="complete-case",
+            missing_justification="MCAR confirmed by clinical audit",
+        )
+        assert res["n_input"] == 50
+        assert res["n_observations"] == 48
+        assert res["n_excluded"] == 2
+        assert res["missing_counts"]["med"] == 2

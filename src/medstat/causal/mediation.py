@@ -15,6 +15,8 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 
+from medstat.data.missing import prepare_data_for_analysis
+
 
 def run_mediation(
     df: pd.DataFrame,
@@ -24,6 +26,8 @@ def run_mediation(
     covariates: list[str] | None = None,
     n_sims: int = 1000,
     seed: int = 42,
+    missing_strategy: str | None = None,
+    missing_justification: str | None = None,
 ) -> dict[str, Any]:
     """
     Perform parametric causal mediation analysis.
@@ -36,13 +40,20 @@ def run_mediation(
         covariates: Optional baseline confounders.
         n_sims: Number of Monte Carlo draws for confidence intervals (default 1000).
         seed: Random seed for reproducibility.
+        missing_strategy: Strategy for handling missing data (e.g., 'complete-case', 'mice', 'knn', 'indicator').
+        missing_justification: Documented clinical rationale for missing data strategy under STROBE/CONSORT.
 
     Returns:
-        dict containing ACME, ADE, Total Effect, Proportion Mediated, and 95% CIs.
+        dict containing ACME, ADE, Total Effect, Proportion Mediated, 95% CIs, and sample retention info.
     """
     covar_list = covariates or []
     all_cols = [treatment, mediator, outcome] + covar_list
-    df_clean = df[all_cols].dropna().copy()
+    df_clean, missing_info = prepare_data_for_analysis(
+        df,
+        required_cols=all_cols,
+        handle_missing=missing_strategy,
+        missing_justification=missing_justification,
+    )
 
     if len(df_clean) < 10:
         raise ValueError("Insufficient observations for causal mediation analysis.")
@@ -123,7 +134,10 @@ def run_mediation(
         "treatment": treatment,
         "mediator": mediator,
         "outcome": outcome,
+        "n_input": len(df),
         "n_observations": len(df_clean),
+        "n_excluded": missing_info["rows_excluded"],
+        "missing_counts": missing_info["missing_counts"],
         "scale": scale,
         "effect_scale": scale,
         "acme": acme_point,
