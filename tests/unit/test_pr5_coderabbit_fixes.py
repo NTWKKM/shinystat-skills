@@ -52,15 +52,49 @@ class TestEggerCLIGuards:
                 "se",
                 "--study-col",
                 "study",
+                "--measure",
+                "continuous",
                 "--egger",
             ],
         )
         assert res.exit_code != 0
         assert "Egger's test requires at least 10 studies" in res.output
 
+    def test_egger_rejects_missing_measure(self, tmp_path):
+        runner = CliRunner()
+        df = pd.DataFrame(
+            {
+                "study": [f"Study_{i}" for i in range(12)],
+                "effect_size": np.random.normal(0.2, 0.1, 12),
+                "se": np.random.uniform(0.05, 0.15, 12),
+            }
+        )
+        csv_path = tmp_path / "meta_no_measure.csv"
+        df.to_csv(csv_path, index=False)
+
+        res = runner.invoke(
+            cli,
+            [
+                "meta",
+                "--data",
+                str(csv_path),
+                "--effect-col",
+                "effect_size",
+                "--se-col",
+                "se",
+                "--study-col",
+                "study",
+                "--egger",
+            ],
+        )
+        assert res.exit_code != 0
+        assert (
+            "Egger's test requires an explicit continuous effect measure" in res.output
+        )
+
     def test_egger_rejects_binary_log_odds_ratio(self, tmp_path):
         runner = CliRunner()
-        # 12 studies but effect_col is log_or
+        # 12 studies but measure is log_or
         df = pd.DataFrame(
             {
                 "study": [f"Study_{i}" for i in range(12)],
@@ -83,6 +117,8 @@ class TestEggerCLIGuards:
                 "se",
                 "--study-col",
                 "study",
+                "--measure",
+                "log_or",
                 "--egger",
             ],
         )
@@ -121,6 +157,37 @@ class TestEggerCLIGuards:
         )
         assert res.exit_code != 0
         assert "Egger's test is invalid for binary log odds ratios" in res.output
+
+    def test_egger_rejects_mixed_measures(self, tmp_path):
+        runner = CliRunner()
+        df = pd.DataFrame(
+            {
+                "study": [f"Study_{i}" for i in range(12)],
+                "effect_size": np.random.normal(0.2, 0.1, 12),
+                "se": np.random.uniform(0.05, 0.15, 12),
+                "measure": ["continuous"] * 6 + ["log_or"] * 6,
+            }
+        )
+        csv_path = tmp_path / "meta_mixed.csv"
+        df.to_csv(csv_path, index=False)
+
+        res = runner.invoke(
+            cli,
+            [
+                "meta",
+                "--data",
+                str(csv_path),
+                "--effect-col",
+                "effect_size",
+                "--se-col",
+                "se",
+                "--study-col",
+                "study",
+                "--egger",
+            ],
+        )
+        assert res.exit_code != 0
+        assert "Mixed effect measures detected" in res.output
 
 
 # ==============================================================================

@@ -139,10 +139,18 @@ def summarize_categorical(series, group):
     ct = pd.crosstab(series, group)
     chi2, p_val_asymp, _, expected = stats.chi2_contingency(ct)
     is_sparse = (expected < 5).any()
-    if is_sparse and ct.shape == (2, 2):
-        _, p_val = stats.fisher_exact(ct)
+    if is_sparse:
+        if ct.shape == (2, 2):
+            _, p_val = stats.fisher_exact(ct)
+            p_formatted = format_p_value(p_val)
+        else:
+            # Sparse table larger than 2x2: asymptotic chi-square is invalid
+            # Report as not estimable without exact/Monte Carlo permutation test
+            p_val = np.nan
+            p_formatted = "Not estimable (sparse table > 2x2 requires exact/permutation test)"
     else:
         p_val = p_val_asymp
+        p_formatted = format_p_value(p_val)
     g0 = series[group == 0].dropna()
     g1 = series[group == 1].dropna()
     dummies = pd.get_dummies(series, drop_first=(series.nunique() == 2))
@@ -161,7 +169,7 @@ def summarize_categorical(series, group):
     smd_str = smds[dummies.columns[0]] if len(smds) == 1 else str(smds)
     return {
         "crosstab": ct,
-        "p_value": format_p_value(p_val),
+        "p_value": p_formatted,
         "SMD": smd_str,
         "category_smds": smds,
     }

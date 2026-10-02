@@ -1433,11 +1433,22 @@ def meta_cmd(
                     unique_m = df[m_col].dropna().astype(str).str.lower().unique()
                     if len(unique_m) == 1:
                         measure_type = unique_m[0]
+                    elif len(unique_m) > 1:
+                        raise click.BadParameter(
+                            f"Mixed effect measures detected in dataset ({unique_m}). Egger's test requires a homogeneous continuous effect measure.",
+                            param_hint="--egger",
+                        )
                     break
-        if not measure_type:
-            measure_type = effect_col.lower()
 
-        if measure_type in (
+        SUPPORTED_CONTINUOUS = (
+            "continuous",
+            "md",
+            "smd",
+            "mean_diff",
+            "mean_difference",
+            "wmd",
+        )
+        BINARY_RATIO_MEASURES = (
             "log_or",
             "log_odds_ratio",
             "or",
@@ -1445,9 +1456,23 @@ def meta_cmd(
             "rr",
             "log_rr",
             "risk_ratio",
-        ):
+            "relative_risk",
+        )
+
+        if not measure_type:
+            raise click.BadParameter(
+                "Egger's test requires an explicit continuous effect measure. Specify --measure (e.g. --measure continuous, md, smd) or provide a 'measure' column in the dataset. Missing or unverified effect measures are rejected to prevent invalid testing on binary log ratios.",
+                param_hint="--egger",
+            )
+
+        if measure_type in BINARY_RATIO_MEASURES:
             raise click.BadParameter(
                 "Egger's test is invalid for binary log odds ratios due to artifactual correlation between log OR and standard error. Use continuous effect sizes or alternative tests.",
+                param_hint="--egger",
+            )
+        if measure_type not in SUPPORTED_CONTINUOUS:
+            raise click.BadParameter(
+                f"Unsupported effect measure '{measure_type}' for Egger's test. Egger's test requires a supported continuous measure ({', '.join(SUPPORTED_CONTINUOUS)}).",
                 param_hint="--egger",
             )
         res["egger_test"] = eggers_test(df[effect_col], df[se_col])
