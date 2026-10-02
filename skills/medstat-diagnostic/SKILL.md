@@ -144,13 +144,21 @@ def evaluate_cutoff(gold, score, cutoff):
     print(f"Cutoff >= {cutoff}:")
     print(f"  Sensitivity: {sens*100:.1f}% (95% CI: {sens_l*100:.1f}% - {sens_u*100:.1f}%)")
     print(f"  Specificity: {spec*100:.1f}% (95% CI: {spec_l*100:.1f}% - {spec_u*100:.1f}%)")
-    print(f"  PPV: {ppv*100:.1f}% | NPV: {npv*100:.1f}%")
-    return {"sens": sens, "spec": spec, "ppv": ppv, "npv": npv}
+    print(f"  PPV: {ppv*100:.1f}% (95% CI: {ppv_l*100:.1f}% - {ppv_u*100:.1f}%) | NPV: {npv*100:.1f}% (95% CI: {npv_l*100:.1f}% - {npv_u*100:.1f}%)")
+    return {
+        "sens": sens, "sens_ci": (sens_l, sens_u),
+        "spec": spec, "spec_ci": (spec_l, spec_u),
+        "ppv": ppv, "ppv_ci": (ppv_l, ppv_u),
+        "npv": npv, "npv_ci": (npv_l, npv_u),
+    }
 
 # 3. EMPIRICAL ROC, DIRECTIONALITY SANITY CHECK & YOUDEN'S INDEX
 scores = df['test_score'].values
 fpr, tpr, thresholds = roc_curve(df['gold_standard'], scores)
 roc_auc = auc(fpr, tpr)
+from medstat.diagnostic.roc import auc_ci_delong
+delong_res = auc_ci_delong(df['gold_standard'], scores)
+auc_ci = (delong_res['ci_lower'], delong_res['ci_upper'])
 
 # Directionality: Verify prespecified clinical orientation (low-is-abnormal markers like eGFR or Platelets must be prespecified and recoded prior to analysis)
 # If an empirical AUC < 0.50 occurs contrary to clinical expectation, report and investigate potential coding/assay error rather than post-hoc flipping
@@ -160,19 +168,30 @@ if roc_auc < 0.50:
 youden_j = tpr - fpr
 opt_idx = np.argmax(youden_j)
 opt_cutoff = thresholds[opt_idx]
-print(f"ROC AUC: {roc_auc:.3f} | Optimal Cutoff (Youden J): {opt_cutoff:.2f}")
+print(f"ROC AUC: {roc_auc:.3f} (95% DeLong CI: {auc_ci[0]:.3f} - {auc_ci[1]:.3f}) | Optimal Cutoff (Youden J): {opt_cutoff:.2f}")
 
 # 4. DECISION CURVE ANALYSIS (DCA: Net Benefit with Treat All and Treat None Reference Strategies)
 def calculate_net_benefit(gold, probs, thresholds_range):
-    n = len(gold)
-    tp_all = np.sum(gold == 1)
-    fp_all = np.sum(gold == 0)
+    # Filter valid paired inputs
+    y_true = np.asarray(gold, dtype=float)
+    y_prob = np.asarray(probs, dtype=float)
+    valid = np.isfinite(y_true) & np.isfinite(y_prob)
+    y_true = y_true[valid]
+    y_prob = y_prob[valid]
+    n = len(y_true)
+    if n == 0:
+        raise ValueError("calculate_net_benefit requires at least one valid paired observation.")
+    
+    tp_all = np.sum(y_true == 1)
+    fp_all = np.sum(y_true == 0)
     net_benefits = []
     for pt in thresholds_range:
-        pred = (probs >= pt).astype(int)
-        tp = np.sum((gold == 1) & (pred == 1))
-        fp = np.sum((gold == 0) & (pred == 1))
-        w = pt / (1.0 - pt) if pt < 1.0 else 0.0
+        if not (0.0 < pt < 1.0):
+            raise ValueError(f"DCA threshold pt must be strictly between 0.0 and 1.0 (got {pt}).")
+        pred = (y_prob >= pt).astype(int)
+        tp = np.sum((y_true == 1) & (pred == 1))
+        fp = np.sum((y_true == 0) & (pred == 1))
+        w = pt / (1.0 - pt)
         nb_model = (tp / n) - (fp / n) * w
         nb_all = (tp_all / n) - (fp_all / n) * w
         net_benefits.append({

@@ -110,6 +110,11 @@ import statsmodels.formula.api as smf
 df = pd.read_csv("clean_cohort.csv")
 
 # 2. TABLE 1: BASELINE CHARACTERISTICS WITH SMDs
+def format_p_value(p_val):
+    if p_val is None or pd.isna(p_val) or not np.isfinite(p_val):
+        return "NA"
+    return "< 0.001" if p_val < 0.001 else f"{p_val:.3f}"
+
 def summarize_continuous(series, group):
     g0 = series[group == 0].dropna()
     g1 = series[group == 1].dropna()
@@ -126,13 +131,18 @@ def summarize_continuous(series, group):
     return {
         "Group 0": f"{g0.mean():.1f} ± {g0.std():.1f}",
         "Group 1": f"{g1.mean():.1f} ± {g1.std():.1f}",
-        "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001",
+        "p_value": format_p_value(p_val),
         "SMD": smd
     }
 
 def summarize_categorical(series, group):
     ct = pd.crosstab(series, group)
-    chi2, p_val, _, _ = stats.chi2_contingency(ct)
+    chi2, p_val_asymp, _, expected = stats.chi2_contingency(ct)
+    is_sparse = (expected < 5).any()
+    if is_sparse and ct.shape == (2, 2):
+        _, p_val = stats.fisher_exact(ct)
+    else:
+        p_val = p_val_asymp
     g0 = series[group == 0].dropna()
     g1 = series[group == 1].dropna()
     dummies = pd.get_dummies(series, drop_first=(series.nunique() == 2))
@@ -151,7 +161,7 @@ def summarize_categorical(series, group):
     smd_str = smds[dummies.columns[0]] if len(smds) == 1 else str(smds)
     return {
         "crosstab": ct,
-        "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001",
+        "p_value": format_p_value(p_val),
         "SMD": smd_str,
         "category_smds": smds,
     }
@@ -189,17 +199,18 @@ print(f"Events Per Parameter (EPV): {epv:.1f} (effective events={min(n_events, n
 if epv < 10:
     print(f"Warning: Low EPV ({epv:.1f} < 10); routing to Firth penalized logistic regression to prevent separation bias.")
     firth_res = fit_firth_logistic(y_mat.iloc[:, 0], X_mat.drop(columns=['Intercept']), fit_intercept=True, ci_method="pl")
+    summary = firth_res["summary_df"]
     results = []
-    for term, coef in firth_res["params"].items():
-        ci_low, ci_high = firth_res["ci"][term]
-        p_val = firth_res["pvalues"][term]
+    for term, row in summary.iterrows():
+        if term == "(Intercept)":
+            continue
         results.append({
             "Predictor": term,
-            "Adjusted OR": f"{np.exp(coef):.2f}",
-            "95% CI": f"({np.exp(ci_low):.2f} - {np.exp(ci_high):.2f})",
-            "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001"
+            "Adjusted OR": f"{row['odds_ratio']:.2f}",
+            "95% CI": f"({row['or_ci_lower']:.2f} - {row['or_ci_upper']:.2f})",
+            "p_value": format_p_value(row["p_value"])
         })
-    primary_or = np.exp(firth_res["params"]["treatment"])
+    primary_or = summary.loc["treatment", "odds_ratio"] if "treatment" in summary.index else np.nan
 else:
     model = smf.logit(formula, data=df_model).fit(disp=False)
     results = []
@@ -208,12 +219,11 @@ else:
             continue
         coef = model.params[term]
         ci_low, ci_high = model.conf_int().loc[term]
-        p_val = model.pvalues[term]
         results.append({
             "Predictor": term,
             "Adjusted OR": f"{np.exp(coef):.2f}",
             "95% CI": f"({np.exp(ci_low):.2f} - {np.exp(ci_high):.2f})",
-            "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001"
+            "p_value": format_p_value(model.pvalues[term])
         })
     primary_or = np.exp(model.params["treatment"])
 

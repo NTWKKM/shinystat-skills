@@ -1381,6 +1381,11 @@ def psm_cmd(
     "--egger", is_flag=True, help="Run Egger's regression test for publication bias."
 )
 @click.option(
+    "--measure",
+    default=None,
+    help="Explicit effect measure type (e.g. 'continuous', 'md', 'smd', 'log_or', 'or', 'rr').",
+)
+@click.option(
     "--output", type=click.Path(), help="Output path for meta-analysis summary JSON."
 )
 def meta_cmd(
@@ -1392,6 +1397,7 @@ def meta_cmd(
     method: str,
     forest_plot: str | None,
     egger: bool,
+    measure: str | None,
     output: str | None,
 ) -> None:
     """Perform fixed and random effects meta-analysis with Forest plot data."""
@@ -1413,7 +1419,33 @@ def meta_cmd(
                 f"Egger's test requires at least 10 studies (got {len(df)}) to ensure adequate statistical power.",
                 param_hint="--egger",
             )
-        if effect_col.lower() in ("log_or", "log_odds_ratio", "or", "odds_ratio"):
+        # Determine explicit or metadata effect measure
+        measure_type = measure.lower() if measure else None
+        if not measure_type:
+            for m_col in [
+                "measure",
+                "effect_measure",
+                "metric",
+                "effect_type",
+                "measure_type",
+            ]:
+                if m_col in df.columns:
+                    unique_m = df[m_col].dropna().astype(str).str.lower().unique()
+                    if len(unique_m) == 1:
+                        measure_type = unique_m[0]
+                    break
+        if not measure_type:
+            measure_type = effect_col.lower()
+
+        if measure_type in (
+            "log_or",
+            "log_odds_ratio",
+            "or",
+            "odds_ratio",
+            "rr",
+            "log_rr",
+            "risk_ratio",
+        ):
             raise click.BadParameter(
                 "Egger's test is invalid for binary log odds ratios due to artifactual correlation between log OR and standard error. Use continuous effect sizes or alternative tests.",
                 param_hint="--egger",

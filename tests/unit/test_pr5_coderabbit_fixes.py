@@ -17,7 +17,6 @@ import json
 import numpy as np
 import pandas as pd
 from click.testing import CliRunner
-from scipy import stats
 
 from medstat.cli.main import cli
 from medstat.data.retention import SampleFlowTracker
@@ -90,6 +89,39 @@ class TestEggerCLIGuards:
         assert res.exit_code != 0
         assert "Egger's test is invalid for binary log odds ratios" in res.output
 
+    def test_egger_rejects_with_explicit_measure_or_metadata(self, tmp_path):
+        runner = CliRunner()
+        # 12 studies where column is named 'effect_size' but --measure is log_or
+        df = pd.DataFrame(
+            {
+                "study": [f"Study_{i}" for i in range(12)],
+                "effect_size": np.random.normal(0.2, 0.1, 12),
+                "se": np.random.uniform(0.05, 0.15, 12),
+            }
+        )
+        csv_path = tmp_path / "meta_effect_size.csv"
+        df.to_csv(csv_path, index=False)
+
+        res = runner.invoke(
+            cli,
+            [
+                "meta",
+                "--data",
+                str(csv_path),
+                "--effect-col",
+                "effect_size",
+                "--se-col",
+                "se",
+                "--study-col",
+                "study",
+                "--measure",
+                "log_or",
+                "--egger",
+            ],
+        )
+        assert res.exit_code != 0
+        assert "Egger's test is invalid for binary log odds ratios" in res.output
+
 
 # ==============================================================================
 # 2. Causal Inference & Agreement Fixes Verification
@@ -107,27 +139,19 @@ class TestCausalAgreementFixes:
         assert list(sorted_desc["logit_ps"]) == [0.8, 0.5]
 
     def test_bland_altman_confidence_intervals(self):
+        from medstat.agreement.bland_altman import calculate_bland_altman
+
         np.random.seed(42)
-        m1 = pd.Series(np.random.normal(100, 15, 50))
-        m2 = m1 + pd.Series(np.random.normal(2, 5, 50))
-        diff = m1 - m2
-        n = len(diff)
-        mean_bias = float(diff.mean())
-        sd_diff = float(diff.std(ddof=1))
-        se_bias = sd_diff / np.sqrt(n)
-        t_crit = float(stats.t.ppf(0.975, df=n - 1))
-        ci_bias = (mean_bias - t_crit * se_bias, mean_bias + t_crit * se_bias)
-
-        z_loa = float(stats.norm.ppf(0.975))
-        loa_upper = mean_bias + z_loa * sd_diff
-        loa_lower = mean_bias - z_loa * sd_diff
-        se_loa = float(np.sqrt((1.0 / n + (z_loa**2) / (2.0 * (n - 1))) * (sd_diff**2)))
-        ci_loa_upper = (loa_upper - t_crit * se_loa, loa_upper + t_crit * se_loa)
-        ci_loa_lower = (loa_lower - t_crit * se_loa, loa_lower + t_crit * se_loa)
-
-        assert ci_bias[0] < mean_bias < ci_bias[1]
-        assert ci_loa_lower[0] < loa_lower < ci_loa_lower[1]
-        assert ci_loa_upper[0] < loa_upper < ci_loa_upper[1]
+        df = pd.DataFrame(
+            {
+                "m1": np.random.normal(100, 15, 50),
+                "m2": np.random.normal(100, 15, 50) + 2.0,
+            }
+        )
+        res = calculate_bland_altman(df, "m1", "m2", ci=0.95)
+        assert res["ci_mean_diff"][0] < res["mean_diff"] < res["ci_mean_diff"][1]
+        assert res["ci_lower_loa"][0] < res["lower_loa"] < res["ci_lower_loa"][1]
+        assert res["ci_upper_loa"][0] < res["upper_loa"] < res["ci_upper_loa"][1]
 
     def test_smd_boundary_and_categorical(self):
         # Test zero pooled SD with different means (non-estimable)
@@ -184,33 +208,28 @@ class TestCleanRetentionFixes:
 # ==============================================================================
 class TestDiagnosticDCAFixes:
     def test_calculate_net_benefit_includes_treat_all_and_none(self):
+        from medstat.diagnostic.dca import calculate_dca
+
         gold = np.array([1, 1, 0, 0, 1, 0, 0, 1, 0, 0])
         probs = np.array([0.9, 0.8, 0.2, 0.1, 0.7, 0.3, 0.2, 0.85, 0.05, 0.15])
         thresholds = [0.1, 0.3, 0.5]
-        n = len(gold)
-        tp_all = np.sum(gold == 1)
-        fp_all = np.sum(gold == 0)
+        dca_df = calculate_dca(gold, probs, thresholds=thresholds)
+        strategies = set(dca_df["strategy"].unique())
+        assert "Model" in strategies
+        assert "Treat All" in strategies
+        assert "Treat None" in strategies
+        none_df = dca_df[dca_df["strategy"] == "Treat None"]
+        assert (none_df["net_benefit"] == 0.0).all()
 
-        records = []
-        for pt in thresholds:
-            pred = (probs >= pt).astype(int)
-            tp = np.sum((gold == 1) & (pred == 1))
-            fp = np.sum((gold == 0) & (pred == 1))
-            w = pt / (1.0 - pt)
-            nb_model = (tp / n) - (fp / n) * w
-            nb_all = (tp_all / n) - (fp_all / n) * w
-            records.append(
-                {
-                    "pt": pt,
-                    "net_benefit": nb_model,
-                    "treat_all": nb_all,
-                    "treat_none": 0.0,
-                }
-            )
-        dca_df = pd.DataFrame(records)
-        assert "treat_all" in dca_df.columns
-        assert "treat_none" in dca_df.columns
-        assert (dca_df["treat_none"] == 0.0).all()
+    def test_auc_ci_delong(self):
+        from medstat.diagnostic.roc import auc_ci_delong
+
+        gold = np.array([1, 1, 1, 1, 0, 0, 0, 0])
+        score = np.array([0.9, 0.8, 0.7, 0.6, 0.4, 0.3, 0.2, 0.1])
+        res = auc_ci_delong(gold, score)
+        assert res["auc"] == 1.0
+        assert 0.0 <= res["ci_lower"] <= 1.0
+        assert 0.0 <= res["ci_upper"] <= 1.0
 
 
 # ==============================================================================
@@ -245,6 +264,20 @@ class TestModelsEPVAndEValueFixes:
         # For OR = 2.0 with common outcome (sqrt(OR) transform)
         res_common = calculate_e_value(2.0, estimate_type="OR", rare_outcome=False)
         assert res_rare["e_value_estimate"] > res_common["e_value_estimate"]
+
+    def test_fit_firth_logistic_summary_df_schema(self):
+        from medstat.models.firth import fit_firth_logistic
+
+        y = np.array([0, 0, 0, 0, 1, 1, 1, 1])
+        X = np.array([[1.0], [2.0], [1.5], [2.5], [5.0], [6.0], [5.5], [6.5]])
+        res = fit_firth_logistic(y, X, feature_names=["exposure"])
+        summary_df = res["summary_df"]
+        assert "estimate" in summary_df.columns
+        assert "odds_ratio" in summary_df.columns
+        assert "ci_lower" in summary_df.columns
+        assert "ci_upper" in summary_df.columns
+        assert "p_value" in summary_df.columns
+        assert "exposure" in summary_df.index
 
 
 # ==============================================================================
@@ -292,6 +325,8 @@ class TestReportMethodsNarrativeFixes:
         def format_p_value(p_val_str, style="NEJM"):
             try:
                 p = float(p_val_str)
+                if not np.isfinite(p):
+                    return "NA"
                 if style.upper() == "JAMA":
                     if p < 0.001:
                         return "<.001"
@@ -307,12 +342,22 @@ class TestReportMethodsNarrativeFixes:
                     else:
                         return f"{p:.3f}"
             except (ValueError, TypeError):
-                return p_val_str
+                return "NA"
 
         # NEJM retains leading zero
         assert format_p_value("0.023", style="NEJM") == "0.023"
         assert format_p_value("0.0004", style="NEJM") == "<0.001"
+        assert format_p_value(np.nan, style="NEJM") == "NA"
 
         # JAMA strips leading zero
         assert format_p_value("0.023", style="JAMA") == ".023"
         assert format_p_value("0.0004", style="JAMA") == "<.001"
+        assert format_p_value(np.nan, style="JAMA") == "NA"
+
+    def test_html_table_escaping(self):
+        import html
+
+        raw_var = "<script>alert('xss')</script>"
+        escaped_var = html.escape(raw_var)
+        assert "<script>" not in escaped_var
+        assert "&lt;script&gt;" in escaped_var

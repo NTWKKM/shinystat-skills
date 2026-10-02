@@ -147,7 +147,7 @@ Before writing analysis scripts or fitting models, the agent must pass through 5
 - **The Risk**: Survival events encoded backwards ($0 = \text{Death}, 1 = \text{Alive}$), or low-is-abnormal biomarkers (eGFR, Platelets, PaO2/FiO2) classified with $Score \ge Cutoff$, yielding $\text{AUC} < 0.50$ and inverted sensitivity/specificity.
 - **Directive**:
   1. Strict numeric `0/1` encoding: $1 = \text{Event / Disease / Case}$, $0 = \text{Censored / Healthy / Control}$.
-  2. Automated AUC Sanity Check: If empirical $\text{AUC} < 0.50$, invert score ($Score_{\text{eff}} = -Score$) to preserve concordance.
+  2. Prespecified Clinical Orientation: Prespecify biomarker directionality from clinical mechanism before analysis. If empirical $\text{AUC} < 0.50$, investigate potential event/outcome coding error or assay inversion rather than post-hoc flipping.
 
 ### Gate 4: Sparse Data & Events-Per-Variable (EPV) Gate (สถิติตัวแปรพหุคูณบนข้อมูลเบาบาง)
 - **The Risk**: Fitting multivariable models with 10 covariates when only 12 events occurred, producing quasi-complete separation and astronomical odds ratios ($\text{OR} > 1000$).
@@ -304,19 +304,32 @@ n_nonevents = (df_model['outcome'] == 0).sum()
 epv = min(n_events, n_nonevents) / n_params if n_params > 0 else np.nan
 print(f"Events Per Parameter (EPV): {epv:.1f} (effective events={min(n_events, n_nonevents)}, parameters={n_params})")
 
+# Check for quasi-complete separation / zero cells in categorical predictors
+has_zero_cells = False
+for col in ["sex", "admission_status"]:
+    if col in df_model.columns:
+        ct = pd.crosstab(df_model[col], df_model["outcome"])
+        if (ct == 0).any().any():
+            has_zero_cells = True
+            break
+
 # Route model fit: If EPV < 10 or quasi-complete separation occurs, route to Firth penalized regression
-if epv < 10:
-    print(f"Warning: Low EPV ({epv:.1f} < 10); routing to Firth penalized logistic regression to prevent separation bias.")
+if epv < 10 or has_zero_cells:
+    reason = "Low EPV (< 10)" if epv < 10 else "Quasi-complete separation / zero cells detected"
+    print(f"Warning: {reason}; routing to Firth penalized logistic regression to prevent separation bias.")
     firth_res = fit_firth_logistic(y_mat.iloc[:, 0], X_mat.drop(columns=['Intercept']), fit_intercept=True, ci_method="pl")
+    summary = firth_res["summary_df"]
     results = []
-    for term, coef in firth_res["params"].items():
-        ci_low, ci_high = firth_res["ci"][term]
-        p_val = firth_res["pvalues"][term]
+    for term, row in summary.iterrows():
+        if term == "(Intercept)":
+            continue
+        p_val = row["p_value"]
+        p_str = "NA" if (pd.isna(p_val) or not np.isfinite(p_val)) else ("< 0.001" if p_val < 0.001 else f"{p_val:.3f}")
         results.append({
             "Variable / Predictor": term,
-            "Adjusted OR": f"{np.exp(coef):.2f}",
-            "95% CI": f"({np.exp(ci_low):.2f} - {np.exp(ci_high):.2f})",
-            "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001"
+            "Adjusted OR": f"{row['odds_ratio']:.2f}",
+            "95% CI": f"({row['or_ci_lower']:.2f} - {row['or_ci_upper']:.2f})",
+            "p_value": p_str
         })
 else:
     model = smf.logit(formula, data=df_model).fit(disp=False)
@@ -327,11 +340,12 @@ else:
         coef = model.params[term]
         ci_low, ci_high = model.conf_int().loc[term]
         p_val = model.pvalues[term]
+        p_str = "NA" if (pd.isna(p_val) or not np.isfinite(p_val)) else ("< 0.001" if p_val < 0.001 else f"{p_val:.3f}")
         results.append({
             "Variable / Predictor": term,
             "Adjusted OR": f"{np.exp(coef):.2f}",
             "95% CI": f"({np.exp(ci_low):.2f} - {np.exp(ci_high):.2f})",
-            "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001"
+            "p_value": p_str
         })
 
 res_df = pd.DataFrame(results)

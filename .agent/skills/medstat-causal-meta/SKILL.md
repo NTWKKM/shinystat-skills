@@ -133,11 +133,15 @@ import statsmodels.formula.api as smf
 # 1. PROPENSITY SCORE MATCHING (Austin 2009 Standard)
 # ------------------------------------------------------------------------------
 def run_psm_pipeline(df, treatment_col, covariate_cols, caliper_sd=0.20):
-    # Fit propensity score model
-    formula = f"{treatment_col} ~ " + " + ".join(covariate_cols)
-    ps_model = smf.logit(formula, data=df).fit(disp=False)
+    # Fit propensity score model with safe column identifiers to prevent formula injection
+    col_map = {treatment_col: "_trt"}
+    for i, col in enumerate(covariate_cols):
+        col_map[col] = f"_cov_{i}"
+    df_safe = df.rename(columns=col_map)
+    formula = "_trt ~ " + " + ".join(col_map[col] for col in covariate_cols)
+    ps_model = smf.logit(formula, data=df_safe).fit(disp=False)
     df = df.copy()
-    df['ps'] = ps_model.predict(df)
+    df['ps'] = ps_model.predict(df_safe)
     df['logit_ps'] = np.log(df['ps'] / (1.0 - df['ps']))
     
     caliper = caliper_sd * df['logit_ps'].std()
@@ -162,7 +166,12 @@ def run_psm_pipeline(df, treatment_col, covariate_cols, caliper_sd=0.20):
             matched_pairs.append((t_idx, best_match_idx))
             available_ctrl_idx.remove(best_match_idx)
             
-    print(f"Matched {len(matched_pairs)} / {len(treated)} treated subjects (Caliper = {caliper:.4f})")
+    n_treated_initial = len(treated)
+    n_control_initial = len(control)
+    n_matched = len(matched_pairs)
+    print(f"Matching retention flow (Caliper = {caliper:.4f}):")
+    print(f"  Treated: Initial = {n_treated_initial}, Matched = {n_matched}, Unmatched = {n_treated_initial - n_matched}")
+    print(f"  Control: Initial = {n_control_initial}, Matched = {n_matched}, Unmatched = {n_control_initial - n_matched}")
     
     # Post-Match Balance Check (SMD < 0.10)
     matched_idx = [t for t, c in matched_pairs] + [c for t, c in matched_pairs]
@@ -199,15 +208,23 @@ def run_psm_pipeline(df, treatment_col, covariate_cols, caliper_sd=0.20):
     return df_matched
 
 # ------------------------------------------------------------------------------
-# 2. BLAND-ALTMAN LIMITS OF AGREEMENT (with 95% Confidence Intervals)
+# 2. BLAND-ALTMAN LIMITS OF AGREEMENT (with Configurable Confidence Intervals)
 # ------------------------------------------------------------------------------
 def run_bland_altman(m1_series, m2_series, ci=0.95):
-    diff = (m1_series - m2_series).dropna()
+    # Verify equal lengths and subtract positional values to avoid pandas index alignment
+    m1 = np.asarray(m1_series, dtype=float)
+    m2 = np.asarray(m2_series, dtype=float)
+    if len(m1) != len(m2):
+        raise ValueError(f"Bland-Altman requires paired inputs of equal length (got {len(m1)} and {len(m2)}).")
+    valid_mask = np.isfinite(m1) & np.isfinite(m2)
+    m1_clean = m1[valid_mask]
+    m2_clean = m2[valid_mask]
+    diff = m1_clean - m2_clean
     n = len(diff)
     if n < 2:
         raise ValueError(f"Bland-Altman requires at least 2 non-missing pairs (got {n}).")
-    mean_bias = float(diff.mean())
-    sd_diff = float(diff.std(ddof=1))
+    mean_bias = float(np.mean(diff))
+    sd_diff = float(np.std(diff, ddof=1))
     se_bias = sd_diff / np.sqrt(n)
     t_crit = float(stats.t.ppf(1.0 - (1.0 - ci) / 2.0, df=n - 1))
     ci_bias = (mean_bias - t_crit * se_bias, mean_bias + t_crit * se_bias)
@@ -218,9 +235,10 @@ def run_bland_altman(m1_series, m2_series, ci=0.95):
     se_loa = float(np.sqrt((1.0 / n + (z_loa**2) / (2.0 * (n - 1))) * (sd_diff**2)))
     ci_loa_upper = (loa_upper - t_crit * se_loa, loa_upper + t_crit * se_loa)
     ci_loa_lower = (loa_lower - t_crit * se_loa, loa_lower + t_crit * se_loa)
-    print(f"Bland-Altman: Mean Bias = {mean_bias:.2f} (95% CI [{ci_bias[0]:.2f}, {ci_bias[1]:.2f}]), "
-          f"95% LoA = [{loa_lower:.2f}, {loa_upper:.2f}] (LoA Lower 95% CI [{ci_loa_lower[0]:.2f}, {ci_loa_lower[1]:.2f}], "
-          f"LoA Upper 95% CI [{ci_loa_upper[0]:.2f}, {ci_loa_upper[1]:.2f}])")
+    ci_pct = int(round(ci * 100))
+    print(f"Bland-Altman: Mean Bias = {mean_bias:.2f} ({ci_pct}% CI [{ci_bias[0]:.2f}, {ci_bias[1]:.2f}]), "
+          f"{ci_pct}% LoA = [{loa_lower:.2f}, {loa_upper:.2f}] (LoA Lower {ci_pct}% CI [{ci_loa_lower[0]:.2f}, {ci_loa_lower[1]:.2f}], "
+          f"LoA Upper {ci_pct}% CI [{ci_loa_upper[0]:.2f}, {ci_loa_upper[1]:.2f}])")
     return {
         "mean_bias": mean_bias,
         "ci_mean_bias": ci_bias,

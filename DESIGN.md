@@ -314,9 +314,9 @@ While ADR 15 and ADR 16 provided agents with adaptive Python scripting flexibili
    - **Pillar 2 (Clinical Principles)**: Biological mechanisms, confounding by indication, non-linear thresholds, and directionality.
    - **Pillar 3 (Raw Data Reality)**: Data geometry, sample size $N$, events count, outcome formats, EPV, and missingness patterns.
 2. **The 5 Anti-Hallucination Stop Gates**:
-   - *Gate 1 (Contradiction Resolution)*: Halt & Pivot when proposal conflicts with raw data (e.g., survival without time column transitions to logistic/Firth).
-   - *Gate 2 (Silent Assumption Barrier)*: Zero silent listwise deletion; mandatory distribution checks (Shapiro-Wilk) routing skewed data to Median [IQR] and Mann-Whitney U.
-   - *Gate 3 (Directionality Gate)*: Strict 0/1 numeric encoding; automated AUC sanity check (AUC < 0.50 triggers low-is-abnormal inversion $Score_{\text{eff}} = -Score$).
+   - *Gate 1 (Contradiction Resolution)*: Halt when a time-to-event proposal lacks event or follow-up times. Use logistic regression only for a prespecified fixed-horizon outcome with complete ascertainment.
+   - *Gate 2 (Silent Assumption Barrier)*: Zero silent listwise deletion; inspect distributions and model assumptions, then select summaries and tests based on the prespecified estimand, study design, and outcome scale.
+   - *Gate 3 (Directionality Gate)*: Strict 0/1 numeric encoding; prespecify score direction from clinical meaning. If AUC is below 0.50, verify event mapping and score direction before any inversion.
    - *Gate 4 (Sparse Data & EPV Gate)*: Mandate calculation of $\text{EPV} = \frac{\min(N_{\text{events}}, N_{\text{non-events}})}{K_{\text{covariates}}}$; if $\text{EPV} < 10$, enforce Firth penalized likelihood.
    - *Gate 5 (Clinical Interpretation Guardrails)*: Report $P > 0.05$ as "insufficient evidence to reject the null hypothesis" (never "no difference"); report OR with incidence warning if $> 10\%$; strictly reject Pearson correlation for rater/device agreement.
 3. **Domain Skill Hardening**:

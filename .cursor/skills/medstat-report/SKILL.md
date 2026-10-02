@@ -131,14 +131,23 @@ def format_p_value(p_val_str, style="NEJM"):
     except (ValueError, TypeError):
         return p_val_str
 
-def render_publication_html_table(records, style="NEJM", title="Table 2. Multivariable Logistic Regression Analysis"):
+import html
+
+def render_publication_html_table(records, style="NEJM", title="Table 2. Multivariable Logistic Regression Analysis", adjustment_vars=None, ci_method="profile likelihood"):
     is_nejm = style.upper() == "NEJM"
     top_border = "border-top: 3px double #000;" if is_nejm else "border-top: 1px solid #000;"
     p_header = "P Value" if is_nejm else "<em>P</em> Value"
+    title_escaped = html.escape(str(title))
     
-    html = f"""
+    if adjustment_vars:
+        covar_str = ", ".join(html.escape(str(v)) for v in adjustment_vars)
+        footnote_text = f"* Odds ratios were adjusted for {covar_str}. Confidence intervals are {html.escape(str(ci_method))}-based."
+    else:
+        footnote_text = f"* Unadjusted estimates. Confidence intervals are {html.escape(str(ci_method))}-based."
+    
+    html_out = f"""
     <div style="font-family: 'Times New Roman', Times, serif; max-width: 800px; margin: 20px auto;">
-      <h3 style="margin-bottom: 8px; font-weight: bold;">{title}</h3>
+      <h3 style="margin-bottom: 8px; font-weight: bold;">{title_escaped}</h3>
       <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 14px;">
         <thead>
           <tr style="{top_border} border-bottom: 1px solid #000;">
@@ -151,28 +160,32 @@ def render_publication_html_table(records, style="NEJM", title="Table 2. Multiva
         <tbody>
     """
     for r in records:
-        p_str = format_p_value(r['p_value'], style=style)
-        html += f"""
+        p_str = format_p_value(r.get('p_value', ''), style=style)
+        var_esc = html.escape(str(r.get('Variable', '')))
+        est_esc = html.escape(str(r.get('Estimate', '')))
+        ci_esc = html.escape(str(r.get('CI', '')))
+        p_esc = html.escape(str(p_str))
+        html_out += f"""
           <tr>
-            <td style="padding: 6px 8px;">{r['Variable']}</td>
-            <td style="padding: 6px 8px; text-align: right;">{r['Estimate']}</td>
-            <td style="padding: 6px 8px; text-align: right;">{r['CI']}</td>
-            <td style="padding: 6px 8px; text-align: right;">{p_str}</td>
+            <td style="padding: 6px 8px;">{var_esc}</td>
+            <td style="padding: 6px 8px; text-align: right;">{est_esc}</td>
+            <td style="padding: 6px 8px; text-align: right;">{ci_esc}</td>
+            <td style="padding: 6px 8px; text-align: right;">{p_esc}</td>
           </tr>
         """
-    html += """
+    html_out += f"""
         </tbody>
         <tfoot>
           <tr style="border-bottom: 2px solid #000;">
             <td colspan="4" style="padding: 8px 4px; font-size: 12px; color: #333;">
-              * Odds ratios were adjusted for baseline age, sex, and hypertension status. Confidence intervals are profile likelihood-based.
+              {footnote_text}
             </td>
           </tr>
         </tfoot>
       </table>
     </div>
     """
-    return html
+    return html_out
 
 # 3. GENERATE STATISTICAL METHODS NARRATIVE FROM ACTUAL ANALYSIS METADATA
 def generate_methods_narrative(
