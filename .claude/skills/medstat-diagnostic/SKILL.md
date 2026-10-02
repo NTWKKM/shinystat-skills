@@ -114,6 +114,10 @@ from sklearn.metrics import roc_curve, auc
 
 # 1. LOAD DATA & VERIFY ENDPOINTS (Strict Numeric 0/1)
 df = pd.read_csv("clean_cohort.csv")
+# Validate gold_standard contains strictly binary values {0, 1}
+unique_gold = set(df['gold_standard'].dropna().unique())
+if not unique_gold.issubset({0, 1, 0.0, 1.0}):
+    raise ValueError(f"gold_standard contains invalid values {unique_gold}. Must be strictly binary {{0, 1}}.")
 # gold_standard: 1 = Disease/Event, 0 = Non-disease
 # test_score: continuous biomarker or predicted probability
 
@@ -130,11 +134,21 @@ def wilson_score_interval(k, n, confidence=0.95):
     return max(0.0, center - margin), min(1.0, center + margin)
 
 def evaluate_cutoff(gold, score, cutoff):
-    pred = (score >= cutoff).astype(int)
-    tp = np.sum((gold == 1) & (pred == 1))
-    fp = np.sum((gold == 0) & (pred == 1))
-    tn = np.sum((gold == 0) & (pred == 0))
-    fn = np.sum((gold == 1) & (pred == 0))
+    g = np.asarray(gold, dtype=float)
+    s = np.asarray(score, dtype=float)
+    valid = np.isfinite(g) & np.isfinite(s)
+    g = g[valid]
+    s = s[valid]
+    if len(g) == 0:
+        raise ValueError("evaluate_cutoff requires at least one finite paired observation.")
+    if not np.isin(g, [0.0, 1.0]).all():
+        raise ValueError(f"gold contains invalid values {np.unique(g)}. Must be strictly binary {{0, 1}}.")
+
+    pred = (s >= cutoff).astype(int)
+    tp = np.sum((g == 1) & (pred == 1))
+    fp = np.sum((g == 0) & (pred == 1))
+    tn = np.sum((g == 0) & (pred == 0))
+    fn = np.sum((g == 1) & (pred == 0))
     
     sens, (sens_l, sens_u) = (tp / (tp + fn), wilson_score_interval(tp, tp + fn)) if (tp + fn) > 0 else (np.nan, (np.nan, np.nan))
     spec, (spec_l, spec_u) = (tn / (tn + fp), wilson_score_interval(tn, tn + fp)) if (tn + fp) > 0 else (np.nan, (np.nan, np.nan))
@@ -153,11 +167,16 @@ def evaluate_cutoff(gold, score, cutoff):
     }
 
 # 3. EMPIRICAL ROC, DIRECTIONALITY SANITY CHECK & YOUDEN'S INDEX
-scores = df['test_score'].values
-fpr, tpr, thresholds = roc_curve(df['gold_standard'], scores)
+valid_mask = np.isfinite(df['gold_standard']) & np.isfinite(df['test_score'])
+clean_diag = df[valid_mask].copy()
+if not set(clean_diag['gold_standard'].unique()).issubset({0, 1, 0.0, 1.0}):
+    raise ValueError("gold_standard must contain strictly {0, 1}.")
+scores = clean_diag['test_score'].values
+gold_vals = clean_diag['gold_standard'].astype(int).values
+fpr, tpr, thresholds = roc_curve(gold_vals, scores)
 roc_auc = auc(fpr, tpr)
 from medstat.diagnostic.roc import auc_ci_delong
-delong_res = auc_ci_delong(df['gold_standard'], scores)
+delong_res = auc_ci_delong(gold_vals, scores)
 auc_ci = (delong_res['ci_lower'], delong_res['ci_upper'])
 
 # Directionality: Verify prespecified clinical orientation (low-is-abnormal markers like eGFR or Platelets must be prespecified and recoded prior to analysis)
@@ -181,6 +200,8 @@ def calculate_net_benefit(gold, probs, thresholds_range):
     n = len(y_true)
     if n == 0:
         raise ValueError("calculate_net_benefit requires at least one valid paired observation.")
+    if not np.isin(y_true, [0.0, 1.0]).all():
+        raise ValueError(f"gold contains invalid values {np.unique(y_true)}. Must be strictly binary {{0, 1}}.")
     
     tp_all = np.sum(y_true == 1)
     fp_all = np.sum(y_true == 0)

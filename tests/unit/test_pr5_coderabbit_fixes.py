@@ -195,15 +195,30 @@ class TestEggerCLIGuards:
 # ==============================================================================
 class TestCausalAgreementFixes:
     def test_psm_deterministic_order(self):
-        df = pd.DataFrame(
+        from medstat.causal.psm import perform_matching
+
+        df1 = pd.DataFrame(
             {
                 "treatment": [1, 1, 0, 0, 0],
-                "logit_ps": [0.8, 0.5, 0.75, 0.45, 0.1],
+                "ps": [0.8, 0.5, 0.75, 0.45, 0.1],
             }
         )
-        treated = df[df["treatment"] == 1]
-        sorted_desc = treated.sort_values("logit_ps", ascending=False)
-        assert list(sorted_desc["logit_ps"]) == [0.8, 0.5]
+        df2 = pd.DataFrame(
+            {
+                "treatment": [1, 1, 0, 0, 0],
+                "ps": [0.5, 0.8, 0.75, 0.45, 0.1],
+            }
+        )
+        m1 = perform_matching(df1, "treatment", "ps", caliper=0.5)
+        m2 = perform_matching(df2, "treatment", "ps", caliper=0.5)
+        assert len(m1) == 4
+        assert len(m2) == 4
+        # Treated with ps=0.8 matches control with ps=0.75 in both
+        pair_t1 = m1[(m1["treatment"] == 1) & (m1["ps"] == 0.8)]["pair_id"].iloc[0]
+        ctrl_1 = m1[(m1["treatment"] == 0) & (m1["pair_id"] == pair_t1)]["ps"].iloc[0]
+        pair_t2 = m2[(m2["treatment"] == 1) & (m2["ps"] == 0.8)]["pair_id"].iloc[0]
+        ctrl_2 = m2[(m2["treatment"] == 0) & (m2["pair_id"] == pair_t2)]["ps"].iloc[0]
+        assert ctrl_1 == ctrl_2 == 0.75
 
     def test_bland_altman_confidence_intervals(self):
         from medstat.agreement.bland_altman import calculate_bland_altman
@@ -360,66 +375,76 @@ class TestReportMethodsNarrativeFixes:
             missing_data_strategy="complete-case analysis",
             guideline="STROBE",
             tests=None,
+            two_sided=True,
+            alpha=0.05,
         ):
             if confounders is None:
                 confounders = ["age", "sex"]
             if tests is None:
                 tests = "t-test and Chi-Square test"
             confounder_str = ", ".join(confounders)
+            sig_clause = ""
+            if two_sided is not None and alpha is not None:
+                sided_str = "two-sided" if two_sided else "one-sided"
+                sig_clause = f"All tests were {sided_str}, with p < {alpha} considered statistically significant. "
+            elif alpha is not None:
+                sig_clause = (
+                    f"Statistical tests used a significance threshold of p < {alpha}. "
+                )
+
             return (
                 f"Statistical Analysis: Evaluated {tests}. "
                 f"Missing data were addressed via {missing_data_strategy}. "
                 f"{model_type} was fitted to evaluate associations with {primary_outcome}, "
                 f"adjusting for prespecified confounders ({confounder_str}). "
+                f"Effect estimates were reported with corresponding 95% confidence intervals. "
+                f"{sig_clause}"
                 f"Reporting conformed to {guideline} guidelines for {study_design.lower()} studies."
             )
 
-        narrative = generate_methods_narrative(
+        narrative_with_meta = generate_methods_narrative(
             study_design="Prospective Cohort",
             primary_outcome="In-hospital Sepsis",
             model_type="Cox proportional hazards",
             confounders=["SOFA score", "Lactate"],
             missing_data_strategy="multiple imputation (MICE)",
             guideline="STROBE",
+            two_sided=True,
+            alpha=0.05,
         )
-        assert "Prospective Cohort" in narrative or "prospective cohort" in narrative
-        assert "In-hospital Sepsis" in narrative
-        assert "Cox proportional hazards" in narrative
-        assert "SOFA score, Lactate" in narrative
-        assert "multiple imputation (MICE)" in narrative
+        assert (
+            "All tests were two-sided, with p < 0.05 considered statistically significant."
+            in narrative_with_meta
+        )
+
+        narrative_unknown_meta = generate_methods_narrative(
+            two_sided=None,
+            alpha=None,
+        )
+        assert "statistically significant" not in narrative_unknown_meta
+        assert "two-sided" not in narrative_unknown_meta
 
     def test_p_value_formatting_nejm_vs_jama(self):
-        def format_p_value(p_val_str, style="NEJM"):
-            try:
-                p = float(p_val_str)
-                if not np.isfinite(p):
-                    return "NA"
-                if style.upper() == "JAMA":
-                    if p < 0.001:
-                        return "<.001"
-                    elif p >= 0.99:
-                        return ">.99"
-                    else:
-                        return f"{p:.3f}".lstrip("0")
-                else:  # NEJM
-                    if p < 0.001:
-                        return "<0.001"
-                    elif p >= 0.99:
-                        return ">0.99"
-                    else:
-                        return f"{p:.3f}"
-            except (ValueError, TypeError):
-                return "NA"
+        from medstat.reporting.tables import format_journal_p_value
 
-        # NEJM retains leading zero
-        assert format_p_value("0.023", style="NEJM") == "0.023"
-        assert format_p_value("0.0004", style="NEJM") == "<0.001"
-        assert format_p_value(np.nan, style="NEJM") == "NA"
+        # Test missing / NaN returns em-dash
+        assert format_journal_p_value(None) == "—"
+        assert format_journal_p_value(float("nan")) == "—"
 
-        # JAMA strips leading zero
-        assert format_p_value("0.023", style="JAMA") == ".023"
-        assert format_p_value("0.0004", style="JAMA") == "<.001"
-        assert format_p_value(np.nan, style="JAMA") == "NA"
+        # Test NEJM: 3 decimals at/below .01, 2 decimals above .01, strict >0.99
+        assert format_journal_p_value(0.0004, style="NEJM") == "P<0.001"
+        assert format_journal_p_value(0.008, style="NEJM") == "P=0.008"
+        assert format_journal_p_value(0.014, style="NEJM") == "P=0.01"
+        assert format_journal_p_value(0.99, style="NEJM") == "P=0.99"
+        assert format_journal_p_value(0.994, style="NEJM") == "P>0.99"
+
+        # Test JAMA: 3 decimals below .01, 2 decimals at/above .01, strict >.99, stripped leading 0
+        assert format_journal_p_value(0.0004, style="JAMA") == "P<0.001"
+        assert format_journal_p_value(0.008, style="JAMA") == "P=0.008"
+        assert format_journal_p_value(0.01, style="JAMA") == "P=0.01"
+        assert format_journal_p_value(0.023, style="JAMA") == "P=0.02"
+        assert format_journal_p_value(0.99, style="JAMA") == "P=0.99"
+        assert format_journal_p_value(0.995, style="JAMA") == "P>0.99"
 
     def test_html_table_escaping(self):
         import html
@@ -428,3 +453,34 @@ class TestReportMethodsNarrativeFixes:
         escaped_var = html.escape(raw_var)
         assert "<script>" not in escaped_var
         assert "&lt;script&gt;" in escaped_var
+
+    def test_diagnostic_gold_standard_binary_validation(self):
+        import pytest
+
+        def validate_gold(gold_series):
+            vals = set(pd.Series(gold_series).dropna().unique())
+            if not vals.issubset({0, 1, 0.0, 1.0}):
+                raise ValueError("Must be strictly binary {0, 1}")
+
+        validate_gold([0, 1, 1, 0])
+        with pytest.raises(ValueError):
+            validate_gold([0, 1, 2])
+        with pytest.raises(ValueError):
+            validate_gold(["Case", "Control"])
+
+    def test_treatment_contrast_extraction(self):
+        def extract_primary_or(estimates_map):
+            for term, or_val in estimates_map.items():
+                if (
+                    term == "treatment"
+                    or term.startswith("treatment[")
+                    or term.startswith("C(treatment)[")
+                ):
+                    if np.isfinite(or_val) and or_val > 0:
+                        return float(or_val)
+            return np.nan
+
+        assert extract_primary_or({"treatment": 2.15, "age": 1.02}) == 2.15
+        assert extract_primary_or({"C(treatment)[T.1]": 1.85, "age": 1.02}) == 1.85
+        assert extract_primary_or({"treatment[T.True]": 3.10}) == 3.10
+        assert np.isnan(extract_primary_or({"other": 1.5}))

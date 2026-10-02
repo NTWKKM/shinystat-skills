@@ -118,19 +118,35 @@ def format_p_value(p_val):
 def summarize_continuous(series, group):
     g0 = series[group == 0].dropna()
     g1 = series[group == 1].dropna()
-    t_stat, p_val = stats.ttest_ind(g1, g0, equal_var=False)
     if len(g0) < 2 or len(g1) < 2:
-        smd = "Not estimable"
+        return {"Group 0": "NA", "Group 1": "NA", "p_value": "NA", "SMD": "Not estimable"}
+
+    # Assess normality via Shapiro-Wilk when sample size permits (n <= 5000)
+    is_normal = True
+    if len(g0) >= 3 and len(g1) >= 3:
+        _, p_norm0 = stats.shapiro(g0) if len(g0) <= 5000 else (None, 0.05)
+        _, p_norm1 = stats.shapiro(g1) if len(g1) <= 5000 else (None, 0.05)
+        if (p_norm0 is not None and p_norm0 < 0.05) or (p_norm1 is not None and p_norm1 < 0.05):
+            is_normal = False
+
+    if is_normal:
+        t_stat, p_val = stats.ttest_ind(g1, g0, equal_var=False)
+        g0_summary = f"{g0.mean():.1f} ± {g0.std():.1f}"
+        g1_summary = f"{g1.mean():.1f} ± {g1.std():.1f}"
     else:
-        diff = abs(g1.mean() - g0.mean())
-        pooled_sd = np.sqrt((g1.var(ddof=1) + g0.var(ddof=1)) / 2.0)
-        if pooled_sd == 0:
-            smd = "0.000" if diff == 0 else "Not estimable (zero SD with non-zero diff)"
-        else:
-            smd = f"{diff / pooled_sd:.3f}"
+        u_stat, p_val = stats.mannwhitneyu(g1, g0, alternative="two-sided")
+        g0_summary = f"{g0.median():.1f} [{g0.quantile(0.25):.1f}, {g0.quantile(0.75):.1f}]"
+        g1_summary = f"{g1.median():.1f} [{g1.quantile(0.25):.1f}, {g1.quantile(0.75):.1f}]"
+
+    diff = abs(g1.mean() - g0.mean())
+    pooled_sd = np.sqrt((g1.var(ddof=1) + g0.var(ddof=1)) / 2.0)
+    if pooled_sd == 0:
+        smd = "0.000" if diff == 0 else "Not estimable (zero SD with non-zero diff)"
+    else:
+        smd = f"{diff / pooled_sd:.3f}"
     return {
-        "Group 0": f"{g0.mean():.1f} ± {g0.std():.1f}",
-        "Group 1": f"{g1.mean():.1f} ± {g1.std():.1f}",
+        "Group 0": g0_summary,
+        "Group 1": g1_summary,
         "p_value": format_p_value(p_val),
         "SMD": smd
     }
@@ -203,9 +219,27 @@ n_nonevents = (df_model['outcome'] == 0).sum()
 epv = min(n_events, n_nonevents) / n_params if n_params > 0 else np.nan
 print(f"Events Per Parameter (EPV): {epv:.1f} (effective events={min(n_events, n_nonevents)}, parameters={n_params})")
 
+# Check for quasi-complete separation / zero cells in categorical predictors
+has_zero_cells = False
+for col in ["treatment", "sex"]:
+    if col in df_model.columns:
+        ct = pd.crosstab(df_model[col], df_model["outcome"])
+        if (ct == 0).any().any():
+            has_zero_cells = True
+            break
+
+# Helper to resolve treatment OR across numeric and patsy contrast terms:
+def extract_primary_or(estimates_map):
+    for term, or_val in estimates_map.items():
+        if term == "treatment" or term.startswith("treatment[") or term.startswith("C(treatment)["):
+            if np.isfinite(or_val) and or_val > 0:
+                return float(or_val)
+    return np.nan
+
 # Route model fit: If EPV < 10 or quasi-complete separation occurs, route to Firth penalized regression
-if epv < 10:
-    print(f"Warning: Low EPV ({epv:.1f} < 10); routing to Firth penalized logistic regression to prevent separation bias.")
+if epv < 10 or has_zero_cells:
+    reason = f"Low EPV ({epv:.1f} < 10)" if epv < 10 else "Quasi-complete separation / zero cells detected"
+    print(f"Warning: {reason}; routing to Firth penalized logistic regression to prevent separation bias.")
     firth_res = fit_firth_logistic(y_mat.iloc[:, 0], X_mat.drop(columns=['Intercept']), fit_intercept=True, ci_method="pl")
     summary = firth_res["summary_df"]
     results = []
@@ -218,7 +252,7 @@ if epv < 10:
             "95% CI": f"({row['or_ci_lower']:.2f} - {row['or_ci_upper']:.2f})",
             "p_value": format_p_value(row["p_value"])
         })
-    primary_or = summary.loc["treatment", "odds_ratio"] if "treatment" in summary.index else np.nan
+    primary_or = extract_primary_or({term: row["odds_ratio"] for term, row in summary.iterrows()})
 else:
     model = smf.logit(formula, data=df_model).fit(disp=False)
     results = []
@@ -233,7 +267,7 @@ else:
             "95% CI": f"({np.exp(ci_low):.2f} - {np.exp(ci_high):.2f})",
             "p_value": format_p_value(model.pvalues[term])
         })
-    primary_or = np.exp(model.params["treatment"])
+    primary_or = extract_primary_or({term: np.exp(model.params[term]) for term in model.params.index})
 
 res_df = pd.DataFrame(results)
 print(res_df.to_markdown(index=False))
@@ -243,10 +277,13 @@ from medstat.models.sensitivity import calculate_e_value
 
 # Compute E-value using calculate_e_value with estimate_type="OR" and verify rare-outcome assumption
 # (If outcome incidence is common, >= 15%, the square-root transformation is applied to approximate risk ratio)
-outcome_incidence = df_model['outcome'].mean()
-is_rare = outcome_incidence < 0.15
-e_val_res = calculate_e_value(primary_or, estimate_type="OR", rare_outcome=is_rare)
-print(f"E-value for treatment effect (OR = {primary_or:.2f}, rare_outcome={is_rare}): {e_val_res['e_value_estimate']:.2f}")
+if np.isfinite(primary_or) and primary_or > 0:
+    outcome_incidence = df_model['outcome'].mean()
+    is_rare = outcome_incidence < 0.15
+    e_val_res = calculate_e_value(primary_or, estimate_type="OR", rare_outcome=is_rare)
+    print(f"E-value for treatment effect (OR = {primary_or:.2f}, rare_outcome={is_rare}): {e_val_res['e_value_estimate']:.2f}")
+else:
+    print("Primary treatment effect is not estimable or non-finite; E-value calculation skipped.")
 ```
 
 The agent may freely incorporate `medstat` modules (e.g. `from medstat.models.firth import fit_firth_logistic`, `from medstat.models.survival import fit_cox_ph`, `from medstat.models.sensitivity import calculate_e_value`) or standard libraries (`lifelines` for Cox PH/KM) as appropriate.

@@ -152,7 +152,7 @@ Before writing analysis scripts or fitting models, the agent must pass through 5
 ### Gate 4: Sparse Data & Events-Per-Variable (EPV) Gate (สถิติตัวแปรพหุคูณบนข้อมูลเบาบาง)
 - **The Risk**: Fitting multivariable models with 10 covariates when only 12 events occurred, producing quasi-complete separation and astronomical odds ratios ($\text{OR} > 1000$).
 - **Directive**:
-  Compute $\text{EPV} = \frac{\min(N_{\text{events}}, N_{\text{non-events}})}{K_{\text{covariates}}}$. If $\text{EPV} < 10$ or zero cells appear in crosstabs, decisively switch to **Firth Penalized Likelihood** (`fit_firth_logistic` / `firth_cox`).
+  Evaluate the EPV diagnostic against fitted model parameter degrees of freedom ($\text{EPV} = \frac{\min(N_{\text{events}}, N_{\text{non-events}})}{P_{\text{params}}}$). Under study-prespecified sparse-data criteria, or when quasi-complete separation or zero cells appear in crosstabs, employ **Firth Penalized Likelihood** (`fit_firth_logistic` / `firth_cox`) or variable reduction rather than treating EPV < 10 as an automatic universal trigger.
 
 ### Gate 5: Clinical Interpretation Guardrails (การแปลผลทางคลินิกอย่างรัดกุม)
 - **The Risk**: Claiming $P > 0.05$ proves "no effect" or "treatments are identical", or substituting Pearson correlation for rater agreement.
@@ -297,6 +297,12 @@ if n_model_excluded > 0:
 
 formula = "outcome ~ age + C(sex) + C(admission_status)"
 y_mat, X_mat = patsy.dmatrices(formula, data=df_model, return_type='dataframe')
+# Validate clinical outcome mapping before calculating EPV:
+# Explicitly verify event is mapped to 1 and non-event to 0, then reject any values outside {0, 1}
+outcome_vals = set(df_model['outcome'].dropna().unique())
+if not outcome_vals.issubset({0, 1, 0.0, 1.0}):
+    raise ValueError(f"Outcome contains invalid values {outcome_vals}. Must be strictly binary {{0, 1}}.")
+
 # Count expanded model parameter degrees of freedom (excluding intercept)
 n_params = X_mat.shape[1] - 1
 n_events = (df_model['outcome'] == 1).sum()

@@ -112,24 +112,32 @@ model_records = [
 
 # 2. RENDER NEJM / JAMA PUBLICATION HTML TABLE
 def format_p_value(p_val_str, style="NEJM"):
+    if p_val_str is None or pd.isna(p_val_str) or str(p_val_str).strip() in ("NA", "—", "-", "", "nan", "NaN"):
+        return "—"
     try:
         p = float(p_val_str)
+        if not np.isfinite(p):
+            return "—"
         if style.upper() == "JAMA":
             if p < 0.001:
                 return "<.001"
-            elif p >= 0.99:
+            elif p < 0.01:
+                return f"{p:.3f}".lstrip("0")
+            elif p > 0.99:
                 return ">.99"
             else:
-                return f"{p:.3f}".lstrip("0")
+                return f"{p:.2f}".lstrip("0")
         else:  # NEJM
             if p < 0.001:
                 return "<0.001"
-            elif p >= 0.99:
+            elif p <= 0.01:
+                return f"{p:.3f}"
+            elif p > 0.99:
                 return ">0.99"
             else:
-                return f"{p:.3f}"
+                return f"{p:.2f}"
     except (ValueError, TypeError):
-        return p_val_str
+        return "—"
 
 import html
 
@@ -196,6 +204,8 @@ def generate_methods_narrative(
     missing_data_strategy="complete-case analysis",
     guideline="STROBE",
     tests=None,
+    two_sided=True,
+    alpha=0.05,
 ):
     if confounders is None:
         confounders = ["age", "sex", "hypertension"]
@@ -203,13 +213,20 @@ def generate_methods_narrative(
         tests = "Welch's t-test or Mann-Whitney U test for continuous variables and Pearson Chi-Square or Fisher's exact test for categorical variables"
 
     confounder_str = ", ".join(confounders)
+    sig_clause = ""
+    if two_sided is not None and alpha is not None:
+        sided_str = "two-sided" if two_sided else "one-sided"
+        sig_clause = f"All tests were {sided_str}, with p < {alpha} considered statistically significant. "
+    elif alpha is not None:
+        sig_clause = f"Statistical tests used a significance threshold of p < {alpha}. "
+
     text = (
         f"Statistical Analysis: Continuous and categorical baseline variables were compared using {tests}. "
         f"Missing data were addressed via {missing_data_strategy}. "
         f"{model_type} was fitted to evaluate associations with {primary_outcome}, "
         f"adjusting for prespecified confounders ({confounder_str}). "
         f"Effect estimates were reported with corresponding 95% confidence intervals. "
-        f"All tests were two-sided, with p < 0.05 considered statistically significant. "
+        f"{sig_clause}"
         f"Reporting conformed to {guideline} guidelines for {study_design.lower()} studies."
     )
     return text

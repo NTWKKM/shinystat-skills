@@ -141,18 +141,29 @@ print(f"Loaded raw dataset: N = {n_initial}")
 # ตัวอย่าง: df['outcome'] = df['raw_outcome'].map({'Positive': 1, 'Negative': 0})
 df = df_raw.copy()
 
-# 3. MISSINGNESS AUDIT & SAMPLE RETENTION FLOW
-# ตรวจสอบสัดส่วนค่าสูญหาย บันทึก named exclusion stage พร้อม clinical rationale และ persist retention flow
+# 3. MISSINGNESS AUDIT & SAMPLE RETENTION FLOW (SCAFFOLD TEMPLATE)
+# NOTE: This block is an illustrative scaffold template that must be adapted to the specific study protocol;
+# do NOT run as an unverified blanket workflow without addressing missing covariates.
+missing_audit = df.isnull().mean()
+print("Missingness audit per variable:\n", missing_audit[missing_audit > 0])
+
 from medstat.data.retention import SampleFlowTracker
 tracker = SampleFlowTracker(initial_n=n_initial, initial_name="Initial Enrolled Cohort")
 
-df_clean = df.dropna(subset=['outcome']).copy()
-tracker.record_stage(
-    stage_name="Complete Primary Outcome Verification",
-    n_remaining=len(df_clean),
-    reason="Excluded missing primary outcome (mandatory endpoint per SAP)",
-)
+# Verify protocol justification before complete-case outcome exclusion:
+if df['outcome'].isnull().any():
+    # Only exclude if SAP explicitly prespecifies complete ascertainment on primary endpoint
+    df_clean = df.dropna(subset=['outcome']).copy()
+    tracker.record_stage(
+        stage_name="Primary Outcome Ascertainment",
+        n_remaining=len(df_clean),
+        reason="Excluded missing primary outcome per verified study protocol criteria",
+    )
+else:
+    df_clean = df.copy()
 
+# Address remaining missing values in covariates per study-specific strategy (e.g. MICE, indicator, or documented complete-case)
+# before declaring the cohort clean and persisting.
 n_analyzed = len(df_clean)
 n_excluded = n_initial - n_analyzed
 print(f"Sample Retention Flow: Initial={n_initial} -> Excluded={n_excluded} -> Analyzed={n_analyzed}")
