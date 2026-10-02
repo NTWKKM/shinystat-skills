@@ -11,6 +11,16 @@ from medstat.models.glm import (
 )
 from medstat.models.sensitivity import bootstrap_confidence_interval, calculate_e_value
 from medstat.models.splines import fit_cox_rcs
+from medstat.models.multilevel import (
+    calculate_design_effect,
+    fit_gee,
+    fit_random_intercept,
+)
+from medstat.models.ordinal import (
+    fit_multinomial_logistic,
+    fit_proportional_odds,
+    test_proportional_odds,
+)
 from medstat.models.survival import (
     compare_survival_curves,
     fit_cox_ph,
@@ -29,6 +39,12 @@ __all__ = [
     "compare_survival_curves",
     "fit_cox_ph",
     "fit_cox_rcs",
+    "fit_proportional_odds",
+    "test_proportional_odds",
+    "fit_multinomial_logistic",
+    "calculate_design_effect",
+    "fit_gee",
+    "fit_random_intercept",
     "calculate_e_value",
     "bootstrap_confidence_interval",
 ]

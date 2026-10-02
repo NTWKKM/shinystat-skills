@@ -16,6 +16,8 @@ Dissemination engine for rendering publication-quality tables conforming to top 
    - *Absence of Evidence*: Never report $P > 0.05$ as "demonstrating no difference" or "proving equivalence." State: "insufficient evidence to reject the null hypothesis" and discuss the 95% CI width.
    - *Odds Ratio vs Risk*: The degree to which an Odds Ratio diverges from Relative Risk depends on both outcome incidence and effect size (divergence grows as incidence and effect size increase). Estimates must be explicitly labeled as Odds Ratios without loose substitution of "risk" or "relative risk".
    - *Uncertainty-First ICC Reporting*: For Intraclass Correlation Coefficients (ICC), report the 95% confidence interval and its spanning clinical reliability tier (Koo & Li 2016) rather than interpreting point estimates in isolation.
+   - *Cumulative Odds & GEE*: For ordinal outcomes, report cumulative odds ratios clearly stating the direction (e.g., odds of higher vs. lower categories). For clustered data using GEE, report marginal effects with robust sandwich standard errors, alongside cluster ICC and Design Effect (DEFF).
+5. **Calibration Reporting Context**: When calibration data is present, the narrative distinguishes in-sample apparent estimates (where calibration slope is not reported for in-sample apparent probability estimates) from external validation calibration (where Brier score, calibration slope/intercept, and ICI are fully reported). This distinction prevents misleading calibration claims from non-cross-validated model predictions.
 
 ## Execution Sequence
 

@@ -15,6 +15,8 @@ Biostatistical modeling engine supporting generalized linear models, Cox proport
 4. **Non-Linearity Verification**: Continuous exposures with potential non-linear biology can be modeled using restricted cubic splines (RCS, supported for Cox regression in the CLI via `--spline-var`) with centered contrast reference points.
 5. **Binary & Event Outcome Encoding**: Binary outcomes (logistic regression) and event indicators (Cox proportional hazards) must be explicitly encoded as numeric `0` and `1` (`1 = Event`, `0 = Non-event`). Raw text outcomes (e.g., `"Dead"`, `"Alive"`, `"Yes"`, `"No"`) are rejected to prevent clinical event inversion.
 6. **Events-Per-Variable (EPV) Diagnostic Rule**: Before fitting multivariable regression, calculate EPV according to model type: for Cox proportional hazards, calculate $\text{EPV}_{\text{Cox}} = \frac{E}{P}$ where $E$ is the total failure-event count and $P$ is the fitted predictor parameter count (degrees of freedom, excluding intercept); for logistic regression, calculate $\text{EPV}_{\text{Logistic}} = \frac{\min(N_{\text{events}}, N_{\text{non-events}})}{P}$ where $P$ is the fitted parameter count from the expanded design matrix. If $\text{EPV} < 10$ or quasi-complete separation occurs, standard maximum likelihood estimation (MLE) is biased and produces unstable/infinite estimates. The agent must decisively transition to **Firth penalized likelihood** (`fit_firth_logistic` / `firth_cox`) or perform variable selection.
+7. **Ordinal Outcome Modeling**: Ordinal outcomes with 3+ ordered levels (mRS, GCS, NYHA) should be modeled using cumulative link proportional odds models (`fit_proportional_odds` / CLI `--type ordinal`) with Brant test verification (`--po-test`). Do not treat ordinal scores as continuous OLS linear regressions.
+8. **Clustered Data & GEE**: Multi-center datasets with patient clustering within hospitals violate independence. Use GEE (`--type gee --cluster <col>`) with robust standard errors or random-intercept mixed models (`--type mixed --cluster <col>`), and compute Design Effect (DEFF).
 
 ## Execution Sequence
 
@@ -62,6 +64,19 @@ medstat model --data <survival.csv> \
   --type cox_ph --time time_months --outcome status_death \
   --exposure treatment --covariates "age,stage,biomarker" \
   --method firth --output firth_cox_res.json
+
+# Ordinal Proportional Odds Model (e.g., mRS, GCS)
+medstat model --data <cohort.csv> --type ordinal --outcome mrs_score \
+  --exposure treatment --covariates "age,nihss" --po-test --output ordinal_res.json
+
+# Clustered GEE (Population-Average Effects for multi-center data)
+medstat model --data <multicenter.csv> --type gee --outcome mortality \
+  --exposure statin --covariates "age,sex" --cluster hospital_id \
+  --corr-structure exchangeable --output gee_res.json
+
+# Random Intercept Mixed Model (Subject-Specific Effects for clustered data)
+medstat model --data <multicenter.csv> --type mixed --outcome recovery_days \
+  --exposure statin --covariates "age,sex" --cluster hospital_id --output mixed_res.json
 ```
 
 #### Option B: Statistical Analysis Plan (SAP) YAML Spec
@@ -76,6 +91,7 @@ See [references/model-spec-schema.md](references/model-spec-schema.md) for full 
 - **Cox Proportional Hazards (Standard Cox with `--schoenfeld`)**: The Schoenfeld residual correlation test is one diagnostic for the proportional hazards assumption; $p > 0.05$ indicates insufficient evidence against PH but does not establish proportionality. Review scaled Schoenfeld residual plots and model context, as the test may miss non-monotone departures (penalized Firth Cox does not compute Schoenfeld tests via CLI).
 - **Firth Convergence**: Verify profile likelihood confidence intervals converge.
 - **E-Value Sensitivity**: If effect is statistically significant, compute the minimum unmeasured confounding strength required to explain away the observed estimate.
+- **Calibration for Prediction Models**: For models intended for clinical deployment or TRIPOD-compliant prediction validation, evaluate calibration (Brier score, calibration slope/intercept, ICI) via `medstat diag --calibration` on model-predicted probabilities. High AUC alone does not guarantee well-calibrated predictions.
 
 ---
 
@@ -91,6 +107,8 @@ See [references/model-spec-schema.md](references/model-spec-schema.md) for full 
 > - **Cox Proportional Hazards**: ดูการฟิต survival model และการทดสอบ Schoenfeld residuals จาก `src/medstat/models/survival.py`
 > - **Non-linear Splines (RCS)**: ดูการทำ restricted cubic splines จาก `src/medstat/models/splines.py`
 > - **Sensitivity to Unmeasured Confounding**: ดูสูตร VanderWeele E-value จาก `src/medstat/models/sensitivity.py`
+> - **Ordinal Proportional Odds**: ดูโมเดลสะสม cumulative link และ Brant test จาก `src/medstat/models/ordinal.py`
+> - **Clustered Data & GEE**: ดูแบบจำลอง GEE และ Mixed Effects จาก `src/medstat/models/multilevel.py`
 >
 > **วงจรการทำงานของ Agent**:
 > `[1. สำรวจตัวแปรและการแจกแจง] ──▶ [2. ดูสคริปต์ต้นแบบเพื่อยึดหลักชีวสถิติ] ──▶ [3. ปรับโค้ดและรันแบบจำลอง]`
@@ -284,6 +302,19 @@ if np.isfinite(primary_or) and primary_or > 0:
     print(f"E-value for treatment effect (OR = {primary_or:.2f}, rare_outcome={is_rare}): {e_val_res['e_value_estimate']:.2f}")
 else:
     print("Primary treatment effect is not estimable or non-finite; E-value calculation skipped.")
+
+# 5. ADVANCED MODELING: ORDINAL & CLUSTERED (Optional/Contextual)
+# For Ordinal Outcomes (e.g., mRS):
+# from medstat.models.ordinal import fit_proportional_odds
+# ordinal_res = fit_proportional_odds(df_model, outcome="mrs_score", predictors=["treatment", "age"])
+# print(f"Brant Test p-value: {ordinal_res['brant_p_value']}")
+
+# For Clustered Data (e.g., multicenter):
+# from medstat.models.multilevel import fit_gee_model, calculate_deff
+# df_multi = df.dropna(subset=["outcome", "treatment", "hospital_id"])
+# deff = calculate_deff(df_multi["outcome"], df_multi["hospital_id"])
+# print(f"Design Effect (DEFF): {deff:.2f}")
+# gee_res = fit_gee_model(df_multi, formula="outcome ~ treatment", cluster_col="hospital_id", family="binomial")
 ```
 
 The agent may freely incorporate `medstat` modules (e.g. `from medstat.models.firth import fit_firth_logistic`, `from medstat.models.survival import fit_cox_ph`, `from medstat.models.sensitivity import calculate_e_value`) or standard libraries (`lifelines` for Cox PH/KM) as appropriate.
@@ -296,4 +327,6 @@ The agent may freely incorporate `medstat` modules (e.g. `from medstat.models.fi
 - [ ] Outcome variable verified and encoded as numeric 0/1 (1 = Event).
 - [ ] Model coefficients, 95% confidence intervals, and p-values generated.
 - [ ] Proportional hazards or separation diagnostics completed.
+- [ ] Ordinal proportional odds assumption verified via Brant test (if applicable).
+- [ ] Clustering design effect (DEFF) evaluated and GEE/mixed models applied for multi-center data (if applicable).
 - [ ] E-value calculated for primary exposure to quantify sensitivity to unmeasured confounding.

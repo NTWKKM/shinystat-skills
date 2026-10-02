@@ -22,6 +22,17 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
 | **Intraclass Correlation** | `icc` | Variance partition ratio quantifying reliability and agreement among clinical observers based on two-way ANOVA decomposition. |
 | **DerSimonian-Laird** | `dl` | Non-iterative method of moments estimator for between-study variance ($\tau^2$) in random-effects meta-analysis. |
 | **Egger's Test** | `egger` | Linear regression of standardized effect against precision assessing funnel plot asymmetry and publication bias. |
+| **Brier Score** | `brier_score` | Mean squared prediction error for probabilistic forecasts ($\\text{Brier} = \\frac{1}{N}\\sum(y_i - \\hat{p}_i)^2$); lower is better. Scaled Brier adjusts for baseline prevalence. |
+| **Calibration Slope** | `calibration_slope` | Logistic recalibration coefficient: ideal slope = 1. Slope $\lt 1$ indicates overfitting; slope $\gt 1$ indicates underfitting. Paired with calibration intercept (ideal = 0). |
+| **Integrated Calibration Index** | `ici` | Austin & Steyerberg (2019) mean absolute difference between LOWESS-smoothed observed and predicted probabilities, with E50, E90, and Emax quantiles. |
+| **Hosmer-Lemeshow** | `hosmer_lemeshow` | Goodness-of-fit $\chi^2$ test across decile risk groups assessing logistic model calibration. Low power limits its use as a sole calibration indicator. |
+| **Proportional Odds** | `proportional_odds` | Cumulative link model for ordinal outcomes assuming equal covariate effects across all threshold cuts: $\text{logit}(P(Y \ge j)) = \alpha_j + \beta^T X$. |
+| **Brant Test** | `brant_test` | Wald-type hypothesis test (Brant 1990) assessing parallel slopes across ordinal cutpoints ($H_0: \beta_1 = \dots = \beta_{K-1}$). Omnibus and per-variable statistics. |
+| **Cumulative Odds Ratio** | `cumulative_or` | Exponentiated slope $\exp(\beta)$ representing the odds ratio of being in a higher versus lower category per unit increase in predictor. |
+| **Design Effect** | `design_effect` | Variance inflation factor from clustering: $\text{DEFF} = 1 + (\bar{m} - 1)\text{ICC}_{\text{cluster}}$. Quantifies effective sample size $N_{\text{eff}} = N / \text{DEFF}$. |
+| **Cluster ICC** | `icc_cluster` | Intraclass correlation coefficient quantifying the proportion of total variance attributable to between-cluster differences in multi-center cohorts. |
+| **Generalized Estimating Equations** | `gee` | Semi-parametric population-averaged regression accounting for within-cluster correlation using empirical robust (sandwich) standard errors. |
+| **Random-Intercept Model** | `random_intercept` | Linear mixed-effects model decomposing outcome variance into fixed covariate effects and cluster-specific random shifts ($u_i \sim \mathcal{N}(0, \sigma_u^2)$). |
 | **Master Orchestration** | `medstat-master` | Autonomous intelligence layer that profiles datasets, infers clinical study design, and orchestrates downstream atomic skills without manual skill selection. |
 | **Statistical Analysis Plan** | `SAP` | Formal specification of primary estimand, data cleaning/retention strategy, planned models, and reporting standards before execution. |
 

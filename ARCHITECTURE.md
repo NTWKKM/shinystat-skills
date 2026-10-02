@@ -62,11 +62,14 @@ System architecture and structural specifications for `medstat-core` and the `me
 - **`survival.py`**: Cox proportional hazards modeling via `lifelines` and Grambsch-Therneau Schoenfeld residual correlation tests.
 - **`splines.py`**: Restricted cubic splines (RCS) with flexible knot placement via pure-Python `rcs_lib.py` for both Cox proportional hazards and multivariable logistic regression.
 - **`sensitivity.py`**: VanderWeele & Ding E-value computation for point estimates and lower/upper confidence bounds.
+- **`ordinal.py`**: Proportional odds logistic regression via `OrderedModel`, Brant's Wald test (Brant 1990) for parallel lines assumption, and multinomial logistic fallback.
+- **`multilevel.py`**: Clustered data analysis via population-averaged Generalized Estimating Equations (GEE) with robust sandwich standard errors, random-intercept mixed models via `MixedLM`, and cluster design effect (DEFF / ICC_cluster) calculation.
 
 ### `medstat.diagnostic`
 - **`accuracy.py`**: Complete 2x2 contingency metrics (Sensitivity, Specificity, PPV, NPV, LR+, LR-, DOR) with Wilson score confidence intervals and low-is-abnormal directionality handling.
 - **`roc.py`**: Non-parametric empirical ROC curve, Youden's J cutpoint, and DeLong covariance matrix calculation for paired AUC comparisons.
 - **`dca.py`**: Vickers Decision Curve Analysis calculating net benefit across threshold probabilities relative to "Treat All" and "Treat None".
+- **`calibration.py`**: Model calibration assessment: Brier score (with scaled Brier), calibration slope & intercept via logistic recalibration, Integrated Calibration Index (ICI / E50 / E90 / Emax) per Austin & Steyerberg (2019), Hosmer-Lemeshow goodness-of-fit test, and Plotly calibration plot generation.
 
 ### `medstat.causal`
 - **`psm.py`**: Propensity score estimation via logistic regression, 1:1 nearest neighbor matching with logit standard deviation caliper, and matched cohort extraction.

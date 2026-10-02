@@ -50,6 +50,15 @@ from medstat.meta.forest import generate_forest_data
 from medstat.meta.models import run_meta_analysis
 from medstat.models.firth import fit_firth_cox, fit_firth_logistic
 from medstat.models.glm import fit_linear_regression, fit_standard_logistic
+from medstat.models.multilevel import (
+    calculate_design_effect,
+    fit_gee,
+    fit_random_intercept,
+)
+from medstat.models.ordinal import (
+    fit_proportional_odds,
+    test_proportional_odds,
+)
 from medstat.models.sensitivity import calculate_e_value
 from medstat.models.splines import fit_cox_rcs, fit_logistic_rcs
 from medstat.models.survival import check_proportional_hazards, fit_cox_ph
@@ -547,7 +556,7 @@ def table1_cmd(
     "--model-type",
     "model_type",
     default="logistic",
-    help="Model type (logistic, linear, cox, cox_ph).",
+    help="Model type (logistic, linear, cox, cox_ph, ordinal, proportional_odds, gee, mixed).",
 )
 @click.option("--outcome", default=None, help="Outcome variable name.")
 @click.option(
@@ -581,6 +590,25 @@ def table1_cmd(
     help="Compute VanderWeele E-value for unmeasured confounding.",
 )
 @click.option(
+    "--po-test",
+    is_flag=True,
+    default=False,
+    help="Run Brant test for proportional odds assumption (for ordinal models).",
+)
+@click.option(
+    "--cluster",
+    "--cluster-col",
+    "cluster_col",
+    default=None,
+    help="Cluster identifier column for GEE / mixed-effects models.",
+)
+@click.option(
+    "--corr-structure",
+    type=click.Choice(["exchangeable", "independence", "autoregressive"]),
+    default="exchangeable",
+    help="Correlation structure for GEE models (default: exchangeable).",
+)
+@click.option(
     "--spline-var",
     default=None,
     help="Continuous variable to model with restricted cubic splines (RCS).",
@@ -604,6 +632,9 @@ def model_cmd(
     ci_method: str,
     schoenfeld: bool,
     e_value: bool,
+    po_test: bool,
+    cluster_col: str | None,
+    corr_structure: str,
     spline_var: str | None,
     knots: int,
     output: str | None,
@@ -632,6 +663,7 @@ def model_cmd(
     cols_to_check = (
         [outcome]
         + ([time_col] if time_col else [])
+        + ([cluster_col] if cluster_col else [])
         + covar_list
         + ([spline_var] if spline_var and spline_var not in covar_list else [])
     )
@@ -776,6 +808,101 @@ def model_cmd(
     elif mtype in ("linear", "ols"):
         fit_res = fit_linear_regression(df[outcome], X_df)
         result_data["coefficients"] = _serialize_summary_df(fit_res["summary_df"])
+
+    elif mtype in ("ordinal", "proportional_odds"):
+        y_raw = df[outcome]
+        u_y = y_raw.dropna().unique()
+        if len(u_y) < 3:
+            raise click.ClickException(
+                f"Ordinal outcome column '{outcome}' must have at least 3 categories, found {len(u_y)}: {sorted(u_y)}. "
+                "For binary outcomes (2 categories), use --type logistic."
+            )
+        fit_res = fit_proportional_odds(y_raw, X_df)
+        sum_df = fit_res["summary_df"]
+        result_data["coefficients"] = _serialize_summary_df(sum_df)
+        result_data["thresholds"] = _serialize_summary_df(fit_res["threshold_df"])
+        result_data["pseudo_r2"] = fit_res.get("pseudo_r2")
+        result_data["categories"] = fit_res.get("categories")
+        result_data["log_likelihood"] = fit_res.get("log_likelihood")
+        result_data["aic"] = fit_res.get("aic")
+        result_data["bic"] = fit_res.get("bic")
+
+        if po_test:
+            po_diag = test_proportional_odds(y_raw, X_df)
+            result_data["proportional_odds_test"] = po_diag
+
+        if e_value and exposure:
+            pred_df = fit_res["predictor_df"]
+            matching = [idx for idx in pred_df.index if str(idx) == exposure]
+            if not matching:
+                matching = [
+                    idx for idx in pred_df.index if str(idx).startswith(f"{exposure}_")
+                ]
+            if not matching:
+                raise click.ClickException(
+                    f"Exposure term '{exposure}' not found in model results for E-value calculation."
+                )
+            exp_term = pred_df.loc[matching[0]]
+            or_val = exp_term.get("odds_ratio")
+            ci_lo = exp_term.get("or_ci_lower")
+            ci_hi = exp_term.get("or_ci_upper")
+            if (
+                or_val is not None
+                and ci_lo is not None
+                and ci_hi is not None
+                and not np.isnan(float(or_val))
+            ):
+                ev = calculate_e_value(
+                    float(or_val), float(ci_lo), float(ci_hi), estimate_type="OR"
+                )
+                result_data["e_value"] = ev
+
+    elif mtype in ("gee", "multilevel_gee"):
+        if not cluster_col:
+            raise click.ClickException("GEE model requires --cluster <cluster_col>.")
+        y_raw = df[outcome]
+        u_y = y_raw.dropna().unique()
+        fam = "binomial" if len(u_y) == 2 else "gaussian"
+        fit_res = fit_gee(
+            y=y_raw,
+            X=X_df,
+            cluster_ids=df[cluster_col],
+            family=fam,
+            cov_struct=corr_structure,
+            add_constant=True,
+        )
+        sum_df = fit_res["summary_df"]
+        result_data["coefficients"] = _serialize_summary_df(sum_df)
+        result_data["n_clusters"] = fit_res["n_clusters"]
+        result_data["cov_struct"] = fit_res["cov_struct"]
+        result_data["family"] = fit_res["family"]
+        result_data["qic"] = fit_res["qic"]
+
+        deff_res = calculate_design_effect(y_raw, df[cluster_col])
+        result_data["clustering_diagnostics"] = deff_res
+
+    elif mtype in ("mixed", "random_intercept", "lmm"):
+        if not cluster_col:
+            raise click.ClickException(
+                "Mixed-effects model requires --cluster <cluster_col>."
+            )
+        fit_res = fit_random_intercept(
+            y=df[outcome],
+            X=X_df,
+            cluster_ids=df[cluster_col],
+            add_constant=True,
+        )
+        sum_df = fit_res["summary_df"]
+        result_data["coefficients"] = _serialize_summary_df(sum_df)
+        result_data["n_clusters"] = fit_res["n_clusters"]
+        result_data["random_intercept_var"] = fit_res["random_intercept_var"]
+        result_data["residual_var"] = fit_res["residual_var"]
+        result_data["cluster_icc"] = fit_res["cluster_icc"]
+        result_data["aic"] = fit_res["aic"]
+        result_data["bic"] = fit_res["bic"]
+
+        deff_res = calculate_design_effect(df[outcome], df[cluster_col])
+        result_data["clustering_diagnostics"] = deff_res
     else:
         raise click.UsageError(f"Unsupported model type: {mtype}")
 

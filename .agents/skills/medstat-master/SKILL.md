@@ -34,7 +34,7 @@ Activate **medstat-master** whenever:
 │  - Pillar 1: Research Proposal (PICO / Estimand)       │
 │  - Pillar 2: Clinical Principles & Mechanisms          │
 │  - Pillar 3: Raw Data Reality (Geometry & Constraints) │
-│  - Pass through 5 Anti-Hallucination Stop Gates        │
+│  - Pass through 7 Anti-Hallucination Stop Gates        │
 └──────────────────────────┬─────────────────────────────┘
                            │
              ┌─────────────┴─────────────┐
@@ -120,17 +120,19 @@ To select the mathematically and clinically valid statistical analysis, the agen
 | :--- | :--- | :--- | :--- |
 | **Type 1: Baseline Cohort & Descriptive** | Patient demographics, comorbidities, labs, group comparison | Table 1: Mean ± SD (t-test) or Median [IQR] (Mann-Whitney U); n (%) (Chi-Square / Fisher); SMD | Baseline Table 1 with SMDs & p-values |
 | **Type 2: Prognostic & Multivariable Risk** | Binary clinical outcome ($0/1$) + clinical predictors | Multivariable Logistic Regression: Odds Ratios (OR), 95% CI, p-values. Firth penalization if sparse events/separation. RCS splines for non-linear continuous markers. E-value for unmeasured confounding. | Multivariable Regression Table & Forest Plot |
+| **Type 2b: Ordinal Outcome & Functional Staging** | Outcome with 3+ ordered levels (e.g. mRS, GCS, NYHA) + clinical predictors | Proportional Odds Logistic Regression: cumulative OR, 95% Wald CI, Brant test for parallel slopes ($p \ge 0.05$). Multinomial fallback if PO violated. | Ordinal Regression Table with Cumulative ORs |
 | **Type 3: Time-to-Event / Survival Cohort** | Follow-up time column + binary event indicator ($1=\text{Event}, 0=\text{Censored}$) | Kaplan-Meier survival curves, Log-rank test, Cox Proportional Hazards (HR with 95% CI), Schoenfeld residual test for PH assumption. Firth Cox if zero events in subgroup. | KM Curves & Cox PH Table |
-| **Type 4: Diagnostic Accuracy & Biomarker** | Continuous/ordinal test score + binary gold standard | 2×2 Contingency (Sensitivity, Specificity, PPV, NPV, LR+, LR- with Wilson score 95% CIs), ROC curve, AUC with DeLong 95% CI, Vickers Decision Curve Analysis (DCA). | Diagnostic Accuracy & ROC Table |
+| **Type 4: Diagnostic Accuracy & Biomarker** | Continuous/ordinal test score + binary gold standard | 2×2 Contingency (Sensitivity, Specificity, PPV, NPV, LR+, LR- with Wilson score 95% CIs), ROC curve, AUC with DeLong 95% CI, Vickers Decision Curve Analysis (DCA), Model Calibration (Brier, slope, ICI). | Diagnostic Accuracy & ROC Table |
 | **Type 5: Observational Causal Inference** | Non-randomized treatment indicator + baseline confounders | Propensity Score Matching (PSM, Austin 2009 caliper $0.2 \times \text{SD}(\text{logit } e)$), Love plot (post-match $\text{SMD} < 0.10$), outcome model on matched cohort. | Covariate Balance & Matched Effect |
 | **Type 6: Agreement & Reliability** | Paired device measurements OR subject ID + multiple raters | Bland-Altman Limits of Agreement with large-sample approximate CIs, Intraclass Correlation Coefficient (ICC forms 1, 2, 3), Cohen's / Fleiss' Kappa. | Agreement Plot & Reliability Table |
 | **Type 7: Multi-Study Meta-Analysis** | Effect sizes (log OR, HR, MD) with SEs across studies | DerSimonian-Laird random effects ($\tau^2, I^2$), Forest plot data, Egger's test for funnel asymmetry (if continuous $k \ge 10$). | Forest Plot & Meta-Analysis Table |
+| **Type 8: Clustered & Multi-Center Cohort** | Cluster ID (hospital, clinic, site) + patient outcomes | GEE with exchangeable correlation and robust sandwich SEs (population-averaged) OR Random-Intercept Mixed Model (cluster-specific). Cluster ICC and Design Effect (DEFF). | Clustered Multilevel Model Table |
 
 ---
 
-## 5. The 5 Anti-Hallucination Stop Gates (เกราะป้องกันภาวะสร้างข้อมูลเท็จ)
+## 5. The 7 Anti-Hallucination Stop Gates (เกราะป้องกันภาวะสร้างข้อมูลเท็จ)
 
-Before writing analysis scripts or fitting models, the agent must pass through 5 deterministic stop gates:
+Before writing analysis scripts or fitting models, the agent must pass through 7 deterministic stop gates:
 
 ### Gate 1: Contradiction Resolution Gate (ความขัดแย้งระหว่าง Proposal กับ ข้อมูลจริง)
 - **The Risk**: User requests Survival Analysis (Cox regression), but raw data only contains a binary discharge status without a follow-up time column.
@@ -159,6 +161,14 @@ Before writing analysis scripts or fitting models, the agent must pass through 5
 - **Directive**:
   1. $P > 0.05$ must be reported as "insufficient evidence to reject the null hypothesis", focusing on the 95% CI.
   2. For device/rater reliability, strictly reject Pearson correlation ($r$) and enforce **Bland-Altman 95% LoA** or **Intraclass Correlation (ICC)**.
+
+### Gate 6: Ordinal Scale Integrity Gate (ระดับลำดับที่เหมาะสม)
+- **The Risk**: Treating ordinal outcomes (mRS 0–6, GCS, NYHA) as continuous linear scales or arbitrarily collapsing to binary when the full ordinal gradation carries clinical information.
+- **Directive**: When an outcome has 3+ ordered categories with clinical meaning, employ Proportional Odds Logistic Regression (`fit_proportional_odds`). Never fit linear regression on bounded ordinal scales. Evaluate the proportional odds assumption via Brant's test (`test_proportional_odds`); if violated ($p < 0.05$), consider multinomial logistic regression (`fit_multinomial_logistic`) or clinically prespecified dichotomization.
+
+### Gate 7: Clustering & Independence Violation Gate (ความเป็นอิสระของข้อมูล)
+- **The Risk**: Fitting standard logistic or Cox regression on multi-center or clustered data (patients nested in hospitals/centers) where observations are correlated, producing artificially narrow confidence intervals and inflated Type I error.
+- **Directive**: When cluster identifiers exist (hospital_id, center_id, site), calculate the Design Effect ($\text{DEFF} = 1 + (\bar{m} - 1)\text{ICC}_{\text{cluster}}$). If $\text{DEFF} > 1.5$ or $\text{ICC}_{\text{cluster}} > 0.05$, transition to Population-Averaged GEE (`fit_gee` with robust sandwich SEs) or Random-Intercept Mixed Models (`fit_random_intercept`). Always report effective sample size ($N_{\text{eff}} = N / \text{DEFF}$) alongside nominal $N$.
 
 ---
 
@@ -373,6 +383,9 @@ The agent may freely incorporate `medstat` modules (e.g. `from medstat.reporting
 5. **Austin (2009) PSM Standard & Confounder Selection**: Propensity score caliper must default to $0.2 \times \text{SD}(\text{logit } e)$; post-match balance requires $\text{SMD} < 0.10$. Include *only* baseline pre-treatment confounders; strictly exclude post-treatment variables, mediators, or colliders.
 6. **Publication Table Styling**: Tables must follow journal conventions (NEJM/JAMA: 3 horizontal rules, no vertical dividers, standard decimal precision: OR/HR to 2 decimal places, percentages to 1 decimal place, p-values formatted to 3 decimal places with `< 0.001` cutoff).
 7. **No Correlation as Agreement**: Never substitute Pearson/Spearman correlation for agreement; enforce Bland-Altman LoA with large-sample CIs and pure-SciPy ICC.
+8. **Calibration Mandatory for Prediction Models**: For models intended for clinical deployment or TRIPOD-compliant prediction validation (Type 2/4), report calibration metrics (Brier score, calibration slope/intercept, ICI) alongside discrimination (AUC). High AUC alone does not guarantee well-calibrated predicted probabilities.
+9. **Ordinal Scale Preservation**: Retain 3+ category ordinal outcomes (e.g., mRS, GCS) as ordinal using proportional odds models (checking parallel slopes) rather than continuous linear models or arbitrary dichotomization.
+10. **Cluster Design Effect Reporting**: For clustered or multi-center data, compute and report the Design Effect (DEFF) based on the intraclass correlation (ICC). If DEFF > 1.5 or ICC > 0.05, adjust models using GEE (robust SEs) or random-intercept mixed models.
 
 ---
 
@@ -380,9 +393,12 @@ The agent may freely incorporate `medstat` modules (e.g. `from medstat.reporting
 
 - [ ] Sheet layout inspected: title rows, metadata, and side-by-side dashboard tables identified and handled.
 - [ ] 3-Pillar Triangulation completed: Proposal PICO matched against clinical principles and empirical data reality.
-- [ ] 5 Anti-Hallucination Stop Gates passed (Contradiction checked, No silent assumptions, Directionality verified, EPV diagnosed, Interpretation guarded).
+- [ ] 7 Anti-Hallucination Stop Gates passed (Contradiction checked, No silent assumptions, Directionality verified, EPV diagnosed, Interpretation guarded, Ordinal integrity checked, Clustering verified).
 - [ ] Binary endpoints recoded strictly to numeric `0/1` (`1 = Event`).
+- [ ] Ordinal scale integrity checked and proportional odds models used for 3+ ordered levels, testing parallel slopes.
+- [ ] Clustering/multi-center effects addressed with ICC/DEFF reporting and multilevel modeling (GEE/Mixed Models) if applicable.
 - [ ] Sample retention flow ($N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$) tracked and documented.
 - [ ] Baseline characteristics (Table 1) generated with distribution-appropriate tests (t-test vs Mann-Whitney, Chi-Square vs Fisher) and SMDs.
 - [ ] Multivariable model executed conforming to clinical standards (Adjusted OR / HR with 95% CIs and p-values; Firth penalization applied if EPV < 10 or sparse).
+- [ ] Calibration assessed (Brier, slope, ICI) for prediction models intended for clinical deployment.
 - [ ] Results compiled into publication-grade table (NEJM/JAMA style) with clinical interpretation.

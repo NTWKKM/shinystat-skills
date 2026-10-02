@@ -14,11 +14,12 @@ Validation engine for clinical biomarkers, laboratory diagnostic assays, point-o
 3. **Clinical Utility Beyond Accuracy**: High AUC does not guarantee clinical utility. Decision Curve Analysis (DCA) is required to establish positive net benefit over "Treat All" and "Treat None" across threshold probabilities.
 4. **Prespecified Directionality Rule (Low-is-Abnormal)**: Before calculating ROC or cutpoint metrics, establish biomarker directionality based on clinical biological mechanisms (e.g. abnormal when high: Troponin, Lactate; abnormal when low: Platelet count, eGFR, PaO2/FiO2). Recode or invert low-is-abnormal scores prior to analysis as a prespecified transformation. Never automatically invert scores post-hoc based solely on observing empirical $\text{AUC} < 0.50$; an unexpected low AUC must be reported and investigated for assay miscalibration, labeling reversal, or data errors rather than reversed after observing the data.
 5. **Cutpoint Selection & Anti-P-Hacking**: Cutpoints must either be pre-specified by clinical guidelines or derived via objective metrics (Youden's Index $J = \text{Sens} + \text{Spec} - 1$, or a prespecified minimum sensitivity tier like 95% for triage screening). Never data-dredge through arbitrary cutpoints to maximize statistical significance without multiplicity disclosure.
+6. **Discrimination ≠ Calibration**: High AUC does not guarantee well-calibrated predicted probabilities. Report calibration metrics (Brier score, calibration slope, ICI) alongside discrimination (AUC) for TRIPOD-compliant prediction model validation.
 
 ## Execution Sequence
 
 ```
-[1. 2x2 ACCURACY] ──▶ [2. ROC & DELONG] ──▶ [3. BIOMARKER COMPARISON] ──▶ [4. DCA NET BENEFIT]
+[1. 2x2 ACCURACY] ──▶ [2. ROC & DELONG] ──▶ [3. BIOMARKER COMPARISON] ──▶ [4. DCA NET BENEFIT] ──▶ [5. CALIBRATION]
 ```
 
 ### Step 1: Calculate 2x2 Contingency Matrix & Accuracy Metrics
@@ -87,6 +88,23 @@ medstat diag --data <cohort.csv> \
   $$\text{Net Benefit}(p_t) = \frac{\text{TP}}{N} - \frac{\text{FP}}{N} \cdot \left(\frac{p_t}{1 - p_t}\right)$$
 - Clinical Rule: A biomarker should only be deployed across threshold ranges where its net benefit curve exceeds both "Treat All" and "Treat None".
 
+### Step 5: Model Calibration Assessment
+
+Evaluate how well predicted probabilities match observed event rates:
+
+```bash
+medstat diag --data <cohort.csv> \
+  --gold-standard <disease_col> \
+  --test-col <predicted_risk_prob> \
+  --calibration \
+  --output calibration_results.json
+```
+
+- **Brier Score**: Overall calibration + discrimination accuracy (range 0–1; lower = better). Scaled Brier adjusts for baseline prevalence.
+- **Calibration Slope & Intercept**: Logistic recalibration via logit link. Ideal: slope = 1, intercept = 0. Slope < 1 indicates overfitting; intercept ≠ 0 indicates systematic over/under-prediction.
+- **Integrated Calibration Index (ICI)**: Austin & Steyerberg (2019) mean absolute difference between LOWESS-smoothed observed and predicted probabilities. Accompanied by E50, E90, Emax quantiles.
+- **Hosmer-Lemeshow Test**: Goodness-of-fit across decile risk groups ($p > 0.05$ suggests adequate calibration, but low power limits the test as a sole indicator; report alongside ICI and slope).
+
 ---
 
 ## Adaptive Python Scripting Protocol (ปรับแต่งสคริปต์ความแม่นยำในการวินิจฉัยและ ROC ตามข้อมูลจริง)
@@ -98,6 +116,7 @@ medstat diag --data <cohort.csv> \
 > - **ตาราง 2x2 และ Wilson Score Interval**: ดูการคำนวณ Sensitivity, Specificity, PPV, NPV, LR+, LR- พร้อม Wilson Score 95% CIs จาก `src/medstat/diagnostic/accuracy.py`
 > - **Empirical ROC & DeLong Test**: ดูการคำนวณ Area Under Curve (AUC), DeLong 95% CIs, และ Paired DeLong test จาก `src/medstat/diagnostic/roc.py`
 > - **Decision Curve Analysis (DCA)**: ดูการคำนวณ Net Benefit ข้าม Decision Threshold Probabilities ($p_t$) และการเปรียบเทียบ Treat All / Treat None จาก `src/medstat/diagnostic/dca.py`
+> - **Model Calibration (Brier, Slope, ICI, Hosmer-Lemeshow)**: ดูการคำนวณ Brier Score, Calibration Slope & Intercept, Integrated Calibration Index (ICI), และ Hosmer-Lemeshow test จาก `src/medstat/diagnostic/calibration.py`
 >
 > **วงจรการทำงานของ Agent**:
 > `[1. สำรวจ Gold Standard และ Biomarker] ──▶ [2. ดูสคริปต์ต้นแบบเพื่อยึดหลักชีวสถิติ] ──▶ [3. ปรับโค้ดและประเมินความแม่นยำ]`
@@ -222,6 +241,26 @@ def calculate_net_benefit(gold, probs, thresholds_range):
             "treat_none": 0.0,
         })
     return pd.DataFrame(net_benefits)
+
+# 5. MODEL CALIBRATION (Brier Score, Calibration Slope, ICI, Hosmer-Lemeshow)
+from medstat.diagnostic.calibration import (
+    calculate_brier_score,
+    calculate_calibration_slope_and_intercept,
+    calculate_ici,
+    hosmer_lemeshow_test,
+)
+
+# Requires predicted risk probabilities in [0, 1] (oriented if low-is-abnormal)
+brier = calculate_brier_score(gold_vals, risk_probs)
+cal_slope = calculate_calibration_slope_and_intercept(gold_vals, risk_probs)
+ici_res = calculate_ici(gold_vals, risk_probs)
+hl = hosmer_lemeshow_test(gold_vals, risk_probs, g=10)
+
+print(f"Brier Score: {brier['brier_score']:.4f} ({brier['interpretation']})")
+print(f"Calibration Slope: {cal_slope['calibration_slope']:.3f} (Ideal = 1.0)")
+print(f"Calibration Intercept: {cal_slope['calibration_intercept']:.3f} (Ideal = 0.0)")
+print(f"ICI: {ici_res['ici']:.4f} | E50: {ici_res['e50']:.4f} | E90: {ici_res['e90']:.4f}")
+print(f"Hosmer-Lemeshow: χ²={hl['statistic']:.2f}, df={hl['df']}, p={hl['p_value']:.3f}")
 ```
 
 The agent may freely incorporate `medstat` modules (e.g. `from medstat.diagnostic.roc import calculate_delong_ci`, `from medstat.diagnostic.accuracy import compute_diagnostic_metrics`, `from medstat.diagnostic.dca import calculate_dca`) or standard libraries as appropriate.
@@ -234,3 +273,4 @@ The agent may freely incorporate `medstat` modules (e.g. `from medstat.diagnosti
 - [ ] ROC AUC calculated with analytical DeLong 95% CIs.
 - [ ] Paired DeLong test executed if comparing multiple diagnostic tests.
 - [ ] DCA net benefit confirmed superior to default strategies across the target decision range.
+- [ ] Model calibration assessed with Brier score, calibration slope/intercept, and ICI (when predicted risk probabilities are available).

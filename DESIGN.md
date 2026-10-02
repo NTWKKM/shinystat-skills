@@ -335,8 +335,72 @@ While ADR 15 and ADR 16 provided agents with adaptive Python scripting flexibili
 
 [MEMORY_LEARN: 3-pillar triangulation (Proposal, Clinical Principles, Raw Data) paired with 5 deterministic anti-hallucination gates provides coding agents with decisive statistical judgment while preventing model mismatch and spurious claims.]
 
+---
+
+## ADR 18: Calibration Skill Documentation Parity (Resolving Code-Instruction Drift)
+
+### Context
+Audit of the restructured skill-set (2026-10-02) revealed that model calibration (`src/medstat/diagnostic/calibration.py`, 275 lines) was fully implemented — Brier score (with scaled Brier), calibration slope & intercept via logistic recalibration, Integrated Calibration Index (ICI / E50 / E90 / Emax per Austin & Steyerberg 2019), Hosmer-Lemeshow goodness-of-fit test, and Plotly calibration plot — and integrated into the CLI (`medstat diag --calibration`), polymorphic report tables, and narrative synthesis. However, none of the 6 skill instruction files referenced calibration capabilities, creating a documentation-code drift where agents could not discover or leverage the existing functionality.
+
+### Decision
+1. Document calibration as **Step 5** in `medstat-diagnostic` with prototype script referencing `src/medstat/diagnostic/calibration.py` functions.
+2. Add **Core Rule 6** (Discrimination ≠ Calibration) to `medstat-diagnostic` as a positive anti-hallucination directive.
+3. Add **Governance Rule 8** (Calibration Mandatory for Prediction Models) to `medstat-master` for TRIPOD-compliant prediction validation.
+4. Cross-reference calibration in `medstat-models` Step 3 (Model Diagnostics) and `medstat-report` Core Rules.
+5. Record calibration domain terms (`brier_score`, `calibration_slope`, `ici`, `hosmer_lemeshow`) in `CONTEXT.md`.
+6. Record `calibration.py` module seam in `ARCHITECTURE.md`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Zero New Code**: All changes are documentation-only; the underlying implementation and tests were already complete and passing.
+- **Agent Discoverability**: Agents can now autonomously invoke calibration assessment for prediction models via skill instructions, prototype scripts, and CLI references.
+- **TRIPOD Compliance**: Prediction model validation now includes discrimination (AUC) and calibration (Brier, slope, ICI) as a documented skill requirement.
+
+[MEMORY_LEARN: Code-instruction drift — fully implemented features invisible to agents because skill documentation was never updated — is a systematic risk in adaptive scripting architectures. Audit skill instructions against actual CLI/module capabilities after every implementation sprint.]
 
 
 
+---
 
+## ADR 19: Ordinal Outcome Support via Proportional Odds Model and Brant Test
 
+### Context
+Clinical functional outcomes (e.g., Modified Rankin Scale [mRS 0–6] in stroke, Glasgow Coma Scale [GCS 3–15] in trauma, NYHA functional class I–IV in cardiology) have natural ordered gradations. Collapsing these endpoints into arbitrary binary thresholds (e.g., mRS 0–2 vs 3–6) loses statistical power and clinical nuance, while treating ordinal categories as continuous numbers in OLS regression violates distributional assumptions. Furthermore, fitting proportional odds without testing the parallel slopes assumption risks biased inference.
+
+### Decision
+1. Implement `src/medstat/models/ordinal.py` providing `fit_proportional_odds` using `statsmodels.miscmodels.ordinal_model.OrderedModel` with cumulative logit link.
+2. Implement closed-form Brant's Wald test (`test_proportional_odds`, Brant 1990) computing both omnibus and per-variable test statistics for the parallel slopes assumption without external GPL packages.
+3. Provide unconstrained multinomial logistic regression (`fit_multinomial_logistic`) as a fallback when proportional odds is violated.
+4. Add Anti-Hallucination Gate 6 (Ordinal Scale Integrity Gate) and Study Design Type 2b to `medstat-master`.
+5. Integrate `--type ordinal` and `--po-test` into `medstat model` CLI.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Statistical Validity**: Preserves ordinal clinical gradations with valid cumulative Odds Ratios ($\exp(\beta)$) and Wald confidence intervals.
+- **Assumption Verification**: Automatically evaluates parallel slopes; guards against inappropriate linear or collapsed binary modeling.
+- **Zero New Dependencies**: Leverages existing `statsmodels ≥ 0.14.0`.
+
+[MEMORY_LEARN: Modeling multi-level ordinal clinical endpoints (mRS, GCS, NYHA) via cumulative logit with analytical Brant parallel-slopes testing preserves clinical gradation while preventing distributional violations.]
+
+---
+
+## ADR 20: Multilevel & Clustered Data Support via GEE and MixedLM
+
+### Context
+In multi-center clinical trials, health registry networks, and community hospital clusters (รพช.), patients within the same center share unmeasured institutional, geographic, or clinical practice characteristics. Standard GLMs assuming independent observations underestimate standard errors, inflate Type I error rates, and produce spuriously narrow confidence intervals.
+
+### Decision
+1. Implement `src/medstat/models/multilevel.py` providing:
+   - `calculate_design_effect`: Computes cluster Intraclass Correlation ($\text{ICC}_{\text{cluster}}$), Design Effect ($\text{DEFF} = 1 + (\bar{m}-1)\text{ICC}$), and Effective Sample Size ($N_{\text{eff}} = N / \text{DEFF}$) via ANOVA variance decomposition.
+   - `fit_gee`: Population-averaged Generalized Estimating Equations using `statsmodels.genmod.generalized_estimating_equations.GEE` with robust (sandwich) standard errors and exchangeable/independent/AR(1) correlation structures.
+   - `fit_random_intercept`: Subject-specific linear mixed-effects model using `statsmodels.formula.api.mixedlm`.
+2. Add Anti-Hallucination Gate 7 (Clustering & Independence Gate) and Study Design Type 8 to `medstat-master`.
+3. Integrate `--type gee`, `--type mixed`, `--cluster <col>`, and `--corr-structure` into `medstat model` CLI, and `--cluster` into `medstat profile`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Inference Rigor**: Robust sandwich standard errors prevent spurious statistical significance in clustered clinical data.
+- **Sample Size Transparency**: Automatically reports Design Effect and effective sample size alongside nominal $N$.
+- **Zero New Dependencies**: Implemented using existing `statsmodels ≥ 0.14.0`.
+
+[MEMORY_LEARN: Multi-center clinical clustering requires variance adjustment; reporting Design Effect (DEFF) alongside population-averaged GEE robust standard errors guarantees valid inference under nested patient structures.]
