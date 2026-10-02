@@ -174,3 +174,35 @@ def test_cli_model_mixed(sample_clustered_csv, tmp_path):
     assert "residual_var" in data
     assert "cluster_icc" in data
     assert data["cluster_icc"] > 0
+
+
+def test_cli_model_gee_invalid_binary_rejected(tmp_path):
+    runner = CliRunner()
+    csv_path = tmp_path / "bad_binary.csv"
+    df = pd.DataFrame(
+        {
+            "bad_outcome": [1, 2, 1, 2, 1, 2, 1, 2, 1, 2],
+            "x": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+            "hospital_id": [1, 1, 1, 1, 1, 2, 2, 2, 2, 2],
+        }
+    )
+    df.to_csv(csv_path, index=False)
+
+    res = runner.invoke(
+        cli,
+        [
+            "model",
+            "--data",
+            str(csv_path),
+            "--type",
+            "gee",
+            "--outcome",
+            "bad_outcome",
+            "--exposure",
+            "x",
+            "--cluster",
+            "hospital_id",
+        ],
+    )
+    assert res.exit_code != 0
+    assert "must be strictly numeric 0 and 1" in res.output

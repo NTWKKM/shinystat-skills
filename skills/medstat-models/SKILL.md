@@ -14,7 +14,7 @@ Biostatistical modeling engine supporting generalized linear models, Cox proport
 3. **Sparse Events & Monotone Likelihood**: In sparse event survival (< 20 events) or quasi-complete logistic separation, use Firth's penalized likelihood with profile likelihood confidence intervals.
 4. **Non-Linearity Verification**: Continuous exposures with potential non-linear biology can be modeled using restricted cubic splines (RCS, supported for Cox regression in the CLI via `--spline-var`) with centered contrast reference points.
 5. **Binary & Event Outcome Encoding**: Binary outcomes (logistic regression) and event indicators (Cox proportional hazards) must be explicitly encoded as numeric `0` and `1` (`1 = Event`, `0 = Non-event`). Raw text outcomes (e.g., `"Dead"`, `"Alive"`, `"Yes"`, `"No"`) are rejected to prevent clinical event inversion.
-6. **Events-Per-Variable (EPV) Diagnostic Rule**: Before fitting multivariable regression, calculate EPV according to model type: for Cox proportional hazards, calculate $\text{EPV}_{\text{Cox}} = \frac{E}{P}$ where $E$ is the total failure-event count and $P$ is the fitted predictor parameter count (degrees of freedom, excluding intercept); for logistic regression, calculate $\text{EPV}_{\text{Logistic}} = \frac{\min(N_{\text{events}}, N_{\text{non-events}})}{P}$ where $P$ is the fitted parameter count from the expanded design matrix. If $\text{EPV} < 10$ or quasi-complete separation occurs, standard maximum likelihood estimation (MLE) is biased and produces unstable/infinite estimates. The agent must decisively transition to **Firth penalized likelihood** (`fit_firth_logistic` / `firth_cox`) or perform variable selection.
+6. **Events-Per-Variable (EPV) Diagnostic Rule**: Before fitting multivariable regression, calculate EPV according to model type: for Cox proportional hazards, calculate $\text{EPV}_{\text{Cox}} = \frac{E}{P}$ where $E$ is the total failure-event count and $P$ is the fitted predictor parameter count (degrees of freedom, excluding intercept); for logistic regression, calculate $\text{EPV}_{\text{Logistic}} = \frac{\min(N_{\text{events}}, N_{\text{non-events}})}{P}$ where $P$ is the fitted parameter count from the expanded design matrix. Note that $\text{EPV} < 10$ serves as a pragmatic risk screen for small-sample bias and overfitting rather than an absolute diagnosis of separation. If quasi-complete separation occurs, or when prespecified sparse-data criteria or estimation instability arise, standard maximum likelihood estimation (MLE) is biased or fails to converge. The agent must decisively transition to **Firth penalized likelihood** (`fit_firth_logistic` / `firth_cox`) or perform dimension reduction.
 7. **Ordinal Outcome Modeling**: Ordinal outcomes with 3+ ordered levels (mRS, GCS, NYHA) should be modeled using cumulative link proportional odds models (`fit_proportional_odds` / CLI `--type ordinal`) with Brant test verification (`--po-test`). Do not treat ordinal scores as continuous OLS linear regressions.
 8. **Clustered Data & GEE**: Multi-center datasets with patient clustering within hospitals violate independence. Use GEE (`--type gee --cluster <col>`) with robust standard errors or random-intercept mixed models (`--type mixed --cluster <col>`), and compute Design Effect (DEFF).
 
@@ -237,22 +237,17 @@ n_nonevents = (df_model['outcome'] == 0).sum()
 epv = min(n_events, n_nonevents) / n_params if n_params > 0 else np.nan
 print(f"Events Per Parameter (EPV): {epv:.1f} (effective events={min(n_events, n_nonevents)}, parameters={n_params})")
 
-# Check for quasi-complete separation / zero cells in categorical predictors
+# Check for quasi-complete separation / zero cells across categorical predictors
 has_zero_cells = False
-for col in ["treatment", "sex"]:
-    if col in df_model.columns:
+for col in df_model.select_dtypes(include=['category', 'object', 'int', 'bool']).columns:
+    if col != "outcome":
         ct = pd.crosstab(df_model[col], df_model["outcome"])
         if (ct == 0).any().any():
             has_zero_cells = True
             break
 
 # Helper to resolve treatment OR across numeric and patsy contrast terms:
-def extract_primary_or(estimates_map):
-    for term, or_val in estimates_map.items():
-        if term == "treatment" or term.startswith("treatment[") or term.startswith("C(treatment)["):
-            if np.isfinite(or_val) and or_val > 0:
-                return float(or_val)
-    return np.nan
+from medstat.models import extract_primary_effect
 
 # Route model fit: If EPV < 10 or quasi-complete separation occurs, route to Firth penalized regression
 if epv < 10 or has_zero_cells:
@@ -270,22 +265,40 @@ if epv < 10 or has_zero_cells:
             "95% CI": f"({row['or_ci_lower']:.2f} - {row['or_ci_upper']:.2f})",
             "p_value": format_p_value(row["p_value"])
         })
-    primary_or = extract_primary_or({term: row["odds_ratio"] for term, row in summary.iterrows()})
+    primary_or = extract_primary_effect({term: row["odds_ratio"] for term, row in summary.iterrows()})
 else:
-    model = smf.logit(formula, data=df_model).fit(disp=False)
-    results = []
-    for term in model.params.index:
-        if term == "Intercept":
-            continue
-        coef = model.params[term]
-        ci_low, ci_high = model.conf_int().loc[term]
-        results.append({
-            "Predictor": term,
-            "Adjusted OR": f"{np.exp(coef):.2f}",
-            "95% CI": f"({np.exp(ci_low):.2f} - {np.exp(ci_high):.2f})",
-            "p_value": format_p_value(model.pvalues[term])
-        })
-    primary_or = extract_primary_or({term: np.exp(model.params[term]) for term in model.params.index})
+    try:
+        model = smf.logit(formula, data=df_model).fit(disp=False)
+        if not model.mle_retvals.get("converged", True) or not np.all(np.isfinite(model.params)):
+            raise ValueError("Standard MLE did not converge or yielded non-finite estimates.")
+        results = []
+        for term in model.params.index:
+            if term == "Intercept":
+                continue
+            coef = model.params[term]
+            ci_low, ci_high = model.conf_int().loc[term]
+            results.append({
+                "Predictor": term,
+                "Adjusted OR": f"{np.exp(coef):.2f}",
+                "95% CI": f"({np.exp(ci_low):.2f} - {np.exp(ci_high):.2f})",
+                "p_value": format_p_value(model.pvalues[term])
+            })
+        primary_or = extract_primary_effect({term: np.exp(model.params[term]) for term in model.params.index})
+    except Exception as e:
+        print(f"Standard MLE estimation failed or unstable ({e}); falling back to Firth penalized likelihood.")
+        firth_res = fit_firth_logistic(y_mat.iloc[:, 0], X_mat.drop(columns=['Intercept']), fit_intercept=True, ci_method="pl")
+        summary = firth_res["summary_df"]
+        results = []
+        for term, row in summary.iterrows():
+            if term == "(Intercept)":
+                continue
+            results.append({
+                "Predictor": term,
+                "Adjusted OR": f"{row['odds_ratio']:.2f}",
+                "95% CI": f"({row['or_ci_lower']:.2f} - {row['or_ci_upper']:.2f})",
+                "p_value": format_p_value(row["p_value"])
+            })
+        primary_or = extract_primary_effect({term: row["odds_ratio"] for term, row in summary.iterrows()})
 
 res_df = pd.DataFrame(results)
 print(res_df.to_markdown(index=False))
@@ -305,16 +318,17 @@ else:
 
 # 5. ADVANCED MODELING: ORDINAL & CLUSTERED (Optional/Contextual)
 # For Ordinal Outcomes (e.g., mRS):
-# from medstat.models.ordinal import fit_proportional_odds
-# ordinal_res = fit_proportional_odds(df_model, outcome="mrs_score", predictors=["treatment", "age"])
-# print(f"Brant Test p-value: {ordinal_res['brant_p_value']}")
+# from medstat.models.ordinal import fit_proportional_odds, test_proportional_odds
+# ordinal_res = fit_proportional_odds(y=df_model["mrs_score"], X=df_model[["treatment", "age"]])
+# brant_res = test_proportional_odds(y=df_model["mrs_score"], X=df_model[["treatment", "age"]])
+# print(f"Brant Omnibus Test p-value: {brant_res['omnibus_p_value']:.4f}")
 
 # For Clustered Data (e.g., multicenter):
-# from medstat.models.multilevel import fit_gee_model, calculate_deff
+# from medstat.models.multilevel import fit_gee, calculate_design_effect
 # df_multi = df.dropna(subset=["outcome", "treatment", "hospital_id"])
-# deff = calculate_deff(df_multi["outcome"], df_multi["hospital_id"])
-# print(f"Design Effect (DEFF): {deff:.2f}")
-# gee_res = fit_gee_model(df_multi, formula="outcome ~ treatment", cluster_col="hospital_id", family="binomial")
+# deff_res = calculate_design_effect(df_multi["outcome"], df_multi["hospital_id"])
+# print(f"Design Effect (DEFF): {deff_res['design_effect']:.2f}")
+# gee_res = fit_gee(y=df_multi["outcome"], X=df_multi[["treatment"]], cluster_ids=df_multi["hospital_id"], family="binomial")
 ```
 
 The agent may freely incorporate `medstat` modules (e.g. `from medstat.models.firth import fit_firth_logistic`, `from medstat.models.survival import fit_cox_ph`, `from medstat.models.sensitivity import calculate_e_value`) or standard libraries (`lifelines` for Cox PH/KM) as appropriate.

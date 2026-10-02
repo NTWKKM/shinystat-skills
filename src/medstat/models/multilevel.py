@@ -12,7 +12,6 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
-import statsmodels.formula.api as smf
 from statsmodels.genmod.cov_struct import Autoregressive, Exchangeable, Independence
 from statsmodels.genmod.families import Binomial, Gaussian
 from statsmodels.genmod.generalized_estimating_equations import GEE
@@ -127,10 +126,19 @@ def fit_gee(
 
     if isinstance(X, pd.DataFrame):
         X_df = X.loc[y_series[valid].index].copy()
+        if X_df.isna().any().any():
+            raise ValueError(
+                "Missing values detected in covariates X. Covariates must be imputed or cleaned before fitting GEE."
+            )
         var_names = list(X_df.columns)
         X_mat = X_df.values.astype(float)
     else:
-        X_mat = np.asarray(X)[valid].astype(float)
+        X_mat_raw = np.asarray(X)[valid]
+        if np.isnan(X_mat_raw).any():
+            raise ValueError(
+                "Missing values detected in covariates X. Covariates must be imputed or cleaned before fitting GEE."
+            )
+        X_mat = X_mat_raw.astype(float)
         var_names = [f"x{i}" for i in range(X_mat.shape[1])]
 
     if add_constant:
@@ -227,19 +235,22 @@ def fit_random_intercept(
 
     if isinstance(X, pd.DataFrame):
         X_df = X.loc[y_series[valid].index].copy()
+        if X_df.isna().any().any():
+            raise ValueError(
+                "Missing values detected in covariates X. Covariates must be imputed or cleaned before fitting random intercept models."
+            )
         var_names = list(X_df.columns)
     else:
         X_mat = np.asarray(X)[valid].astype(float)
+        if np.isnan(X_mat).any():
+            raise ValueError(
+                "Missing values detected in covariates X. Covariates must be imputed or cleaned before fitting random intercept models."
+            )
         var_names = [f"x{i}" for i in range(X_mat.shape[1])]
         X_df = pd.DataFrame(X_mat, columns=var_names)
 
-    # Prepare DataFrame for formula fit
-    df_fit = X_df.copy()
-    df_fit["_y"] = y_clean
-    df_fit["_cluster"] = c_clean
-
-    formula = "_y ~ " + " + ".join(var_names) if var_names else "_y ~ 1"
-    model = smf.mixedlm(formula, data=df_fit, groups=df_fit["_cluster"])
+    exog = sm.add_constant(X_df, has_constant="add") if add_constant else X_df
+    model = sm.MixedLM(y_clean, exog.astype(float), groups=c_clean)
     result = model.fit()
 
     coefs = result.params

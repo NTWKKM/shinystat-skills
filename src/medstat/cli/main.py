@@ -862,7 +862,22 @@ def model_cmd(
             raise click.ClickException("GEE model requires --cluster <cluster_col>.")
         y_raw = df[outcome]
         u_y = y_raw.dropna().unique()
-        fam = "binomial" if len(u_y) == 2 else "gaussian"
+        if len(u_y) <= 1:
+            raise click.BadParameter(
+                f"Outcome '{outcome}' is constant or has fewer than 2 distinct values.",
+                param_hint="--outcome",
+            )
+        if len(u_y) == 2:
+            u_set = set(u_y)
+            if not u_set.issubset({0, 1, 0.0, 1.0}):
+                raise click.BadParameter(
+                    f"Binary outcome '{outcome}' for GEE binomial family must be strictly numeric 0 and 1 (found: {sorted(list(u_set))}). "
+                    "Recode endpoints (0 = Non-event, 1 = Event) prior to fitting.",
+                    param_hint="--outcome",
+                )
+            fam = "binomial"
+        else:
+            fam = "gaussian"
         fit_res = fit_gee(
             y=y_raw,
             X=X_df,
@@ -1541,31 +1556,48 @@ def meta_cmd(
     )
 
     if egger:
-        if len(df) < 10:
+        n_studies = (
+            df[study_col].dropna().nunique()
+            if (study_col and study_col in df.columns)
+            else len(df)
+        )
+        if n_studies < 10:
             raise click.BadParameter(
-                f"Egger's test requires at least 10 studies (got {len(df)}) to ensure adequate statistical power.",
+                f"Egger's test requires at least 10 independent studies (got {n_studies}) to ensure adequate statistical power.",
                 param_hint="--egger",
             )
-        # Determine explicit or metadata effect measure
-        measure_type = measure.lower() if measure else None
-        if not measure_type:
-            for m_col in [
-                "measure",
-                "effect_measure",
-                "metric",
-                "effect_type",
-                "measure_type",
-            ]:
-                if m_col in df.columns:
-                    unique_m = df[m_col].dropna().astype(str).str.lower().unique()
-                    if len(unique_m) == 1:
-                        measure_type = unique_m[0]
-                    elif len(unique_m) > 1:
-                        raise click.BadParameter(
-                            f"Mixed effect measures detected in dataset ({unique_m}). Egger's test requires a homogeneous continuous effect measure.",
-                            param_hint="--egger",
-                        )
-                    break
+        # Determine explicit or metadata effect measure across all present columns
+        explicit_measure = measure.lower() if measure else None
+        discovered_measures = set()
+        if explicit_measure:
+            discovered_measures.add(explicit_measure)
+
+        for m_col in [
+            "measure",
+            "effect_measure",
+            "metric",
+            "effect_type",
+            "measure_type",
+        ]:
+            if m_col in df.columns:
+                unique_m = df[m_col].dropna().astype(str).str.lower().unique()
+                if len(unique_m) > 1:
+                    raise click.BadParameter(
+                        f"Mixed effect measures detected in column '{m_col}' ({unique_m}). Egger's test requires a homogeneous continuous effect measure.",
+                        param_hint="--egger",
+                    )
+                elif len(unique_m) == 1:
+                    discovered_measures.add(unique_m[0])
+
+        if len(discovered_measures) > 1:
+            raise click.BadParameter(
+                f"Conflicting effect measures detected across metadata columns and --measure ({discovered_measures}). Egger's test requires a consistent, homogeneous effect measure.",
+                param_hint="--egger",
+            )
+        elif len(discovered_measures) == 1:
+            measure_type = next(iter(discovered_measures))
+        else:
+            measure_type = None
 
         SUPPORTED_CONTINUOUS = (
             "continuous",

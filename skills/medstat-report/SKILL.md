@@ -113,6 +113,9 @@ model_records = [
 ]
 
 # 2. RENDER NEJM / JAMA PUBLICATION HTML TABLE
+import numpy as np
+import html
+
 def format_p_value(p_val_str, style="NEJM"):
     if p_val_str is None or pd.isna(p_val_str) or str(p_val_str).strip() in ("NA", "—", "-", "", "nan", "NaN"):
         return "—"
@@ -141,12 +144,11 @@ def format_p_value(p_val_str, style="NEJM"):
     except (ValueError, TypeError):
         return "—"
 
-import html
-
 def render_publication_html_table(records, style="NEJM", title="Table 2. Multivariable Logistic Regression Analysis", adjustment_vars=None, ci_method="profile likelihood"):
     is_nejm = style.upper() == "NEJM"
     top_border = "border-top: 3px double #000;" if is_nejm else "border-top: 1px solid #000;"
     p_header = "P Value" if is_nejm else "<em>P</em> Value"
+    est_header = "Adjusted Odds Ratio" if adjustment_vars else "Unadjusted Odds Ratio"
     title_escaped = html.escape(str(title))
     
     if adjustment_vars:
@@ -162,7 +164,7 @@ def render_publication_html_table(records, style="NEJM", title="Table 2. Multiva
         <thead>
           <tr style="{top_border} border-bottom: 1px solid #000;">
             <th style="padding: 6px 8px;">Characteristic / Variable</th>
-            <th style="padding: 6px 8px; text-align: right;">Adjusted Odds Ratio</th>
+            <th style="padding: 6px 8px; text-align: right;">{est_header}</th>
             <th style="padding: 6px 8px; text-align: right;">95% Confidence Interval</th>
             <th style="padding: 6px 8px; text-align: right;">{p_header}</th>
           </tr>
@@ -238,7 +240,16 @@ html_output = render_publication_html_table(model_records, style="NEJM")
 with open("publication_table.html", "w", encoding="utf-8") as f:
     f.write(html_output)
 
-narrative_text = generate_methods_narrative()
+narrative_text = generate_methods_narrative(
+    study_design="Retrospective Cohort",
+    primary_outcome="30-day Mortality",
+    model_type="Multivariable logistic regression",
+    confounders=["Age", "Female Sex", "Baseline SBP"],
+    missing_data_strategy="complete-case analysis",
+    guideline="STROBE",
+    two_sided=True,
+    alpha=0.05,
+)
 print("Methods Narrative:\n", narrative_text)
 ```
 

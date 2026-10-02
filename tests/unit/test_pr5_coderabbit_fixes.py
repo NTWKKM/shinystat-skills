@@ -58,7 +58,56 @@ class TestEggerCLIGuards:
             ],
         )
         assert res.exit_code != 0
-        assert "Egger's test requires at least 10 studies" in res.output
+        assert "Egger's test requires at least 10" in res.output
+
+    def test_egger_rejects_fewer_than_10_unique_studies(self, tmp_path):
+        runner = CliRunner()
+        # 12 rows, but only 4 unique studies
+        df = pd.DataFrame(
+            {
+                "study": [
+                    "Study_A",
+                    "Study_A",
+                    "Study_A",
+                    "Study_B",
+                    "Study_B",
+                    "Study_C",
+                    "Study_C",
+                    "Study_C",
+                    "Study_D",
+                    "Study_D",
+                    "Study_D",
+                    "Study_D",
+                ],
+                "effect_size": np.random.normal(0.2, 0.1, 12),
+                "se": np.random.uniform(0.05, 0.15, 12),
+            }
+        )
+        csv_path = tmp_path / "meta_dup_studies.csv"
+        df.to_csv(csv_path, index=False)
+
+        res = runner.invoke(
+            cli,
+            [
+                "meta",
+                "--data",
+                str(csv_path),
+                "--effect-col",
+                "effect_size",
+                "--se-col",
+                "se",
+                "--study-col",
+                "study",
+                "--measure",
+                "continuous",
+                "--egger",
+            ],
+        )
+        assert res.exit_code != 0
+        assert (
+            "Egger's test requires at least 10 independent studies (got 4)"
+            in res.output
+        )
 
     def test_egger_rejects_missing_measure(self, tmp_path):
         runner = CliRunner()
@@ -236,17 +285,18 @@ class TestCausalAgreementFixes:
         assert res["ci_upper_loa"][0] < res["upper_loa"] < res["ci_upper_loa"][1]
 
     def test_smd_boundary_and_categorical(self):
-        # Test zero pooled SD with different means (non-estimable)
+        from medstat.causal.balance import calculate_smd
+
+        # Test zero pooled SD with different means (non-estimable / NaN)
         g1 = pd.Series([5.0, 5.0, 5.0])
         g0 = pd.Series([10.0, 10.0, 10.0])
-        diff = abs(g1.mean() - g0.mean())
-        pooled_sd = np.sqrt((g1.var(ddof=1) + g0.var(ddof=1)) / 2.0)
-        smd = (
-            0.0
-            if (pooled_sd == 0 and diff == 0)
-            else (np.nan if pooled_sd == 0 else diff / pooled_sd)
-        )
+        smd = calculate_smd(g1, g0)
         assert np.isnan(smd)
+
+        # Test zero pooled SD with identical means (0.0)
+        g_ident1 = pd.Series([5.0, 5.0, 5.0])
+        g_ident0 = pd.Series([5.0, 5.0, 5.0])
+        assert calculate_smd(g_ident1, g_ident0) == 0.0
 
 
 # ==============================================================================
@@ -367,62 +417,21 @@ class TestModelsEPVAndEValueFixes:
 # ==============================================================================
 class TestReportMethodsNarrativeFixes:
     def test_methods_narrative_uses_metadata(self):
-        def generate_methods_narrative(
-            study_design="Retrospective Cohort",
-            primary_outcome="30-day Mortality",
-            model_type="Multivariable logistic regression",
-            confounders=None,
-            missing_data_strategy="complete-case analysis",
-            guideline="STROBE",
-            tests=None,
-            two_sided=True,
-            alpha=0.05,
-        ):
-            if confounders is None:
-                confounders = ["age", "sex"]
-            if tests is None:
-                tests = "t-test and Chi-Square test"
-            confounder_str = ", ".join(confounders)
-            sig_clause = ""
-            if two_sided is not None and alpha is not None:
-                sided_str = "two-sided" if two_sided else "one-sided"
-                sig_clause = f"All tests were {sided_str}, with p < {alpha} considered statistically significant. "
-            elif alpha is not None:
-                sig_clause = (
-                    f"Statistical tests used a significance threshold of p < {alpha}. "
-                )
+        from medstat.reporting.narrative import generate_methods_narrative
 
-            return (
-                f"Statistical Analysis: Evaluated {tests}. "
-                f"Missing data were addressed via {missing_data_strategy}. "
-                f"{model_type} was fitted to evaluate associations with {primary_outcome}, "
-                f"adjusting for prespecified confounders ({confounder_str}). "
-                f"Effect estimates were reported with corresponding 95% confidence intervals. "
-                f"{sig_clause}"
-                f"Reporting conformed to {guideline} guidelines for {study_design.lower()} studies."
-            )
-
-        narrative_with_meta = generate_methods_narrative(
-            study_design="Prospective Cohort",
-            primary_outcome="In-hospital Sepsis",
-            model_type="Cox proportional hazards",
-            confounders=["SOFA score", "Lactate"],
-            missing_data_strategy="multiple imputation (MICE)",
-            guideline="STROBE",
-            two_sided=True,
+        narr_with_meta = generate_methods_narrative(
+            model_type="cox",
+            exposure="Statin",
+            outcome="In-hospital Sepsis",
+            covariates=["SOFA score", "Lactate"],
+            missing_strategy="mice",
             alpha=0.05,
         )
-        assert (
-            "All tests were two-sided, with p < 0.05 considered statistically significant."
-            in narrative_with_meta
-        )
-
-        narrative_unknown_meta = generate_methods_narrative(
-            two_sided=None,
-            alpha=None,
-        )
-        assert "statistically significant" not in narrative_unknown_meta
-        assert "two-sided" not in narrative_unknown_meta
+        assert "In-hospital Sepsis" in narr_with_meta
+        assert "SOFA score, Lactate" in narr_with_meta
+        assert "Cox proportional hazards" in narr_with_meta
+        assert "p-values < 0.05" in narr_with_meta
+        assert "Multiple Imputation by Chained Equations (MICE)" in narr_with_meta
 
     def test_p_value_formatting_nejm_vs_jama(self):
         from medstat.reporting.tables import format_journal_p_value
@@ -457,30 +466,24 @@ class TestReportMethodsNarrativeFixes:
     def test_diagnostic_gold_standard_binary_validation(self):
         import pytest
 
-        def validate_gold(gold_series):
-            vals = set(pd.Series(gold_series).dropna().unique())
-            if not vals.issubset({0, 1, 0.0, 1.0}):
-                raise ValueError("Must be strictly binary {0, 1}")
+        from medstat.diagnostic.accuracy import validate_gold_standard
 
-        validate_gold([0, 1, 1, 0])
-        with pytest.raises(ValueError):
-            validate_gold([0, 1, 2])
-        with pytest.raises(ValueError):
-            validate_gold(["Case", "Control"])
+        res = validate_gold_standard([0, 1, 1, 0])
+        assert list(res) == [0, 1, 1, 0]
+
+        with pytest.raises(ValueError, match="strictly binary numeric"):
+            validate_gold_standard([0, 1, 2])
+
+        with pytest.raises(ValueError, match="strictly binary numeric"):
+            validate_gold_standard(["Case", "Control"])
+
+        with pytest.raises(ValueError, match="must contain both 0 and 1 classes"):
+            validate_gold_standard([0, 0, 0], require_both_classes=True)
 
     def test_treatment_contrast_extraction(self):
-        def extract_primary_or(estimates_map):
-            for term, or_val in estimates_map.items():
-                if (
-                    term == "treatment"
-                    or term.startswith("treatment[")
-                    or term.startswith("C(treatment)[")
-                ):
-                    if np.isfinite(or_val) and or_val > 0:
-                        return float(or_val)
-            return np.nan
+        from medstat.models import extract_primary_effect
 
-        assert extract_primary_or({"treatment": 2.15, "age": 1.02}) == 2.15
-        assert extract_primary_or({"C(treatment)[T.1]": 1.85, "age": 1.02}) == 1.85
-        assert extract_primary_or({"treatment[T.True]": 3.10}) == 3.10
-        assert np.isnan(extract_primary_or({"other": 1.5}))
+        assert extract_primary_effect({"treatment": 2.15, "age": 1.02}) == 2.15
+        assert extract_primary_effect({"C(treatment)[T.1]": 1.85, "age": 1.02}) == 1.85
+        assert extract_primary_effect({"treatment[T.True]": 3.10}) == 3.10
+        assert np.isnan(extract_primary_effect({"other": 1.5}))

@@ -171,3 +171,25 @@ def calculate_diagnostic_accuracy(
     tn = int(np.sum((y_t == 0) & (y_p == 0)))
 
     return calculate_2x2_metrics(tp=tp, fp=fp, fn=fn, tn=tn, ci=ci)
+
+
+def validate_gold_standard(
+    gold: pd.Series | np.ndarray | list[Any],
+    require_both_classes: bool = False,
+) -> np.ndarray:
+    """
+    Validate that gold standard values are strictly binary numeric {0, 1}.
+    Optionally enforce that both classes (0 and 1) are present.
+    """
+    s = pd.Series(gold).dropna()
+    vals = set(s.unique())
+    if not vals.issubset({0, 1, 0.0, 1.0}):
+        raise ValueError(
+            f"Gold standard values must be strictly binary numeric {{0, 1}} (found: {sorted(list(vals))}). "
+            "Recode disease/event status to 0 and 1 prior to analysis."
+        )
+    if require_both_classes and len(vals) < 2:
+        raise ValueError(
+            f"Gold standard must contain both 0 and 1 classes for evaluation (found only: {sorted(list(vals))})."
+        )
+    return s.values.astype(int)

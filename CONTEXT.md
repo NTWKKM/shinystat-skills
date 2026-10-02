@@ -35,6 +35,10 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
 | **Random-Intercept Model** | `random_intercept` | Linear mixed-effects model decomposing outcome variance into fixed covariate effects and cluster-specific random shifts ($u_i \sim \mathcal{N}(0, \sigma_u^2)$). |
 | **Master Orchestration** | `medstat-master` | Autonomous intelligence layer that profiles datasets, infers clinical study design, and orchestrates downstream atomic skills without manual skill selection. |
 | **Statistical Analysis Plan** | `SAP` | Formal specification of primary estimand, data cleaning/retention strategy, planned models, and reporting standards before execution. |
+| **Gold Standard Validation** | `validate_gold_standard` | Pre-flight validation asserting that clinical reference standards have complete binary class support ($\{0, 1\}$), sufficient prevalence, and non-empty samples before ROC or accuracy estimation. |
+| **Primary Effect Extraction** | `extract_primary_effect` | Polymorphic extraction extracting primary exposure/treatment point estimates, Wald/profile CIs, and p-values uniformly across GLM, Firth, Cox, and GEE model objects. |
+| **Zero-Variance SMD** | `smd_zero_variance` | Boundary condition in covariate balance: when pooled SD is 0 and group means differ, SMD is mathematically undefined and returns `np.nan` (rather than masking extreme imbalance as `0.0`). |
+| **Distinct Study Count** | `distinct_studies` | Independent sample size threshold ($k_{\text{distinct}} \ge 10$) enforced before running Egger's linear regression test to prevent spurious validity from multi-effect studies. |
 
 ---
 

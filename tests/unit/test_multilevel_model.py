@@ -125,3 +125,51 @@ class TestRandomInterceptModel:
         assert res["random_intercept_var"] > 0
         assert res["residual_var"] > 0
         assert 0.0 < res["cluster_icc"] < 1.0
+
+    def test_fit_random_intercept_special_colnames_and_add_constant(self):
+        np.random.seed(42)
+        n = 100
+        centers = np.random.choice([1, 2, 3, 4], size=n)
+        df_special = pd.DataFrame(
+            {
+                "SOFA score": np.random.normal(5, 2, n),
+                "C(sex)[T.M]": np.random.choice([0, 1], n),
+            }
+        )
+        y = (
+            2.0
+            + 0.5 * df_special["SOFA score"]
+            + centers * 0.3
+            + np.random.normal(0, 1, n)
+        )
+
+        # Test with spaces and special syntax in column names
+        res = fit_random_intercept(
+            y=y,
+            X=df_special,
+            cluster_ids=centers,
+            add_constant=True,
+        )
+        sum_df = res["summary_df"]
+        assert "SOFA score" in sum_df.index
+        assert "C(sex)[T.M]" in sum_df.index
+        assert "const" in sum_df.index
+
+    def test_multilevel_missing_covariates_rejected(self, clustered_continuous_data):
+        df = clustered_continuous_data.copy()
+        df.loc[0, "x"] = np.nan
+
+        with pytest.raises(ValueError, match="Missing values detected in covariates X"):
+            fit_gee(
+                y=df["y"],
+                X=df[["x"]],
+                cluster_ids=df["center_id"],
+                family="gaussian",
+            )
+
+        with pytest.raises(ValueError, match="Missing values detected in covariates X"):
+            fit_random_intercept(
+                y=df["y"],
+                X=df[["x"]],
+                cluster_ids=df["center_id"],
+            )

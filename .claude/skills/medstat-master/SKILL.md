@@ -126,7 +126,7 @@ To select the mathematically and clinically valid statistical analysis, the agen
 | **Type 5: Observational Causal Inference** | Non-randomized treatment indicator + baseline confounders | Propensity Score Matching (PSM, Austin 2009 caliper $0.2 \times \text{SD}(\text{logit } e)$), Love plot (post-match $\text{SMD} < 0.10$), outcome model on matched cohort. | Covariate Balance & Matched Effect |
 | **Type 6: Agreement & Reliability** | Paired device measurements OR subject ID + multiple raters | Bland-Altman Limits of Agreement with large-sample approximate CIs, Intraclass Correlation Coefficient (ICC forms 1, 2, 3), Cohen's / Fleiss' Kappa. | Agreement Plot & Reliability Table |
 | **Type 7: Multi-Study Meta-Analysis** | Effect sizes (log OR, HR, MD) with SEs across studies | DerSimonian-Laird random effects ($\tau^2, I^2$), Forest plot data, Egger's test for funnel asymmetry (if continuous $k \ge 10$). | Forest Plot & Meta-Analysis Table |
-| **Type 8: Clustered & Multi-Center Cohort** | Cluster ID (hospital, clinic, site) + patient outcomes | GEE with exchangeable correlation and robust sandwich SEs (population-averaged) OR Random-Intercept Mixed Model (cluster-specific). Cluster ICC and Design Effect (DEFF). | Clustered Multilevel Model Table |
+| **Type 8: Clustered & Multi-Center Cohort** | Cluster ID (hospital, clinic, site) + patient outcomes | GEE with exchangeable correlation and robust sandwich SEs (population-averaged for binary/continuous outcomes) OR Random-Intercept Linear Mixed Model (for continuous outcomes only; for clustered Cox, use survival-specific cluster-robust variance). Cluster ICC and Design Effect (DEFF). | Clustered Multilevel Model Table |
 
 ---
 
@@ -136,8 +136,8 @@ Before writing analysis scripts or fitting models, the agent must pass through 7
 
 ### Gate 1: Contradiction Resolution Gate (ความขัดแย้งระหว่าง Proposal กับ ข้อมูลจริง)
 - **The Risk**: User requests Survival Analysis (Cox regression), but raw data only contains a binary discharge status without a follow-up time column.
-- **Directive**: **HALT & PIVOT**. Never hallucinate a synthetic time column. The agent must declare the mismatch, pivot to Type 2 (Multivariable Logistic or Firth), and notify the user:
-  *"Proposal requests survival analysis, but raw data lacks follow-up duration; transitioning primary model to Multivariable Logistic/Firth Regression to preserve statistical validity."*
+- **Directive**: **REQUEST DATA OR PIVOT**. Never hallucinate a synthetic time column. If follow-up varies or outcomes are censored, duration data must be requested. A pivot to Type 2 (Multivariable Logistic or Firth) is permitted ONLY for a prespecified fixed horizon with complete ascertainment (e.g. 30-day in-hospital mortality with 100% ascertainment). Notify the user:
+  *"Proposal requests survival analysis, but raw data lacks observation time; transitioning primary model to Multivariable Logistic/Firth Regression under a fixed-horizon assumption with complete ascertainment."*
 
 ### Gate 2: Silent Assumption Barrier (ห้ามทึกทักสมมติฐานทางสถิติไปเอง)
 - **The Risk**: Silently executing `df.dropna()` without checking missingness mechanisms, or reporting Mean ± SD and t-tests on highly skewed clinical labs (Troponin, Length of Stay, Ferritin).
@@ -168,7 +168,7 @@ Before writing analysis scripts or fitting models, the agent must pass through 7
 
 ### Gate 7: Clustering & Independence Violation Gate (ความเป็นอิสระของข้อมูล)
 - **The Risk**: Fitting standard logistic or Cox regression on multi-center or clustered data (patients nested in hospitals/centers) where observations are correlated, producing artificially narrow confidence intervals and inflated Type I error.
-- **Directive**: When cluster identifiers exist (hospital_id, center_id, site), calculate the Design Effect ($\text{DEFF} = 1 + (\bar{m} - 1)\text{ICC}_{\text{cluster}}$). If $\text{DEFF} > 1.5$ or $\text{ICC}_{\text{cluster}} > 0.05$, transition to Population-Averaged GEE (`fit_gee` with robust sandwich SEs) or Random-Intercept Mixed Models (`fit_random_intercept`). Always report effective sample size ($N_{\text{eff}} = N / \text{DEFF}$) alongside nominal $N$.
+- **Directive**: When cluster identifiers exist (hospital_id, center_id, site), calculate the Design Effect ($\text{DEFF} = 1 + (\bar{m} - 1)\text{ICC}_{\text{cluster}}$). If $\text{DEFF} > 1.5$ or $\text{ICC}_{\text{cluster}} > 0.05$, transition to clustered modeling. For survival outcomes, use Cox regression with cluster-robust variance or shared frailty models (do not use GEE or linear mixed models for censored time-to-event). For non-survival outcomes, use Population-Averaged GEE (`fit_gee` with robust sandwich SEs, requiring $\ge 30\text{--}50$ clusters for sandwich SE asymptotic validity) or Random-Intercept Linear Mixed Models (`fit_random_intercept` for continuous outcomes only). If cluster counts are few ($< 30$), sandwich SEs can underestimate variance, requiring small-sample corrections or mixed models. Always report effective sample size ($N_{\text{eff}} = N / \text{DEFF}$) alongside nominal $N$.
 
 ---
 
@@ -239,7 +239,7 @@ n_initial = len(df)
 df_clean = df.dropna(subset=['outcome']).copy()
 n_analyzed = len(df_clean)
 n_excluded = n_initial - n_analyzed
-print(f"Sample Flow: Initial={n_initial} -> Excluded={n_excluded} -> Analyzed={n_analyzed}")
+print(f"Sample Flow (Cohort Cleaning): Initial={n_initial} -> Excluded={n_excluded} -> Outcome Complete={n_analyzed}")
 
 # 3. TABLE 1: BASELINE CHARACTERISTICS WITH NORMALITY AUDIT
 def summarize_continuous(series, group):
@@ -284,13 +284,17 @@ def summarize_continuous(series, group):
         }
 
 def summarize_categorical(series, group):
-    """คำนวณ n (%) และ Chi-Square หรือ Fisher's exact test"""
+    """คำนวณ n (%) และประเมิน expected cell frequencies ก่อนเลือก Chi-Square หรือ Fisher exact"""
     ct = pd.crosstab(series, group)
-    if ct.shape == (2, 2) and (ct.values < 5).any():
+    chi2, p_val, dof, expected = stats.chi2_contingency(ct)
+    is_sparse = (expected < 5).mean() > 0.20 or (expected < 1).any()
+    if ct.shape == (2, 2) and is_sparse:
         _, p_val = stats.fisher_exact(ct)
-    else:
-        _, p_val, _, _ = stats.chi2_contingency(ct)
-    return {"crosstab": ct, "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001"}
+    return {
+        "crosstab": ct,
+        "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001",
+        "is_sparse": is_sparse,
+    }
 
 # 4. EPV DIAGNOSTIC & MULTIVARIABLE MODELING
 import patsy
@@ -300,18 +304,18 @@ from medstat.models.firth import fit_firth_logistic
 model_cols = ["outcome", "age", "sex", "admission_status"]
 df_model = df_clean.dropna(subset=model_cols).copy()
 n_model_excluded = len(df_clean) - len(df_model)
-if n_model_excluded > 0:
-    print(f"Model complete-case exclusion: excluded {n_model_excluded} rows with missing model variables.")
-    # Reconcile retention counts with sample retention flow if tracker is used:
-    # tracker.record_stage("Model Complete Cases", n_remaining=len(df_model), reason="Missing model variables")
+print(f"Sample Flow (Model Analysis): Analyzed={len(df_model)} (excluded {n_model_excluded} rows with missing predictors)")
 
 formula = "outcome ~ age + C(sex) + C(admission_status)"
 y_mat, X_mat = patsy.dmatrices(formula, data=df_model, return_type='dataframe')
 # Validate clinical outcome mapping before calculating EPV:
-# Explicitly verify event is mapped to 1 and non-event to 0, then reject any values outside {0, 1}
+# Explicitly verify event is mapped to 1 (primary clinical event) and non-event to 0:
 outcome_vals = set(df_model['outcome'].dropna().unique())
 if not outcome_vals.issubset({0, 1, 0.0, 1.0}):
     raise ValueError(f"Outcome contains invalid values {outcome_vals}. Must be strictly binary {{0, 1}}.")
+if len(outcome_vals) < 2:
+    raise ValueError(f"Outcome must contain both events (1) and non-events (0) for multivariable modeling (found: {outcome_vals}).")
+print("Confirmed clinical outcome mapping: 1 = Event/Death, 0 = Non-event/Survival.")
 
 # Count expanded model parameter degrees of freedom (excluding intercept)
 n_params = X_mat.shape[1] - 1

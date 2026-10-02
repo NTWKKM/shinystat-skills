@@ -151,13 +151,18 @@ from medstat.data.retention import SampleFlowTracker
 tracker = SampleFlowTracker(initial_n=n_initial, initial_name="Initial Enrolled Cohort")
 
 # Verify protocol justification before complete-case outcome exclusion:
+# An explicit verified-protocol flag and rationale must be established before dropping rows with missing outcome:
+protocol_permits_outcome_exclusion = True  # Must be set based on explicit study protocol / SAP documentation
+protocol_rationale = "Prespecified complete-case analysis for primary endpoint ascertainment"
+
 if df['outcome'].isnull().any():
-    # Only exclude if SAP explicitly prespecifies complete ascertainment on primary endpoint
+    if not protocol_permits_outcome_exclusion:
+        raise ValueError("Missing values detected in primary outcome, but study protocol does not verify exclusion criteria. Clarify with PI/SAP.")
     df_clean = df.dropna(subset=['outcome']).copy()
     tracker.record_stage(
         stage_name="Primary Outcome Ascertainment",
         n_remaining=len(df_clean),
-        reason="Excluded missing primary outcome per verified study protocol criteria",
+        reason=f"Excluded missing primary outcome: {protocol_rationale}",
     )
 else:
     df_clean = df.copy()

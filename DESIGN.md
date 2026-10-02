@@ -404,3 +404,33 @@ In multi-center clinical trials, health registry networks, and community hospita
 - **Zero New Dependencies**: Implemented using existing `statsmodels ≥ 0.14.0`.
 
 [MEMORY_LEARN: Multi-center clinical clustering requires variance adjustment; reporting Design Effect (DEFF) alongside population-averaged GEE robust standard errors guarantees valid inference under nested patient structures.]
+
+---
+
+## ADR 21: CodeRabbit PR#5 Quality & Clinical Biostatistics Remediation
+
+### Context
+Automated code and clinical biostatistics review by CodeRabbit AI on PR #5 identified 36 findings (23 Major, 12 Minor, 1 Nitpick). Key concerns spanned:
+1. `src/medstat/models/multilevel.py`: `fit_random_intercept` used formula strings (`smf.mixedlm`) vulnerable to unquoted special characters/spaces and dummy syntax; missing covariate values were not explicitly detected before fitting GEE or MixedLM.
+2. `src/medstat/cli/main.py`: GEE binomial family did not enforce strict numeric `{0, 1}` outcome validation prior to modeling; Egger's test count check checked raw row count instead of distinct study count (`nunique() >= 10`), risking false validity on multi-effect studies; conflicting effect measure CLI arguments were not rejected.
+3. `src/medstat/causal/balance.py`: `calculate_smd` returned `0.0` when pooled SD was 0 even if group means differed, masking infinite/undefined clinical imbalance.
+4. Public API exports: Functions required by reporting pipelines (`validate_gold_standard`, `extract_primary_effect`) were either missing or not exported in public package namespaces.
+5. Unit tests: PR#5 verification tests used local shadow copies/mocks rather than testing true package imports.
+6. Skill documentation: Canonical skill instructions contained small statistical and syntax gaps (e.g. missing `import numpy as np` in reporting, lack of expected cell count warnings, ambiguous fallback for survival time horizons, unverified outcome dropping).
+
+### Decision
+1. **Multilevel Matrix Formulation**: Refactored `fit_random_intercept` to pass direct design matrices (`sm.MixedLM(y_clean, exog.astype(float), groups=c_clean)`) and properly honor `add_constant`. Added explicit missingness checks raising `ValueError("Missing values detected in covariates X...")` across both GEE and MixedLM.
+2. **CLI Guardrails**: Enforced strict numeric `{0, 1}` outcome verification for GEE binomial models. Enforced distinct study threshold (`df[study_col].dropna().nunique() >= 10`) for Egger's test. Added cross-column validation for meta-analysis effect measures.
+3. **SMD Boundary Correctness**: Updated `calculate_smd` to return `np.nan` if pooled SD is 0 and means differ, returning `0.0` strictly when means are identical.
+4. **Export Public Contract Utilities**: Implemented and exported `validate_gold_standard` in `medstat.diagnostic` and `extract_primary_effect` in `medstat.models`.
+5. **Decoupled Unit Testing**: Refactored `tests/unit/test_pr5_coderabbit_fixes.py` to import and directly test production package code; added direct CLI tests for binary validation and duplicate study rejection.
+6. **Skills Suite Hardening & Mirror Parity**: Hardened canonical skill instructions (`skills/`) for cell counts, survival horizons, Firth separation fallbacks, and complete-case protocol flags, and synchronized byte-for-byte across `.agent/`, `.agents/`, `.claude/`, and `.cursor/` mirrors.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Statistical Safety**: Prevents silent masking of infinite imbalance in balance metrics and prohibits invalid outcome types in GEE.
+- **Robust Execution**: Formula parsing crashes eliminated in MixedLM with arbitrary column names.
+- **100% Mirror Parity**: Verified by `tests/unit/test_skill_docs_drift.py` across all 5 skill directories.
+- **Test Integrity**: Full suite passing (388/388 tests) with real production imports.
+
+[MEMORY_LEARN: Zero-variance in covariate balance with differing group means represents an undefined/infinite imbalance that must yield NaN rather than 0.0 to prevent masking severe clinical cohort disparities.]

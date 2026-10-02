@@ -179,12 +179,13 @@ def run_psm_pipeline(df, treatment_col, covariate_cols, caliper_sd=0.20):
     for cov in covariate_cols:
         # Encode or assess categorical covariates per category before numeric mean/var
         if not pd.api.types.is_numeric_dtype(df_matched[cov]):
-            cats = pd.get_dummies(df_matched[cov], drop_first=(df_matched[cov].nunique() == 2), prefix=cov)
+            cov_nonmissing = df_matched[[treatment_col, cov]].dropna()
+            cats = pd.get_dummies(cov_nonmissing[cov], drop_first=(cov_nonmissing[cov].nunique() == 2), prefix=cov)
             sub_covs = cats.columns.tolist()
-            df_eval = pd.concat([df_matched[[treatment_col]], cats], axis=1)
+            df_eval = pd.concat([cov_nonmissing[[treatment_col]], cats], axis=1)
         else:
             sub_covs = [cov]
-            df_eval = df_matched[[treatment_col, cov]]
+            df_eval = df_matched[[treatment_col, cov]].dropna()
 
         for sc in sub_covs:
             g1 = df_eval[df_eval[treatment_col] == 1][sc].dropna()

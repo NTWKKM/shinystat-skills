@@ -188,8 +188,11 @@ def evaluate_cutoff(gold, score, cutoff):
 # 3. EMPIRICAL ROC, DIRECTIONALITY SANITY CHECK & YOUDEN'S INDEX
 valid_mask = np.isfinite(df['gold_standard']) & np.isfinite(df['test_score'])
 clean_diag = df[valid_mask].copy()
-if not set(clean_diag['gold_standard'].unique()).issubset({0, 1, 0.0, 1.0}):
-    raise ValueError("gold_standard must contain strictly {0, 1}.")
+gold_classes = set(clean_diag['gold_standard'].unique())
+if not gold_classes.issubset({0, 1, 0.0, 1.0}):
+    raise ValueError(f"gold_standard must contain strictly {{0, 1}} (found: {gold_classes}).")
+if len(gold_classes) < 2:
+    raise ValueError(f"ROC analysis requires both classes {{0, 1}} to estimate discrimination (found only: {gold_classes}).")
 scores = clean_diag['test_score'].values
 gold_vals = clean_diag['gold_standard'].astype(int).values
 fpr, tpr, thresholds = roc_curve(gold_vals, scores)
@@ -221,6 +224,8 @@ def calculate_net_benefit(gold, probs, thresholds_range):
         raise ValueError("calculate_net_benefit requires at least one valid paired observation.")
     if not np.isin(y_true, [0.0, 1.0]).all():
         raise ValueError(f"gold contains invalid values {np.unique(y_true)}. Must be strictly binary {{0, 1}}.")
+    if ((y_prob < 0.0) | (y_prob > 1.0)).any():
+        raise ValueError("Predicted probabilities y_prob must fall strictly within [0, 1].")
     
     tp_all = np.sum(y_true == 1)
     fp_all = np.sum(y_true == 0)
@@ -250,17 +255,25 @@ from medstat.diagnostic.calibration import (
     hosmer_lemeshow_test,
 )
 
-# Requires predicted risk probabilities in [0, 1] (oriented if low-is-abnormal)
-brier = calculate_brier_score(gold_vals, risk_probs)
-cal_slope = calculate_calibration_slope_and_intercept(gold_vals, risk_probs)
-ici_res = calculate_ici(gold_vals, risk_probs)
-hl = hosmer_lemeshow_test(gold_vals, risk_probs, g=10)
+# Calibration evaluates predicted risk probabilities against binary outcomes.
+# Define and align risk_probs from the dataset (e.g. clean_diag['predicted_risk']) or prediction model:
+if "predicted_risk" in clean_diag.columns:
+    risk_probs = clean_diag["predicted_risk"].values
+    if not np.all((risk_probs >= 0.0) & (risk_probs <= 1.0)):
+        raise ValueError("Predicted risk probabilities for calibration must be within [0, 1].")
+    
+    brier = calculate_brier_score(gold_vals, risk_probs)
+    cal_slope = calculate_calibration_slope_and_intercept(gold_vals, risk_probs)
+    ici_res = calculate_ici(gold_vals, risk_probs)
+    hl = hosmer_lemeshow_test(gold_vals, risk_probs, g=10)
 
-print(f"Brier Score: {brier['brier_score']:.4f} ({brier['interpretation']})")
-print(f"Calibration Slope: {cal_slope['calibration_slope']:.3f} (Ideal = 1.0)")
-print(f"Calibration Intercept: {cal_slope['calibration_intercept']:.3f} (Ideal = 0.0)")
-print(f"ICI: {ici_res['ici']:.4f} | E50: {ici_res['e50']:.4f} | E90: {ici_res['e90']:.4f}")
-print(f"Hosmer-Lemeshow: χ²={hl['statistic']:.2f}, df={hl['df']}, p={hl['p_value']:.3f}")
+    print(f"Brier Score: {brier['brier_score']:.4f} ({brier['interpretation']})")
+    print(f"Calibration Slope: {cal_slope['calibration_slope']:.3f} (Ideal = 1.0)")
+    print(f"Calibration Intercept: {cal_slope['calibration_intercept']:.3f} (Ideal = 0.0)")
+    print(f"ICI: {ici_res['ici']:.4f} | E50: {ici_res['e50']:.4f} | E90: {ici_res['e90']:.4f}")
+    print(f"Hosmer-Lemeshow: χ²={hl['statistic']:.2f}, df={hl['df']}, p={hl['p_value']:.3f}")
+else:
+    print("Calibration evaluation skipped: 'predicted_risk' column not provided in dataset.")
 ```
 
 The agent may freely incorporate `medstat` modules (e.g. `from medstat.diagnostic.roc import calculate_delong_ci`, `from medstat.diagnostic.accuracy import compute_diagnostic_metrics`, `from medstat.diagnostic.dca import calculate_dca`) or standard libraries as appropriate.
