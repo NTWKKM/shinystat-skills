@@ -85,6 +85,92 @@ medstat diag --data <cohort.csv> \
   $$\text{Net Benefit}(p_t) = \frac{\text{TP}}{N} - \frac{\text{FP}}{N} \cdot \left(\frac{p_t}{1 - p_t}\right)$$
 - Clinical Rule: A biomarker should only be deployed across threshold ranges where its net benefit curve exceeds both "Treat All" and "Treat None".
 
+---
+
+## Adaptive Python Scripting Protocol (ปรับแต่งสคริปต์ความแม่นยำในการวินิจฉัยและ ROC ตามข้อมูลจริง)
+
+> **Core Philosophy**: Never execute rigid canned scripts that make naive assumptions about file structure. The agent is empowered with full autonomy to write, adapt, and run Python scripts (`scratch/diagnostic.py`) tailored to specific clinical biomarkers, cutoff evaluations, and risk scoring tools.
+>
+> ⚠️ **Mandatory Directive — ต้องดู Script ต้นแบบประกอบเสมอ (Review Prototype Scripts First)**:
+> แม้จะให้อิสระ Agent ในการเขียนและปรับ Python Script เองตามสภาพข้อมูลจริง แต่ **Agent ต้องเปิดดูและอ้างอิงสคริปต์ต้นแบบ (Prototype Scripts)** หรือศึกษาการคำนวณในโมดูลแกนกลาง `src/medstat/diagnostic/` เสมอ เพื่อยึดมาตรฐานความถูกต้องทางชีวสถิติการแพทย์:
+> - **ตาราง 2x2 และ Wilson Score Interval**: ดูการคำนวณ Sensitivity, Specificity, PPV, NPV, LR+, LR- พร้อม Wilson Score 95% CIs จาก `src/medstat/diagnostic/accuracy.py`
+> - **Empirical ROC & DeLong Test**: ดูการคำนวณ Area Under Curve (AUC), DeLong 95% CIs, และ Paired DeLong test จาก `src/medstat/diagnostic/roc.py`
+> - **Decision Curve Analysis (DCA)**: ดูการคำนวณ Net Benefit ข้าม Decision Threshold Probabilities ($p_t$) และการเปรียบเทียบ Treat All / Treat None จาก `src/medstat/diagnostic/dca.py`
+>
+> **วงจรการทำงานของ Agent**:
+> `[1. สำรวจ Gold Standard และ Biomarker] ──▶ [2. ดูสคริปต์ต้นแบบเพื่อยึดหลักชีวสถิติ] ──▶ [3. ปรับโค้ดและประเมินความแม่นยำ]`
+
+### Master Prototype Script for Diagnostic Accuracy & ROC (สคริปต์ต้นแบบมาตรฐาน)
+
+Agent ควรนำโครงสร้างและฟังก์ชันของสคริปต์ต้นแบบนี้ไปปรับแต่งลงใน workspace (เช่น `scratch/diagnostic.py`) ให้เข้ากับตัวชี้วัดและจุดตัด (cut-off) ของข้อมูลจริง:
+
+```python
+import numpy as np
+import pandas as pd
+from scipy import stats
+from sklearn.metrics import roc_curve, auc
+
+# 1. LOAD DATA & VERIFY ENDPOINTS (Strict Numeric 0/1)
+df = pd.read_csv("clean_cohort.csv")
+# gold_standard: 1 = Disease/Event, 0 = Non-disease
+# test_score: continuous biomarker or predicted probability
+
+# 2. 2x2 CONTINGENCY MATRIX WITH WILSON SCORE INTERVAL
+def wilson_score_interval(k, n, confidence=0.95):
+    """Compute Wilson score interval for binomial proportions"""
+    if n == 0:
+        return 0.0, 0.0
+    z = stats.norm.ppf(1 - (1 - confidence) / 2)
+    p_hat = k / n
+    denom = 1 + z**2 / n
+    center = (p_hat + z**2 / (2 * n)) / denom
+    margin = (z * np.sqrt((p_hat * (1 - p_hat) + z**2 / (4 * n)) / n)) / denom
+    return max(0.0, center - margin), min(1.0, center + margin)
+
+def evaluate_cutoff(gold, score, cutoff):
+    pred = (score >= cutoff).astype(int)
+    tp = np.sum((gold == 1) & (pred == 1))
+    fp = np.sum((gold == 0) & (pred == 1))
+    tn = np.sum((gold == 0) & (pred == 0))
+    fn = np.sum((gold == 1) & (pred == 0))
+    
+    sens, (sens_l, sens_u) = tp / (tp + fn) if (tp + fn) > 0 else 0, wilson_score_interval(tp, tp + fn)
+    spec, (spec_l, spec_u) = tn / (tn + fp) if (tn + fp) > 0 else 0, wilson_score_interval(tn, tn + fp)
+    ppv, (ppv_l, ppv_u) = tp / (tp + fp) if (tp + fp) > 0 else 0, wilson_score_interval(tp, tp + fp)
+    npv, (npv_l, npv_u) = tn / (tn + fn) if (tn + fn) > 0 else 0, wilson_score_interval(tn, tn + fn)
+    
+    print(f"Cutoff >= {cutoff}:")
+    print(f"  Sensitivity: {sens*100:.1f}% (95% CI: {sens_l*100:.1f}% - {sens_u*100:.1f}%)")
+    print(f"  Specificity: {spec*100:.1f}% (95% CI: {spec_l*100:.1f}% - {spec_u*100:.1f}%)")
+    print(f"  PPV: {ppv*100:.1f}% | NPV: {npv*100:.1f}%")
+    return {"sens": sens, "spec": spec, "ppv": ppv, "npv": npv}
+
+# 3. EMPIRICAL ROC & YOUDEN'S INDEX
+fpr, tpr, thresholds = roc_curve(df['gold_standard'], df['test_score'])
+roc_auc = auc(fpr, tpr)
+youden_j = tpr - fpr
+opt_idx = np.argmax(youden_j)
+opt_cutoff = thresholds[opt_idx]
+print(f"ROC AUC: {roc_auc:.3f} | Optimal Cutoff (Youden J): {opt_cutoff:.2f}")
+
+# 4. DECISION CURVE ANALYSIS (DCA: Net Benefit)
+def calculate_net_benefit(gold, probs, thresholds_range):
+    n = len(gold)
+    net_benefits = []
+    for pt in thresholds_range:
+        pred = (probs >= pt).astype(int)
+        tp = np.sum((gold == 1) & (pred == 1))
+        fp = np.sum((gold == 0) & (pred == 1))
+        w = pt / (1.0 - pt)
+        nb = (tp / n) - (fp / n) * w
+        net_benefits.append({"pt": pt, "net_benefit": nb})
+    return pd.DataFrame(net_benefits)
+```
+
+The agent may freely incorporate `medstat` modules (e.g. `from medstat.diagnostic.roc import calculate_delong_ci`, `from medstat.diagnostic.accuracy import compute_diagnostic_metrics`, `from medstat.diagnostic.dca import calculate_dca`) or standard libraries as appropriate.
+
+---
+
 ## Completion Criteria
 
 - [ ] 2x2 contingency table evaluated with Wilson 95% confidence intervals.

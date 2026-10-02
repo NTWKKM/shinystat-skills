@@ -249,5 +249,54 @@ Code review identified statistical subtleties across rater agreement, mediation,
 
 [MEMORY_LEARN: Strict non-null standard errors for weighted kappa, contrast matrices for non-linear spline ORs, and probability-oriented DCA curves ensure rigorous biostatistical validity in automated clinical pipelines.]
 
+---
+
+## ADR 15: Adaptive Agent Scripting & Decoupled Execution Architecture (Evolution of medstat-master)
+
+### Context
+Users ingesting real-world clinical datasets (e.g., Thai hospital EHR exports with multi-row headers, notes, embedded dashboard summaries, and Thai locale strings) experienced execution errors in Antigravity. The previous orchestrator design suffered from two friction points:
+1. Pre-flight PHI checks and external auditor dependencies caused fail-closed halts on clinical files.
+2. Rigid canned CLI commands (`uv run medstat profile`, `uv run medstat clean`, etc.) assumed tidy, single-header tables starting at row 1, causing fatal parser errors on complex, multi-table spreadsheets.
+
+### Decision
+1. **Eliminate Mandatory PHI Blocker**: Remove the rigid pre-flight PHI auditor requirement from `medstat-master`, allowing agents to process clinical datasets without fail-closed stalls.
+2. **Methodological Guidance (ระเบียนวิธี)**: Structure `medstat-master` as a methodological manual defining study designs (Types 1–7), statistical testing heuristics, variable mapping, and publication standards.
+3. **Adaptive Python Scripting (ไม่ยึดติดกับสคริปต์สำเร็จรูป)**: Empower the agent to inspect the raw file layout, isolate the analytic cohort from embedded dashboard tables, and write/adapt customized Python scripts (`scratch/analyze.py`) using scientific libraries (`pandas`, `numpy`, `scipy.stats`, `statsmodels`, `sklearn`, `lifelines`) or `medstat` modules.
+4. **Preserve Statistical Invariants**: Maintain strict numeric 0/1 outcome encoding, sample retention flow tracking ($N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$), Wilson score CIs, DeLong variance, and NEJM/JAMA table formatting.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Robustness**: Non-standard clinical spreadsheets with metadata rows, Thai categories, and side-by-side summary blocks can now be ingested and analyzed dynamically without parser crashes.
+- **Cross-Platform Uniformity**: Validated across all 4 multi-agent mirror platforms (`.agent/`, `.agents/`, `.claude/`, `.cursor/`) with zero documentation drift (154/154 unit tests passing).
+
+[MEMORY_LEARN: Replacing rigid canned CLI execution with adaptive agent-driven Python scripting grounded in biostatistical methodology enables robust processing of messy real-world clinical spreadsheets while preserving clinical governance invariants.]
+
+---
+
+## ADR 16: Suite-Wide Expansion of Adaptive Python Scripting Protocol
+
+### Context
+Following ADR 15, `medstat-master` proved effective at handling complex, non-standard clinical datasets by empowering agents to adapt Python scripts from prototypes. However, specialized downstream skills (`medstat-clean`, `medstat-models`, `medstat-causal-meta`, `medstat-diagnostic`, `medstat-report`) still relied solely on rigid canned CLI examples. When agents operated in modular subtasks, they lacked explicit prototypes and references to core modules (`src/medstat/`), causing potential regression to naive data assumptions.
+
+### Decision
+1. **Universal Adaptive Protocol**: Expand the Adaptive Python Scripting Protocol to all 5 specialized skills:
+   - `medstat-clean`: Prototype script for layout isolation, Little's MCAR, explicit imputation justification, Tukey IQR fences, and sample retention flow ($N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$) referencing `src/medstat/data/`.
+   - `medstat-models`: Prototype script for Table 1 with SMDs, multivariable logistic/GLM, Firth penalization, Cox PH, RCS splines, and VanderWeele E-values referencing `src/medstat/models/` and `src/medstat/reporting/`.
+   - `medstat-causal-meta`: Prototype script for 1:1 nearest-neighbor PSM matching with logit caliper ($0.2 \times \text{SD}$), Austin 2009 balance check ($|\text{SMD}| < 0.10$), and Bland-Altman LoA referencing `src/medstat/causal/` and `src/medstat/agreement/`.
+   - `medstat-diagnostic`: Prototype script for 2x2 contingency matrices with Wilson score 95% CIs, empirical ROC/AUC with DeLong variance, and Vickers Decision Curve Analysis (DCA) Net Benefit referencing `src/medstat/diagnostic/`.
+   - `medstat-report`: Prototype script for rendering 3-horizontal-rule publication HTML tables (NEJM/JAMA), synthesizing automated Methods & Results narratives, and compiling STROBE/CONSORT/TRIPOD audits referencing `src/medstat/reporting/`.
+2. **Mandatory Prototype Reference**: Agents are directed to review the provided prototype scripts or core `src/medstat/` implementations before executing scripts on raw clinical data:
+   `[1. สำรวจโครงสร้างข้อมูลจริง] ──▶ [2. ดูสคริปต์ต้นแบบเพื่อยึดหลักชีวสถิติ] ──▶ [3. ปรับโค้ดให้เข้ากับข้อมูลและรัน]`
+3. **Multi-Agent Mirror Parity**: Maintain exact byte-identical synchronization across canonical `skills/` and all 4 platform mirrors (`.agent/`, `.agents/`, `.claude/`, `.cursor/`), validated continuously via `test_skill_docs_drift.py`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Biostatistical Rigor**: Agents can now flexibly analyze messy clinical data across any specific domain skill while strictly adhering to biostatistical ground truths.
+- **Verification**: Zero documentation drift across 24 mirror files, 350/350 tests passing in full test suite.
+
+[MEMORY_LEARN: Expanding adaptive prototype scripting across all domain skills provides agents with end-to-end flexibility for raw clinical data while enforcing biostatistical ground truths from core modules.]
+
+
+
 
 

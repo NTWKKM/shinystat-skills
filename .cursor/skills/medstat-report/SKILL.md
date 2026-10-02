@@ -76,6 +76,101 @@ medstat report --checklist tripod --output tripod_checklist.md
 
 - Each checklist audits required reporting items: participant flow, eligibility criteria, missingness handling, bias mitigation, confounder adjustments, and sensitivity analysis.
 
+---
+
+## Adaptive Python Scripting Protocol (ปรับแต่งสคริปต์รายงานผลมาตรฐานวารสารและการจัดตารางตามข้อมูลจริง)
+
+> **Core Philosophy**: Never execute rigid canned scripts that make naive assumptions about file structure. The agent is empowered with full autonomy to write, adapt, and run Python scripts (`scratch/report.py`) tailored to formatting clinical study findings, survival metrics, adjusted odds ratios, or rater reliability statistics into publication-ready tables (NEJM, JAMA, APA 7) and automated methods narratives.
+>
+> ⚠️ **Mandatory Directive — ต้องดู Script ต้นแบบประกอบเสมอ (Review Prototype Scripts First)**:
+> แม้จะให้อิสระ Agent ในการเขียนและปรับ Python Script เองตามสภาพข้อมูลจริง แต่ **Agent ต้องเปิดดูและอ้างอิงสคริปต์ต้นแบบ (Prototype Scripts)** หรือศึกษาการคำนวณในโมดูลแกนกลาง `src/medstat/reporting/` เสมอ เพื่อยึดมาตรฐานความถูกต้องทางชีวสถิติการแพทย์:
+> - **การจัดรูปแบบตารางมาตรฐานวารสาร (NEJM / JAMA / APA 7)**: ดูโครงสร้าง HTML table 3 เส้นนอน (three horizontal rules: top border, mid header border, bottom table border) และไม่มีเส้นแนวตั้ง (no vertical borders) จาก `src/medstat/reporting/tables.py`
+> - **การสังเคราะห์ Methods & Results Narrative**: ดูการเรียบเรียงวรรคข้อความอัตโนมัติจาก `src/medstat/reporting/narrative.py`
+> - **การตรวจสอบ Reporting Guidelines (STROBE, CONSORT, TRIPOD)**: ดูการสร้าง compliance checklist จาก `src/medstat/reporting/checklists.py`
+>
+> **วงจรการทำงานของ Agent**:
+> `[1. นำผลลัพธ์แบบจำลองทางสถิติมาจัดกลุ่ม] ──▶ [2. ดูสคริปต์ต้นแบบเพื่อยึดหลักวารสาร] ──▶ [3. สร้างตาราง publication และรายงาน]`
+
+### Master Prototype Script for Publication Reporting (สคริปต์ต้นแบบมาตรฐาน)
+
+Agent ควรนำโครงสร้างและฟังก์ชันของสคริปต์ต้นแบบนี้ไปปรับแต่งลงใน workspace (เช่น `scratch/report.py`) เพื่อจัดรูปแบบตารางและเนื้อหารายงาน:
+
+```python
+import pandas as pd
+
+# 1. ORGANIZE MODEL ESTIMATES & CLINICAL METRICS
+model_records = [
+    {"Variable": "Treatment Arm (Drug B vs Drug A)", "Estimate": "1.85", "CI": "(1.24 - 2.76)", "p_value": "0.003"},
+    {"Variable": "Age (per 10-year increase)", "Estimate": "1.12", "CI": "(1.02 - 1.23)", "p_value": "0.018"},
+    {"Variable": "Female Sex", "Estimate": "0.88", "CI": "(0.65 - 1.19)", "p_value": "0.412"},
+    {"Variable": "Baseline SBP >= 140 mmHg", "Estimate": "1.45", "CI": "(1.08 - 1.95)", "p_value": "0.014"},
+]
+
+# 2. RENDER NEJM / JAMA THREE-HORIZONTAL-RULE HTML TABLE
+def render_nejm_html_table(records, title="Table 2. Multivariable Logistic Regression Analysis"):
+    html = f"""
+    <div style="font-family: 'Times New Roman', Times, serif; max-width: 800px; margin: 20px auto;">
+      <h3 style="margin-bottom: 8px; font-weight: bold;">{title}</h3>
+      <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 14px;">
+        <thead>
+          <tr style="border-top: 2px solid #000; border-bottom: 1px solid #000;">
+            <th style="padding: 6px 8px;">Characteristic / Variable</th>
+            <th style="padding: 6px 8px; text-align: right;">Adjusted Odds Ratio</th>
+            <th style="padding: 6px 8px; text-align: right;">95% Confidence Interval</th>
+            <th style="padding: 6px 8px; text-align: right;">P Value</th>
+          </tr>
+        </thead>
+        <tbody>
+    """
+    for r in records:
+        html += f"""
+          <tr>
+            <td style="padding: 6px 8px;">{r['Variable']}</td>
+            <td style="padding: 6px 8px; text-align: right;">{r['Estimate']}</td>
+            <td style="padding: 6px 8px; text-align: right;">{r['CI']}</td>
+            <td style="padding: 6px 8px; text-align: right;">{r['p_value']}</td>
+          </tr>
+        """
+    html += """
+        </tbody>
+        <tfoot>
+          <tr style="border-bottom: 2px solid #000;">
+            <td colspan="4" style="padding: 8px 4px; font-size: 12px; color: #333;">
+              * Odds ratios were adjusted for baseline age, sex, and hypertension status. Confidence intervals are profile likelihood-based.
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    """
+    return html
+
+# 3. GENERATE STATISTICAL METHODS NARRATIVE
+def generate_methods_narrative(study_design="Retrospective Cohort", primary_outcome="30-day Mortality"):
+    text = (
+        f"Statistical Analysis: Continuous baseline variables were reported as Mean ± SD or Median [IQR] "
+        f"and compared using Welch's t-test or Mann-Whitney U test, as appropriate. Categorical variables "
+        f"were expressed as frequencies and percentages and compared using Pearson Chi-Square tests. "
+        f"Multivariable logistic regression was fitted to evaluate independent risk factors for {primary_outcome}. "
+        f"Adjusted odds ratios (aOR) with corresponding 95% confidence intervals were reported. "
+        f"All tests were two-sided, with p < 0.05 considered statistically significant. "
+        f"Analyses adhered to STROBE guidelines for observational cohort studies."
+    )
+    return text
+
+# Export HTML table and narrative
+html_output = render_nejm_html_table(model_records)
+with open("publication_table.html", "w", encoding="utf-8") as f:
+    f.write(html_output)
+
+narrative_text = generate_methods_narrative()
+print("Methods Narrative:\n", narrative_text)
+```
+
+The agent may freely incorporate `medstat` modules (e.g. `from medstat.reporting.tables import render_records_table`, `from medstat.reporting.narrative import synthesize_methods_text`, `from medstat.reporting.checklists import generate_strobe_checklist`) or standard libraries as appropriate.
+
+---
+
 ## Completion Criteria
 
 - [ ] Statistical analysis results ingested and validated from JSON output.

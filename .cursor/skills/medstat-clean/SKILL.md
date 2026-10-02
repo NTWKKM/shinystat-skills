@@ -102,6 +102,72 @@ Verify that the output contains the audited sample retention tracker:
 - $N_{\text{excluded}}$: Rows removed with categorized rationale.
 - $N_{\text{analyzed}}$: Final analytic cohort size matching downstream model inputs.
 
+---
+
+## Adaptive Python Scripting Protocol (ปรับแต่งสคริปต์ทำความสะอาดข้อมูลตามข้อมูลจริง)
+
+> **Core Philosophy**: Never execute rigid canned scripts that make naive assumptions about file structure. The agent is empowered with full autonomy to inspect, write, adapt, and run Python scripts (`scratch/clean.py`) tailored to the specific layout, encodings, and clinical requirements of the raw dataset (e.g. multi-row headers, notes, Thai locale strings, embedded dashboard summary cards, or side-by-side tables).
+>
+> ⚠️ **Mandatory Directive — ต้องดู Script ต้นแบบประกอบเสมอ (Review Prototype Scripts First)**:
+> แม้จะให้อิสระ Agent ในการเขียนและปรับ Python Script เองตามสภาพข้อมูลจริง แต่ **Agent ต้องเปิดดูและอ้างอิงสคริปต์ต้นแบบ (Prototype Scripts)** หรือศึกษาการคำนวณในโมดูลแกนกลาง `src/medstat/clean/` เสมอ เพื่อยึดมาตรฐานความถูกต้องทางชีวสถิติการแพทย์:
+> - **การตรวจสอบการสูญหายและการทดสอบ MCAR**: ดูการวิเคราะห์ missing patterns และ Little's MCAR test จาก `src/medstat/data/missing.py` และ `src/medstat/data/quality.py`
+> - **การจัดการค่าสูญหายและการทำความสะอาด**: ดูการทำ Imputation (MICE, KNN, Complete-case) และการกรองข้อมูลจาก `src/medstat/data/clean.py` และ `src/medstat/data/missing.py`
+> - **การจัดการค่าผิดปกติ (Outliers & Tukey Fences)**: ดูการคำนวณ Tukey IQR fences ($Q_1 - 1.5\text{IQR}, Q_3 + 1.5\text{IQR}$) สำหรับการ winsorize / cap จาก `src/medstat/data/clean.py`
+> - **การติดตามการคัดเข้า-ออกกลุ่มตัวอย่าง**: ดูการบันทึก $N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$ จาก `src/medstat/data/retention.py`
+>
+> **วงจรการทำงานของ Agent**:
+> `[1. สำรวจโครงสร้างข้อมูลดิบ] ──▶ [2. ดูสคริปต์ต้นแบบเพื่อยึดหลักชีวสถิติ] ──▶ [3. ปรับโค้ดและขัดเกลาข้อมูล]`
+
+### Master Prototype Script for Clinical Cleaning (สคริปต์ต้นแบบมาตรฐาน)
+
+Agent ควรนำโครงสร้างของสคริปต์ต้นแบบนี้ไปปรับแต่งลงใน workspace (เช่น `scratch/clean.py`) ให้เข้ากับโครงสร้างไฟล์จริง:
+
+```python
+import numpy as np
+import pandas as pd
+from scipy import stats
+
+# 1. LOAD & INSPECT RAW STRUCTURE
+# ตรวจสอบและปรับ skiprows / header / usecols ให้แยกเฉพาะ cohort ผู้ป่วยจริง
+# ตัดแถวหัวตารางที่เป็นคำอธิบาย หรือคอลัมน์ Dashboard สรุปผลด้านข้างออก
+df_raw = pd.read_excel("dataset.xlsx", skiprows=2)  # ปรับ skiprows ตามจริง
+n_initial = len(df_raw)
+print(f"Loaded raw dataset: N = {n_initial}")
+
+# 2. STANDARDIZE ENDPOINTS & LABELS
+# บังคับใช้ Numeric 0/1 สำหรับ Binary Outcome เสมอ (1 = Event, 0 = Non-event)
+# ตัวอย่าง: df['outcome'] = df['raw_outcome'].map({'Positive': 1, 'Negative': 0})
+df = df_raw.copy()
+
+# 3. MISSINGNESS AUDIT & SAMPLE RETENTION FLOW
+# ตรวจสอบสัดส่วนค่าสูญหาย และตัดแถวที่ไม่มี Primary Outcome พร้อมบันทึกเหตุผล
+df_clean = df.dropna(subset=['outcome']).copy()
+n_analyzed = len(df_clean)
+n_excluded = n_initial - n_analyzed
+print(f"Sample Retention Flow: Initial={n_initial} -> Excluded={n_excluded} -> Analyzed={n_analyzed}")
+
+# 4. OUTLIER HANDLING (Tukey IQR Fences for Explicitly Selected Variables)
+def winsorize_tukey(series, k=1.5):
+    """Winsorize extreme values to Tukey fences [Q1 - k*IQR, Q3 + k*IQR]"""
+    s = series.dropna()
+    q1 = s.quantile(0.25)
+    q3 = s.quantile(0.75)
+    iqr = q3 - q1
+    lower_fence = q1 - k * iqr
+    upper_fence = q3 + k * iqr
+    return series.clip(lower=lower_fence, upper=upper_fence)
+
+# ตัวอย่าง: บังคับใช้เฉพาะคอลัมน์ที่ผ่านการประเมินทางคลินิกแล้ว
+# df_clean['sbp_winsorized'] = winsorize_tukey(df_clean['sbp'], k=1.5)
+
+# บันทึกข้อมูลที่พร้อมสำหรับการวิเคราะห์
+df_clean.to_csv("clean_cohort.csv", index=False)
+```
+
+The agent may freely incorporate `medstat` modules (e.g. `from medstat.clean.missing import audit_missingness`, `from medstat.clean.outliers import winsorize_outliers`) or standard libraries as appropriate.
+
+---
+
 ## Completion Criteria
 
 - [ ] Missingness audit executed and reviewed across all clinical variables.

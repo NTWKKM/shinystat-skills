@@ -76,6 +76,94 @@ See [references/model-spec-schema.md](references/model-spec-schema.md) for full 
 - **Firth Convergence**: Verify profile likelihood confidence intervals converge.
 - **E-Value Sensitivity**: If effect is statistically significant, compute the minimum unmeasured confounding strength required to explain away the observed estimate.
 
+---
+
+## Adaptive Python Scripting Protocol (ปรับแต่งสคริปต์แบบจำลองทางสถิติตามข้อมูลจริง)
+
+> **Core Philosophy**: Never execute rigid canned scripts that make naive assumptions about file structure. The agent is empowered with full autonomy to write, adapt, and run Python scripts (`scratch/model.py`) tailored to the specific columns, encodings, and clinical objectives of the analyzed dataset.
+>
+> ⚠️ **Mandatory Directive — ต้องดู Script ต้นแบบประกอบเสมอ (Review Prototype Scripts First)**:
+> แม้จะให้อิสระ Agent ในการเขียนและปรับ Python Script เองตามสภาพข้อมูลจริง แต่ **Agent ต้องเปิดดูและอ้างอิงสคริปต์ต้นแบบ (Prototype Scripts)** หรือศึกษาการคำนวณในโมดูลแกนกลาง `src/medstat/` เสมอ เพื่อยึดมาตรฐานความถูกต้องทางชีวสถิติการแพทย์:
+> - **Table 1 และสถิติ Bivariate**: ดูการคำนวณ Mean ± SD vs Median [IQR], t-test vs Mann-Whitney U, Chi-Square vs Fisher's exact, และ SMD จาก `src/medstat/reporting/table1.py` และ `src/medstat/stats/bivariate.py`
+> - **Multivariable Logistic & GLM**: ดูการคำนวณ Adjusted Odds Ratio ($\exp(\beta)$) และ 95% CI จาก `src/medstat/models/glm.py`
+> - **Firth Penalized Likelihood**: ดูการแก้ปัญหา separation / sparse events จาก `src/medstat/models/firth.py`
+> - **Cox Proportional Hazards**: ดูการฟิต survival model และการทดสอบ Schoenfeld residuals จาก `src/medstat/models/survival.py`
+> - **Non-linear Splines (RCS)**: ดูการทำ restricted cubic splines จาก `src/medstat/models/splines.py`
+> - **Sensitivity to Unmeasured Confounding**: ดูสูตร VanderWeele E-value จาก `src/medstat/models/sensitivity.py`
+>
+> **วงจรการทำงานของ Agent**:
+> `[1. สำรวจตัวแปรและการแจกแจง] ──▶ [2. ดูสคริปต์ต้นแบบเพื่อยึดหลักชีวสถิติ] ──▶ [3. ปรับโค้ดและรันแบบจำลอง]`
+
+### Master Prototype Script for Statistical Modeling (สคริปต์ต้นแบบมาตรฐาน)
+
+Agent ควรนำโครงสร้างและฟังก์ชันของสคริปต์ต้นแบบนี้ไปปรับแต่งลงใน workspace (เช่น `scratch/model.py`) ให้เข้ากับตัวแปรและคำถามวิจัยของข้อมูลจริง:
+
+```python
+import numpy as np
+import pandas as pd
+from scipy import stats
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+
+# 1. LOAD CLEANED COHORT
+df = pd.read_csv("clean_cohort.csv")
+
+# 2. TABLE 1: BASELINE CHARACTERISTICS WITH SMDs
+def summarize_continuous(series, group):
+    g0 = series[group == 0].dropna()
+    g1 = series[group == 1].dropna()
+    t_stat, p_val = stats.ttest_ind(g1, g0, equal_var=False)
+    pooled_sd = np.sqrt((g1.var() + g0.var()) / 2.0)
+    smd = abs(g1.mean() - g0.mean()) / pooled_sd if pooled_sd > 0 else 0.0
+    return {
+        "Group 0": f"{g0.mean():.1f} ± {g0.std():.1f}",
+        "Group 1": f"{g1.mean():.1f} ± {g1.std():.1f}",
+        "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001",
+        "SMD": f"{smd:.3f}"
+    }
+
+def summarize_categorical(series, group):
+    ct = pd.crosstab(series, group)
+    chi2, p_val, _, _ = stats.chi2_contingency(ct)
+    return {"crosstab": ct, "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001"}
+
+# 3. MULTIVARIABLE MODELING (Logistic Regression / GLM)
+# Formula: outcome ~ exposure + covariates
+formula = "outcome ~ treatment + age + C(sex) + bmi"
+model = smf.logit(formula, data=df).fit(disp=False)
+
+results = []
+for term in model.params.index:
+    if term == "Intercept":
+        continue
+    coef = model.params[term]
+    ci_low, ci_high = model.conf_int().loc[term]
+    p_val = model.pvalues[term]
+    results.append({
+        "Predictor": term,
+        "Adjusted OR": f"{np.exp(coef):.2f}",
+        "95% CI": f"({np.exp(ci_low):.2f} - {np.exp(ci_high):.2f})",
+        "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001"
+    })
+
+res_df = pd.DataFrame(results)
+print(res_df.to_markdown(index=False))
+
+# 4. SENSITIVITY ANALYSIS (VanderWeele E-value)
+def compute_evalue_or(or_val):
+    """Compute VanderWeele E-value for Odds Ratio"""
+    if or_val < 1.0:
+        or_val = 1.0 / or_val
+    return or_val + np.sqrt(or_val * (or_val - 1.0))
+
+primary_or = np.exp(model.params['treatment'])
+print(f"E-value for treatment effect (OR = {primary_or:.2f}): {compute_evalue_or(primary_or):.2f}")
+```
+
+The agent may freely incorporate `medstat` modules (e.g. `from medstat.models.firth import fit_firth_logistic`, `from medstat.models.survival import fit_cox_ph`, `from medstat.models.sensitivity import calculate_e_value`) or standard libraries (`lifelines` for Cox PH/KM) as appropriate.
+
+---
+
 ## Completion Criteria
 
 - [ ] Baseline characteristics tabulated with explicit SMD imbalance checks.
