@@ -6,6 +6,7 @@ from medstat.diagnostic.accuracy import (
     calculate_2x2_metrics,
     calculate_ci_wilson_score,
     calculate_diagnostic_accuracy,
+    validate_gold_standard,
 )
 from medstat.diagnostic.calibration import (
     calculate_brier_score,
@@ -44,4 +45,5 @@ __all__ = [
     "calculate_ici",
     "hosmer_lemeshow_test",
     "create_calibration_plot",
+    "validate_gold_standard",
 ]

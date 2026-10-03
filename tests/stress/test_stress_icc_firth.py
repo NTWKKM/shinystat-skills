@@ -1,5 +1,5 @@
 """
-Adversarial Stress Test Suite — Challenger 1 (Milestone M1)
+tests/stress/test_stress_icc_firth.py: Empirical Stress Harness for ICC Two-way ANOVA & Firth Separation.
 
 Empirically challenges:
 1. Pure-Python / SciPy two-way ANOVA ICC (medstat.agreement.icc) vs Pingouin:

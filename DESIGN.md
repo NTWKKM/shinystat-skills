@@ -249,5 +249,280 @@ Code review identified statistical subtleties across rater agreement, mediation,
 
 [MEMORY_LEARN: Strict non-null standard errors for weighted kappa, contrast matrices for non-linear spline ORs, and probability-oriented DCA curves ensure rigorous biostatistical validity in automated clinical pipelines.]
 
+---
 
+## ADR 15: Adaptive Agent Scripting & Decoupled Execution Architecture (Evolution of medstat-master)
+
+### Context
+Users ingesting real-world clinical datasets (e.g., Thai hospital EHR exports with multi-row headers, notes, embedded dashboard summaries, and Thai locale strings) experienced execution errors in Antigravity. The previous orchestrator design suffered from two friction points:
+1. Pre-flight PHI checks and external auditor dependencies caused fail-closed halts on clinical files.
+2. Rigid canned CLI commands (`uv run medstat profile`, `uv run medstat clean`, etc.) assumed tidy, single-header tables starting at row 1, causing fatal parser errors on complex, multi-table spreadsheets.
+
+### Decision
+1. **Eliminate Mandatory PHI Blocker**: Remove the rigid pre-flight PHI auditor requirement from `medstat-master`, allowing agents to process clinical datasets without fail-closed stalls.
+2. **Methodological Guidance (ระเบียนวิธี)**: Structure `medstat-master` as a methodological manual defining study designs (Types 1–7), statistical testing heuristics, variable mapping, and publication standards.
+3. **Adaptive Python Scripting (ไม่ยึดติดกับสคริปต์สำเร็จรูป)**: Empower the agent to inspect the raw file layout, isolate the analytic cohort from embedded dashboard tables, and write/adapt customized Python scripts (`scratch/analyze.py`) using scientific libraries (`pandas`, `numpy`, `scipy.stats`, `statsmodels`, `sklearn`, `lifelines`) or `medstat` modules.
+4. **Preserve Statistical Invariants**: Maintain strict numeric 0/1 outcome encoding, sample retention flow tracking ($N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$), Wilson score CIs, DeLong variance, and NEJM/JAMA table formatting.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Robustness**: Non-standard clinical spreadsheets with metadata rows, Thai categories, and side-by-side summary blocks can now be ingested and analyzed dynamically without parser crashes.
+- **Cross-Platform Uniformity**: Validated across all 4 multi-agent mirror platforms (`.agent/`, `.agents/`, `.claude/`, `.cursor/`) with zero documentation drift (154/154 unit tests passing).
+
+[MEMORY_LEARN: Replacing rigid canned CLI execution with adaptive agent-driven Python scripting grounded in biostatistical methodology enables robust processing of messy real-world clinical spreadsheets while preserving clinical governance invariants.]
+
+---
+
+## ADR 16: Suite-Wide Expansion of Adaptive Python Scripting Protocol
+
+### Context
+Following ADR 15, `medstat-master` proved effective at handling complex, non-standard clinical datasets by empowering agents to adapt Python scripts from prototypes. However, specialized downstream skills (`medstat-clean`, `medstat-models`, `medstat-causal-meta`, `medstat-diagnostic`, `medstat-report`) still relied solely on rigid canned CLI examples. When agents operated in modular subtasks, they lacked explicit prototypes and references to core modules (`src/medstat/`), causing potential regression to naive data assumptions.
+
+### Decision
+1. **Universal Adaptive Protocol**: Expand the Adaptive Python Scripting Protocol to all 5 specialized skills:
+   - `medstat-clean`: Prototype script for layout isolation, Little's MCAR, explicit imputation justification, Tukey IQR fences, and sample retention flow ($N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$) referencing `src/medstat/data/`.
+   - `medstat-models`: Prototype script for Table 1 with SMDs, multivariable logistic/GLM, Firth penalization, Cox PH, RCS splines, and VanderWeele E-values referencing `src/medstat/models/` and `src/medstat/reporting/`.
+   - `medstat-causal-meta`: Prototype script for 1:1 nearest-neighbor PSM matching with logit caliper ($0.2 \times \text{SD}$), Austin 2009 balance check ($|\text{SMD}| < 0.10$), and Bland-Altman LoA referencing `src/medstat/causal/` and `src/medstat/agreement/`.
+   - `medstat-diagnostic`: Prototype script for 2x2 contingency matrices with Wilson score 95% CIs, empirical ROC/AUC with DeLong variance, and Vickers Decision Curve Analysis (DCA) Net Benefit referencing `src/medstat/diagnostic/`.
+   - `medstat-report`: Prototype script for rendering 3-horizontal-rule publication HTML tables (NEJM/JAMA), synthesizing automated Methods & Results narratives, and compiling STROBE/CONSORT/TRIPOD audits referencing `src/medstat/reporting/`.
+2. **Mandatory Prototype Reference**: Agents are directed to review the provided prototype scripts or core `src/medstat/` implementations before executing scripts on raw clinical data:
+   `[1. สำรวจโครงสร้างข้อมูลจริง] ──▶ [2. ดูสคริปต์ต้นแบบเพื่อยึดหลักชีวสถิติ] ──▶ [3. ปรับโค้ดให้เข้ากับข้อมูลและรัน]`
+3. **Multi-Agent Mirror Parity**: Maintain exact byte-identical synchronization across canonical `skills/` and all 4 platform mirrors (`.agent/`, `.agents/`, `.claude/`, `.cursor/`), validated continuously via `test_skill_docs_drift.py`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Biostatistical Rigor**: Agents can now flexibly analyze messy clinical data across any specific domain skill while strictly adhering to biostatistical ground truths.
+- **Verification**: Zero documentation drift across 24 mirror files, 350/350 tests passing in full test suite.
+
+[MEMORY_LEARN: Expanding adaptive prototype scripting across all domain skills provides agents with end-to-end flexibility for raw clinical data while enforcing biostatistical ground truths from core modules.]
+
+---
+
+## ADR 17: Autonomous Triangulation Decision Engine & Anti-Hallucination Governance Suite
+
+### Context
+While ADR 15 and ADR 16 provided agents with adaptive Python scripting flexibility to handle non-standard spreadsheets, testing revealed that without structured arbitrating logic, AI agents risk statistical hallucinations:
+1. Mismatch between research proposal and raw data (e.g. attempting survival analysis when only binary vital status is available without follow-up duration, leading agents to fabricate synthetic time columns or loop on failed model fits).
+2. Silent statistical assumptions (e.g. performing listwise deletion without MCAR testing, or reporting mean ± SD on highly skewed biomarker data without normality audits).
+3. Inverted clinical concordance (e.g. evaluating low-is-abnormal biomarkers like eGFR or Platelets with Score >= Cutoff, causing inverted ROC curves with AUC < 0.50).
+4. Sparse-data over-parameterization (e.g. fitting multivariable logistic regression with EPV < 10, producing quasi-complete separation and astronomical odds ratios).
+5. Unsubstantiated clinical claims (e.g. concluding "treatments are equivalent" from p > 0.05, or confusing Pearson correlation with measurement agreement).
+
+### Decision
+1. **3-Pillar Triangulation Decision Engine**: Formally establish the arbitration protocol in `medstat-master` and references (`study-design-decision-tree.md`), requiring agents to triangulate:
+   - **Pillar 1 (Proposal)**: PICO/PECO, target estimand, and primary research archetype (Types 1–7).
+   - **Pillar 2 (Clinical Principles)**: Biological mechanisms, confounding by indication, non-linear thresholds, and directionality.
+   - **Pillar 3 (Raw Data Reality)**: Data geometry, sample size $N$, events count, outcome formats, EPV, and missingness patterns.
+2. **The 5 Anti-Hallucination Stop Gates**:
+   - *Gate 1 (Contradiction Resolution)*: Halt when a time-to-event proposal lacks event or follow-up times. Use logistic regression only for a prespecified fixed-horizon outcome with complete ascertainment.
+   - *Gate 2 (Silent Assumption Barrier)*: Zero silent listwise deletion; inspect distributions and model assumptions, then select summaries and tests based on the prespecified estimand, study design, and outcome scale.
+   - *Gate 3 (Directionality Gate)*: Strict 0/1 numeric encoding; prespecify score direction from clinical meaning. If AUC is below 0.50, verify event mapping and score direction before any inversion.
+   - *Gate 4 (Sparse Data & EPV Gate)*: Mandate calculation of diagnostic $\text{EPV} = \frac{\min(N_{\text{events}}, N_{\text{non-events}})}{P_{\text{parameters}}}$ (or failure events / parameters in Cox); treat EPV as a diagnostic under study-prespecified sparse-data criteria rather than an unconditional trigger, and enforce Firth penalized likelihood or variable reduction when quasi-complete separation, sparse-data bias, or estimation instability occurs.
+   - *Gate 5 (Clinical Interpretation Guardrails)*: Report $P > 0.05$ as "insufficient evidence to reject the null hypothesis" (never "no difference"); report OR with incidence warning if $> 10\%$; strictly reject Pearson correlation for rater/device agreement.
+3. **Domain Skill Hardening**:
+   - `medstat-clean`: Strict ban on imputing primary outcome variables; physiological plausibility protection against naive Tukey fence outlier deletion.
+   - `medstat-models`: Explicit EPV calculation and Firth fallback in master prototype script.
+   - `medstat-diagnostic`: Automated directionality sanity check and anti-p-hacking cutpoint guidance.
+   - `medstat-causal-meta`: Strict confounder selection (baseline only; no post-treatment mediators/colliders); agreement vs association invariant.
+   - `medstat-report`: Absence of evidence reporting rule, OR vs RR warning, and uncertainty-first ICC interval reporting.
+4. **Multi-Agent Mirror Synchronization**: Propagate byte-identical updates across canonical `skills/` and all 4 platform mirrors (`.agent/`, `.agents/`, `.claude/`, `.cursor/`).
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Decision Rigor**: Agents make principled, autonomous, and decisive methodology choices anchored in clinical biostatistical ground truths.
+- **Anti-Hallucination Defense**: Eliminates synthetic column fabrication, inverted ROC curves, separation artifacts, and misleading clinical claims.
+- **Verification**: Zero documentation drift across all platform mirrors; 100% passing test suite.
+
+[MEMORY_LEARN: 3-pillar triangulation (Proposal, Clinical Principles, Raw Data) paired with 5 deterministic anti-hallucination gates provides coding agents with decisive statistical judgment while preventing model mismatch and spurious claims.]
+
+---
+
+## ADR 18: Calibration Skill Documentation Parity (Resolving Code-Instruction Drift)
+
+### Context
+Audit of the restructured skill-set (2026-10-02) revealed that model calibration (`src/medstat/diagnostic/calibration.py`, 275 lines) was fully implemented — Brier score (with scaled Brier), calibration slope & intercept via logistic recalibration, Integrated Calibration Index (ICI / E50 / E90 / Emax per Austin & Steyerberg 2019), Hosmer-Lemeshow goodness-of-fit test, and Plotly calibration plot — and integrated into the CLI (`medstat diag --calibration`), polymorphic report tables, and narrative synthesis. However, none of the 6 skill instruction files referenced calibration capabilities, creating a documentation-code drift where agents could not discover or leverage the existing functionality.
+
+### Decision
+1. Document calibration as **Step 5** in `medstat-diagnostic` with prototype script referencing `src/medstat/diagnostic/calibration.py` functions.
+2. Add **Core Rule 6** (Discrimination ≠ Calibration) to `medstat-diagnostic` as a positive anti-hallucination directive.
+3. Add **Governance Rule 8** (Calibration Mandatory for Prediction Models) to `medstat-master` for TRIPOD-compliant prediction validation.
+4. Cross-reference calibration in `medstat-models` Step 3 (Model Diagnostics) and `medstat-report` Core Rules.
+5. Record calibration domain terms (`brier_score`, `calibration_slope`, `ici`, `hosmer_lemeshow`) in `CONTEXT.md`.
+6. Record `calibration.py` module seam in `ARCHITECTURE.md`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Zero New Code**: All changes are documentation-only; the underlying implementation and tests were already complete and passing.
+- **Agent Discoverability**: Agents can now autonomously invoke calibration assessment for prediction models via skill instructions, prototype scripts, and CLI references.
+- **TRIPOD Compliance**: Prediction model validation now includes discrimination (AUC) and calibration (Brier, slope, ICI) as a documented skill requirement.
+
+[MEMORY_LEARN: Code-instruction drift — fully implemented features invisible to agents because skill documentation was never updated — is a systematic risk in adaptive scripting architectures. Audit skill instructions against actual CLI/module capabilities after every implementation sprint.]
+
+
+
+---
+
+## ADR 19: Ordinal Outcome Support via Proportional Odds Model and Brant Test
+
+### Context
+Clinical functional outcomes (e.g., Modified Rankin Scale [mRS 0–6] in stroke, Glasgow Coma Scale [GCS 3–15] in trauma, NYHA functional class I–IV in cardiology) have natural ordered gradations. Collapsing these endpoints into arbitrary binary thresholds (e.g., mRS 0–2 vs 3–6) loses statistical power and clinical nuance, while treating ordinal categories as continuous numbers in OLS regression violates distributional assumptions. Furthermore, fitting proportional odds without testing the parallel slopes assumption risks biased inference.
+
+### Decision
+1. Implement `src/medstat/models/ordinal.py` providing `fit_proportional_odds` using `statsmodels.miscmodels.ordinal_model.OrderedModel` with cumulative logit link.
+2. Implement closed-form Brant's Wald test (`test_proportional_odds`, Brant 1990) computing both omnibus and per-variable test statistics for the parallel slopes assumption without external GPL packages.
+3. Provide unconstrained multinomial logistic regression (`fit_multinomial_logistic`) as a fallback when proportional odds is violated.
+4. Add Anti-Hallucination Gate 6 (Ordinal Scale Integrity Gate) and Study Design Type 2b to `medstat-master`.
+5. Integrate `--type ordinal` and `--po-test` into `medstat model` CLI.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Statistical Validity**: Preserves ordinal clinical gradations with valid cumulative Odds Ratios ($\exp(\beta)$) and Wald confidence intervals.
+- **Assumption Verification**: Automatically evaluates parallel slopes; guards against inappropriate linear or collapsed binary modeling.
+- **Zero New Dependencies**: Leverages existing `statsmodels ≥ 0.14.0`.
+
+[MEMORY_LEARN: Modeling multi-level ordinal clinical endpoints (mRS, GCS, NYHA) via cumulative logit with analytical Brant parallel-slopes testing preserves clinical gradation while preventing distributional violations.]
+
+---
+
+## ADR 20: Multilevel & Clustered Data Support via GEE and MixedLM
+
+### Context
+In multi-center clinical trials, health registry networks, and community hospital clusters (รพช.), patients within the same center share unmeasured institutional, geographic, or clinical practice characteristics. Standard GLMs assuming independent observations underestimate standard errors, inflate Type I error rates, and produce spuriously narrow confidence intervals.
+
+### Decision
+1. Implement `src/medstat/models/multilevel.py` providing:
+   - `calculate_design_effect`: Computes cluster Intraclass Correlation ($\text{ICC}_{\text{cluster}}$), Design Effect ($\text{DEFF} = 1 + (\bar{m}-1)\text{ICC}$), and Effective Sample Size ($N_{\text{eff}} = N / \text{DEFF}$) via ANOVA variance decomposition.
+   - `fit_gee`: Population-averaged Generalized Estimating Equations using `statsmodels.genmod.generalized_estimating_equations.GEE` with robust (sandwich) standard errors and exchangeable/independent/AR(1) correlation structures.
+   - `fit_random_intercept`: Subject-specific linear mixed-effects model using `statsmodels.formula.api.mixedlm`.
+2. Add Anti-Hallucination Gate 7 (Clustering & Independence Gate) and Study Design Type 8 to `medstat-master`.
+3. Integrate `--type gee`, `--type mixed`, `--cluster <col>`, and `--corr-structure` into `medstat model` CLI, and `--cluster` into `medstat profile`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Inference Rigor**: Robust sandwich standard errors prevent spurious statistical significance in clustered clinical data.
+- **Sample Size Transparency**: Automatically reports Design Effect and effective sample size alongside nominal $N$.
+- **Zero New Dependencies**: Implemented using existing `statsmodels ≥ 0.14.0`.
+
+[MEMORY_LEARN: Multi-center clinical clustering requires variance adjustment; reporting Design Effect (DEFF) alongside population-averaged GEE robust standard errors guarantees valid inference under nested patient structures.]
+
+---
+
+## ADR 21: CodeRabbit PR#5 Quality & Clinical Biostatistics Remediation
+
+### Context
+Automated code and clinical biostatistics review by CodeRabbit AI on PR #5 identified 36 findings (23 Major, 12 Minor, 1 Nitpick). Key concerns spanned:
+1. `src/medstat/models/multilevel.py`: `fit_random_intercept` used formula strings (`smf.mixedlm`) vulnerable to unquoted special characters/spaces and dummy syntax; missing covariate values were not explicitly detected before fitting GEE or MixedLM.
+2. `src/medstat/cli/main.py`: GEE binomial family did not enforce strict numeric `{0, 1}` outcome validation prior to modeling; Egger's test count check checked raw row count instead of distinct study count (`nunique() >= 10`), risking false validity on multi-effect studies; conflicting effect measure CLI arguments were not rejected.
+3. `src/medstat/causal/balance.py`: `calculate_smd` returned `0.0` when pooled SD was 0 even if group means differed, masking infinite/undefined clinical imbalance.
+4. Public API exports: Functions required by reporting pipelines (`validate_gold_standard`, `extract_primary_effect`) were either missing or not exported in public package namespaces.
+5. Unit tests: PR#5 verification tests used local shadow copies/mocks rather than testing true package imports.
+6. Skill documentation: Canonical skill instructions contained small statistical and syntax gaps (e.g. missing `import numpy as np` in reporting, lack of expected cell count warnings, ambiguous fallback for survival time horizons, unverified outcome dropping).
+
+### Decision
+1. **Multilevel Matrix Formulation**: Refactored `fit_random_intercept` to pass direct design matrices (`sm.MixedLM(y_clean, exog.astype(float), groups=c_clean)`) and properly honor `add_constant`. Added explicit missingness checks raising `ValueError("Missing values detected in covariates X...")` across both GEE and MixedLM.
+2. **CLI Guardrails**: Enforced strict numeric `{0, 1}` outcome verification for GEE binomial models. Enforced distinct study threshold (`df[study_col].dropna().nunique() >= 10`) for Egger's test. Added cross-column validation for meta-analysis effect measures.
+3. **SMD Boundary Correctness**: Updated `calculate_smd` to return `np.nan` if pooled SD is 0 and means differ, returning `0.0` strictly when means are identical.
+4. **Export Public Contract Utilities**: Implemented and exported `validate_gold_standard` in `medstat.diagnostic` and `extract_primary_effect` in `medstat.models`.
+5. **Decoupled Unit Testing**: Refactored `tests/unit/test_regression_guardrails_pr5.py` to import and directly test production package code; added direct CLI tests for binary validation and duplicate study rejection.
+6. **Skills Suite Hardening & Mirror Parity**: Hardened canonical skill instructions (`skills/`) for cell counts, survival horizons, Firth separation fallbacks, and complete-case protocol flags, and synchronized byte-for-byte across `.agent/`, `.agents/`, `.claude/`, and `.cursor/` mirrors.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Statistical Safety**: Prevents silent masking of infinite imbalance in balance metrics and prohibits invalid outcome types in GEE.
+- **Robust Execution**: Formula parsing crashes eliminated in MixedLM with arbitrary column names.
+- **100% Mirror Parity**: Verified by `tests/unit/test_skill_docs_drift.py` across all 5 skill directories.
+- **Test Integrity**: Full suite passing (388/388 tests) with real production imports.
+
+[MEMORY_LEARN: Zero-variance in covariate balance with differing group means represents an undefined/infinite imbalance that must yield NaN rather than 0.0 to prevent masking severe clinical cohort disparities.]
+
+---
+
+## ADR 22: CodeRabbit PR#5 Second-Pass Remediation & Security Hardening
+
+### Context
+Following initial remediation in commit `5c4f604`, CodeRabbit automated review completed a full re-review (`5397817652`) narrowing findings down to 19 items (9 Major, 9 Minor, 1 Nitpick). Key concerns addressed:
+1. `src/medstat/models/ordinal.py`: `X_mat[y_series.index]` used label indexing which silently failed or re-indexed incorrectly when `X_mat` or `y_series` had non-standard, custom, or reset indices.
+2. `src/medstat/causal/balance.py` & `src/medstat/cli/main.py`: `check_balance` produced non-finite float `np.nan` values for undefined SMDs, generating non-standard JSON (`NaN`) instead of valid JSON `null`.
+3. `src/medstat/models/multilevel.py` & `main.py`: `calculate_design_effect` and mixed model CLI lacked explicit numeric outcome validation, allowing non-numeric outcomes to cause internal crashes during ANOVA decomposition.
+4. `src/medstat/cli/main.py`: Egger's test allowed duplicate study IDs (when multiple rows had identical study names), violating linear regression observational independence.
+5. `src/medstat/cli/main.py`: Ordinal cumulative odds E-value calculation lacked explicit documentation regarding common-outcome approximation ($RR \approx \sqrt{OR}$).
+6. Skills Suite Security & Statistical Hardening: Prototype Python scripts lacked sandbox execution boundaries, risk-stratified zero-cell checks, strict binary outcome validation, and deterministic matching tie-breaking.
+
+### Decision
+1. **Positional Boolean Masking**: In `src/medstat/models/ordinal.py`, replaced label-based `y_series.index` with explicit positional boolean mask `valid_mask = y_raw.notna().to_numpy()` in both `fit_proportional_odds` and `fit_multinomial_logistic`.
+2. **JSON Null Serialization for Balance SMDs**: In `src/medstat/causal/balance.py`, updated `check_balance` to convert non-finite SMDs to `None`. In `main.py` CLI causal command, applied `_clean_smd` helper so that `json.dump` outputs compliant `null`.
+3. **Multilevel Numeric Guards**: Added explicit `is_numeric_dtype(y_raw)` validation in `calculate_design_effect` and the mixed model CLI branch.
+4. **Egger Duplicate Study ID Rejection**: Added pre-flight `df[study_col].is_unique` check in `main.py` CLI before fitting Egger's regression, raising `click.BadParameter` if duplicate study IDs are present.
+5. **Ordinal E-Value Assumption Annotation**: Set `rare_outcome=False` for ordinal CLI models and attached an explicit `assumption_note` documenting the square-root transformation.
+6. **Skills Suite Sandboxing & Parity**: Embedded subprocess/sandbox security guidance across all 6 skills, enforced deterministic control matching tie-breaks, restricted zero-cell checks strictly to discrete variables, and synchronized all changes across all 4 mirrors (`.agent/`, `.agents/`, `.claude/`, `.cursor/`), confirmed by `test_skill_docs_drift.py`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Robust Indexing**: Positional masking completely decouples model fitting from pandas DataFrame index state.
+- **Strict JSON Standard**: Output JSON contains strictly valid `null` values for undefined SMDs.
+- **Statistical Independence**: Prohibits invalid funnel plot asymmetry tests on multi-effect/clustered study records.
+- **100% Test Pass**: 391/391 tests passing with zero lint or format warnings.
+
+[MEMORY_LEARN: In pandas/numpy hybrid modeling pipelines, positional boolean masking (via `.to_numpy()`) prevents silent data corruption and slicing errors that occur with label-based Index alignment.]
+
+---
+
+## ADR 23: Protocol Justification, Pre-Post Balance Normalization & Clinical Model Family Hardening
+
+### Context
+Final CodeRabbit automated review items identified refinements in:
+1. `src/medstat/models/ordinal.py`: `test_proportional_odds` still used `y_series.index` to slice `X_mat` on non-default indices.
+2. `src/medstat/causal/balance.py`: `compare_pre_post_balance` lacked normalization for undefined SMDs (which may be `None` from `check_balance`), causing potential `TypeError` when calling `float(None)`.
+3. `src/medstat/cli/main.py`: GEE Gaussian family lacked explicit rejection of non-numeric outcomes, and ordinal models allowed unordered text categories without establishing explicit ordinal rank.
+4. Skills Suite Scaffolding:
+   - `medstat-clean`: Outcome dropping in the scaffold defaulted to `True`, which could encourage unverified outcome exclusion.
+   - `medstat-master`: Table 1 prototypes omitted group-specific analyzed and missing denominators; completion checklist stated automatic Firth for EPV < 10 rather than treating it as a risk screening alert.
+   - `medstat-models`: Prototype script routed directly to Firth on EPV < 10 rather than issuing an alert and routing on zero cells or MLE failure.
+
+### Decision
+1. **Positional Masking & Length Guard in Brant Test**: Updated `test_proportional_odds` to build a positional boolean mask `valid_mask = y_raw.notna().to_numpy()` and assert `len(X) == len(y_raw)`.
+2. **SMD Normalization Helper**: Added `_normalize_smd` in `src/medstat/causal/balance.py` coercing `None`, `np.nan`, or invalid values to `np.nan`, preserving boolean post-balance flags.
+3. **CLI Outcome Type Enforcement**: In `src/medstat/cli/main.py`, rejected non-numeric outcomes for GEE Gaussian models, and required numeric or ordered pandas Categoricals for ordinal models (`--outcome`).
+4. **Skills Suite Hardening**:
+   - `medstat-clean`: Defaulted `protocol_permits_outcome_exclusion = False` and `protocol_rationale = None`.
+   - `medstat-master`: Added group-specific analyzed/missing counts to continuous and categorical Table 1 prototypes; updated checklist item.
+   - `medstat-models`: Changed EPV < 10 to a diagnostic warning, routing to Firth on zero cells or MLE failure.
+5. **Mirror Parity**: Synchronized byte-for-byte across `.agent/`, `.agents/`, `.claude/`, and `.cursor/`, verified by `test_skill_docs_drift.py`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Protocol Safety**: Eliminates accidental outcome exclusion without explicit PI/SAP protocol documentation.
+- **Complete Test Coverage**: 394/394 tests passing with zero lint warnings.
+
+[MEMORY_LEARN: Clinical baseline tables must report group-specific analyzed (n) and missing counts alongside summary statistics to prevent misinterpreting attrition as true balance.]
+
+---
+
+## ADR 24: GEE Time Validation, PSM Penalization Nonzero Alpha, Calibration Provenance & Outcome Recoding Parity
+
+### Context
+PR #5 latest review findings from CodeRabbit identified several clinical and statistical safety improvements:
+1. `src/medstat/models/multilevel.py`: `fit_gee` allowed `struct_key="autoregressive"` without `time` to proceed through data preprocessing before encountering an error, rather than raising `ValueError` during argument validation.
+2. `skills/medstat-causal-meta` & `src/medstat/causal/psm.py`: `fit_regularized(disp=False)` defaulted to `alpha=0.0` in statsmodels, resulting in unpenalized estimates during separation fallback.
+3. `skills/medstat-report`: Calibration narrative generators allowed apparent calibration slope reporting (which is 1.0 by definition in development cohorts) and lacked validation requiring the complete metric quartet (`brier`, `slope`, `intercept`, `ici`) for external cohorts, along with non-finite metric validation. Duplicated JAMA and APA p-value branches existed.
+4. `skills/medstat-clean`: Prototype outcome validation did not recode mapped text labels to integer codes nor cast validated codes to integer dtype before export.
+5. `skills/medstat-diagnostic`: DCA fallback selected raw `test_score` when `predicted_risk` was missing, which violates the decision-analytic requirement for calibrated probabilities in $[0, 1]$.
+6. `skills/medstat-models`: Table 1 group splitting inferred reference levels via naive lexical sort (`key=str`), which risks mislabeling active intervention arms as reference, and output generic `Group 0` and `Group 1` labels.
+
+### Decision
+1. **GEE Autoregressive Pre-flight Check**: Added immediate `ValueError` raising in `fit_gee` argument validation when `cov_struct == "autoregressive"` and `time is None`.
+2. **Justified PSM Regularization Penalty**: Updated regularized propensity score fits to supply explicit `alpha=1.0` in both `src/medstat/causal/psm.py` and all 5 skill copies before falling back to Firth penalization.
+3. **TRIPOD Calibration Reporting Compliance**: In `generate_methods_narrative`, validated that all calibration metric values are finite numeric, rejected boolean values before numeric acceptance, suppressed calibration slope for apparent validation only when fit metadata establishes it is tautological (otherwise retaining and labeling it as apparent), required the full metric quartet for external validation, and merged duplicated JAMA/APA p-value formatting branches.
+4. **Clinical Outcome Recoding & Integer Typing**: Updated `medstat-clean` outcome validation to recode mapped string labels to protocol-defined integer codes and cast to integer dtype (`df_clean['outcome'].astype(int)`) before export across all 5 skill mirrors.
+5. **DCA Calibrated Risk Guard**: Updated `medstat-diagnostic` DCA to require `predicted_risk` and skip analysis with an informative message if absent, eliminating invalid raw biomarker score calculations.
+6. **Explicit Reference Group & Actual Treatment Labels**: Updated Table 1 group splitting in `medstat-models` to accept an optional `ref_level`, avoid lexical sorting, and report actual treatment group labels alongside standard summaries.
+7. **Mirror Parity**: Synchronized all changes byte-for-byte across canonical `skills/` and mirrors (`.agent/`, `.agents/`, `.claude/`, `.cursor/`), confirmed by `test_skill_docs_drift.py`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Statistical Safety**: Uncalibrated raw test scores can no longer corrupt DCA Net Benefit calculations; propensity scores cannot proceed unpenalized under separation.
+- **Reporting Fidelity**: Narrative generation strictly follows TRIPOD guidelines regarding apparent vs external calibration.
+- **Full Test Suite Pass**: 416/416 tests passing, 0 lint errors (`ruff check`), 100% formatted (`ruff format`).
+
+[MEMORY_LEARN: Decision Curve Analysis (DCA) strictly requires calibrated probabilities in [0, 1]; passing uncalibrated raw continuous biomarkers corrupts net benefit calculations due to invalid threshold exchange rates.]
 

@@ -1,5 +1,5 @@
 """
-tests/unit/test_pr4_coderabbit_fixes.py: Verification of CodeRabbit review fixes in PR#4.
+tests/unit/test_regression_guardrails_pr4.py: Regression guardrails suite for PR#4 contracts.
 
 Tests:
 1. Kappa: non-null SE vs null SE, equal rater count validation in Fleiss, continuous rating rejection, no explicit rater ValueError.

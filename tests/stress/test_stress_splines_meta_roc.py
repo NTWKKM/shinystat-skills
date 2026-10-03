@@ -1,5 +1,5 @@
 """
-tests/stress/test_m1_challenger2_stress.py: Empirical Stress Harness for Milestone M1.
+tests/stress/test_stress_splines_meta_roc.py: Empirical Stress Harness for Splines Collinearity, Meta SE=0, and ROC DeLong.
 
 Author: Challenger 2 (Empirical Reviewer)
 Scope:

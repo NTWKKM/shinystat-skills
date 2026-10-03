@@ -66,7 +66,7 @@ def format_journal_p_value(p: float, style: str = "NEJM") -> str:
             return "P<0.001"
         elif p < 0.01:
             return f"P={p:.3f}"
-        elif p >= 0.99:
+        elif p > 0.99:
             return "P>0.99"
         else:
             return f"P={p:.2f}"
@@ -75,7 +75,7 @@ def format_journal_p_value(p: float, style: str = "NEJM") -> str:
             return "< .001"
         elif p < 0.01:
             return f"{p:.3f}".lstrip("0")
-        elif p >= 0.99:
+        elif p > 0.99:
             return "> .99"
         else:
             return f"{p:.2f}".lstrip("0")
