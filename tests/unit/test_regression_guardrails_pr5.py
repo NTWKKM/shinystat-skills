@@ -876,3 +876,77 @@ class TestCLIInputContractGuards:
         )
         assert "coefficients" in parsed
         assert "cluster_icc" in parsed
+
+    def test_sanitize_for_json_preserves_nested_booleans_and_converts_non_finite_floats(
+        self,
+    ):
+        import json
+
+        import numpy as np
+
+        from medstat.cli.main import _sanitize_for_json
+
+        data = {
+            "is_valid": True,
+            "has_error": False,
+            "np_flag_true": np.bool_(True),
+            "np_flag_false": np.bool_(False),
+            "int_val": 1,
+            "zero_val": 0,
+            "np_int": np.int64(42),
+            "nan_val": float("nan"),
+            "inf_val": float("inf"),
+            "neg_inf_val": float("-inf"),
+            "np_nan": np.nan,
+            "nested_dict": {
+                "flag": True,
+                "score": float("nan"),
+                "sub_list": [False, 0, 1, float("inf"), np.bool_(True)],
+            },
+            "tuple_vals": (True, False, 1, 0, float("nan")),
+        }
+
+        sanitized = _sanitize_for_json(data)
+
+        # Direct type assertions on sanitized structure
+        assert sanitized["is_valid"] is True
+        assert type(sanitized["is_valid"]) is bool
+        assert sanitized["has_error"] is False
+        assert type(sanitized["has_error"]) is bool
+        assert sanitized["np_flag_true"] is True
+        assert type(sanitized["np_flag_true"]) is bool
+        assert sanitized["np_flag_false"] is False
+        assert type(sanitized["np_flag_false"]) is bool
+        assert sanitized["int_val"] == 1
+        assert type(sanitized["int_val"]) is int
+        assert sanitized["zero_val"] == 0
+        assert type(sanitized["zero_val"]) is int
+        assert sanitized["nan_val"] is None
+        assert sanitized["inf_val"] is None
+        assert sanitized["neg_inf_val"] is None
+        assert sanitized["np_nan"] is None
+
+        # Verify strict JSON serialization with allow_nan=False
+        dumped = json.dumps(sanitized, allow_nan=False)
+        assert '"is_valid": true' in dumped
+        assert '"has_error": false' in dumped
+        assert '"np_flag_true": true' in dumped
+        assert '"np_flag_false": false' in dumped
+        assert '"int_val": 1' in dumped
+        assert '"zero_val": 0' in dumped
+        assert '"nan_val": null' in dumped
+        assert '"inf_val": null' in dumped
+        assert '"neg_inf_val": null' in dumped
+        assert '"np_nan": null' in dumped
+        assert '"flag": true' in dumped
+        assert '"score": null' in dumped
+        assert "[false, 0, 1, null, true]" in dumped
+
+        # Parse back and verify round-trip integrity
+        loaded = json.loads(dumped)
+        assert loaded["is_valid"] is True
+        assert loaded["has_error"] is False
+        assert loaded["np_flag_true"] is True
+        assert loaded["int_val"] == 1
+        assert loaded["nan_val"] is None
+        assert loaded["nested_dict"]["sub_list"] == [False, 0, 1, None, True]

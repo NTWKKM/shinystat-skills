@@ -117,12 +117,12 @@ def _serialize_summary_df(sum_df: pd.DataFrame) -> list[dict[str, Any]]:
 
 def _sanitize_for_json(obj: Any) -> Any:
     """Recursively convert non-finite float/NumPy numbers to None for strict JSON serialization."""
+    if isinstance(obj, (bool, np.bool_)):
+        return bool(obj)
     if isinstance(obj, (float, np.floating)):
         return float(obj) if math.isfinite(obj) else None
     if isinstance(obj, (int, np.integer)):
         return int(obj)
-    if isinstance(obj, (bool, np.bool_)):
-        return bool(obj)
     if isinstance(obj, dict):
         return {k: _sanitize_for_json(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
