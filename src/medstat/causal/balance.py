@@ -69,7 +69,7 @@ def calculate_smd(
 
     pooled_sd = np.sqrt((var_t + var_c) / 2.0)
     if pooled_sd == 0:
-        return 0.0 if np.isclose(mean_t, mean_c) else np.nan
+        return 0.0 if mean_t == mean_c else np.nan
 
     return float((mean_t - mean_c) / pooled_sd)
 

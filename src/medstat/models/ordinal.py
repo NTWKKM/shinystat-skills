@@ -20,6 +20,24 @@ from medstat.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _extract_ordered_categories(
+    y_series: pd.Series,
+) -> tuple[pd.Series, list[Any] | np.ndarray]:
+    """
+    Extract observed categories in declared order.
+
+    For pandas Categorical series, preserves the declared category hierarchy
+    (y_series.cat.categories) filtered to observed levels.
+    For other types, sorts unique values.
+    """
+    if isinstance(y_series.dtype, pd.CategoricalDtype):
+        y_cleaned = y_series.cat.remove_unused_categories()
+        observed = set(y_cleaned.dropna().unique())
+        categories = [c for c in y_cleaned.cat.categories if c in observed]
+        return y_cleaned, categories
+    return y_series, np.sort(y_series.unique())
+
+
 def fit_proportional_odds(
     y: pd.Series | np.ndarray,
     X: pd.DataFrame | np.ndarray,
@@ -52,7 +70,7 @@ def fit_proportional_odds(
     y_raw = pd.Series(y)
     valid_mask = y_raw.notna().to_numpy()
     y_series = y_raw[valid_mask]
-    categories = np.sort(y_series.unique())
+    y_series, categories = _extract_ordered_categories(y_series)
     k_categories = len(categories)
 
     if k_categories < 3:
@@ -166,7 +184,7 @@ def test_proportional_odds(
     y_raw = pd.Series(y)
     valid_mask = y_raw.notna().to_numpy()
     y_series = y_raw[valid_mask]
-    categories = np.sort(y_series.unique())
+    y_series, categories = _extract_ordered_categories(y_series)
     K = len(categories)
     J = K - 1
 
@@ -200,7 +218,8 @@ def test_proportional_odds(
 
     for j in range(J):
         # Cutpoint: Y > categories[j]
-        z_j = (y_series.values > categories[j]).astype(int)
+        # In declared category order, Y > categories[j] corresponds to Y in categories[j+1:]
+        z_j = y_series.isin(categories[j + 1 :]).to_numpy(dtype=int)
         # Verify both classes exist at cutpoint
         if z_j.sum() == 0 or z_j.sum() == n:
             raise ValueError(

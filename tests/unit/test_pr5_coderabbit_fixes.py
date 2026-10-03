@@ -564,6 +564,35 @@ class TestReportMethodsNarrativeFixes:
         res_brant = test_proportional_odds(y, X)
         assert "omnibus" in res_brant
 
+    def test_ordinal_declared_category_order_brant_and_fit(self):
+        from medstat.models.ordinal import (
+            fit_proportional_odds,
+            test_proportional_odds,
+        )
+
+        np.random.seed(42)
+        n = 150
+        x = np.random.randn(n)
+        z = 0.8 * x + np.random.logistic(size=n)
+        # Declared order: Low < Medium < High (alphabetical would be High < Low < Medium)
+        cats = pd.Categorical(
+            np.where(z < -0.5, "Low", np.where(z < 0.8, "Medium", "High")),
+            categories=["Low", "Medium", "High"],
+            ordered=True,
+        )
+        y = pd.Series(cats)
+        X = pd.DataFrame({"x": x})
+
+        res_po = fit_proportional_odds(y, X)
+        assert res_po["categories"] == ["Low", "Medium", "High"]
+
+        res_brant = test_proportional_odds(y, X)
+        assert "omnibus" in res_brant
+        cutpoint_keys = list(
+            res_brant["variables"]["x"]["cutpoint_coefficients"].keys()
+        )
+        assert cutpoint_keys == ["cutpoint_Low", "cutpoint_Medium"]
+
     def test_multilevel_calculate_design_effect_string_outcome(self):
         import pytest
 
@@ -580,7 +609,12 @@ class TestReportMethodsNarrativeFixes:
         raw_df = pd.DataFrame(
             {
                 "trt": [1, 1, 0, 0],
-                "cov1": [1.0, 1.0, 1.0, 1.0],  # zero variance
+                "cov1": [
+                    1.0,
+                    1.0,
+                    2.0,
+                    2.0,
+                ],  # different constant means -> non-estimable Post_SMD
                 "cov2": [2.0, 3.0, 1.0, 2.0],
             }
         )
@@ -589,10 +623,8 @@ class TestReportMethodsNarrativeFixes:
         comp_df = compare_pre_post_balance(raw_df, matched_df, "trt", ["cov1", "cov2"])
         assert len(comp_df) == 2
         cov1_row = comp_df[comp_df["Covariate"] == "cov1"].iloc[0]
-        assert not cov1_row["Balanced_Post"] or cov1_row["Balanced_Post"] in (
-            True,
-            False,
-        )
+        assert pd.isna(cov1_row["Post_SMD"])
+        assert not cov1_row["Balanced_Post"]
 
     def test_cli_ordinal_rejects_unordered_text_outcome(self, tmp_path):
         from click.testing import CliRunner
