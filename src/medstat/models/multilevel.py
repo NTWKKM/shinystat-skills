@@ -173,6 +173,21 @@ def fit_gee(
         X_mat = sm.add_constant(X_mat)
         var_names = ["const"] + var_names
 
+    # If time is provided, or for autoregressive structures, sort observations by (cluster_ids, time)
+    # so Autoregressive(grid=True) evaluates lags on sequentially ordered rows within each cluster.
+    if t_clean is not None:
+        order = np.lexsort((t_clean, c_clean))
+        y_clean = y_clean[order]
+        X_mat = X_mat[order]
+        c_clean = c_clean[order]
+        t_clean = t_clean[order]
+    else:
+        # Ensure contiguous clusters if cluster_ids are not already grouped
+        order = np.argsort(c_clean, kind="stable")
+        y_clean = y_clean[order]
+        X_mat = X_mat[order]
+        c_clean = c_clean[order]
+
     # Select correlation structure
     struct_map = {
         "exchangeable": Exchangeable,

@@ -78,6 +78,41 @@ class TestFitGeeArgumentValidation:
         assert res["cov_struct"] == "autoregressive"
         assert np.isfinite(res["summary_df"].loc["x", "coef"])
 
+    def test_autoregressive_shuffled_invariance(self):
+        df_ordered = _clustered_df(n_clusters=25, per_cluster=6)
+        res_ordered = fit_gee(
+            df_ordered["y"],
+            df_ordered[["x"]],
+            df_ordered["cluster"],
+            cov_struct="autoregressive",
+            time=df_ordered["visit"],
+        )
+
+        # Shuffle rows completely
+        df_shuffled = df_ordered.sample(frac=1.0, random_state=123).reset_index(
+            drop=True
+        )
+        res_shuffled = fit_gee(
+            df_shuffled["y"],
+            df_shuffled[["x"]],
+            df_shuffled["cluster"],
+            cov_struct="autoregressive",
+            time=df_shuffled["visit"],
+        )
+
+        np.testing.assert_allclose(
+            res_ordered["summary_df"]["coef"].values,
+            res_shuffled["summary_df"]["coef"].values,
+            rtol=1e-6,
+            atol=1e-6,
+        )
+        np.testing.assert_allclose(
+            res_ordered["summary_df"]["std_error"].values,
+            res_shuffled["summary_df"]["std_error"].values,
+            rtol=1e-6,
+            atol=1e-6,
+        )
+
 
 class TestCliGeeAutoregressiveRequiresTime:
     def _invoke(self, tmp_path, extra):
