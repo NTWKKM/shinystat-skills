@@ -156,7 +156,7 @@ def run_psm_pipeline(df, treatment_col, covariate_cols, caliper_sd=0.20):
             raise RuntimeError("Propensity score MLE did not converge.")
     except Exception:
         try:
-            ps_model = smf.logit(formula, data=df_safe).fit_regularized(disp=False)
+            ps_model = smf.logit(formula, data=df_safe).fit_regularized(alpha=1.0, disp=False)
             if not ps_model.mle_retvals.get("converged", False):
                 raise RuntimeError("Regularized propensity score fit did not converge.")
         except Exception as exc:

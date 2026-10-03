@@ -253,12 +253,14 @@ def calculate_net_benefit(gold, probs, thresholds_range):
         })
     return pd.DataFrame(net_benefits)
 
-# DCA requires predicted probabilities in [0, 1]: prefer 'predicted_risk'; raw biomarker scores must be
-# converted to calibrated risks first (calculate_net_benefit raises if values fall outside [0, 1]).
-dca_prob_col = "predicted_risk" if "predicted_risk" in df.columns else "test_score"
-dca_results = calculate_net_benefit(df["gold_standard"], df[dca_prob_col], np.round(np.arange(0.05, 0.51, 0.05), 2))
-print(f"Decision Curve Analysis ({dca_prob_col}):")
-print(dca_results.to_string(index=False))
+# DCA strictly requires calibrated predicted probabilities in [0, 1] ('predicted_risk').
+# Raw biomarker test scores must not be used directly in DCA; stop or skip if predicted_risk is absent.
+if "predicted_risk" not in df.columns:
+    print("Decision Curve Analysis skipped: 'predicted_risk' column absent. Calibrated risk probabilities in [0, 1] are required.")
+else:
+    dca_results = calculate_net_benefit(df["gold_standard"], df["predicted_risk"], np.round(np.arange(0.05, 0.51, 0.05), 2))
+    print("Decision Curve Analysis (predicted_risk):")
+    print(dca_results.to_string(index=False))
 
 # 5. MODEL CALIBRATION (Brier Score, Calibration Slope, ICI, Hosmer-Lemeshow)
 from medstat.diagnostic.calibration import (

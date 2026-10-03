@@ -157,9 +157,19 @@ if not is_ordered_cat:
                 "Must be strictly binary {0, 1}, an ordered Categorical, or an explicitly declared "
                 "ordinal endpoint (outcome_is_ordinal=True with outcome_ordinal_mapping)."
             )
-        unmapped = outcome_vals - set(outcome_ordinal_mapping)
+        # Support code->label ({0: 'Home'}) or label->code ({'Home': 0}) mapping
+        label_to_code = {v: k for k, v in outcome_ordinal_mapping.items() if isinstance(k, int) and isinstance(v, str)}
+        if not label_to_code:
+            label_to_code = {k: v for k, v in outcome_ordinal_mapping.items() if isinstance(v, int)}
+        valid_keys = set(outcome_ordinal_mapping.keys()) | set(label_to_code.keys())
+        unmapped = outcome_vals - valid_keys
         if unmapped:
             raise ValueError(f"Outcome values {unmapped} are not defined in outcome_ordinal_mapping.")
+        # Recode mapped text labels to protocol-defined integer codes
+        if label_to_code and any(isinstance(v, str) for v in outcome_vals):
+            df['outcome'] = df['outcome'].replace(label_to_code)
+        if not df['outcome'].isnull().any():
+            df['outcome'] = df['outcome'].astype(int)
 
 
 # 3. MISSINGNESS AUDIT & SAMPLE RETENTION FLOW (SCAFFOLD TEMPLATE)
@@ -214,6 +224,8 @@ def winsorize_tukey(series, k=1.5):
 # df_clean['sbp_winsorized'] = winsorize_tukey(df_clean['sbp'], k=1.5)
 
 # บันทึกข้อมูลที่พร้อมสำหรับการวิเคราะห์ และ persist retention flow ควบคู่กัน
+# Standardize validated outcome codes to integer dtype before export
+df_clean['outcome'] = df_clean['outcome'].astype(int)
 df_clean.to_csv("clean_cohort.csv", index=False)
 with open("sample_retention_flow.json", "w") as f:
     f.write(tracker.to_json())

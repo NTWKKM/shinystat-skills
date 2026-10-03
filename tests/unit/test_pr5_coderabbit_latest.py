@@ -66,6 +66,17 @@ class TestFitGeeArgumentValidation:
         with pytest.raises(ValueError, match="cov_struct"):
             fit_gee(df["y"], df[["x"]], df["cluster"], cov_struct="unstructured")
 
+    def test_autoregressive_without_time_raises(self):
+        df = _clustered_df()
+        with pytest.raises(ValueError, match="requires 'time' variable"):
+            fit_gee(
+                df["y"],
+                df[["x"]],
+                df["cluster"],
+                cov_struct="autoregressive",
+                time=None,
+            )
+
     def test_autoregressive_with_time(self):
         df = _clustered_df()
         res = fit_gee(

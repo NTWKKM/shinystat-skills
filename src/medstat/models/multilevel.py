@@ -136,6 +136,10 @@ def fit_gee(
             f"Unsupported GEE cov_struct '{cov_struct}'. "
             "Supported: 'exchangeable', 'independence', 'autoregressive'."
         )
+    if struct_key == "autoregressive" and time is None:
+        raise ValueError(
+            "GEE with autoregressive correlation structure requires 'time' variable for ordering."
+        )
 
     y_series = pd.Series(y)
     c_series = pd.Series(cluster_ids)

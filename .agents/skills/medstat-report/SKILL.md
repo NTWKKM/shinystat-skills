@@ -126,16 +126,7 @@ def format_p_value(p_val_str, style="NEJM"):
         p = float(p_val_str)
         if not np.isfinite(p) or not (0.0 <= p <= 1.0):
             raise ValueError(f"p-value must fall within [0, 1] (got {p}).")
-        if style.upper() == "JAMA":
-            if p < 0.001:
-                return "<.001"
-            elif p < 0.01:
-                return f"{p:.3f}".lstrip("0")
-            elif p > 0.99:
-                return ">.99"
-            else:
-                return f"{p:.2f}".lstrip("0")
-        elif style.upper() in ("APA", "APA7"):  # APA 7: no leading zero (p cannot exceed 1)
+        if style.upper() in ("JAMA", "APA", "APA7"):  # JAMA & APA 7: no leading zero (p cannot exceed 1)
             if p < 0.001:
                 return "<.001"
             elif p < 0.01:
@@ -261,8 +252,24 @@ def generate_methods_narrative(
             raise ValueError("calibration_provenance must be 'apparent', 'external', or None.")
         if not calibration_metrics:
             raise ValueError("calibration_metrics must be provided when calibration_provenance is set.")
+        for k, v in calibration_metrics.items():
+            if not isinstance(v, (int, float, np.number)) or not np.isfinite(v):
+                raise ValueError(f"Calibration metric '{k}' must be a finite numeric value (got {v}).")
+        if calibration_provenance == "apparent":
+            # For apparent estimates, reject or omit calibration slope (apparent slope is 1.0 by construction)
+            filtered_metrics = {k: v for k, v in calibration_metrics.items() if k.lower() != "slope"}
+            if not filtered_metrics:
+                raise ValueError("Apparent validation requires at least one non-slope calibration metric (e.g., Brier score).")
+        else:
+            required_metrics = {"brier", "slope", "intercept", "ici"}
+            missing = required_metrics - {k.lower() for k in calibration_metrics}
+            if missing:
+                raise ValueError(
+                    f"External validation requires calibration metrics {sorted(required_metrics)}; missing: {sorted(missing)}."
+                )
+            filtered_metrics = calibration_metrics
         labels = {"slope": "calibration slope", "intercept": "calibration intercept", "brier": "Brier score", "ici": "ICI"}
-        metric_str = ", ".join(f"{labels.get(k, k)} {v:.3f}" for k, v in calibration_metrics.items())
+        metric_str = ", ".join(f"{labels.get(k.lower(), k)} {v:.3f}" for k, v in filtered_metrics.items())
         if calibration_provenance == "apparent":
             calib_clause = (
                 f"Calibration was assessed in the development sample ({metric_str}); these are apparent (in-sample) "

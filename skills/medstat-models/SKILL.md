@@ -136,17 +136,41 @@ def format_p_value(p_val):
         return "NA"
     return "< 0.001" if p_val < 0.001 else f"{p_val:.3f}"
 
-def split_groups(series, group):
-    """Split by the two observed treatment levels (sorted: reference first, e.g. 0/1 or 'control'/'treated')."""
-    levels = sorted(pd.Series(group).dropna().unique(), key=str)
-    if len(levels) != 2:
-        raise ValueError(f"Table 1 requires exactly 2 observed treatment levels (found: {levels}).")
-    return series[group == levels[0]].dropna(), series[group == levels[1]].dropna()
+def split_groups(series, group, ref_level=None):
+    """
+    Split by two observed treatment levels.
+    Accepts an explicit reference level (ref_level); if None, defaults to 0 if present in {0, 1},
+    or the first observed level (avoiding naive lexical sort). Returns (g_ref, g_comp, ref_label, comp_label).
+    """
+    unique_levels = list(pd.Series(group).dropna().unique())
+    if len(unique_levels) != 2:
+        raise ValueError(f"Table 1 requires exactly 2 observed treatment levels (found: {unique_levels}).")
+    if ref_level is not None:
+        if ref_level not in unique_levels:
+            raise ValueError(f"Specified ref_level '{ref_level}' not in treatment levels: {unique_levels}")
+        ref = ref_level
+        comp = unique_levels[1] if unique_levels[0] == ref else unique_levels[0]
+    elif 0 in unique_levels and 1 in unique_levels:
+        ref, comp = 0, 1
+    else:
+        ref, comp = unique_levels[0], unique_levels[1]
+    return series[group == ref].dropna(), series[group == comp].dropna(), ref, comp
 
-def summarize_continuous(series, group):
-    g0, g1 = split_groups(series, group)
+def summarize_continuous(series, group, ref_level=None):
+    g0, g1, ref_lbl, comp_lbl = split_groups(series, group, ref_level=ref_level)
+    lbl_ref = f"Group ({ref_lbl})"
+    lbl_comp = f"Group ({comp_lbl})"
     if len(g0) < 2 or len(g1) < 2:
-        return {"Group 0": "NA", "Group 1": "NA", "p_value": "NA", "SMD": "Not estimable"}
+        return {
+            lbl_ref: "NA",
+            lbl_comp: "NA",
+            "Group 0": "NA",
+            "Group 1": "NA",
+            "ref_level": ref_lbl,
+            "comp_level": comp_lbl,
+            "p_value": "NA",
+            "SMD": "Not estimable",
+        }
 
     # Assess normality via Shapiro-Wilk when sample size permits (n <= 5000)
     is_normal = True
@@ -172,13 +196,17 @@ def summarize_continuous(series, group):
     else:
         smd = f"{diff / pooled_sd:.3f}"
     return {
+        lbl_ref: g0_summary,
+        lbl_comp: g1_summary,
         "Group 0": g0_summary,
         "Group 1": g1_summary,
+        "ref_level": ref_lbl,
+        "comp_level": comp_lbl,
         "p_value": format_p_value(p_val),
         "SMD": smd
     }
 
-def summarize_categorical(series, group):
+def summarize_categorical(series, group, ref_level=None):
     ct = pd.crosstab(series, group)
     chi2, p_val_asymp, _, expected = stats.chi2_contingency(ct)
     is_sparse = (expected < 5).any()
@@ -194,7 +222,7 @@ def summarize_categorical(series, group):
     else:
         p_val = p_val_asymp
         p_formatted = format_p_value(p_val)
-    g0, g1 = split_groups(series, group)
+    g0, g1, ref_lbl, comp_lbl = split_groups(series, group, ref_level=ref_level)
     dummies = pd.get_dummies(series, drop_first=(series.nunique() == 2))
     smds = {}
     for col in dummies.columns:
@@ -214,15 +242,17 @@ def summarize_categorical(series, group):
         "p_value": p_formatted,
         "SMD": smd_str,
         "category_smds": smds,
+        "ref_level": ref_lbl,
+        "comp_level": comp_lbl,
     }
 
 # Report Table 1 baseline summaries and SMDs before model fitting
 print("--- Table 1: Baseline Characteristics & SMDs ---")
 for num_var in ["age", "bmi"]:
-    res_num = summarize_continuous(df[num_var], df["treatment"])
-    print(f"{num_var}: Control={res_num['Group 0']}, Treated={res_num['Group 1']}, p={res_num['p_value']}, SMD={res_num['SMD']}")
+    res_num = summarize_continuous(df[num_var], df["treatment"], ref_level=0)
+    print(f"{num_var}: {res_num['ref_level']}={res_num['Group 0']}, {res_num['comp_level']}={res_num['Group 1']}, p={res_num['p_value']}, SMD={res_num['SMD']}")
 
-res_cat = summarize_categorical(df["sex"], df["treatment"])
+res_cat = summarize_categorical(df["sex"], df["treatment"], ref_level=0)
 print(f"sex: p={res_cat['p_value']}, SMD={res_cat['SMD']}")
 
 # 3. EPV DIAGNOSTIC & MULTIVARIABLE MODELING (Logistic Regression / GLM)

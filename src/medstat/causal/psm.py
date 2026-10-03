@@ -52,7 +52,7 @@ def calculate_propensity_score(
         ps_clean = model.predict(X)
     except Exception:
         try:
-            model = sm.Logit(y, X).fit_regularized(disp=False)
+            model = sm.Logit(y, X).fit_regularized(alpha=1.0, disp=False)
             ps_clean = model.predict(X)
         except Exception:
             from medstat.models.firth import fit_firth_logistic

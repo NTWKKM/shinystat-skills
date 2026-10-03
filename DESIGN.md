@@ -495,3 +495,34 @@ Final CodeRabbit automated review items identified refinements in:
 - **Complete Test Coverage**: 394/394 tests passing with zero lint warnings.
 
 [MEMORY_LEARN: Clinical baseline tables must report group-specific analyzed (n) and missing counts alongside summary statistics to prevent misinterpreting attrition as true balance.]
+
+---
+
+## ADR 24: GEE Time Validation, PSM Penalization Nonzero Alpha, Calibration Provenance & Outcome Recoding Parity
+
+### Context
+PR #5 latest review findings from CodeRabbit identified several clinical and statistical safety improvements:
+1. `src/medstat/models/multilevel.py`: `fit_gee` allowed `struct_key="autoregressive"` without `time` to proceed through data preprocessing before encountering an error, rather than raising `ValueError` during argument validation.
+2. `skills/medstat-causal-meta` & `src/medstat/causal/psm.py`: `fit_regularized(disp=False)` defaulted to `alpha=0.0` in statsmodels, resulting in unpenalized estimates during separation fallback.
+3. `skills/medstat-report`: Calibration narrative generators allowed apparent calibration slope reporting (which is 1.0 by definition in development cohorts) and lacked validation requiring the complete metric quartet (`brier`, `slope`, `intercept`, `ici`) for external cohorts, along with non-finite metric validation. Duplicated JAMA and APA p-value branches existed.
+4. `skills/medstat-clean`: Prototype outcome validation did not recode mapped text labels to integer codes nor cast validated codes to integer dtype before export.
+5. `skills/medstat-diagnostic`: DCA fallback selected raw `test_score` when `predicted_risk` was missing, which violates the decision-analytic requirement for calibrated probabilities in $[0, 1]$.
+6. `skills/medstat-models`: Table 1 group splitting inferred reference levels via naive lexical sort (`key=str`), which risks mislabeling active intervention arms as reference, and output generic `Group 0` and `Group 1` labels.
+
+### Decision
+1. **GEE Autoregressive Pre-flight Check**: Added immediate `ValueError` raising in `fit_gee` argument validation when `cov_struct == "autoregressive"` and `time is None`.
+2. **Justified PSM Regularization Penalty**: Updated regularized propensity score fits to supply explicit `alpha=1.0` in both `src/medstat/causal/psm.py` and all 5 skill copies before falling back to Firth penalization.
+3. **TRIPOD Calibration Reporting Compliance**: In `generate_methods_narrative`, validated that all calibration metric values are finite numeric, rejected/omitted calibration slope for apparent validation, required the full metric quartet for external validation, and merged duplicated JAMA/APA p-value formatting branches.
+4. **Clinical Outcome Recoding & Integer Typing**: Updated `medstat-clean` outcome validation to recode mapped string labels to protocol-defined integer codes and cast to integer dtype (`df_clean['outcome'].astype(int)`) before export across all 5 skill mirrors.
+5. **DCA Calibrated Risk Guard**: Updated `medstat-diagnostic` DCA to require `predicted_risk` and skip analysis with an informative message if absent, eliminating invalid raw biomarker score calculations.
+6. **Explicit Reference Group & Actual Treatment Labels**: Updated Table 1 group splitting in `medstat-models` to accept an optional `ref_level`, avoid lexical sorting, and report actual treatment group labels alongside standard summaries.
+7. **Mirror Parity**: Synchronized all changes byte-for-byte across canonical `skills/` and mirrors (`.agent/`, `.agents/`, `.claude/`, `.cursor/`), confirmed by `test_skill_docs_drift.py`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Statistical Safety**: Uncalibrated raw test scores can no longer corrupt DCA Net Benefit calculations; propensity scores cannot proceed unpenalized under separation.
+- **Reporting Fidelity**: Narrative generation strictly follows TRIPOD guidelines regarding apparent vs external calibration.
+- **Full Test Suite Pass**: 416/416 tests passing, 0 lint errors (`ruff check`), 100% formatted (`ruff format`).
+
+[MEMORY_LEARN: Decision Curve Analysis (DCA) strictly requires calibrated probabilities in [0, 1]; passing uncalibrated raw continuous biomarkers corrupts net benefit calculations due to invalid threshold exchange rates.]
+
