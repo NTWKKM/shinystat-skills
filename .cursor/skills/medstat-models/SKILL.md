@@ -164,8 +164,8 @@ def summarize_continuous(series, group, ref_level=None):
         return {
             lbl_ref: "NA",
             lbl_comp: "NA",
-            "Group 0": "NA",
-            "Group 1": "NA",
+            "ref_summary": "NA",
+            "comp_summary": "NA",
             "ref_level": ref_lbl,
             "comp_level": comp_lbl,
             "p_value": "NA",
@@ -198,8 +198,8 @@ def summarize_continuous(series, group, ref_level=None):
     return {
         lbl_ref: g0_summary,
         lbl_comp: g1_summary,
-        "Group 0": g0_summary,
-        "Group 1": g1_summary,
+        "ref_summary": g0_summary,
+        "comp_summary": g1_summary,
         "ref_level": ref_lbl,
         "comp_level": comp_lbl,
         "p_value": format_p_value(p_val),
@@ -248,11 +248,14 @@ def summarize_categorical(series, group, ref_level=None):
 
 # Report Table 1 baseline summaries and SMDs before model fitting
 print("--- Table 1: Baseline Characteristics & SMDs ---")
+# Configure observed reference level from treatment variable:
+treatment_levels = list(pd.Series(df["treatment"]).dropna().unique())
+configured_ref = 0 if 0 in treatment_levels else treatment_levels[0]
 for num_var in ["age", "bmi"]:
-    res_num = summarize_continuous(df[num_var], df["treatment"], ref_level=0)
-    print(f"{num_var}: {res_num['ref_level']}={res_num['Group 0']}, {res_num['comp_level']}={res_num['Group 1']}, p={res_num['p_value']}, SMD={res_num['SMD']}")
+    res_num = summarize_continuous(df[num_var], df["treatment"], ref_level=configured_ref)
+    print(f"{num_var}: {res_num['ref_level']}={res_num['ref_summary']}, {res_num['comp_level']}={res_num['comp_summary']}, p={res_num['p_value']}, SMD={res_num['SMD']}")
 
-res_cat = summarize_categorical(df["sex"], df["treatment"], ref_level=0)
+res_cat = summarize_categorical(df["sex"], df["treatment"], ref_level=configured_ref)
 print(f"sex: p={res_cat['p_value']}, SMD={res_cat['SMD']}")
 
 # 3. EPV DIAGNOSTIC & MULTIVARIABLE MODELING (Logistic Regression / GLM)

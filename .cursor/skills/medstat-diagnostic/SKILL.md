@@ -254,9 +254,13 @@ def calculate_net_benefit(gold, probs, thresholds_range):
     return pd.DataFrame(net_benefits)
 
 # DCA strictly requires calibrated predicted probabilities in [0, 1] ('predicted_risk').
-# Raw biomarker test scores must not be used directly in DCA; stop or skip if predicted_risk is absent.
+# Raw biomarker test scores must not be used directly in DCA; stop or skip if predicted_risk is absent
+# or if upstream calibration has not been documented / validated.
+predicted_risk_is_calibrated = False  # Set True ONLY with documented upstream calibration guarantee or validation
 if "predicted_risk" not in df.columns:
     print("Decision Curve Analysis skipped: 'predicted_risk' column absent. Calibrated risk probabilities in [0, 1] are required.")
+elif not predicted_risk_is_calibrated:
+    print("Decision Curve Analysis skipped: 'predicted_risk' lacks documented upstream calibration guarantee or validation.")
 else:
     dca_results = calculate_net_benefit(df["gold_standard"], df["predicted_risk"], np.round(np.arange(0.05, 0.51, 0.05), 2))
     print("Decision Curve Analysis (predicted_risk):")

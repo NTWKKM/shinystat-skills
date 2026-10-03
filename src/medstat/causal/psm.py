@@ -52,7 +52,19 @@ def calculate_propensity_score(
         ps_clean = model.predict(X)
     except Exception:
         try:
-            model = sm.Logit(y, X).fit_regularized(alpha=1.0, disp=False)
+            # Statsmodels fit_regularized minimizes unnormalized negative log-likelihood.
+            # Use documented per-observation penalty strength (per_obs_penalty=1.0), scaling
+            # covariate penalties by len(y) while setting intercept penalty to zero.
+            per_obs_penalty = 1.0
+            alphas = np.full(X.shape[1], per_obs_penalty * len(y), dtype=float)
+            const_indices = [
+                i
+                for i, col in enumerate(X.columns)
+                if col == "const" or (X[col] == 1.0).all()
+            ]
+            for idx in const_indices:
+                alphas[idx] = 0.0
+            model = sm.Logit(y, X).fit_regularized(alpha=alphas, disp=False)
             ps_clean = model.predict(X)
         except Exception:
             from medstat.models.firth import fit_firth_logistic

@@ -227,6 +227,7 @@ def generate_methods_narrative(
     alpha=0.05,
     calibration_provenance=None,  # None (not assessed), "apparent" (in-sample), or "external" (independent cohort)
     calibration_metrics=None,  # e.g. {"slope": 0.94, "intercept": -0.03, "brier": 0.112, "ici": 0.021}
+    fit_metadata=None,  # Optional dict, e.g. {"tautological_slope": True} when slope is 1.0 by construction
 ):
     if confounders is None:
         raise ValueError("confounders list must be explicitly provided from actual analysis metadata (do not use arbitrary defaults)")
@@ -253,13 +254,17 @@ def generate_methods_narrative(
         if not calibration_metrics:
             raise ValueError("calibration_metrics must be provided when calibration_provenance is set.")
         for k, v in calibration_metrics.items():
-            if not isinstance(v, (int, float, np.number)) or not np.isfinite(v):
+            if isinstance(v, (bool, np.bool_)) or not isinstance(v, (int, float, np.number)) or not np.isfinite(v):
                 raise ValueError(f"Calibration metric '{k}' must be a finite numeric value (got {v}).")
         if calibration_provenance == "apparent":
-            # For apparent estimates, reject or omit calibration slope (apparent slope is 1.0 by construction)
-            filtered_metrics = {k: v for k, v in calibration_metrics.items() if k.lower() != "slope"}
-            if not filtered_metrics:
-                raise ValueError("Apparent validation requires at least one non-slope calibration metric (e.g., Brier score).")
+            # Suppress calibration slope only when fit metadata establishes it is tautological (e.g. unpenalized MLE logistic)
+            is_tautological = bool(fit_metadata and fit_metadata.get("tautological_slope", False))
+            if is_tautological:
+                filtered_metrics = {k: v for k, v in calibration_metrics.items() if k.lower() != "slope"}
+                if not filtered_metrics:
+                    raise ValueError("Apparent validation requires at least one non-slope calibration metric (e.g., Brier score).")
+            else:
+                filtered_metrics = calibration_metrics
         else:
             required_metrics = {"brier", "slope", "intercept", "ici"}
             missing = required_metrics - {k.lower() for k in calibration_metrics}
@@ -268,7 +273,12 @@ def generate_methods_narrative(
                     f"External validation requires calibration metrics {sorted(required_metrics)}; missing: {sorted(missing)}."
                 )
             filtered_metrics = calibration_metrics
-        labels = {"slope": "calibration slope", "intercept": "calibration intercept", "brier": "Brier score", "ici": "ICI"}
+        labels = {
+            "slope": "apparent calibration slope" if calibration_provenance == "apparent" else "calibration slope",
+            "intercept": "apparent calibration intercept" if calibration_provenance == "apparent" else "calibration intercept",
+            "brier": "Brier score",
+            "ici": "ICI",
+        }
         metric_str = ", ".join(f"{labels.get(k.lower(), k)} {v:.3f}" for k, v in filtered_metrics.items())
         if calibration_provenance == "apparent":
             calib_clause = (

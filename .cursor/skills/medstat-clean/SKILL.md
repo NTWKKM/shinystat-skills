@@ -128,6 +128,7 @@ Verify that the output contains the audited sample retention tracker:
 Agent ควรนำโครงสร้างของสคริปต์ต้นแบบนี้ไปปรับแต่งลงใน workspace (เช่น `scratch/clean.py`) ให้เข้ากับโครงสร้างไฟล์จริง:
 
 ```python
+import numbers
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -158,9 +159,15 @@ if not is_ordered_cat:
                 "ordinal endpoint (outcome_is_ordinal=True with outcome_ordinal_mapping)."
             )
         # Support code->label ({0: 'Home'}) or label->code ({'Home': 0}) mapping
-        label_to_code = {v: k for k, v in outcome_ordinal_mapping.items() if isinstance(k, int) and isinstance(v, str)}
+        label_to_code = {
+            v: k for k, v in outcome_ordinal_mapping.items()
+            if isinstance(k, numbers.Integral) and not isinstance(k, bool) and isinstance(v, str)
+        }
         if not label_to_code:
-            label_to_code = {k: v for k, v in outcome_ordinal_mapping.items() if isinstance(v, int)}
+            label_to_code = {
+                k: v for k, v in outcome_ordinal_mapping.items()
+                if isinstance(v, numbers.Integral) and not isinstance(v, bool)
+            }
         valid_keys = set(outcome_ordinal_mapping.keys()) | set(label_to_code.keys())
         unmapped = outcome_vals - valid_keys
         if unmapped:
@@ -225,7 +232,22 @@ def winsorize_tukey(series, k=1.5):
 
 # บันทึกข้อมูลที่พร้อมสำหรับการวิเคราะห์ และ persist retention flow ควบคู่กัน
 # Standardize validated outcome codes to integer dtype before export
-df_clean['outcome'] = df_clean['outcome'].astype(int)
+if isinstance(df_clean['outcome'].dtype, pd.CategoricalDtype) and df_clean['outcome'].dtype.ordered:
+    if outcome_ordinal_mapping:
+        mapping = {
+            v: k for k, v in outcome_ordinal_mapping.items()
+            if isinstance(k, numbers.Integral) and not isinstance(k, bool)
+        }
+        if not mapping:
+            mapping = {
+                k: v for k, v in outcome_ordinal_mapping.items()
+                if isinstance(v, numbers.Integral) and not isinstance(v, bool)
+            }
+        df_clean['outcome'] = df_clean['outcome'].map(mapping).astype(int)
+    else:
+        df_clean['outcome'] = df_clean['outcome'].cat.codes.astype(int)
+else:
+    df_clean['outcome'] = df_clean['outcome'].astype(int)
 df_clean.to_csv("clean_cohort.csv", index=False)
 with open("sample_retention_flow.json", "w") as f:
     f.write(tracker.to_json())
