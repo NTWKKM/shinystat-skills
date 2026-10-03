@@ -260,10 +260,13 @@ for col in cat_cols:
 # Helper to resolve treatment OR across numeric and patsy contrast terms:
 from medstat.models import extract_primary_effect
 
-# Route model fit: If EPV < 10 or quasi-complete separation occurs, route to Firth penalized regression
-if epv < 10 or has_zero_cells:
-    reason = f"Low EPV ({epv:.1f} < 10)" if epv < 10 else "Quasi-complete separation / zero cells detected"
-    print(f"Warning: {reason}; routing to Firth penalized logistic regression to prevent separation bias.")
+# EPV diagnostic alert (screening risk; does not automatically force Firth)
+if epv < 10:
+    print(f"Warning: Low Events Per Parameter (EPV = {epv:.1f} < 10); risk of small-sample bias. Standard MLE may be unstable.")
+
+# Route model fit: If quasi-complete separation occurs, route to Firth penalized regression
+if has_zero_cells:
+    print("Warning: Quasi-complete separation / zero cells detected; routing to Firth penalized logistic regression to prevent separation bias.")
     firth_res = fit_firth_logistic(y_mat.iloc[:, 0], X_mat.drop(columns=['Intercept']), fit_intercept=True, ci_method="pl")
     summary = firth_res["summary_df"]
     results = []

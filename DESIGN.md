@@ -464,3 +464,34 @@ Following initial remediation in commit `5c4f604`, CodeRabbit automated review c
 - **100% Test Pass**: 391/391 tests passing with zero lint or format warnings.
 
 [MEMORY_LEARN: In pandas/numpy hybrid modeling pipelines, positional boolean masking (via `.to_numpy()`) prevents silent data corruption and slicing errors that occur with label-based Index alignment.]
+
+---
+
+## ADR 23: Protocol Justification, Pre-Post Balance Normalization & Clinical Model Family Hardening
+
+### Context
+Final CodeRabbit automated review items identified refinements in:
+1. `src/medstat/models/ordinal.py`: `test_proportional_odds` still used `y_series.index` to slice `X_mat` on non-default indices.
+2. `src/medstat/causal/balance.py`: `compare_pre_post_balance` lacked normalization for undefined SMDs (which may be `None` from `check_balance`), causing potential `TypeError` when calling `float(None)`.
+3. `src/medstat/cli/main.py`: GEE Gaussian family lacked explicit rejection of non-numeric outcomes, and ordinal models allowed unordered text categories without establishing explicit ordinal rank.
+4. Skills Suite Scaffolding:
+   - `medstat-clean`: Outcome dropping in the scaffold defaulted to `True`, which could encourage unverified outcome exclusion.
+   - `medstat-master`: Table 1 prototypes omitted group-specific analyzed and missing denominators; completion checklist stated automatic Firth for EPV < 10 rather than treating it as a risk screening alert.
+   - `medstat-models`: Prototype script routed directly to Firth on EPV < 10 rather than issuing an alert and routing on zero cells or MLE failure.
+
+### Decision
+1. **Positional Masking & Length Guard in Brant Test**: Updated `test_proportional_odds` to build a positional boolean mask `valid_mask = y_raw.notna().to_numpy()` and assert `len(X) == len(y_raw)`.
+2. **SMD Normalization Helper**: Added `_normalize_smd` in `src/medstat/causal/balance.py` coercing `None`, `np.nan`, or invalid values to `np.nan`, preserving boolean post-balance flags.
+3. **CLI Outcome Type Enforcement**: In `src/medstat/cli/main.py`, rejected non-numeric outcomes for GEE Gaussian models, and required numeric or ordered pandas Categoricals for ordinal models (`--outcome`).
+4. **Skills Suite Hardening**:
+   - `medstat-clean`: Defaulted `protocol_permits_outcome_exclusion = False` and `protocol_rationale = None`.
+   - `medstat-master`: Added group-specific analyzed/missing counts to continuous and categorical Table 1 prototypes; updated checklist item.
+   - `medstat-models`: Changed EPV < 10 to a diagnostic warning, routing to Firth on zero cells or MLE failure.
+5. **Mirror Parity**: Synchronized byte-for-byte across `.agent/`, `.agents/`, `.claude/`, and `.cursor/`, verified by `test_skill_docs_drift.py`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Protocol Safety**: Eliminates accidental outcome exclusion without explicit PI/SAP protocol documentation.
+- **Complete Test Coverage**: 394/394 tests passing with zero lint warnings.
+
+[MEMORY_LEARN: Clinical baseline tables must report group-specific analyzed (n) and missing counts alongside summary statistics to prevent misinterpreting attrition as true balance.]

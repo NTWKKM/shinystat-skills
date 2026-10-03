@@ -247,8 +247,12 @@ print(f"Sample Flow (Cohort Cleaning): Initial={n_initial} -> Excluded={n_exclud
 # 3. TABLE 1: BASELINE CHARACTERISTICS WITH NORMALITY AUDIT
 def summarize_continuous(series, group):
     """ทดสอบ Normality ก่อนเลือก Mean ± SD (t-test) หรือ Median [IQR] (Mann-Whitney U)"""
-    g0 = series[group == 0].dropna()
-    g1 = series[group == 1].dropna()
+    s0 = series[group == 0]
+    s1 = series[group == 1]
+    g0 = s0.dropna()
+    g1 = s1.dropna()
+    n_analyzed_0, n_missing_0 = len(g0), int(s0.isna().sum())
+    n_analyzed_1, n_missing_1 = len(g1), int(s1.isna().sum())
     
     # Check normality using Shapiro-Wilk (requires 3 <= n <= 5000)
     if len(g0) < 3 or len(g1) < 3:
@@ -273,6 +277,8 @@ def summarize_continuous(series, group):
             "Summary": f"Mean ± SD",
             "Group 0 (Control)": f"{g0.mean():.1f} ± {g0.std():.1f}",
             "Group 1 (Event)": f"{g1.mean():.1f} ± {g1.std():.1f}",
+            "n_analyzed_by_group": {"Group 0": n_analyzed_0, "Group 1": n_analyzed_1},
+            "n_missing_by_group": {"Group 0": n_missing_0, "Group 1": n_missing_1},
             "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001",
             "SMD": smd_str
         }
@@ -282,12 +288,18 @@ def summarize_continuous(series, group):
             "Summary": f"Median [IQR]",
             "Group 0 (Control)": f"{g0.median():.1f} [{g0.quantile(0.25):.1f}, {g0.quantile(0.75):.1f}]",
             "Group 1 (Event)": f"{g1.median():.1f} [{g1.quantile(0.25):.1f}, {g1.quantile(0.75):.1f}]",
+            "n_analyzed_by_group": {"Group 0": n_analyzed_0, "Group 1": n_analyzed_1},
+            "n_missing_by_group": {"Group 0": n_missing_0, "Group 1": n_missing_1},
             "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001",
             "SMD": smd_str
         }
 
 def summarize_categorical(series, group):
     """คำนวณ n (%) และประเมิน expected cell frequencies ก่อนเลือก Chi-Square หรือ Fisher exact"""
+    missing_by_group = {
+        "Group 0": int(series[group == 0].isna().sum()),
+        "Group 1": int(series[group == 1].isna().sum()),
+    }
     ct = pd.crosstab(series, group)
     chi2, p_val, dof, expected = stats.chi2_contingency(ct)
     is_sparse = (expected < 5).mean() > 0.20 or (expected < 1).any()
@@ -299,6 +311,7 @@ def summarize_categorical(series, group):
         print(f"Warning: Sparse contingency table with shape {ct.shape}. Standard 2x2 Fisher exact is inapplicable.")
     return {
         "crosstab": ct,
+        "n_missing_by_group": missing_by_group,
         "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001",
         "is_sparse": is_sparse,
     }
@@ -432,6 +445,6 @@ The agent may freely incorporate `medstat` modules (e.g. `from medstat.reporting
 - [ ] Clustering/multi-center effects addressed with ICC/DEFF reporting and multilevel modeling (GEE/Mixed Models) if applicable.
 - [ ] Sample retention flow ($N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$) tracked and documented.
 - [ ] Baseline characteristics (Table 1) generated with distribution-appropriate tests (t-test vs Mann-Whitney, Chi-Square vs Fisher) and SMDs.
-- [ ] Multivariable model executed conforming to clinical standards (Adjusted OR / HR with 95% CIs and p-values; Firth penalization applied if EPV < 10 or sparse).
+- [ ] Multivariable model executed conforming to clinical standards (Adjusted OR / HR with 95% CIs and p-values; Firth penalization applied for separation, zero cells, estimation instability, or study-prespecified sparse-data criteria).
 - [ ] Calibration assessed (Brier, slope, ICI) for prediction models intended for clinical deployment.
 - [ ] Results compiled into publication-grade table (NEJM/JAMA style) with clinical interpretation.

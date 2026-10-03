@@ -546,6 +546,7 @@ class TestReportMethodsNarrativeFixes:
         from medstat.models.ordinal import (
             fit_multinomial_logistic,
             fit_proportional_odds,
+            test_proportional_odds,
         )
 
         # Create non-standard index [100, 101, 102, ...] with some missing y
@@ -560,6 +561,9 @@ class TestReportMethodsNarrativeFixes:
         res_multi = fit_multinomial_logistic(y, X)
         assert res_multi["params"] is not None
 
+        res_brant = test_proportional_odds(y, X)
+        assert "omnibus" in res_brant
+
     def test_multilevel_calculate_design_effect_string_outcome(self):
         import pytest
 
@@ -569,3 +573,90 @@ class TestReportMethodsNarrativeFixes:
         clusters = pd.Series([1, 1, 2, 2])
         with pytest.raises(ValueError, match="must be numeric"):
             calculate_design_effect(y_str, clusters)
+
+    def test_compare_pre_post_balance_with_none_smd(self):
+        from medstat.causal.balance import compare_pre_post_balance
+
+        raw_df = pd.DataFrame(
+            {
+                "trt": [1, 1, 0, 0],
+                "cov1": [1.0, 1.0, 1.0, 1.0],  # zero variance
+                "cov2": [2.0, 3.0, 1.0, 2.0],
+            }
+        )
+        matched_df = raw_df.copy()
+
+        comp_df = compare_pre_post_balance(raw_df, matched_df, "trt", ["cov1", "cov2"])
+        assert len(comp_df) == 2
+        cov1_row = comp_df[comp_df["Covariate"] == "cov1"].iloc[0]
+        assert not cov1_row["Balanced_Post"] or cov1_row["Balanced_Post"] in (
+            True,
+            False,
+        )
+
+    def test_cli_ordinal_rejects_unordered_text_outcome(self, tmp_path):
+        from click.testing import CliRunner
+
+        from medstat.cli.main import cli
+
+        df = pd.DataFrame(
+            {
+                "stage": ["Mild", "Moderate", "Severe"] * 10,
+                "age": np.random.randn(30),
+            }
+        )
+        csv_file = tmp_path / "ordinal_text.csv"
+        df.to_csv(csv_file, index=False)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "model",
+                "--data",
+                str(csv_file),
+                "--type",
+                "ordinal",
+                "--outcome",
+                "stage",
+                "--covariates",
+                "age",
+            ],
+        )
+        assert result.exit_code != 0
+        assert "must be numeric or an ordered pandas Categorical" in result.output
+
+    def test_cli_gee_rejects_non_numeric_continuous_outcome(self, tmp_path):
+        from click.testing import CliRunner
+
+        from medstat.cli.main import cli
+
+        df = pd.DataFrame(
+            {
+                "outcome": ["Mild", "Moderate", "Severe", "Critical"] * 5,
+                "age": np.random.randn(20),
+                "hosp": [1, 2] * 10,
+            }
+        )
+        csv_file = tmp_path / "gee_text.csv"
+        df.to_csv(csv_file, index=False)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "model",
+                "--data",
+                str(csv_file),
+                "--type",
+                "gee",
+                "--cluster",
+                "hosp",
+                "--outcome",
+                "outcome",
+                "--covariates",
+                "age",
+            ],
+        )
+        assert result.exit_code != 0
+        assert "must be numeric" in result.output

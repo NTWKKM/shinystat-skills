@@ -163,7 +163,9 @@ def test_proportional_odds(
 
     Returns omnibus test statistic and p-value, plus per-variable diagnostics.
     """
-    y_series = pd.Series(y).dropna()
+    y_raw = pd.Series(y)
+    valid_mask = y_raw.notna().to_numpy()
+    y_series = y_raw[valid_mask]
     categories = np.sort(y_series.unique())
     K = len(categories)
     J = K - 1
@@ -175,8 +177,12 @@ def test_proportional_odds(
         X_df = X.loc[y_series.index].copy()
     else:
         X_mat = np.asarray(X)
-        if len(y_series) < len(y):
-            X_mat = X_mat[y_series.index]
+        if len(X_mat) != len(y_raw):
+            raise ValueError(
+                f"Length mismatch: y has {len(y_raw)} rows, X has {len(X_mat)} rows."
+            )
+        if len(y_series) < len(y_raw):
+            X_mat = X_mat[valid_mask]
         X_df = pd.DataFrame(
             X_mat,
             index=y_series.index,

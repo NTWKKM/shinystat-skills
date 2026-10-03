@@ -113,6 +113,16 @@ def check_balance(
     return pd.DataFrame(results)
 
 
+def _normalize_smd(val: Any) -> float:
+    if val is None or pd.isna(val):
+        return np.nan
+    try:
+        f = float(val)
+        return f if np.isfinite(f) else np.nan
+    except (ValueError, TypeError):
+        return np.nan
+
+
 def compare_pre_post_balance(
     raw_df: pd.DataFrame,
     matched_df: pd.DataFrame,
@@ -130,17 +140,23 @@ def compare_pre_post_balance(
         pre_row = pre_bal[pre_bal["Covariate"] == cov]
         post_row = post_bal[post_bal["Covariate"] == cov]
 
-        pre_smd = float(pre_row["SMD"].iloc[0]) if not pre_row.empty else np.nan
-        post_smd = float(post_row["SMD"].iloc[0]) if not post_row.empty else np.nan
+        pre_smd = (
+            _normalize_smd(pre_row["SMD"].iloc[0]) if not pre_row.empty else np.nan
+        )
+        post_smd = (
+            _normalize_smd(post_row["SMD"].iloc[0]) if not post_row.empty else np.nan
+        )
 
         combined.append(
             {
                 "Covariate": cov,
                 "Pre_SMD": pre_smd,
                 "Post_SMD": post_smd,
-                "Pre_Abs_SMD": abs(pre_smd),
-                "Post_Abs_SMD": abs(post_smd),
-                "Balanced_Post": abs(post_smd) < 0.10,
+                "Pre_Abs_SMD": abs(pre_smd) if np.isfinite(pre_smd) else np.nan,
+                "Post_Abs_SMD": abs(post_smd) if np.isfinite(post_smd) else np.nan,
+                "Balanced_Post": bool(abs(post_smd) < 0.10)
+                if np.isfinite(post_smd)
+                else False,
             }
         )
 

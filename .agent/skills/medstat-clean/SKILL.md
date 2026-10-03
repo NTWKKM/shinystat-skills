@@ -158,8 +158,8 @@ tracker = SampleFlowTracker(initial_n=n_initial, initial_name="Initial Enrolled 
 
 # Verify protocol justification before complete-case outcome exclusion:
 # An explicit verified-protocol flag and rationale must be established before dropping rows with missing outcome:
-protocol_permits_outcome_exclusion = True  # Must be set based on explicit study protocol / SAP documentation
-protocol_rationale = "Prespecified complete-case analysis for primary endpoint ascertainment"
+protocol_permits_outcome_exclusion = False  # Default False: requires explicit study protocol / SAP justification
+protocol_rationale = None  # Provide documented rationale before excluding missing outcomes (e.g. 'Prespecified complete-case analysis')
 
 if df['outcome'].isnull().any():
     if not protocol_permits_outcome_exclusion:

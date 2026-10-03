@@ -811,11 +811,23 @@ def model_cmd(
 
     elif mtype in ("ordinal", "proportional_odds"):
         y_raw = df[outcome]
+        is_num = pd.api.types.is_numeric_dtype(y_raw)
+        is_ordered_cat = (
+            isinstance(y_raw.dtype, pd.CategoricalDtype) and y_raw.dtype.ordered
+        )
+        if not (is_num or is_ordered_cat):
+            raise click.BadParameter(
+                f"Ordinal outcome column '{outcome}' must be numeric or an ordered pandas Categorical, "
+                f"got unordered dtype '{y_raw.dtype}'. Please convert to numeric codes or an ordered Categorical "
+                f"to establish explicit clinical category hierarchy.",
+                param_hint="--outcome",
+            )
         u_y = y_raw.dropna().unique()
         if len(u_y) < 3:
-            raise click.ClickException(
+            raise click.BadParameter(
                 f"Ordinal outcome column '{outcome}' must have at least 3 categories, found {len(u_y)}: {sorted(u_y)}. "
-                "For binary outcomes (2 categories), use --type logistic."
+                "For binary outcomes (2 categories), use --type logistic.",
+                param_hint="--outcome",
             )
         fit_res = fit_proportional_odds(y_raw, X_df)
         sum_df = fit_res["summary_df"]
@@ -886,6 +898,11 @@ def model_cmd(
                 )
             fam = "binomial"
         else:
+            if not pd.api.types.is_numeric_dtype(y_raw):
+                raise click.BadParameter(
+                    f"Continuous outcome '{outcome}' for GEE Gaussian family must be numeric, got dtype '{y_raw.dtype}'.",
+                    param_hint="--outcome",
+                )
             fam = "gaussian"
         fit_res = fit_gee(
             y=y_raw,
