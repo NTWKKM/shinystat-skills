@@ -919,6 +919,13 @@ def model_cmd(
                     param_hint="--outcome",
                 )
             fam = "gaussian"
+        if corr_structure == "autoregressive" and not time_col:
+            raise click.BadParameter(
+                "Autoregressive GEE correlation structure requires --time <time_col> "
+                "to define within-cluster ordering.",
+                param_hint="--time",
+            )
+        gee_time = pd.to_numeric(df[time_col], errors="coerce") if time_col else None
         fit_res = fit_gee(
             y=y_raw,
             X=X_df,
@@ -926,6 +933,7 @@ def model_cmd(
             family=fam,
             cov_struct=corr_structure,
             add_constant=True,
+            time=gee_time,
         )
         sum_df = fit_res["summary_df"]
         result_data["coefficients"] = _serialize_summary_df(sum_df)

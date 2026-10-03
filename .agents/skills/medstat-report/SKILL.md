@@ -135,7 +135,16 @@ def format_p_value(p_val_str, style="NEJM"):
                 return ">.99"
             else:
                 return f"{p:.2f}".lstrip("0")
-        else:  # NEJM / APA
+        elif style.upper() in ("APA", "APA7"):  # APA 7: no leading zero (p cannot exceed 1)
+            if p < 0.001:
+                return "<.001"
+            elif p < 0.01:
+                return f"{p:.3f}".lstrip("0")
+            elif p > 0.99:
+                return ">.99"
+            else:
+                return f"{p:.2f}".lstrip("0")
+        else:  # NEJM
             if p < 0.001:
                 return "<0.001"
             elif p < 0.01:
@@ -225,6 +234,8 @@ def generate_methods_narrative(
     tests=None,
     two_sided=True,
     alpha=0.05,
+    calibration_provenance=None,  # None (not assessed), "apparent" (in-sample), or "external" (independent cohort)
+    calibration_metrics=None,  # e.g. {"slope": 0.94, "intercept": -0.03, "brier": 0.112, "ici": 0.021}
 ):
     if confounders is None:
         raise ValueError("confounders list must be explicitly provided from actual analysis metadata (do not use arbitrary defaults)")
@@ -244,12 +255,29 @@ def generate_methods_narrative(
     else:
         adj_clause = "without covariate adjustment (unadjusted model)"
 
+    calib_clause = ""
+    if calibration_provenance is not None:
+        if calibration_provenance not in ("apparent", "external"):
+            raise ValueError("calibration_provenance must be 'apparent', 'external', or None.")
+        if not calibration_metrics:
+            raise ValueError("calibration_metrics must be provided when calibration_provenance is set.")
+        labels = {"slope": "calibration slope", "intercept": "calibration intercept", "brier": "Brier score", "ici": "ICI"}
+        metric_str = ", ".join(f"{labels.get(k, k)} {v:.3f}" for k, v in calibration_metrics.items())
+        if calibration_provenance == "apparent":
+            calib_clause = (
+                f"Calibration was assessed in the development sample ({metric_str}); these are apparent (in-sample) "
+                "estimates that are optimistic and do not constitute external validation. "
+            )
+        else:
+            calib_clause = f"Calibration was assessed in an independent external validation cohort ({metric_str}). "
+
     text = (
         f"Statistical Analysis: Continuous and categorical baseline variables were compared using {tests}. "
         f"Missing data were addressed via {missing_data_strategy}. "
         f"{model_type} was fitted to evaluate associations with {primary_outcome}, "
         f"{adj_clause}. "
         f"Effect estimates were reported with corresponding 95% confidence intervals. "
+        f"{calib_clause}"
         f"{sig_clause}"
         f"Reporting conformed to {guideline} guidelines for {study_design.lower()} studies."
     )

@@ -143,15 +143,23 @@ print(f"Loaded raw dataset: N = {n_initial}")
 # บังคับใช้ Numeric 0/1 สำหรับ Binary Outcome เสมอ (1 = Event, 0 = Non-event)
 # ตัวอย่าง: df['outcome'] = df['raw_outcome'].map({'Positive': 1, 'Negative': 0})
 df = df_raw.copy()
+# Non-binary numeric outcomes are NEVER inferred as ordinal from their values alone.
+# Declare the ordinal type and its category mapping explicitly (from the protocol / data dictionary):
+outcome_is_ordinal = False  # Set True ONLY when the SAP defines the endpoint as ordinal
+outcome_ordinal_mapping = None  # e.g. {0: 'Home', 1: 'Ward', ..., 6: 'Death'} (ordered codes -> labels)
 is_ordered_cat = isinstance(df['outcome'].dtype, pd.CategoricalDtype) and df['outcome'].dtype.ordered
 if not is_ordered_cat:
     outcome_vals = set(df['outcome'].dropna().unique())
-    allowed_vals = {0, 1, 0.0, 1.0} | set(range(7)) | {float(i) for i in range(7)}
-    if not outcome_vals.issubset(allowed_vals):
-        raise ValueError(
-            f"Primary endpoint contains unsupported values {outcome_vals}. "
-            "Must be strictly binary {0, 1}, ordinal integer categories 0–6, or an ordered Categorical."
-        )
+    if not outcome_vals.issubset({0, 1}):
+        if not (outcome_is_ordinal and outcome_ordinal_mapping):
+            raise ValueError(
+                f"Primary endpoint contains non-binary values {outcome_vals}. "
+                "Must be strictly binary {0, 1}, an ordered Categorical, or an explicitly declared "
+                "ordinal endpoint (outcome_is_ordinal=True with outcome_ordinal_mapping)."
+            )
+        unmapped = outcome_vals - set(outcome_ordinal_mapping)
+        if unmapped:
+            raise ValueError(f"Outcome values {unmapped} are not defined in outcome_ordinal_mapping.")
 
 
 # 3. MISSINGNESS AUDIT & SAMPLE RETENTION FLOW (SCAFFOLD TEMPLATE)

@@ -197,7 +197,7 @@ def validate_gold_standard(
     vals = set(s.unique())
     if not vals.issubset({0, 1, 0.0, 1.0}):
         raise ValueError(
-            f"Gold standard values must be strictly binary numeric {{0, 1}} (found: {sorted(list(vals))}). "
+            f"Gold standard values must be strictly binary numeric {{0, 1}} (found: {sorted(vals, key=str)}). "
             "Recode disease/event status to 0 and 1 prior to analysis."
         )
 

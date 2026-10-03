@@ -117,17 +117,40 @@ def fit_gee(
         "exchangeable", "independence", "autoregressive"
     ] = "exchangeable",
     add_constant: bool = True,
+    time: pd.Series | np.ndarray | None = None,
 ) -> dict[str, Any]:
     """
     Fit population-averaged Generalized Estimating Equations (GEE)
     with robust (sandwich) standard errors.
+
+    `time` (within-cluster ordering) is forwarded to GEE, e.g. for autoregressive structures.
     """
+    family_key = str(family).lower()
+    struct_key = str(cov_struct).lower()
+    if family_key not in ("binomial", "gaussian"):
+        raise ValueError(
+            f"Unsupported GEE family '{family}'. Supported: 'binomial', 'gaussian'."
+        )
+    if struct_key not in ("exchangeable", "independence", "autoregressive"):
+        raise ValueError(
+            f"Unsupported GEE cov_struct '{cov_struct}'. "
+            "Supported: 'exchangeable', 'independence', 'autoregressive'."
+        )
+
     y_series = pd.Series(y)
     c_series = pd.Series(cluster_ids)
 
     valid = ~(y_series.isna() | c_series.isna())
     y_clean = y_series[valid].values
     c_clean = c_series[valid].values
+    t_clean = None
+    if time is not None:
+        t_arr = np.asarray(time, dtype=float)[valid.values]
+        if not np.isfinite(t_arr).all():
+            raise ValueError(
+                "Missing or non-finite values detected in GEE time variable."
+            )
+        t_clean = t_arr
 
     if isinstance(X, pd.DataFrame):
         X_df = X.loc[y_series[valid].index].copy()
@@ -152,21 +175,23 @@ def fit_gee(
 
     # Select correlation structure
     struct_map = {
-        "exchangeable": Exchangeable(),
-        "independence": Independence(),
-        "autoregressive": Autoregressive(grid=True),
+        "exchangeable": Exchangeable,
+        "independence": Independence,
+        "autoregressive": lambda: Autoregressive(grid=True),
     }
-    struct = struct_map.get(cov_struct.lower(), Exchangeable())
+    struct = struct_map[struct_key]()
 
     # Select family
-    if family.lower() == "binomial":
+    if family_key == "binomial":
         fam = Binomial()
         is_binary = True
     else:
         fam = Gaussian()
         is_binary = False
 
-    model = GEE(y_clean, X_mat, groups=c_clean, family=fam, cov_struct=struct)
+    model = GEE(
+        y_clean, X_mat, groups=c_clean, time=t_clean, family=fam, cov_struct=struct
+    )
     result = model.fit()
 
     coefs = result.params

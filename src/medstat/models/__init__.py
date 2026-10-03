@@ -48,12 +48,12 @@ def extract_primary_effect(
     """
     effective_scale = (estimate_type or scale).lower()
 
-    matching_terms = [
+    exact_terms = [term for term in estimates_map.keys() if str(term) == primary_var]
+    matching_terms = exact_terms or [
         term
         for term in estimates_map.keys()
         if (
-            str(term) == primary_var
-            or str(term).startswith(f"{primary_var}[")
+            str(term).startswith(f"{primary_var}[")
             or str(term).startswith(f"C({primary_var})[")
             or str(term).startswith(f"{primary_var}_")
         )

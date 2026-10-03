@@ -214,6 +214,9 @@ opt_idx = np.argmax(youden_j)
 opt_cutoff = thresholds[opt_idx]
 print(f"ROC AUC: {roc_auc:.3f} (95% DeLong CI: {auc_ci[0]:.3f} - {auc_ci[1]:.3f}) | Optimal Cutoff (Youden J): {opt_cutoff:.2f}")
 
+# 2x2 accuracy at the Youden-optimal cutoff (replace with a prespecified clinical cutoff when one exists)
+cutoff_results = evaluate_cutoff(gold_vals, scores, opt_cutoff)
+
 # 4. DECISION CURVE ANALYSIS (DCA: Net Benefit with Treat All and Treat None Reference Strategies)
 def calculate_net_benefit(gold, probs, thresholds_range):
     # Filter valid paired inputs
@@ -249,6 +252,13 @@ def calculate_net_benefit(gold, probs, thresholds_range):
             "treat_none": 0.0,
         })
     return pd.DataFrame(net_benefits)
+
+# DCA requires predicted probabilities in [0, 1]: prefer 'predicted_risk'; raw biomarker scores must be
+# converted to calibrated risks first (calculate_net_benefit raises if values fall outside [0, 1]).
+dca_prob_col = "predicted_risk" if "predicted_risk" in df.columns else "test_score"
+dca_results = calculate_net_benefit(df["gold_standard"], df[dca_prob_col], np.round(np.arange(0.05, 0.51, 0.05), 2))
+print(f"Decision Curve Analysis ({dca_prob_col}):")
+print(dca_results.to_string(index=False))
 
 # 5. MODEL CALIBRATION (Brier Score, Calibration Slope, ICI, Hosmer-Lemeshow)
 from medstat.diagnostic.calibration import (

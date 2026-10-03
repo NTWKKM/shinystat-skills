@@ -136,9 +136,15 @@ def format_p_value(p_val):
         return "NA"
     return "< 0.001" if p_val < 0.001 else f"{p_val:.3f}"
 
+def split_groups(series, group):
+    """Split by the two observed treatment levels (sorted: reference first, e.g. 0/1 or 'control'/'treated')."""
+    levels = sorted(pd.Series(group).dropna().unique(), key=str)
+    if len(levels) != 2:
+        raise ValueError(f"Table 1 requires exactly 2 observed treatment levels (found: {levels}).")
+    return series[group == levels[0]].dropna(), series[group == levels[1]].dropna()
+
 def summarize_continuous(series, group):
-    g0 = series[group == 0].dropna()
-    g1 = series[group == 1].dropna()
+    g0, g1 = split_groups(series, group)
     if len(g0) < 2 or len(g1) < 2:
         return {"Group 0": "NA", "Group 1": "NA", "p_value": "NA", "SMD": "Not estimable"}
 
@@ -188,8 +194,7 @@ def summarize_categorical(series, group):
     else:
         p_val = p_val_asymp
         p_formatted = format_p_value(p_val)
-    g0 = series[group == 0].dropna()
-    g1 = series[group == 1].dropna()
+    g0, g1 = split_groups(series, group)
     dummies = pd.get_dummies(series, drop_first=(series.nunique() == 2))
     smds = {}
     for col in dummies.columns:

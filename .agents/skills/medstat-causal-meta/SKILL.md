@@ -139,6 +139,8 @@ import statsmodels.formula.api as smf
 def run_psm_pipeline(df, treatment_col, covariate_cols, caliper_sd=0.20):
     if len(covariate_cols) != len(set(covariate_cols)):
         raise ValueError("Duplicate covariate columns detected.")
+    if treatment_col in covariate_cols:
+        raise ValueError(f"Treatment column '{treatment_col}' must not also be listed as a covariate.")
     # Fit propensity score model with collision-free column identifiers
     prefix = "_psm_tmp_"
     col_map = {treatment_col: f"{prefix}trt"}
@@ -146,7 +148,22 @@ def run_psm_pipeline(df, treatment_col, covariate_cols, caliper_sd=0.20):
         col_map[col] = f"{prefix}cov_{i}"
     df_safe = df.rename(columns=col_map)
     formula = f"{prefix}trt ~ " + " + ".join(col_map[col] for col in covariate_cols)
-    ps_model = smf.logit(formula, data=df_safe).fit(disp=False)
+    # Mirror calculate_propensity_score (src/medstat/causal/psm.py): retry with a penalized fit
+    # on exceptions or non-convergence; never match on unconverged estimates.
+    try:
+        ps_model = smf.logit(formula, data=df_safe).fit(disp=False)
+        if not ps_model.mle_retvals.get("converged", False):
+            raise RuntimeError("Propensity score MLE did not converge.")
+    except Exception:
+        try:
+            ps_model = smf.logit(formula, data=df_safe).fit_regularized(disp=False)
+            if not ps_model.mle_retvals.get("converged", False):
+                raise RuntimeError("Regularized propensity score fit did not converge.")
+        except Exception as exc:
+            raise ValueError(
+                "Propensity score model failed to converge; consider Firth penalization "
+                "(medstat.models.firth.fit_firth_logistic) or covariate reduction before matching."
+            ) from exc
     df = df.copy()
     # Clip propensity scores strictly within [1e-7, 1 - 1e-7] so logit_ps remains finite
     df['ps'] = ps_model.predict(df_safe).clip(1e-7, 1.0 - 1e-7)
