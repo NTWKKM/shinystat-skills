@@ -233,17 +233,32 @@ def winsorize_tukey(series, k=1.5):
 # บันทึกข้อมูลที่พร้อมสำหรับการวิเคราะห์ และ persist retention flow ควบคู่กัน
 # Standardize validated outcome codes to integer dtype before export
 if isinstance(df_clean['outcome'].dtype, pd.CategoricalDtype) and df_clean['outcome'].dtype.ordered:
-    if outcome_ordinal_mapping:
-        mapping = {
-            v: k for k, v in outcome_ordinal_mapping.items()
-            if isinstance(k, numbers.Integral) and not isinstance(k, bool)
-        }
-        if not mapping:
-            mapping = {
-                k: v for k, v in outcome_ordinal_mapping.items()
-                if isinstance(v, numbers.Integral) and not isinstance(v, bool)
+    cats = df_clean['outcome'].cat.categories
+    is_int_coded = all(isinstance(c, numbers.Integral) and not isinstance(c, bool) for c in cats)
+    if is_int_coded:
+        # Categories are already integer codes; preserve after validating against mapping if provided
+        if outcome_ordinal_mapping:
+            expected_codes = {
+                k if isinstance(k, numbers.Integral) and not isinstance(k, bool) else v
+                for k, v in outcome_ordinal_mapping.items()
+                if (isinstance(k, numbers.Integral) and not isinstance(k, bool))
+                or (isinstance(v, numbers.Integral) and not isinstance(v, bool))
             }
-        df_clean['outcome'] = df_clean['outcome'].map(mapping).astype(int)
+            if not set(cats).issubset(expected_codes):
+                raise ValueError(f"Categorical codes {set(cats) - expected_codes} not recognized in outcome_ordinal_mapping.")
+        df_clean['outcome'] = df_clean['outcome'].astype(int)
+    elif outcome_ordinal_mapping:
+        # Categories are text labels; convert via inverse label->code mapping
+        label_to_code = {
+            v: k for k, v in outcome_ordinal_mapping.items()
+            if isinstance(k, numbers.Integral) and not isinstance(k, bool) and isinstance(v, str)
+        }
+        if not label_to_code:
+            label_to_code = {
+                k: v for k, v in outcome_ordinal_mapping.items()
+                if isinstance(v, numbers.Integral) and not isinstance(v, bool) and isinstance(k, str)
+            }
+        df_clean['outcome'] = df_clean['outcome'].map(label_to_code).astype(int)
     else:
         df_clean['outcome'] = df_clean['outcome'].cat.codes.astype(int)
 else:

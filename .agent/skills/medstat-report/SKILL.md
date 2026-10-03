@@ -257,14 +257,11 @@ def generate_methods_narrative(
             if isinstance(v, (bool, np.bool_)) or not isinstance(v, (int, float, np.number)) or not np.isfinite(v):
                 raise ValueError(f"Calibration metric '{k}' must be a finite numeric value (got {v}).")
         if calibration_provenance == "apparent":
-            # Suppress calibration slope only when fit metadata establishes it is tautological (e.g. unpenalized MLE logistic)
-            is_tautological = bool(fit_metadata and fit_metadata.get("tautological_slope", False))
-            if is_tautological:
-                filtered_metrics = {k: v for k, v in calibration_metrics.items() if k.lower() != "slope"}
-                if not filtered_metrics:
-                    raise ValueError("Apparent validation requires at least one non-slope calibration metric (e.g., Brier score).")
-            else:
-                filtered_metrics = calibration_metrics
+            # For apparent estimates, calibration slope is excluded per TRIPOD / core reporting rules
+            # (apparent slope is 1.0 / tautological and uninformative in-sample)
+            filtered_metrics = {k: v for k, v in calibration_metrics.items() if k.lower() != "slope"}
+            if not filtered_metrics:
+                raise ValueError("Apparent validation requires at least one non-slope calibration metric (e.g., Brier score).")
         else:
             required_metrics = {"brier", "slope", "intercept", "ici"}
             missing = required_metrics - {k.lower() for k in calibration_metrics}
@@ -274,8 +271,8 @@ def generate_methods_narrative(
                 )
             filtered_metrics = calibration_metrics
         labels = {
-            "slope": "apparent calibration slope" if calibration_provenance == "apparent" else "calibration slope",
-            "intercept": "apparent calibration intercept" if calibration_provenance == "apparent" else "calibration intercept",
+            "slope": "calibration slope",
+            "intercept": "calibration intercept",
             "brier": "Brier score",
             "ici": "ICI",
         }

@@ -9,6 +9,54 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
+
+
+def validate_calibration_metrics(
+    metrics: dict[str, Any],
+    provenance: str | None = None,
+) -> dict[str, float]:
+    """
+    Validate calibration metrics: reject booleans and non-finite values.
+    For apparent provenance, omit calibration slope (apparent slope is 1.0 / tautological).
+    For external provenance, require full quartet: brier, slope, intercept, ici.
+    """
+    if provenance not in ("apparent", "external", None):
+        raise ValueError(
+            "calibration_provenance must be 'apparent', 'external', or None."
+        )
+    if not metrics:
+        raise ValueError(
+            "calibration_metrics must be provided when calibration_provenance is set."
+        )
+
+    for k, v in metrics.items():
+        if (
+            isinstance(v, (bool, np.bool_))
+            or not isinstance(v, (int, float, np.number))
+            or not np.isfinite(v)
+        ):
+            raise ValueError(
+                f"Calibration metric '{k}' must be a finite numeric value (got {v})."
+            )
+
+    if provenance == "apparent":
+        filtered = {k: float(v) for k, v in metrics.items() if k.lower() != "slope"}
+        if not filtered:
+            raise ValueError(
+                "Apparent validation requires at least one non-slope calibration metric (e.g., Brier score)."
+            )
+        return filtered
+    elif provenance == "external":
+        required = {"brier", "slope", "intercept", "ici"}
+        missing = required - {k.lower() for k in metrics}
+        if missing:
+            raise ValueError(
+                f"External validation requires calibration metrics {sorted(required)}; missing: {sorted(missing)}."
+            )
+        return {k: float(v) for k, v in metrics.items()}
+    return {k: float(v) for k, v in metrics.items()}
+
 
 def generate_methods_narrative(
     model_type: str = "logistic",
