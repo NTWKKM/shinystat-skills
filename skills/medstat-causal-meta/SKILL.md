@@ -15,7 +15,7 @@ Biostatistical engine for observational causal inference, rater reliability anal
 4. **Meta-Analysis Model Selection**: Model choice (fixed-effect vs. DerSimonian-Laird random-effects) must reflect the study design and clinical/methodological variation assumptions; Cochrane advises against selecting models solely by statistical heterogeneity tests ($I^2$).
 5. **Confounder Selection Invariant for PSM**: Include *only* baseline pre-treatment confounders that are causally related to treatment choice and/or outcome. Strictly exclude post-treatment variables, mediators (variables on the causal pathway between treatment and outcome), or colliders, which introduce conditioning bias and artifactual confounding.
 6. **Association vs Agreement Trap**: Never substitute Pearson ($r$) or Spearman ($\rho$) correlation for rater or device agreement. Correlation evaluates linear association, not agreement. Enforce **Bland-Altman 95% Limits of Agreement** (with large-sample CIs) or **Intraclass Correlation (ICC)**.
-7. **Egger's Test Scope & Limitations**: Egger's linear regression test for funnel plot asymmetry requires at least $k \ge 10$ studies with continuous effect measures. The `--egger` command path rejects fewer than 10 studies ($k < 10$) and binary log odds-ratio effect measures (e.g. `log_or`, `or`, `odds_ratio`) where artifactual correlation between log odds ratio and standard error induces false-positive asymmetry.
+7. **Egger's Test Scope & Limitations**: Egger's linear regression test for funnel plot asymmetry requires at least $k \ge 10$ studies with continuous effect measures. The `--egger` command path requires explicit continuous effect measure options (e.g. `--measure continuous` or `--measure md`) and rejects fewer than 10 studies ($k < 10$), standardized mean differences (`smd`), and binary log odds-ratio effect measures (e.g. `log_or`, `or`, `odds_ratio`) where artifactual correlation between effect size and standard error induces false-positive asymmetry.
 
 ## Execution Sequence
 
@@ -85,11 +85,12 @@ Pool effect sizes (log odds ratios, log hazard ratios, or mean differences) acro
 ```bash
 # Model selection: use --model random (e.g. DerSimonian-Laird via --method dl) when pre-specified by analysis plan
 medstat meta --data <clinical_trials.csv> \
-  --effect-col log_hr \
-  --se-col se_log_hr \
+  --effect-col mean_diff \
+  --se-col se_mean_diff \
   --study-col trial_name \
   --model random \
   --method dl \
+  --measure continuous \
   --forest-plot forest_plot.json \
   --egger \
   --output meta_analysis.json
@@ -157,27 +158,29 @@ def run_psm_pipeline(df, treatment_col, covariate_cols, caliper_sd=0.20):
 
     caliper = caliper_sd * df['logit_ps'].std()
     
-    treated = df[df[treatment_col] == 1].copy()
-    control = df[df[treatment_col] == 0].copy()
+    # Assign unique internal row IDs to eliminate ambiguous selection and extraction from duplicate index labels
+    df['_row_id'] = np.arange(len(df))
+    treated = df[df[treatment_col] == 1].copy().set_index('_row_id', drop=False)
+    control = df[df[treatment_col] == 0].copy().set_index('_row_id', drop=False)
     
     matched_pairs = []
-    available_ctrl_idx = set(control.index)
+    available_ctrl_ids = set(control.index)
     
     # 1:1 Nearest-Neighbor Matching within Caliper
     # Deterministic treated-subject order (sort by logit_ps descending to prevent input row order dependency)
     treated_sorted = treated.sort_values('logit_ps', ascending=False)
-    for t_idx, t_row in treated_sorted.iterrows():
-        if not available_ctrl_idx:
+    for t_id, t_row in treated_sorted.iterrows():
+        if not available_ctrl_ids:
             break
-        # Deterministic control order and tie-breaking by index
-        ctrl_subset = control.loc[sorted(available_ctrl_idx)]
+        # Deterministic control order and tie-breaking by unique row id
+        ctrl_subset = control.loc[sorted(available_ctrl_ids)]
         diffs = (ctrl_subset['logit_ps'] - t_row['logit_ps']).abs()
         min_diff = diffs.min()
         if min_diff <= caliper:
             tied_candidates = diffs[diffs == min_diff].index
-            best_match_idx = sorted(tied_candidates)[0]
-            matched_pairs.append((t_idx, best_match_idx))
-            available_ctrl_idx.remove(best_match_idx)
+            best_match_id = sorted(tied_candidates)[0]
+            matched_pairs.append((t_id, best_match_id))
+            available_ctrl_ids.remove(best_match_id)
             
     n_treated_initial = len(treated)
     n_control_initial = len(control)
@@ -187,8 +190,8 @@ def run_psm_pipeline(df, treatment_col, covariate_cols, caliper_sd=0.20):
     print(f"  Control: Initial = {n_control_initial}, Matched = {n_matched}, Unmatched = {n_control_initial - n_matched}")
     
     # Post-Match Balance Check (SMD < 0.10)
-    matched_idx = [t for t, c in matched_pairs] + [c for t, c in matched_pairs]
-    df_matched = df.loc[matched_idx]
+    matched_ids = [t for t, c in matched_pairs] + [c for t, c in matched_pairs]
+    df_matched = df.iloc[matched_ids].copy()
     for cov in covariate_cols:
         # Encode or assess categorical covariates per category before numeric mean/var
         if not pd.api.types.is_numeric_dtype(df_matched[cov]):
@@ -237,6 +240,8 @@ def run_bland_altman(m1_series, m2_series, ci=0.95):
     n = len(diff)
     if n < 2:
         raise ValueError(f"Bland-Altman requires at least 2 non-missing pairs (got {n}).")
+    if not (0.0 < ci < 1.0):
+        raise ValueError(f"Confidence level ci must be strictly between 0 and 1 (got {ci}).")
     mean_bias = float(np.mean(diff))
     sd_diff = float(np.std(diff, ddof=1))
     se_bias = sd_diff / np.sqrt(n)

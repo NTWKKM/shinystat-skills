@@ -258,13 +258,14 @@ def fit_random_intercept(
     model = sm.MixedLM(y_clean, exog.astype(float), groups=c_clean)
     result = model.fit()
 
-    coefs = result.params
-    se = result.bse
-    z_stat = result.tvalues
-    p_values = result.pvalues
-    conf = result.conf_int()
+    # Extract fixed-effect estimates (excluding variance components like 'Group Var')
+    fe_names = list(result.fe_params.index)
+    coefs = result.fe_params
+    se = result.bse.loc[fe_names]
+    z_stat = result.tvalues.loc[fe_names]
+    p_values = result.pvalues.loc[fe_names]
+    conf = result.conf_int().loc[fe_names]
 
-    param_names = list(result.params.index)
     summary_df = pd.DataFrame(
         {
             "coef": coefs.values if hasattr(coefs, "values") else coefs,
@@ -274,7 +275,7 @@ def fit_random_intercept(
             "ci_lower": conf.iloc[:, 0].values if hasattr(conf, "iloc") else conf[:, 0],
             "ci_upper": conf.iloc[:, 1].values if hasattr(conf, "iloc") else conf[:, 1],
         },
-        index=param_names,
+        index=fe_names,
     )
 
     # Calculate cluster ICC from variance components
@@ -287,14 +288,27 @@ def fit_random_intercept(
     total_var = re_var + resid_var
     icc_re = float(re_var / total_var) if total_var > 0 else 0.0
 
+    # Compute AIC and BIC from Maximum Likelihood fit (reml=False); report as unavailable if unable to compute
+    aic: float | None = None
+    bic: float | None = None
+    try:
+        res_ml = model.fit(reml=False)
+        if hasattr(res_ml, "aic") and np.isfinite(res_ml.aic):
+            aic = float(res_ml.aic)
+        if hasattr(res_ml, "bic") and np.isfinite(res_ml.bic):
+            bic = float(res_ml.bic)
+    except Exception:
+        aic = None
+        bic = None
+
     return {
         "model": result,
         "summary_df": summary_df,
         "random_intercept_var": re_var,
         "residual_var": resid_var,
         "cluster_icc": icc_re,
-        "aic": float(result.aic),
-        "bic": float(result.bic),
+        "aic": aic,
+        "bic": bic,
         "nobs": int(result.nobs),
         "n_clusters": len(np.unique(c_clean)),
     }

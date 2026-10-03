@@ -35,20 +35,42 @@ from medstat.models.survival import (
 def extract_primary_effect(
     estimates_map: dict[str, Any],
     primary_var: str = "treatment",
+    scale: str = "ratio",
+    estimate_type: str | None = None,
 ) -> float:
     """
     Extract primary exposure/treatment effect estimate (e.g. OR, HR, coef) from estimates dict,
-    handling exact matches, dummy encodings ('treatment[T.1]'), or Patsy syntax ('C(treatment)[T.1]').
+    handling exact matches, dummy encodings ('treatment[T.1]'), CLI dummies ('treatment_1'),
+    or Patsy syntax ('C(treatment)[T.1]').
+
+    Preserves negative values for coefficient-scale estimates, while requiring positive values
+    for ratio-scale estimates. Detects multiple matching terms and returns np.nan for ambiguous matches.
     """
-    for term, val in estimates_map.items():
+    effective_scale = (estimate_type or scale).lower()
+
+    matching_terms = [
+        term
+        for term in estimates_map.keys()
         if (
-            term == primary_var
-            or term.startswith(f"{primary_var}[")
-            or term.startswith(f"C({primary_var})[")
-        ):
-            if val is not None and np.isfinite(val) and val > 0:
-                return float(val)
-    return np.nan
+            str(term) == primary_var
+            or str(term).startswith(f"{primary_var}[")
+            or str(term).startswith(f"C({primary_var})[")
+            or str(term).startswith(f"{primary_var}_")
+        )
+    ]
+
+    # Ambiguous matches: multiple candidate terms detected
+    if len(matching_terms) != 1:
+        return np.nan
+
+    val = estimates_map[matching_terms[0]]
+    if val is None or not np.isfinite(val):
+        return np.nan
+
+    val_float = float(val)
+    if effective_scale in ("ratio", "or", "hr", "rr"):
+        return val_float if val_float > 0 else np.nan
+    return val_float
 
 
 __all__ = [

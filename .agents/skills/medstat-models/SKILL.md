@@ -245,17 +245,24 @@ n_nonevents = (df_model['outcome'] == 0).sum()
 epv = min(n_events, n_nonevents) / n_params if n_params > 0 else np.nan
 print(f"Events Per Parameter (EPV): {epv:.1f} (effective events={min(n_events, n_nonevents)}, parameters={n_params})")
 
-# Check for quasi-complete separation / zero cells across categorical/discrete predictors
+# Check for quasi-complete separation / zero cells across categorical predictors actually used in design
+import re
+
 has_zero_cells = False
-cat_cols = [c for c in ["treatment", "sex"] if c in df_model.columns] + [
+used_design_vars = {
+    c for c in df_model.columns
+    if re.search(r'\b' + re.escape(c) + r'\b', formula) and c != "outcome"
+}
+cat_cols = [c for c in ["treatment", "sex"] if c in used_design_vars] + [
     c for c in df_model.select_dtypes(include=['category', 'object', 'bool']).columns
-    if c != "outcome" and c not in ["treatment", "sex"]
+    if c in used_design_vars and c not in ["treatment", "sex"]
 ]
 for col in cat_cols:
     ct = pd.crosstab(df_model[col], df_model["outcome"])
     if (ct == 0).any().any():
         has_zero_cells = True
         break
+
 
 # Helper to resolve treatment OR across numeric and patsy contrast terms:
 from medstat.models import extract_primary_effect
@@ -355,6 +362,6 @@ The agent may freely incorporate `medstat` modules (e.g. `from medstat.models.fi
 - [ ] Outcome variable verified and encoded as numeric 0/1 (1 = Event).
 - [ ] Model coefficients, 95% confidence intervals, and p-values generated.
 - [ ] Proportional hazards or separation diagnostics completed.
-- [ ] Ordinal proportional odds assumption verified via Brant test (if applicable).
+- [ ] Ordinal proportional odds assumption assessed via Brant test (if applicable; note that a non-significant result does not prove the assumption).
 - [ ] Clustering design effect (DEFF) evaluated and GEE/mixed models applied for multi-center data (if applicable).
 - [ ] E-value calculated for primary exposure to quantify sensitivity to unmeasured confounding.

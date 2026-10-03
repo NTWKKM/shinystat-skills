@@ -176,20 +176,34 @@ def calculate_diagnostic_accuracy(
 def validate_gold_standard(
     gold: pd.Series | np.ndarray | list[Any],
     require_both_classes: bool = False,
-) -> np.ndarray:
+) -> pd.Series:
     """
     Validate that gold standard values are strictly binary numeric {0, 1}.
+    Explicitly rejects boolean types.
     Optionally enforce that both classes (0 and 1) are present.
+    Returns a pandas Series of non-missing integers retaining the original index.
     """
-    s = pd.Series(gold).dropna()
+    s = gold.dropna() if isinstance(gold, pd.Series) else pd.Series(gold).dropna()
+
+    # Explicitly reject boolean types (which are technically subclasses of int in Python)
+    if pd.api.types.is_bool_dtype(s.dtype) or any(
+        isinstance(v, (bool, np.bool_)) for v in s.values
+    ):
+        raise ValueError(
+            "Gold standard values must be strictly binary numeric {0, 1} (found boolean values). "
+            "Recode disease/event status to numeric 0 and 1 prior to analysis."
+        )
+
     vals = set(s.unique())
     if not vals.issubset({0, 1, 0.0, 1.0}):
         raise ValueError(
             f"Gold standard values must be strictly binary numeric {{0, 1}} (found: {sorted(list(vals))}). "
             "Recode disease/event status to 0 and 1 prior to analysis."
         )
-    if require_both_classes and len(vals) < 2:
+
+    int_classes = {int(v) for v in vals}
+    if require_both_classes and len(int_classes) < 2:
         raise ValueError(
             f"Gold standard must contain both 0 and 1 classes for evaluation (found only: {sorted(list(vals))})."
         )
-    return s.values.astype(int)
+    return s.astype(int)

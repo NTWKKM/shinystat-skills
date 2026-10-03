@@ -115,6 +115,21 @@ def _serialize_summary_df(sum_df: pd.DataFrame) -> list[dict[str, Any]]:
     return df_copy.to_dict(orient="records")
 
 
+def _sanitize_for_json(obj: Any) -> Any:
+    """Recursively convert non-finite float/NumPy numbers to None for strict JSON serialization."""
+    if isinstance(obj, (float, np.floating)):
+        return float(obj) if math.isfinite(obj) else None
+    if isinstance(obj, (int, np.integer)):
+        return int(obj)
+    if isinstance(obj, (bool, np.bool_)):
+        return bool(obj)
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_for_json(v) for v in obj]
+    return obj
+
+
 @click.group()
 @click.version_option(version="0.1.0", prog_name="medstat")
 def cli() -> None:
@@ -1001,8 +1016,9 @@ def model_cmd(
 
     if output:
         Path(output).parent.mkdir(parents=True, exist_ok=True)
+        sanitized_data = _sanitize_for_json(result_data)
         with open(output, "w") as f:
-            json.dump(result_data, f, indent=2, default=str)
+            json.dump(sanitized_data, f, indent=2, default=str, allow_nan=False)
         click.echo(f"Model results saved: {output}")
 
 
@@ -1659,7 +1675,6 @@ def meta_cmd(
         SUPPORTED_CONTINUOUS = (
             "continuous",
             "md",
-            "smd",
             "mean_diff",
             "mean_difference",
             "wmd",
@@ -1677,13 +1692,18 @@ def meta_cmd(
 
         if not measure_type:
             raise click.BadParameter(
-                "Egger's test requires an explicit continuous effect measure. Specify --measure (e.g. --measure continuous, md, smd) or provide a 'measure' column in the dataset. Missing or unverified effect measures are rejected to prevent invalid testing on binary log ratios.",
+                "Egger's test requires an explicit continuous effect measure. Specify --measure (e.g. --measure continuous, md) or provide a 'measure' column in the dataset. Missing or unverified effect measures are rejected to prevent invalid testing on binary log ratios.",
                 param_hint="--egger",
             )
 
         if measure_type in BINARY_RATIO_MEASURES:
             raise click.BadParameter(
                 "Egger's test is invalid for binary log odds ratios due to artifactual correlation between log OR and standard error. Use continuous effect sizes or alternative tests.",
+                param_hint="--egger",
+            )
+        if measure_type == "smd":
+            raise click.BadParameter(
+                "Egger's test is invalid for standardized mean differences (SMD) due to artifactual correlation between effect size and standard error. Consider using sample-size-based precision or an alternative small-study effect test.",
                 param_hint="--egger",
             )
         if measure_type not in SUPPORTED_CONTINUOUS:

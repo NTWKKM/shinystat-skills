@@ -254,12 +254,12 @@ def summarize_continuous(series, group):
     n_analyzed_0, n_missing_0 = len(g0), int(s0.isna().sum())
     n_analyzed_1, n_missing_1 = len(g1), int(s1.isna().sum())
     
-    # Check normality using Shapiro-Wilk (requires 3 <= n <= 5000)
+    # Check normality using Shapiro-Wilk (3 <= n <= 5000) or D'Agostino-Pearson normaltest (n > 5000)
     if len(g0) < 3 or len(g1) < 3:
         is_normal = False
     else:
-        stat0, p0 = stats.shapiro(g0) if len(g0) <= 5000 else (0, 0.05)
-        stat1, p1 = stats.shapiro(g1) if len(g1) <= 5000 else (0, 0.05)
+        p0 = stats.shapiro(g0).pvalue if len(g0) <= 5000 else stats.normaltest(g0).pvalue
+        p1 = stats.shapiro(g1).pvalue if len(g1) <= 5000 else stats.normaltest(g1).pvalue
         is_normal = (p0 > 0.05) and (p1 > 0.05)
     
     if len(g0) < 2 or len(g1) < 2:
@@ -307,12 +307,14 @@ def summarize_categorical(series, group):
         _, p_val = stats.fisher_exact(ct)
     elif is_sparse:
         # Tables > 2x2 with sparse cells cannot use standard 2x2 Fisher's exact test.
-        # Report warning; use Freeman-Halton extension or Chi-Square with simulation if available.
+        # Report warning; mark p-value unavailable rather than returning asymptotic chi2 p-value.
         print(f"Warning: Sparse contingency table with shape {ct.shape}. Standard 2x2 Fisher exact is inapplicable.")
+        p_val = None
+    p_str = "Unavailable (sparse > 2x2)" if p_val is None else (f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001")
     return {
         "crosstab": ct,
         "n_missing_by_group": missing_by_group,
-        "p_value": f"{p_val:.3f}" if p_val >= 0.001 else "< 0.001",
+        "p_value": p_str,
         "is_sparse": is_sparse,
     }
 
@@ -376,9 +378,12 @@ if has_zero_cells:
 else:
     try:
         model = smf.logit(formula, data=df_model).fit(disp=False)
-        # Check for extreme coefficients indicating unhandled separation
+        # Check convergence and extreme coefficients indicating unhandled separation
+        if not getattr(model, "mle_retvals", {}).get("converged", True):
+            raise sm.tools.sm_exceptions.ConvergenceError("MLE failed to converge; routing to Firth penalized regression.")
         if (np.abs(model.params.drop("Intercept", errors="ignore")) > 15).any() or (np.abs(model.bse.drop("Intercept", errors="ignore")) > 50).any():
             raise sm.tools.sm_exceptions.PerfectSeparationError("Extreme coefficients/SEs indicate separation.")
+
         results = []
         for term in model.params.index:
             if term == "Intercept":

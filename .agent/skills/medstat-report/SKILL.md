@@ -124,8 +124,8 @@ def format_p_value(p_val_str, style="NEJM"):
         return "—"
     try:
         p = float(p_val_str)
-        if not np.isfinite(p):
-            return "—"
+        if not np.isfinite(p) or not (0.0 <= p <= 1.0):
+            raise ValueError(f"p-value must fall within [0, 1] (got {p}).")
         if style.upper() == "JAMA":
             if p < 0.001:
                 return "<.001"
@@ -144,8 +144,11 @@ def format_p_value(p_val_str, style="NEJM"):
                 return ">0.99"
             else:
                 return f"{p:.2f}"
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as e:
+        if "must fall within" in str(e):
+            raise
         return "—"
+
 
 def render_publication_html_table(records, style="NEJM", title="Table 2. Multivariable Logistic Regression Analysis", adjustment_vars=None, ci_method="profile likelihood", measure_name="Odds Ratio"):
     style_upper = style.upper()
@@ -236,16 +239,22 @@ def generate_methods_narrative(
     elif alpha is not None:
         sig_clause = f"Statistical tests used a significance threshold of p < {alpha}. "
 
+    if confounders:
+        adj_clause = f"adjusting for prespecified confounders ({', '.join(confounders)})"
+    else:
+        adj_clause = "without covariate adjustment (unadjusted model)"
+
     text = (
         f"Statistical Analysis: Continuous and categorical baseline variables were compared using {tests}. "
         f"Missing data were addressed via {missing_data_strategy}. "
         f"{model_type} was fitted to evaluate associations with {primary_outcome}, "
-        f"adjusting for prespecified confounders ({confounder_str}). "
+        f"{adj_clause}. "
         f"Effect estimates were reported with corresponding 95% confidence intervals. "
         f"{sig_clause}"
         f"Reporting conformed to {guideline} guidelines for {study_design.lower()} studies."
     )
     return text
+
 
 # Export HTML table and narrative
 html_output = render_publication_html_table(model_records, style="NEJM")

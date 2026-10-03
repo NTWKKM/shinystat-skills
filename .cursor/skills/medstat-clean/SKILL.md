@@ -143,9 +143,16 @@ print(f"Loaded raw dataset: N = {n_initial}")
 # บังคับใช้ Numeric 0/1 สำหรับ Binary Outcome เสมอ (1 = Event, 0 = Non-event)
 # ตัวอย่าง: df['outcome'] = df['raw_outcome'].map({'Positive': 1, 'Negative': 0})
 df = df_raw.copy()
-outcome_vals = set(df['outcome'].dropna().unique())
-if not outcome_vals.issubset({0, 1, 0.0, 1.0}):
-    raise ValueError(f"Primary endpoint contains non-binary values {outcome_vals}. Must be strictly binary {{0, 1}}.")
+is_ordered_cat = isinstance(df['outcome'].dtype, pd.CategoricalDtype) and df['outcome'].dtype.ordered
+if not is_ordered_cat:
+    outcome_vals = set(df['outcome'].dropna().unique())
+    allowed_vals = {0, 1, 0.0, 1.0} | set(range(7)) | {float(i) for i in range(7)}
+    if not outcome_vals.issubset(allowed_vals):
+        raise ValueError(
+            f"Primary endpoint contains unsupported values {outcome_vals}. "
+            "Must be strictly binary {0, 1}, ordinal integer categories 0–6, or an ordered Categorical."
+        )
+
 
 # 3. MISSINGNESS AUDIT & SAMPLE RETENTION FLOW (SCAFFOLD TEMPLATE)
 # NOTE: This block is an illustrative scaffold template that must be adapted to the specific study protocol;

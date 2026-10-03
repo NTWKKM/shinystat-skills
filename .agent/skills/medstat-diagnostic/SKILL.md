@@ -259,13 +259,12 @@ from medstat.diagnostic.calibration import (
 )
 
 # Calibration evaluates predicted risk probabilities against binary outcomes.
-# Define and align risk_probs from the dataset (e.g. clean_diag['predicted_risk']) or prediction model:
-if "predicted_risk" in clean_diag.columns:
-    risk_raw = clean_diag["predicted_risk"].values
-    gold_raw = gold_vals
-    cal_valid = np.isfinite(risk_raw) & np.isfinite(gold_raw)
-    risk_probs = risk_raw[cal_valid]
-    gold_cal = gold_raw[cal_valid]
+# Filter valid paired inputs using finite gold_standard and predicted_risk directly:
+if "predicted_risk" in df.columns:
+    cal_mask = np.isfinite(df["gold_standard"]) & np.isfinite(df["predicted_risk"])
+    cal_df = df[cal_mask]
+    risk_probs = cal_df["predicted_risk"].values
+    gold_cal = cal_df["gold_standard"].astype(int).values
     if len(risk_probs) == 0:
         raise ValueError("No valid finite pairs for calibration.")
     if not np.all((risk_probs >= 0.0) & (risk_probs <= 1.0)):
@@ -285,7 +284,8 @@ else:
     print("Calibration evaluation skipped: 'predicted_risk' column not provided in dataset.")
 ```
 
-The agent may freely incorporate `medstat` modules (e.g. `from medstat.diagnostic.roc import calculate_delong_ci`, `from medstat.diagnostic.accuracy import compute_diagnostic_metrics`, `from medstat.diagnostic.dca import calculate_dca`) or standard libraries as appropriate.
+The agent may freely incorporate `medstat` modules (e.g. `from medstat.diagnostic.roc import auc_ci_delong`, `from medstat.diagnostic.accuracy import compute_diagnostic_metrics`, `from medstat.diagnostic.dca import calculate_dca`) or standard libraries as appropriate.
+
 
 ---
 

@@ -274,6 +274,41 @@ class TestEggerCLIGuards:
         assert res.exit_code != 0
         assert "Mixed effect measures detected" in res.output
 
+    def test_egger_rejects_smd_measure(self, tmp_path):
+        runner = CliRunner()
+        df = pd.DataFrame(
+            {
+                "study": [f"Study_{i}" for i in range(12)],
+                "effect_size": np.random.normal(0.2, 0.1, 12),
+                "se": np.random.uniform(0.05, 0.15, 12),
+            }
+        )
+        csv_path = tmp_path / "meta_smd.csv"
+        df.to_csv(csv_path, index=False)
+
+        res = runner.invoke(
+            cli,
+            [
+                "meta",
+                "--data",
+                str(csv_path),
+                "--effect-col",
+                "effect_size",
+                "--se-col",
+                "se",
+                "--study-col",
+                "study",
+                "--measure",
+                "smd",
+                "--egger",
+            ],
+        )
+        assert res.exit_code != 0
+        assert (
+            "Egger's test is invalid for standardized mean differences (SMD)"
+            in res.output
+        )
+
 
 # ==============================================================================
 # 2. Causal Inference & Agreement Fixes Verification
@@ -530,6 +565,21 @@ class TestDiagnosticAccuracyValidationGuards:
         res = validate_gold_standard([0, 1, 1, 0])
         assert list(res) == [0, 1, 1, 0]
 
+        # Returns Series retaining original index
+        idx = [101, 102, 103, 104]
+        s = pd.Series([0, 1, 1, 0], index=idx)
+        res_s = validate_gold_standard(s)
+        assert isinstance(res_s, pd.Series)
+        assert list(res_s.index) == idx
+        assert list(res_s) == [0, 1, 1, 0]
+
+        # Explicitly rejects boolean values
+        with pytest.raises(ValueError, match="strictly binary numeric"):
+            validate_gold_standard([True, False])
+
+        with pytest.raises(ValueError, match="strictly binary numeric"):
+            validate_gold_standard(pd.Series([True, False]))
+
         with pytest.raises(ValueError, match="strictly binary numeric"):
             validate_gold_standard([0, 1, 2])
 
@@ -551,6 +601,30 @@ class TestModelPrimaryEffectExtraction:
         assert extract_primary_effect({"C(treatment)[T.1]": 1.85, "age": 1.02}) == 1.85
         assert extract_primary_effect({"treatment[T.True]": 3.10}) == 3.10
         assert np.isnan(extract_primary_effect({"other": 1.5}))
+
+    def test_extract_primary_effect_extended_features(self):
+        from medstat.models import extract_primary_effect
+
+        # CLI dummy prefix recognition
+        assert extract_primary_effect({"treatment_drugA": 1.75, "age": 1.01}) == 1.75
+
+        # Preserves negative coefficients on coefficient scale
+        assert (
+            extract_primary_effect({"treatment": -0.85, "age": 0.02}, scale="coef")
+            == -0.85
+        )
+        # Rejects negative values on ratio scale
+        assert np.isnan(
+            extract_primary_effect({"treatment": -0.85, "age": 0.02}, scale="ratio")
+        )
+
+        # Ambiguous multiple matches return np.nan
+        assert np.isnan(
+            extract_primary_effect({"treatment_1": 1.5, "treatment_2": 2.1})
+        )
+        assert np.isnan(
+            extract_primary_effect({"C(treatment)[T.1]": 1.5, "C(treatment)[T.2]": 2.1})
+        )
 
 
 # ==============================================================================
@@ -724,3 +798,81 @@ class TestCLIInputContractGuards:
         )
         assert result.exit_code != 0
         assert "must be numeric" in result.output
+
+    def test_fit_random_intercept_fixed_effects_and_ml_criteria(self):
+        from medstat.models.multilevel import fit_random_intercept
+
+        np.random.seed(42)
+        n = 80
+        groups = np.repeat(np.arange(8), 10)
+        x = np.random.randn(n)
+        y = 2.0 + 1.5 * x + groups * 0.5 + np.random.randn(n)
+        df = pd.DataFrame({"y": y, "x": x, "cluster": groups})
+
+        res = fit_random_intercept(
+            y=df["y"],
+            X=df[["x"]],
+            cluster_ids=df["cluster"],
+            add_constant=True,
+        )
+
+        sum_df = res["summary_df"]
+        # Excludes variance components like Group Var
+        assert "Group Var" not in sum_df.index
+        assert "const" in sum_df.index
+        assert "x" in sum_df.index
+
+        # AIC and BIC are computed from ML fit and are finite floats
+        assert res["aic"] is not None and np.isfinite(res["aic"])
+        assert res["bic"] is not None and np.isfinite(res["bic"])
+
+    def test_cli_model_strict_json_serialization_sanitizes_nan(self, tmp_path):
+        import json
+
+        from click.testing import CliRunner
+
+        from medstat.cli.main import cli
+
+        np.random.seed(42)
+        n = 60
+        groups = np.repeat(np.arange(6), 10)
+        x = np.random.randn(n)
+        y = 2.0 + 1.2 * x + groups * 0.4 + np.random.randn(n)
+        df = pd.DataFrame({"y": y, "x": x, "hospital": groups})
+
+        csv_file = tmp_path / "mixed_data.csv"
+        df.to_csv(csv_file, index=False)
+        out_json = tmp_path / "results.json"
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "model",
+                "--data",
+                str(csv_file),
+                "--type",
+                "mixed",
+                "--cluster",
+                "hospital",
+                "--outcome",
+                "y",
+                "--covariates",
+                "x",
+                "--output",
+                str(out_json),
+            ],
+        )
+        assert result.exit_code == 0
+        assert out_json.exists()
+
+        # Strict JSON parse with allow_nan=False (would raise ValueError if NaN was serialized)
+        raw_text = out_json.read_text(encoding="utf-8")
+        parsed = json.loads(
+            raw_text,
+            parse_constant=lambda x: (_ for _ in ()).throw(
+                ValueError(f"Unexpected constant: {x}")
+            ),
+        )
+        assert "coefficients" in parsed
+        assert "cluster_icc" in parsed
