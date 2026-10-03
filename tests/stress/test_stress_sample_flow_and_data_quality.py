@@ -1,5 +1,5 @@
 """
-tests/stress/test_m2_challenger2_stress.py: Adversarial Empirical Stress Harness for Milestone M2.
+tests/stress/test_stress_sample_flow_and_data_quality.py: Adversarial Empirical Stress Harness for CONSORT SampleFlowTracker Invariants & DataQualityReport.
 
 Author: Challenger 2 (Empirical Challenger)
 Scope:

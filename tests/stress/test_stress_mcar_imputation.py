@@ -1,5 +1,5 @@
 """
-tests/stress/test_m2_challenger1_stress.py: Empirical Stress Harness for Milestone M2.
+tests/stress/test_stress_mcar_imputation.py: Empirical Stress Harness for Little's MCAR, MICE Imputation, and Outlier Winsorization.
 
 Author: Challenger 1 (Empirical Challenger)
 Scope:

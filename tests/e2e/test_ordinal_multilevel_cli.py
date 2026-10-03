@@ -206,3 +206,64 @@ def test_cli_model_gee_invalid_binary_rejected(tmp_path):
     )
     assert res.exit_code != 0
     assert "must be strictly numeric 0 and 1" in res.output
+
+
+def test_cli_ordinal_rejects_unordered_text_outcome(tmp_path):
+    df = pd.DataFrame(
+        {
+            "stage": ["Mild", "Moderate", "Severe"] * 10,
+            "age": np.random.randn(30),
+        }
+    )
+    csv_file = tmp_path / "ordinal_text.csv"
+    df.to_csv(csv_file, index=False)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "model",
+            "--data",
+            str(csv_file),
+            "--type",
+            "ordinal",
+            "--outcome",
+            "stage",
+            "--covariates",
+            "age",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "must be numeric or an ordered pandas Categorical" in result.output
+
+
+def test_cli_gee_rejects_non_numeric_continuous_outcome(tmp_path):
+    df = pd.DataFrame(
+        {
+            "outcome": ["Mild", "Moderate", "Severe", "Critical"] * 5,
+            "age": np.random.randn(20),
+            "hosp": [1, 2] * 10,
+        }
+    )
+    csv_file = tmp_path / "gee_text.csv"
+    df.to_csv(csv_file, index=False)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "model",
+            "--data",
+            str(csv_file),
+            "--type",
+            "gee",
+            "--cluster",
+            "hosp",
+            "--outcome",
+            "outcome",
+            "--covariates",
+            "age",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "must be numeric" in result.output

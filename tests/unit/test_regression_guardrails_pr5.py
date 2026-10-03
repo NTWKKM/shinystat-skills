@@ -1,5 +1,5 @@
 """
-tests/unit/test_pr5_coderabbit_fixes.py: Verification of CodeRabbit review fixes in PR#5.
+tests/unit/test_regression_guardrails_pr5.py: Regression guardrails suite for PR#5 contracts.
 
 Tests:
 1. CLI: --egger option guards (rejecting k < 10 studies and binary log odds-ratio effect columns).
@@ -517,7 +517,12 @@ class TestReportMethodsNarrativeFixes:
             assert "<img src=x" not in rendered
             assert "&lt;img src=x onerror=alert(1)&gt;" in rendered
 
-    def test_diagnostic_gold_standard_binary_validation(self):
+
+# ==============================================================================
+# 7. Diagnostic Accuracy Contract Guards
+# ==============================================================================
+class TestDiagnosticAccuracyValidationGuards:
+    def test_diagnostic_gold_standard_strictly_binary_validation(self):
         import pytest
 
         from medstat.diagnostic.accuracy import validate_gold_standard
@@ -534,7 +539,12 @@ class TestReportMethodsNarrativeFixes:
         with pytest.raises(ValueError, match="must contain both 0 and 1 classes"):
             validate_gold_standard([0, 0, 0], require_both_classes=True)
 
-    def test_treatment_contrast_extraction(self):
+
+# ==============================================================================
+# 8. Model Effect Extraction & Multi-term Contrasts
+# ==============================================================================
+class TestModelPrimaryEffectExtraction:
+    def test_extract_primary_effect_parses_statsmodels_formula_contrast_terms(self):
         from medstat.models import extract_primary_effect
 
         assert extract_primary_effect({"treatment": 2.15, "age": 1.02}) == 2.15
@@ -542,14 +552,20 @@ class TestReportMethodsNarrativeFixes:
         assert extract_primary_effect({"treatment[T.True]": 3.10}) == 3.10
         assert np.isnan(extract_primary_effect({"other": 1.5}))
 
-    def test_ordinal_non_standard_index_positional_mask(self):
+
+# ==============================================================================
+# 9. Ordinal & Multilevel Model Robustness Guards
+# ==============================================================================
+class TestOrdinalAndMultilevelModelRobustnessGuards:
+    def test_ordinal_handles_non_standard_index_and_missing_values_via_positional_mask(
+        self,
+    ):
         from medstat.models.ordinal import (
             fit_multinomial_logistic,
             fit_proportional_odds,
             test_proportional_odds,
         )
 
-        # Create non-standard index [100, 101, 102, ...] with some missing y
         idx = [100 + i for i in range(30)]
         y = pd.Series([0, 1, 2] * 10, index=idx)
         y.iloc[5] = np.nan  # introduce missing value
@@ -564,7 +580,9 @@ class TestReportMethodsNarrativeFixes:
         res_brant = test_proportional_odds(y, X)
         assert "omnibus" in res_brant
 
-    def test_ordinal_declared_category_order_brant_and_fit(self):
+    def test_ordinal_and_brant_preserves_non_alphabetical_declared_category_order(
+        self,
+    ):
         from medstat.models.ordinal import (
             fit_proportional_odds,
             test_proportional_odds,
@@ -593,7 +611,9 @@ class TestReportMethodsNarrativeFixes:
         )
         assert cutpoint_keys == ["cutpoint_Low", "cutpoint_Medium"]
 
-    def test_multilevel_calculate_design_effect_string_outcome(self):
+    def test_calculate_design_effect_rejects_non_numeric_outcome_with_value_error(
+        self,
+    ):
         import pytest
 
         from medstat.models.multilevel import calculate_design_effect
@@ -603,7 +623,14 @@ class TestReportMethodsNarrativeFixes:
         with pytest.raises(ValueError, match="must be numeric"):
             calculate_design_effect(y_str, clusters)
 
-    def test_compare_pre_post_balance_with_none_smd(self):
+
+# ==============================================================================
+# 10. Causal Balance Zero-Variance Boundary Guards
+# ==============================================================================
+class TestCausalBalanceZeroVarianceBoundaryGuards:
+    def test_compare_balance_zero_variance_differing_means_yields_nan_smd_and_unbalanced(
+        self,
+    ):
         from medstat.causal.balance import compare_pre_post_balance
 
         raw_df = pd.DataFrame(
@@ -626,6 +653,11 @@ class TestReportMethodsNarrativeFixes:
         assert pd.isna(cov1_row["Post_SMD"])
         assert not cov1_row["Balanced_Post"]
 
+
+# ==============================================================================
+# 11. CLI Input Contract Validation Guards
+# ==============================================================================
+class TestCLIInputContractGuards:
     def test_cli_ordinal_rejects_unordered_text_outcome(self, tmp_path):
         from click.testing import CliRunner
 

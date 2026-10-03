@@ -26,7 +26,7 @@ The legacy test suite contained a mixture of pure statistical calculations, data
 | 7 | `test_missing_data.py` | `tests/unit/test_missing_data.py` | **Ported** | Missing data mechanisms and `MissingStrategyRequiredError`. |
 | 8 | `test_multiple_imputation.py` | `tests/unit/test_multiple_imputation.py` | **Ported** | Chained equations (MICE), Rubin's pooling, and FMI. |
 | 9 | `test_mi_reporting.py` | `tests/unit/test_sample_flow_retention.py` | **Consolidated** | Participant flow tracking through imputation stages. |
-| 10 | `test_firth_regression.py` | `tests/stress/test_m1_stress_icc_firth.py` | **Ported & Deepened** | Profile Likelihood 95% CIs and LRT p-values under separation. |
+| 10 | `test_firth_regression.py` | `tests/stress/test_stress_icc_firth.py` | **Ported & Deepened** | Profile Likelihood 95% CIs and LRT p-values under separation. |
 | 11 | `test_bland_altman.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Pending** | Standalone unit tests pending; covered in E2E. |
 | 12 | `test_calibration_ici.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Pending** | Standalone unit tests pending; covered in E2E. |
 | 13 | `test_causal.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | Propensity score matching, caliper, and SMD balance. |
@@ -47,7 +47,7 @@ The legacy test suite contained a mixture of pure statistical calculations, data
 | 28 | `test_poisson_lib.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Pending** | Poisson and negative binomial count regression pending. |
 | 29 | `test_publication_renderer.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | HTML publication table rendering without vertical borders. |
 | 30 | `test_regression_publication.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | Publication table styling for GLM and Cox models. |
-| 31 | `test_repeated_measures.py` | `tests/stress/test_m1_stress_icc_firth.py` | **Ported & Re-engineered** | Replaced `pingouin` with pure-SciPy two-way ANOVA ICC. |
+| 31 | `test_repeated_measures.py` | `tests/stress/test_stress_icc_firth.py` | **Ported & Re-engineered** | Replaced `pingouin` with pure-SciPy two-way ANOVA ICC. |
 | 32 | `test_reporting_checklists.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | STROBE, CONSORT, and TRIPOD checklist audits. |
 | 33 | `test_sample_size.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | Two-sample t-test, proportions, and survival sample sizing. |
 | 34 | `test_sensitivity.py` | `tests/e2e/test_tier1_feature_coverage.py` | **Ported** | VanderWeele & Ding E-value calculations for point/CI bounds. |

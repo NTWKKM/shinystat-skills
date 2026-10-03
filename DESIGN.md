@@ -423,7 +423,7 @@ Automated code and clinical biostatistics review by CodeRabbit AI on PR #5 ident
 2. **CLI Guardrails**: Enforced strict numeric `{0, 1}` outcome verification for GEE binomial models. Enforced distinct study threshold (`df[study_col].dropna().nunique() >= 10`) for Egger's test. Added cross-column validation for meta-analysis effect measures.
 3. **SMD Boundary Correctness**: Updated `calculate_smd` to return `np.nan` if pooled SD is 0 and means differ, returning `0.0` strictly when means are identical.
 4. **Export Public Contract Utilities**: Implemented and exported `validate_gold_standard` in `medstat.diagnostic` and `extract_primary_effect` in `medstat.models`.
-5. **Decoupled Unit Testing**: Refactored `tests/unit/test_pr5_coderabbit_fixes.py` to import and directly test production package code; added direct CLI tests for binary validation and duplicate study rejection.
+5. **Decoupled Unit Testing**: Refactored `tests/unit/test_regression_guardrails_pr5.py` to import and directly test production package code; added direct CLI tests for binary validation and duplicate study rejection.
 6. **Skills Suite Hardening & Mirror Parity**: Hardened canonical skill instructions (`skills/`) for cell counts, survival horizons, Firth separation fallbacks, and complete-case protocol flags, and synchronized byte-for-byte across `.agent/`, `.agents/`, `.claude/`, and `.cursor/` mirrors.
 
 ### Consequences

@@ -69,6 +69,12 @@ class TestDesignEffectCalculation:
         assert res["design_effect"] > 1.5
         assert res["effective_sample_size"] < 300
 
+    def test_calculate_design_effect_rejects_non_numeric_outcome_with_value_error(self):
+        y_str = pd.Series(["High", "Low", "Medium", "High"])
+        clusters = pd.Series([1, 1, 2, 2])
+        with pytest.raises(ValueError, match="must be numeric"):
+            calculate_design_effect(y_str, clusters)
+
 
 class TestGEEModel:
     def test_fit_gee_binomial_exchangeable(self, clustered_binary_data):

@@ -90,8 +90,46 @@ class TestOrdinalProportionalOdds:
         with pytest.raises(ValueError, match="Length mismatch"):
             fit_proportional_odds(y, X)
 
+    def test_fit_proportional_odds_handles_non_standard_index_and_missing_values(self):
+        # Non-standard index [100, 101, 102, ...] with missing outcome
+        idx = [100 + i for i in range(30)]
+        y = pd.Series([0, 1, 2] * 10, index=idx)
+        y.iloc[5] = np.nan
+        X = np.random.RandomState(42).randn(30, 2)
+
+        res_po = fit_proportional_odds(y, X)
+        assert res_po["summary_df"] is not None
+        assert res_po["nobs"] == 29
+
+        res_brant = test_proportional_odds(y, X)
+        assert "omnibus" in res_brant
+
 
 class TestBrantProportionalOddsTest:
+    def test_brant_preserves_non_alphabetical_declared_category_order(self):
+        np.random.seed(42)
+        n = 150
+        x = np.random.randn(n)
+        z = 0.8 * x + np.random.logistic(size=n)
+        # Declared order: Low < Medium < High (alphabetical would be High < Low < Medium)
+        cats = pd.Categorical(
+            np.where(z < -0.5, "Low", np.where(z < 0.8, "Medium", "High")),
+            categories=["Low", "Medium", "High"],
+            ordered=True,
+        )
+        y = pd.Series(cats)
+        X = pd.DataFrame({"x": x})
+
+        res_po = fit_proportional_odds(y, X)
+        assert res_po["categories"] == ["Low", "Medium", "High"]
+
+        res_brant = test_proportional_odds(y, X)
+        assert "omnibus" in res_brant
+        cutpoint_keys = list(
+            res_brant["variables"]["x"]["cutpoint_coefficients"].keys()
+        )
+        assert cutpoint_keys == ["cutpoint_Low", "cutpoint_Medium"]
+
     def test_brant_test_on_parallel_data(self, ordinal_parallel_data):
         df = ordinal_parallel_data
         brant_res = test_proportional_odds(df["y"], df[["x1", "x2"]])
