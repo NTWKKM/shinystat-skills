@@ -483,7 +483,7 @@ The agent may freely incorporate `medstat` modules (e.g. `from medstat.reporting
 7. **No Correlation as Agreement**: Never substitute Pearson/Spearman correlation for agreement; enforce Bland-Altman LoA with large-sample CIs and pure-SciPy ICC.
 8. **Calibration Mandatory for Prediction Models**: For models intended for clinical deployment or TRIPOD-compliant prediction validation (Type 2/4), report calibration metrics (Brier score, calibration slope/intercept, ICI) alongside discrimination (AUC). High AUC alone does not guarantee well-calibrated predicted probabilities.
 9. **Ordinal Scale Preservation**: Retain 3+ category ordinal outcomes (e.g., mRS, GCS) as ordinal using proportional odds models (checking parallel slopes) rather than continuous linear models or arbitrary dichotomization.
-10. **Cluster Design Effect Reporting**: For clustered or multi-center data, compute and report the Design Effect (DEFF) based on the intraclass correlation (ICC). If DEFF > 1.5 or ICC > 0.05, adjust models using GEE (robust SEs) or random-intercept mixed models.
+10. **Cluster Design Effect Reporting**: For clustered or multi-center data, compute and report the Design Effect (DEFF) based on the intraclass correlation (ICC). If DEFF > 1.5 or ICC > 0.05, adjust models for non-survival outcomes using GEE (robust SEs) or random-intercept mixed models; for censored time-to-event outcomes, direct the analysis to Cox regression with cluster-robust sandwich variance or shared frailty models.
 
 ---
 

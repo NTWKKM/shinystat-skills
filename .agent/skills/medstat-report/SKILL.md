@@ -164,15 +164,15 @@ def render_publication_html_table(records, style="NEJM", title="Table 2. Multiva
         raise ValueError(f"Unsupported table style: {style}. Supported styles are 'NEJM', 'JAMA', 'APA', 'APA7'.")
 
     adj_prefix = "Adjusted " if adjustment_vars else "Unadjusted "
-    est_header = f"{adj_prefix}{measure_name}"
+    est_header = f"{adj_prefix}{html.escape(str(measure_name))}"
     title_escaped = html.escape(str(title))
     
-    measure_plural = f"{measure_name}s" if not measure_name.endswith("s") else measure_name
+    measure_plural = f"{measure_name}s" if not str(measure_name).endswith("s") else str(measure_name)
     if adjustment_vars:
         covar_str = ", ".join(html.escape(str(v)) for v in adjustment_vars)
-        footnote_text = f"* {measure_plural} were adjusted for {covar_str}. Confidence intervals are {html.escape(str(ci_method))}-based."
+        footnote_text = f"* {html.escape(measure_plural)} were adjusted for {covar_str}. Confidence intervals are {html.escape(str(ci_method))}-based."
     else:
-        footnote_text = f"* Unadjusted {measure_plural.lower()}. Confidence intervals are {html.escape(str(ci_method))}-based."
+        footnote_text = f"* Unadjusted {html.escape(measure_plural.lower())}. Confidence intervals are {html.escape(str(ci_method))}-based."
     
     html_out = f"""
     <div style="font-family: 'Times New Roman', Times, serif; max-width: 800px; margin: 20px auto;">
@@ -258,6 +258,8 @@ def generate_methods_narrative(
         for k, v in calibration_metrics.items():
             if isinstance(v, (bool, np.bool_)) or not isinstance(v, (int, float, np.number)) or not np.isfinite(v):
                 raise ValueError(f"Calibration metric '{k}' must be a finite numeric value (got {v}).")
+            if k.lower() in ("brier", "ici") and not 0.0 <= float(v) <= 1.0:
+                raise ValueError(f"Calibration metric '{k}' must lie within [0, 1] (got {v}).")
         if calibration_provenance == "apparent":
             # For apparent estimates, calibration slope is excluded per TRIPOD / core reporting rules
             # (apparent slope is 1.0 / tautological and uninformative in-sample)
@@ -287,6 +289,12 @@ def generate_methods_narrative(
         else:
             calib_clause = f"Calibration was assessed in an independent external validation cohort ({metric_str}). "
 
+    guideline_clause = (
+        f"Reporting conformed to {guideline} guidelines based on verified checklist audit evidence for {study_design.lower()} studies."
+        if fit_metadata and fit_metadata.get("checklist_audit_verified")
+        else f"Methods description was structured in accordance with {guideline} reporting guidelines for {study_design.lower()} studies."
+    )
+
     text = (
         f"Statistical Analysis: Continuous and categorical baseline variables were compared using {tests}. "
         f"Missing data were addressed via {missing_data_strategy}. "
@@ -295,7 +303,7 @@ def generate_methods_narrative(
         f"Effect estimates were reported with corresponding 95% confidence intervals. "
         f"{calib_clause}"
         f"{sig_clause}"
-        f"Reporting conformed to {guideline} guidelines for {study_design.lower()} studies."
+        f"{guideline_clause}"
     )
     return text
 

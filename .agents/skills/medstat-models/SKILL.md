@@ -16,7 +16,7 @@ Biostatistical modeling engine supporting generalized linear models, Cox proport
 5. **Binary & Event Outcome Encoding**: Binary outcomes (logistic regression) and event indicators (Cox proportional hazards) must be explicitly encoded as numeric `0` and `1` (`1 = Event`, `0 = Non-event`). Raw text outcomes (e.g., `"Dead"`, `"Alive"`, `"Yes"`, `"No"`) are rejected to prevent clinical event inversion.
 6. **Events-Per-Variable (EPV) Diagnostic Rule**: Before fitting multivariable regression, calculate EPV according to model type: for Cox proportional hazards, calculate $\text{EPV}_{\text{Cox}} = \frac{E}{P}$ where $E$ is the total failure-event count and $P$ is the fitted predictor parameter count (degrees of freedom, excluding intercept); for logistic regression, calculate $\text{EPV}_{\text{Logistic}} = \frac{\min(N_{\text{events}}, N_{\text{non-events}})}{P}$ where $P$ is the fitted parameter count from the expanded design matrix. Note that $\text{EPV} < 10$ serves as a pragmatic risk screen for small-sample bias and overfitting rather than an absolute diagnosis of separation. If quasi-complete separation occurs, or when prespecified sparse-data criteria or estimation instability arise, standard maximum likelihood estimation (MLE) is biased or fails to converge. The agent must decisively transition to **Firth penalized likelihood** (`fit_firth_logistic` / `firth_cox`) or perform dimension reduction.
 7. **Ordinal Outcome Modeling**: Ordinal outcomes with 3+ ordered levels (mRS, GCS, NYHA) should be modeled using cumulative link proportional odds models (`fit_proportional_odds` / CLI `--type ordinal`) with Brant test verification (`--po-test`). Do not treat ordinal scores as continuous OLS linear regressions.
-8. **Clustered Data & GEE**: Multi-center datasets with patient clustering within hospitals violate independence. Use GEE (`--type gee --cluster <col>`) with robust standard errors or random-intercept mixed models (`--type mixed --cluster <col>`), and compute Design Effect (DEFF).
+8. **Clustered Data & Multilevel Modeling**: Multi-center datasets with patient clustering within hospitals violate independence. For non-survival continuous outcomes, use random-intercept mixed models (`--type mixed --cluster <col>`), and for non-survival binary/count outcomes, use GEE (`--type gee --cluster <col>`) with robust standard errors and compute Design Effect (DEFF). For censored time-to-event outcomes with clustering, direct the analysis to Cox proportional hazards regression with cluster-robust sandwich variance or shared frailty models.
 
 ## Execution Sequence
 
@@ -172,12 +172,17 @@ def summarize_continuous(series, group, ref_level=None):
             "SMD": "Not estimable",
         }
 
-    # Assess normality via Shapiro-Wilk when sample size permits (n <= 5000)
+    # Assess normality via Shapiro-Wilk (n <= 5000) or D'Agostino-Pearson normaltest (n > 5000)
     is_normal = True
-    if len(g0) >= 3 and len(g1) >= 3:
-        _, p_norm0 = stats.shapiro(g0) if len(g0) <= 5000 else (None, 0.05)
-        _, p_norm1 = stats.shapiro(g1) if len(g1) <= 5000 else (None, 0.05)
-        if (p_norm0 is not None and p_norm0 < 0.05) or (p_norm1 is not None and p_norm1 < 0.05):
+    if len(g0) >= 8 and len(g1) >= 8:
+        _, p_norm0 = stats.shapiro(g0) if len(g0) <= 5000 else stats.normaltest(g0)
+        _, p_norm1 = stats.shapiro(g1) if len(g1) <= 5000 else stats.normaltest(g1)
+        if p_norm0 < 0.05 or p_norm1 < 0.05:
+            is_normal = False
+    elif len(g0) >= 3 and len(g1) >= 3:
+        _, p_norm0 = stats.shapiro(g0)
+        _, p_norm1 = stats.shapiro(g1)
+        if p_norm0 < 0.05 or p_norm1 < 0.05:
             is_normal = False
 
     if is_normal:
@@ -267,17 +272,20 @@ print(f"sex: p={res_cat['p_value']}, SMD={res_cat['SMD']}")
 import patsy
 from medstat.models.firth import fit_firth_logistic
 
-# Define missing-data strategy and complete cases before fitting
+# Define missing-data strategy and complete cases before fitting:
+# Requires documented rationale for dropping incomplete cases and prespecified sensitivity analysis
 model_cols = ["outcome", "treatment", "age", "sex", "bmi"]
+protocol_complete_case_rationale = "Prespecified complete-case analysis for primary model variables"
 df_model = df.dropna(subset=model_cols).copy()
 n_model_excluded = len(df) - len(df_model)
 if n_model_excluded > 0:
-    print(f"Excluded {n_model_excluded} incomplete cases for model variables.")
+    print(f"Excluded {n_model_excluded} incomplete cases ({protocol_complete_case_rationale}).")
+    print("A prespecified sensitivity analysis (e.g. MICE or missing-indicator) is planned to assess missingness impact.")
 
-# Validate outcome is strictly binary {0, 1}
+# Validate outcome is strictly binary with both classes present: exactly {0, 1}
 unique_outcomes = set(df_model["outcome"].dropna().unique())
-if not unique_outcomes.issubset({0, 1, 0.0, 1.0}):
-    raise ValueError(f"Outcome must be strictly binary {{0, 1}}, got: {unique_outcomes}")
+if unique_outcomes != {0, 1} and unique_outcomes != {0.0, 1.0}:
+    raise ValueError(f"Outcome must contain exactly both binary classes {{0, 1}}, got: {unique_outcomes}")
 
 formula = "outcome ~ treatment + age + C(sex) + bmi"
 y_mat, X_mat = patsy.dmatrices(formula, data=df_model, return_type='dataframe')

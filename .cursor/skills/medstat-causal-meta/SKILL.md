@@ -13,7 +13,7 @@ Biostatistical engine for observational causal inference, rater reliability anal
 2. **Standardized Mean Difference Criterion**: Evaluate post-match balance across all baseline covariates; every covariate must achieve $|\text{SMD}| < 0.10$.
 3. **Pure-SciPy ICC (GPL-Free)**: Compute intraclass correlation coefficients via pure two-way ANOVA decomposition without external GPL dependencies.
 4. **Meta-Analysis Model Selection**: Model choice (fixed-effect vs. DerSimonian-Laird random-effects) must reflect the study design and clinical/methodological variation assumptions; Cochrane advises against selecting models solely by statistical heterogeneity tests ($I^2$).
-5. **Confounder Selection Invariant for PSM**: Include *only* baseline pre-treatment confounders that are causally related to treatment choice and/or outcome. Strictly exclude post-treatment variables, mediators (variables on the causal pathway between treatment and outcome), or colliders, which introduce conditioning bias and artifactual confounding.
+5. **Confounder Selection Invariant for PSM**: Select baseline pre-treatment covariates that affect both treatment and outcome (true confounders), while allowing justified outcome predictors (which improve precision without increasing bias). Strictly exclude variables that affect treatment choice only (including treatment-only instrumental variables, which amplify unmeasured confounding and variance without reducing bias), as well as post-treatment variables, mediators (variables on the causal pathway between treatment and outcome), or colliders, which introduce conditioning bias and artifactual confounding.
 6. **Association vs Agreement Trap**: Never substitute Pearson ($r$) or Spearman ($\rho$) correlation for rater or device agreement. Correlation evaluates linear association, not agreement. Enforce **Bland-Altman 95% Limits of Agreement** (with large-sample CIs) or **Intraclass Correlation (ICC)**.
 7. **Egger's Test Scope & Limitations**: Egger's linear regression test for funnel plot asymmetry requires at least $k \ge 10$ studies with continuous effect measures. The `--egger` command path requires explicit continuous effect measure options (e.g. `--measure continuous` or `--measure md`) and rejects fewer than 10 studies ($k < 10$), standardized mean differences (`smd`), and binary log odds-ratio effect measures (e.g. `log_or`, `or`, `odds_ratio`) where artifactual correlation between effect size and standard error induces false-positive asymmetry.
 
@@ -179,7 +179,15 @@ def run_psm_pipeline(df, treatment_col, covariate_cols, caliper_sd=0.20, categor
                 "Propensity score model failed to converge; consider Firth penalization "
                 "(medstat.models.firth.fit_firth_logistic) or covariate reduction before matching."
             ) from exc
-    df = df.copy()
+    original_cols = list(df.columns)
+    # Use collision-safe temporary column names if existing columns collide, or preserve original columns
+    orig_has_ps = 'ps' in df.columns
+    orig_has_logit_ps = 'logit_ps' in df.columns
+    orig_has_row_id = '_row_id' in df.columns
+    orig_ps = df['ps'].copy() if orig_has_ps else None
+    orig_logit_ps = df['logit_ps'].copy() if orig_has_logit_ps else None
+    orig_row_id = df['_row_id'].copy() if orig_has_row_id else None
+
     # Clip propensity scores strictly within [1e-7, 1 - 1e-7] so logit_ps remains finite
     df['ps'] = ps_model.predict(df_safe).clip(1e-7, 1.0 - 1e-7)
     df['logit_ps'] = np.log(df['ps'] / (1.0 - df['ps']))
@@ -254,6 +262,16 @@ def run_psm_pipeline(df, treatment_col, covariate_cols, caliper_sd=0.20, categor
             else:
                 status = "PASSED (< 0.10)" if smd < 0.10 else "UNBALANCED (>= 0.10)"
                 print(f"Post-match SMD for {sc}: {smd:.3f} -> {status}")
+
+    # Remove temporary matching fields or restore original columns before returning cohort
+    cols_to_drop = [c for c in ['_row_id', 'logit_ps', 'ps'] if c in df_matched.columns and c not in original_cols]
+    df_matched = df_matched.drop(columns=cols_to_drop)
+    if orig_has_ps and orig_ps is not None:
+        df_matched['ps'] = orig_ps.iloc[matched_ids].values
+    if orig_has_logit_ps and orig_logit_ps is not None:
+        df_matched['logit_ps'] = orig_logit_ps.iloc[matched_ids].values
+    if orig_has_row_id and orig_row_id is not None:
+        df_matched['_row_id'] = orig_row_id.iloc[matched_ids].values
     return df_matched
 
 # ------------------------------------------------------------------------------

@@ -114,9 +114,9 @@ Verify that the output contains the audited sample retention tracker:
 > When generating and running analysis scripts (`scratch/clean.py`), enforce execution controls: disable shell/subprocess access, limit file reads strictly to the designated dataset and referenced prototype/core modules, limit file writes strictly to scratch and designated output paths, and ensure no access to credentials or environment secrets. Require explicit user confirmation if the runtime cannot enforce these sandbox controls.
 >
 > ⚠️ **Mandatory Directive — ต้องดู Script ต้นแบบประกอบเสมอ (Review Prototype Scripts First)**:
-> แม้จะให้อิสระ Agent ในการเขียนและปรับ Python Script เองตามสภาพข้อมูลจริง แต่ **Agent ต้องเปิดดูและอ้างอิงสคริปต์ต้นแบบ (Prototype Scripts)** หรือศึกษาการคำนวณในโมดูลแกนกลาง `src/medstat/clean/` เสมอ เพื่อยึดมาตรฐานความถูกต้องทางชีวสถิติการแพทย์:
-> - **การตรวจสอบการสูญหายและการทดสอบ MCAR**: ดูการวิเคราะห์ missing patterns และ Little's MCAR test จาก `src/medstat/data/missing.py` และ `src/medstat/data/quality.py`
-> - **การจัดการค่าสูญหายและการทำความสะอาด**: ดูการทำ Imputation (MICE, KNN, Complete-case) และการกรองข้อมูลจาก `src/medstat/data/clean.py` และ `src/medstat/data/missing.py`
+> แม้จะให้อิสระ Agent ในการเขียนและปรับ Python Script เองตามสภาพข้อมูลจริง แต่ **Agent ต้องเปิดดูและอ้างอิงสคริปต์ต้นแบบ (Prototype Scripts)** หรือศึกษาการคำนวณในโมดูลแกนกลาง `src/medstat/data/clean.py` เสมอ เพื่อยึดมาตรฐานความถูกต้องทางชีวสถิติการแพทย์:
+> - **การตรวจสอบการสูญหายและการทดสอบ MCAR**: ดูการวิเคราะห์ missing patterns และ Little's MCAR test จาก `src/medstat/data/clean.py` (ฟังก์ชัน `audit_missingness`, `littles_mcar_test`) และ `src/medstat/data/quality.py`
+> - **การจัดการค่าสูญหายและการทำความสะอาด**: ดูการทำ Imputation (MICE, KNN, Complete-case) และการจัดรูปแบบ Outcome จาก `src/medstat/data/clean.py` (ฟังก์ชัน `standardize_categorical_outcome`, `clean_dataframe`) และ `src/medstat/data/missing.py`
 > - **การจัดการค่าผิดปกติ (Outliers & Tukey Fences)**: ดูการคำนวณ Tukey IQR fences ($Q_1 - 1.5\text{IQR}, Q_3 + 1.5\text{IQR}$) สำหรับการ winsorize / cap จาก `src/medstat/data/clean.py`
 > - **การติดตามการคัดเข้า-ออกกลุ่มตัวอย่าง**: ดูการบันทึก $N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$ จาก `src/medstat/data/retention.py`
 >
@@ -168,6 +168,17 @@ if not is_ordered_cat:
                 k: v for k, v in outcome_ordinal_mapping.items()
                 if isinstance(v, numbers.Integral) and not isinstance(v, bool)
             }
+        # Reject mappings with duplicate codes or non-increasing codes before recoding
+        if label_to_code:
+            codes_list = list(label_to_code.values())
+            if len(set(codes_list)) != len(codes_list):
+                raise ValueError(
+                    f"outcome_ordinal_mapping contains duplicate integer codes: {label_to_code}"
+                )
+            if any(b <= a for a, b in zip(codes_list, codes_list[1:])):
+                raise ValueError(
+                    f"outcome_ordinal_mapping codes must strictly increase in declared category order (got {label_to_code})."
+                )
         valid_keys = (
             set(outcome_ordinal_mapping.keys()) | set(label_to_code.keys())
             | {c for c in label_to_code.values() if isinstance(c, numbers.Integral) and not isinstance(c, bool)}
@@ -228,7 +239,18 @@ else:
 unresolved_missing = df_clean.isnull().sum()
 if unresolved_missing.any():
     print(f"Warning: Covariates with unresolved missing values:\n{unresolved_missing[unresolved_missing > 0]}")
-    # Apply explicit imputation (e.g. MICE) or documented complete-case per study design
+    # Resolve unresolved covariate values using a prespecified strategy with retention accounting:
+    # Example (complete-case):
+    # df_clean = df_clean.dropna().copy()
+    # tracker.record_stage("Complete Covariate Analysis", len(df_clean), "Prespecified complete-case exclusion")
+    #
+    # Ensure export occurs only when the completion criterion of zero unexpected NaN cells is met:
+    if df_clean.isnull().any().any():
+        raise ValueError(
+            f"Cannot export clean_cohort.csv: dataset contains unresolved missing values in "
+            f"{df_clean.columns[df_clean.isnull().any()].tolist()}. "
+            "Resolve all missing covariates via explicit imputation or documented complete-case before persistence."
+        )
 
 n_analyzed = len(df_clean)
 n_excluded = n_initial - n_analyzed
@@ -254,7 +276,12 @@ if isinstance(df_clean['outcome'].dtype, pd.CategoricalDtype) and df_clean['outc
     cats = df_clean['outcome'].cat.categories
     is_int_coded = all(isinstance(c, numbers.Integral) and not isinstance(c, bool) for c in cats)
     if is_int_coded:
-        # Categories are already integer codes; preserve after validating against mapping if provided
+        # Validate that declared integer categories strictly increase, or remap/reject to preserve ordinal direction
+        if any(b <= a for a, b in zip(cats, cats[1:])):
+            raise ValueError(
+                f"Integer-coded categorical outcome categories must strictly increase in declared order (got {list(cats)})."
+            )
+        # Categories are already increasing integer codes; preserve after validating against mapping if provided
         if outcome_ordinal_mapping:
             expected_codes = {
                 k if isinstance(k, numbers.Integral) and not isinstance(k, bool) else v
@@ -297,7 +324,7 @@ with open("sample_retention_flow.json", "w") as f:
     f.write(tracker.to_json())
 ```
 
-The agent may freely incorporate `medstat` modules (e.g. `from medstat.clean.missing import audit_missingness`, `from medstat.clean.outliers import winsorize_outliers`) or standard libraries as appropriate.
+The agent may freely incorporate `medstat` modules (e.g. `from medstat.data.clean import audit_missingness, littles_mcar_test, standardize_categorical_outcome`) or standard libraries as appropriate.
 
 ---
 

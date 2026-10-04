@@ -974,6 +974,13 @@ def model_cmd(
                 f"Got non-numeric dtype '{y_raw.dtype}'.",
                 param_hint="--outcome",
             )
+        y_valid = y_raw.dropna()
+        if y_valid.nunique() <= 2:
+            raise click.BadParameter(
+                f"Mixed-effects model outcome '{outcome}' has {y_valid.nunique()} distinct values. "
+                "Linear mixed models require continuous outcomes; for binary or low-cardinality clustered outcomes, use '--type gee'.",
+                param_hint="--outcome",
+            )
         fit_res = fit_random_intercept(
             y=y_raw,
             X=X_df,

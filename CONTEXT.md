@@ -22,7 +22,7 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
 | **Intraclass Correlation** | `icc` | Variance partition ratio quantifying reliability and agreement among clinical observers based on two-way ANOVA decomposition. |
 | **DerSimonian-Laird** | `dl` | Non-iterative method of moments estimator for between-study variance ($\tau^2$) in random-effects meta-analysis. |
 | **Egger's Test** | `egger` | Linear regression of standardized effect against precision assessing funnel plot asymmetry and publication bias. |
-| **Brier Score** | `brier_score` | Mean squared prediction error for probabilistic forecasts ($\\text{Brier} = \\frac{1}{N}\\sum(y_i - \\hat{p}_i)^2$); lower is better. Scaled Brier adjusts for baseline prevalence. |
+| **Brier Score** | `brier_score` | Mean squared prediction error for probabilistic forecasts ($\text{Brier} = \frac{1}{N}\sum(y_i - \hat{p}_i)^2$); lower is better. Scaled Brier adjusts for baseline prevalence. |
 | **Calibration Slope** | `calibration_slope` | Logistic recalibration coefficient: ideal slope = 1. Slope $\lt 1$ indicates overfitting; slope $\gt 1$ indicates underfitting. Paired with calibration intercept (ideal = 0). |
 | **Integrated Calibration Index** | `ici` | Austin & Steyerberg (2019) mean absolute difference between LOWESS-smoothed observed and predicted probabilities, with E50, E90, and Emax quantiles. |
 | **Hosmer-Lemeshow** | `hosmer_lemeshow` | Goodness-of-fit $\chi^2$ test across decile risk groups assessing logistic model calibration. Low power limits its use as a sole calibration indicator. |
@@ -37,7 +37,6 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
 | **Statistical Analysis Plan** | `SAP` | Formal specification of primary estimand, data cleaning/retention strategy, planned models, and reporting standards before execution. |
 | **Gold Standard Validation** | `validate_gold_standard` | Pre-flight validation that drops missing values, rejects observed values outside $\{0, 1\}$ (and boolean types), and requires both classes only when `require_both_classes=True`. |
 | **Primary Effect Extraction** | `extract_primary_effect` | Helper accepting an estimates map and returning a finite point estimate, or `np.nan` when no supported or unambiguous estimate is found. |
-
 | **Zero-Variance SMD** | `smd_zero_variance` | Boundary condition in covariate balance: when pooled SD is 0 and group means differ, SMD is mathematically undefined and returns `np.nan` (rather than masking extreme imbalance as `0.0`), serialized as JSON `null`. |
 | **Distinct Study Count** | `distinct_studies` | Independent sample size threshold ($k_{\text{distinct}} \ge 10$) and uniqueness verification enforced before running Egger's linear regression test to prevent spurious validity from multi-effect studies. |
 | **Positional Boolean Masking** | `valid_mask` | Decoupling numpy design matrix slicing from pandas DataFrame index state via `.notna().to_numpy()` to prevent index misalignment across custom or non-standard indices. |

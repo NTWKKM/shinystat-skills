@@ -166,6 +166,9 @@ def evaluate_cutoff(gold, score, cutoff):
     if not np.isin(g, [0.0, 1.0]).all():
         raise ValueError(f"gold contains invalid values {np.unique(g)}. Must be strictly binary {{0, 1}}.")
 
+    if not np.isfinite(cutoff):
+        raise ValueError(f"cutoff must be a finite numeric value (got {cutoff}).")
+
     pred = (s >= cutoff).astype(int)
     tp = np.sum((g == 1) & (pred == 1))
     fp = np.sum((g == 0) & (pred == 1))
@@ -294,7 +297,8 @@ from medstat.diagnostic.calibration import (
 )
 
 # Calibration evaluates predicted risk probabilities against binary outcomes.
-# Filter valid paired inputs using finite gold_standard and predicted_risk directly:
+# Track prediction provenance: distinguish validation (out-of-fold / independent) from apparent (in-sample)
+prediction_provenance = "apparent" if "is_apparent_risk" in df.columns or "validation_risk" not in df.columns else "validation"
 if "predicted_risk" in df.columns:
     cal_mask = np.isfinite(df["gold_standard"]) & np.isfinite(df["predicted_risk"])
     cal_df = df[cal_mask]
@@ -311,9 +315,13 @@ if "predicted_risk" in df.columns:
     # hosmer_lemeshow_test(g=10) requires at least 10 finite pairs; otherwise report as not estimable
     hl = hosmer_lemeshow_test(gold_cal, risk_probs, g=10) if len(risk_probs) >= 10 else None
 
+    print(f"Calibration Provenance: {prediction_provenance.capitalize()} (in-sample={prediction_provenance == 'apparent'})")
     print(f"Brier Score: {brier['brier_score']:.4f} ({brier['interpretation']})")
-    print(f"Calibration Slope: {cal_slope['calibration_slope']:.3f} (Ideal = 1.0)")
-    print(f"Calibration Intercept: {cal_slope['calibration_intercept']:.3f} (Ideal = 0.0)")
+    if prediction_provenance == "apparent":
+        print("Calibration Slope / Intercept: Omitted for apparent development-sample estimates (tautological/uninformative in-sample)")
+    else:
+        print(f"Calibration Slope: {cal_slope['calibration_slope']:.3f} (Ideal = 1.0)")
+        print(f"Calibration Intercept: {cal_slope['calibration_intercept']:.3f} (Ideal = 0.0)")
     print(f"ICI: {ici_res['ici']:.4f} | E50: {ici_res['e50']:.4f} | E90: {ici_res['e90']:.4f} | Emax: {ici_res['emax']:.4f}")
     if hl is None:
         print(f"Hosmer-Lemeshow: Not estimable (n={len(risk_probs)} finite pairs < 10 groups)")

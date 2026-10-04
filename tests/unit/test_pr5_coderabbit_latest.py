@@ -299,6 +299,19 @@ class TestCleanOrdinalMappingIntegralKeyCheck:
         with pytest.raises(ValueError, match="not recognized"):
             standardize_categorical_outcome(s_bad, mapping)
 
+        # 5. Whole-number float categories recognized as integer-coded
+        s_float_cat = pd.Series(
+            pd.Categorical([1.0, 2.0, 0.0], ordered=True, categories=[0.0, 1.0, 2.0])
+        )
+        res_float = standardize_categorical_outcome(s_float_cat, mapping)
+        assert list(res_float) == [1, 2, 0]
+        assert res_float.dtype == int
+
+        # 6. Fractional numeric values in plain Series are rejected
+        s_frac = pd.Series([0.5, 1.0, 2.0])
+        with pytest.raises(ValueError, match="non-integral"):
+            standardize_categorical_outcome(s_frac)
+
 
 class TestCalibrationMetricValidationAndApparentSlope:
     def test_calibration_metrics_reject_booleans(self):
@@ -312,11 +325,21 @@ class TestCalibrationMetricValidationAndApparentSlope:
         from medstat.reporting.narrative import validate_calibration_metrics
 
         metrics = {"brier": 0.12, "slope": 1.0, "intercept": 0.0}
-        # In apparent provenance, slope is excluded per TRIPOD
-        filtered = validate_calibration_metrics(metrics, provenance="apparent")
-        assert "slope" not in filtered
-        assert "brier" in filtered
-        assert "intercept" in filtered
+        # In apparent provenance with tautological_slope=True, slope & intercept are excluded
+        filtered_tauto = validate_calibration_metrics(
+            metrics, provenance="apparent", tautological_slope=True
+        )
+        assert "slope" not in filtered_tauto
+        assert "intercept" not in filtered_tauto
+        assert "brier" in filtered_tauto
+
+        # In apparent provenance without tautological_slope, all metrics are retained so they can be reported as apparent
+        filtered_non_tauto = validate_calibration_metrics(
+            metrics, provenance="apparent", tautological_slope=False
+        )
+        assert "slope" in filtered_non_tauto
+        assert "intercept" in filtered_non_tauto
+        assert "brier" in filtered_non_tauto
 
     def test_external_validation_requires_full_quartet(self):
         from medstat.reporting.narrative import validate_calibration_metrics

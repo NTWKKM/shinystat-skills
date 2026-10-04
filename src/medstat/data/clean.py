@@ -1091,6 +1091,24 @@ def standardize_categorical_outcome(
                 f"Ordinal outcome contains {int(series.isna().sum())} missing values; "
                 "resolve missingness explicitly before standardizing codes."
             )
+        # Verify all values are integral before casting to int (reject fractional floats)
+        vals = series.dropna()
+        non_int = [
+            v
+            for v in vals.unique()
+            if not (
+                (
+                    isinstance(v, (numbers.Integral, np.integer))
+                    and not isinstance(v, (bool, np.bool_))
+                )
+                or (isinstance(v, (float, np.floating)) and float(v).is_integer())
+            )
+        ]
+        if non_int:
+            raise ValueError(
+                f"Ordinal outcome contains non-integral numeric values {non_int}. "
+                "Ordinal outcomes must be integers without fractional parts."
+            )
         return series.astype(int)
 
     cats = series.cat.categories
@@ -1100,22 +1118,28 @@ def standardize_categorical_outcome(
             "resolve missingness explicitly before standardizing codes."
         )
     is_int_coded = all(
-        isinstance(c, numbers.Integral) and not isinstance(c, bool) for c in cats
+        (isinstance(c, numbers.Integral) and not isinstance(c, bool))
+        or (isinstance(c, (float, np.floating)) and float(c).is_integer())
+        for c in cats
     )
 
     if is_int_coded:
+        int_cats = {int(c) for c in cats}
         if outcome_ordinal_mapping:
             expected_codes = {
                 int(k)
-                if isinstance(k, numbers.Integral) and not isinstance(k, bool)
+                if (isinstance(k, numbers.Integral) and not isinstance(k, bool))
+                or (isinstance(k, (float, np.floating)) and float(k).is_integer())
                 else int(v)
                 for k, v in outcome_ordinal_mapping.items()
                 if (isinstance(k, numbers.Integral) and not isinstance(k, bool))
+                or (isinstance(k, (float, np.floating)) and float(k).is_integer())
                 or (isinstance(v, numbers.Integral) and not isinstance(v, bool))
+                or (isinstance(v, (float, np.floating)) and float(v).is_integer())
             }
-            if not set(cats).issubset(expected_codes):
+            if not int_cats.issubset(expected_codes):
                 raise ValueError(
-                    f"Categorical codes {set(cats) - expected_codes} not recognized in outcome_ordinal_mapping."
+                    f"Categorical codes {int_cats - expected_codes} not recognized in outcome_ordinal_mapping."
                 )
         return series.astype(int)
     elif outcome_ordinal_mapping:

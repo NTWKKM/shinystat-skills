@@ -176,6 +176,29 @@ def test_cli_model_mixed(sample_clustered_csv, tmp_path):
     assert data["cluster_icc"] > 0
 
 
+def test_cli_model_mixed_rejects_binary_outcome(sample_clustered_csv, tmp_path):
+    runner = CliRunner()
+    res = runner.invoke(
+        cli,
+        [
+            "model",
+            "--data",
+            str(sample_clustered_csv),
+            "--type",
+            "mixed",
+            "--outcome",
+            "mortality",
+            "--exposure",
+            "statin",
+            "--cluster",
+            "hospital_id",
+        ],
+    )
+    assert res.exit_code != 0
+    assert "distinct values" in res.output
+    assert "--type gee" in res.output
+
+
 def test_cli_model_gee_invalid_binary_rejected(tmp_path):
     runner = CliRunner()
     csv_path = tmp_path / "bad_binary.csv"
