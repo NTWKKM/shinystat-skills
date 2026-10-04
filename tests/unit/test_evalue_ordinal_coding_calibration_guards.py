@@ -126,3 +126,93 @@ class TestCalibrationRange:
             provenance="external",
         )
         assert out["slope"] == 2.5 and out["intercept"] == -3.0
+
+
+class TestNonOrderedMissingRejection:
+    def test_non_ordered_categorical_or_series_with_missing_rejected(self):
+        # Plain non-categorical series with NaNs
+        s = pd.Series([1, 2, np.nan, 3])
+        with pytest.raises(ValueError, match="missing"):
+            standardize_categorical_outcome(s)
+
+        # Unordered Categorical with NaNs
+        s_cat = pd.Series(pd.Categorical(["A", "B", None], ordered=False))
+        with pytest.raises(ValueError, match="missing"):
+            standardize_categorical_outcome(s_cat)
+
+
+class TestGeeCovarianceAndSmallClusterAdjustment:
+    def test_gee_small_cluster_uses_bias_reduced(self):
+        from medstat.models.multilevel import fit_gee
+
+        rng = np.random.default_rng(42)
+        n_clusters = 10  # < 40 threshold
+        per_cluster = 5
+        n = n_clusters * per_cluster
+        df = pd.DataFrame(
+            {
+                "y": rng.normal(size=n),
+                "x": rng.normal(size=n),
+                "cluster": np.repeat(np.arange(n_clusters), per_cluster),
+            }
+        )
+        res = fit_gee(
+            y=df["y"],
+            X=df[["x"]],
+            cluster_ids=df["cluster"],
+            family="gaussian",
+            cov_struct="independence",
+        )
+        assert res["n_clusters"] == 10
+        assert res["cov_type"] == "bias_reduced"
+        assert res["small_cluster_adjustment"] is True
+
+    def test_gee_large_cluster_uses_robust(self):
+        from medstat.models.multilevel import fit_gee
+
+        rng = np.random.default_rng(42)
+        n_clusters = 50  # >= 40 threshold
+        per_cluster = 2
+        n = n_clusters * per_cluster
+        df = pd.DataFrame(
+            {
+                "y": rng.normal(size=n),
+                "x": rng.normal(size=n),
+                "cluster": np.repeat(np.arange(n_clusters), per_cluster),
+            }
+        )
+        res = fit_gee(
+            y=df["y"],
+            X=df[["x"]],
+            cluster_ids=df["cluster"],
+            family="gaussian",
+            cov_struct="independence",
+        )
+        assert res["n_clusters"] == 50
+        assert res["cov_type"] == "robust"
+        assert res["small_cluster_adjustment"] is False
+
+
+class TestOrdinalThresholdCutpointScale:
+    def test_threshold_df_on_cutpoint_scale_with_delta_method_ci(self):
+        from medstat.models.ordinal import fit_proportional_odds
+
+        rng = np.random.default_rng(42)
+        n = 200
+        x = rng.normal(size=n)
+        latent = 0.8 * x + rng.logistic(size=n)
+        # 3 categories: cutpoints around -0.5 and 1.0
+        y = np.digitize(latent, [-0.5, 1.0])
+        res = fit_proportional_odds(pd.Series(y), pd.DataFrame({"x": x}))
+
+        thresh_df = res["threshold_df"]
+        assert len(thresh_df) == 2
+        assert "scale" in thresh_df.columns
+        assert (thresh_df["scale"] == "cutpoint").all()
+
+        # Actual cutpoint values should be monotonic increasing
+        c1, c2 = thresh_df["coef"].iloc[0], thresh_df["coef"].iloc[1]
+        assert c1 < c2
+        # Standard errors should be positive and finite
+        assert (thresh_df["std_error"] > 0).all()
+        assert np.isfinite(thresh_df["std_error"]).all()

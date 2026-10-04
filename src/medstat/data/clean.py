@@ -1086,6 +1086,11 @@ def standardize_categorical_outcome(
     import numbers
 
     if not (isinstance(series.dtype, pd.CategoricalDtype) and series.dtype.ordered):
+        if series.isna().any():
+            raise ValueError(
+                f"Ordinal outcome contains {int(series.isna().sum())} missing values; "
+                "resolve missingness explicitly before standardizing codes."
+            )
         return series.astype(int)
 
     cats = series.cat.categories

@@ -20,7 +20,7 @@ import pandas as pd
 from medstat.agreement.bland_altman import bland_altman_analysis
 from medstat.agreement.icc import calculate_icc
 from medstat.agreement.kappa import calculate_kappa
-from medstat.causal.balance import calculate_smd
+from medstat.causal.balance import _normalize_smd, calculate_smd
 from medstat.causal.psm import propensity_score_match
 from medstat.cli.spec import AnalysisPlan
 from medstat.data.clean import (
@@ -953,6 +953,10 @@ def model_cmd(
         result_data["n_clusters"] = fit_res["n_clusters"]
         result_data["cov_struct"] = fit_res["cov_struct"]
         result_data["family"] = fit_res["family"]
+        result_data["cov_type"] = fit_res.get("cov_type")
+        result_data["small_cluster_adjustment"] = fit_res.get(
+            "small_cluster_adjustment"
+        )
         result_data["qic"] = fit_res["qic"]
 
         deff_res = calculate_design_effect(y_raw, df[cluster_col])
@@ -1500,9 +1504,8 @@ def psm_cmd(
     )
 
     def _clean_smd(val: Any) -> float | None:
-        if val is None or pd.isna(val) or not np.isfinite(val):
-            return None
-        return float(val)
+        norm = _normalize_smd(val)
+        return float(norm) if np.isfinite(norm) else None
 
     if balance_check or love_plot:
         love_data = {

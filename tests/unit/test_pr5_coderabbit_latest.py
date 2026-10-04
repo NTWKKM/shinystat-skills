@@ -192,9 +192,10 @@ class TestPsmRegularizedFallbackPenalty:
                 assert alphas is not None
                 # Intercept is at index 0 with weight 0.0
                 assert alphas[0] == 0.0
-                # Covariates have justified alpha=1.0 for statsmodels summed-likelihood objective
-                assert alphas[1] == 1.0
-                assert alphas[2] == 1.0
+                # Covariates have sample-size-scaled alpha = 1.0 * len(y) = 4.0
+                expected_alpha = 1.0 * len(df)
+                assert alphas[1] == expected_alpha
+                assert alphas[2] == expected_alpha
                 assert len(ps) == 4
 
     def test_fit_regularized_with_binary_confounders_separation(self):
@@ -243,9 +244,10 @@ class TestPsmRegularizedFallbackPenalty:
                 alphas = mock_reg.call_args.kwargs.get("alpha")
                 # Intercept (added by add_constant) is at index 0 with weight 0.0
                 assert alphas[0] == 0.0
-                # Varying 'const' covariate (index 1) must remain penalized (alpha=1.0)
-                assert alphas[1] == 1.0
-                assert alphas[2] == 1.0
+                # Varying 'const' covariate (index 1) must remain penalized with sample-size-scaled alpha (1.0 * len(y) = 4.0)
+                expected_alpha = 1.0 * len(df)
+                assert alphas[1] == expected_alpha
+                assert alphas[2] == expected_alpha
 
 
 class TestCleanOrdinalMappingIntegralKeyCheck:

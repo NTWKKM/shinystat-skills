@@ -214,8 +214,23 @@ opt_idx = np.argmax(youden_j)
 opt_cutoff = thresholds[opt_idx]
 print(f"ROC AUC: {roc_auc:.3f} (95% DeLong CI: {auc_ci[0]:.3f} - {auc_ci[1]:.3f}) | Optimal Cutoff (Youden J): {opt_cutoff:.2f}")
 
-# 2x2 accuracy at the Youden-optimal cutoff (replace with a prespecified clinical cutoff when one exists)
-cutoff_results = evaluate_cutoff(gold_vals, scores, opt_cutoff)
+# Cutoff selection & evaluation protocol:
+# Optimizing a cutoff via Youden J on the full sample introduces optimistic performance bias.
+# Cutoff must be:
+# 1) Prespecified based on prior literature / clinical guidelines, OR
+# 2) Selected on a dedicated training set (or cross-validation fold) and evaluated on an independent validation set.
+prespecified_cutoff = None  # e.g. 50.0 (prespecified clinical decision threshold)
+if prespecified_cutoff is not None:
+    eval_cutoff = prespecified_cutoff
+    print(f"Evaluating prespecified clinical cutoff: {eval_cutoff}")
+else:
+    # If deriving cutoff empirically, do NOT evaluate on the same data without independent split:
+    print(f"Empirical optimal cutoff (Youden J on cohort): {opt_cutoff:.2f}. "
+          "Caution: evaluate on independent validation data to avoid optimistic threshold bias.")
+    eval_cutoff = opt_cutoff
+
+# 2x2 accuracy evaluation at prespecified or training-derived cutoff
+cutoff_results = evaluate_cutoff(gold_vals, scores, eval_cutoff)
 
 # 4. DECISION CURVE ANALYSIS (DCA: Net Benefit with Treat All and Treat None Reference Strategies)
 def calculate_net_benefit(gold, probs, thresholds_range):

@@ -208,13 +208,18 @@ def fit_gee(
         fam = Gaussian()
         is_binary = False
 
+    n_clusters = len(np.unique(c_clean))
+    small_cluster_threshold = 40
+    small_cluster_flag = bool(n_clusters < small_cluster_threshold)
+    cov_type = "bias_reduced" if small_cluster_flag else "robust"
+
     model = GEE(
         y_clean, X_mat, groups=c_clean, time=t_clean, family=fam, cov_struct=struct
     )
-    result = model.fit()
+    result = model.fit(cov_type=cov_type)
 
     coefs = result.params
-    se_robust = result.bse  # Robust sandwich SE
+    se = result.bse  # Standard errors from chosen covariance structure
     z_stat = result.tvalues
     p_values = result.pvalues
     conf = result.conf_int()
@@ -231,7 +236,7 @@ def fit_gee(
     summary_df = pd.DataFrame(
         {
             "coef": coefs,
-            "std_error": se_robust,
+            "std_error": se,
             "z_stat": z_stat,
             "p_value": p_values,
             "ci_lower": conf[:, 0],
@@ -260,7 +265,10 @@ def fit_gee(
         "cov_struct": cov_struct,
         "family": family,
         "nobs": int(result.nobs),
-        "n_clusters": len(np.unique(c_clean)),
+        "n_clusters": int(n_clusters),
+        "cov_type": cov_type,
+        "small_cluster_adjustment": small_cluster_flag,
+        "small_cluster_threshold": small_cluster_threshold,
         "qic": qic,
         "scale": float(getattr(result, "scale", 1.0)),
     }

@@ -140,7 +140,59 @@ def fit_proportional_odds(
         index=param_names,
     )
 
-    threshold_df = summary_df.iloc[k_vars:].copy()
+    # Construct threshold_df on the actual cutpoint scale using transform_threshold_params
+    # statsmodels OrderedModel estimates cutpoint 0 and subsequent log-increments (gamma_j = log(cutpoint_j - cutpoint_{j-1})).
+    # We transform these to actual cutpoint values excluding infinite endpoints [-inf, c_1, ..., c_{K-1}, inf]
+    # and compute cutpoint standard errors using the delta method on the threshold covariance matrix.
+    raw_thresh = model.transform_threshold_params(result.params)
+    cutpoints = np.asarray(raw_thresh[1:-1], dtype=float)
+    thresh_sub = summary_df.iloc[k_vars:].copy()
+    k_thresh = len(thresh_sub)
+
+    try:
+        cov_params_df = result.cov_params()
+        cov_thresh = cov_params_df.iloc[k_vars:, k_vars:].values
+        # Delta method Jacobian J: d(c_i) / d(theta_j)
+        # c_0 = theta_0 => dc_0/dtheta_0 = 1
+        # c_i = theta_0 + sum_{j=1}^i exp(theta_j) => dc_i/dtheta_0 = 1, dc_i/dtheta_j = exp(theta_j) for j <= i
+        J = np.zeros((k_thresh, k_thresh), dtype=float)
+        J[:, 0] = 1.0
+        param_vals = result.params.iloc[k_vars:].values
+        for i in range(1, k_thresh):
+            for j in range(1, i + 1):
+                J[i, j] = np.exp(param_vals[j])
+        cov_cutpoints = J @ cov_thresh @ J.T
+        se_cutpoints = np.sqrt(np.maximum(0.0, np.diag(cov_cutpoints)))
+        z_crit = 1.959963984540054
+        ci_lower = cutpoints - z_crit * se_cutpoints
+        ci_upper = cutpoints + z_crit * se_cutpoints
+        p_cutpoints = 2.0 * (
+            1.0
+            - stats.norm.cdf(
+                np.abs(cutpoints / np.where(se_cutpoints > 0, se_cutpoints, np.nan))
+            )
+        )
+    except Exception:
+        se_cutpoints = np.full(k_thresh, np.nan)
+        ci_lower = np.full(k_thresh, np.nan)
+        ci_upper = np.full(k_thresh, np.nan)
+        p_cutpoints = np.full(k_thresh, np.nan)
+
+    threshold_df = pd.DataFrame(
+        {
+            "coef": cutpoints,
+            "std_error": se_cutpoints,
+            "z_stat": cutpoints / np.where(se_cutpoints > 0, se_cutpoints, np.nan),
+            "p_value": p_cutpoints,
+            "ci_lower": ci_lower,
+            "ci_upper": ci_upper,
+            "odds_ratio": np.full(k_thresh, np.nan),
+            "or_ci_lower": np.full(k_thresh, np.nan),
+            "or_ci_upper": np.full(k_thresh, np.nan),
+            "scale": "cutpoint",
+        },
+        index=thresh_sub.index,
+    )
     predictor_df = summary_df.iloc[:k_vars].copy()
 
     # Null model log-likelihood for pseudo R2
@@ -312,7 +364,9 @@ def test_proportional_odds(
         },
         "variables": var_results,
         "interpretation": (
-            "Proportional odds assumption holds (p >= 0.05); parallel slopes model is valid."
+            "No evidence against proportional odds assumption (omnibus p >= 0.05); however, "
+            "this does not prove parallel slopes across all cutpoints. Inspect per-variable "
+            "cutpoint coefficients for subtle non-proportionality."
             if p_omnibus >= 0.05
             else "Proportional odds assumption violated (p < 0.05); consider partial proportional odds or multinomial logistic regression."
         ),

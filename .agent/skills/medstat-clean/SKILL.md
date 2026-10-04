@@ -179,6 +179,17 @@ if not is_ordered_cat:
         if label_to_code and any(isinstance(v, str) for v in outcome_vals):
             df['outcome'] = df['outcome'].replace(label_to_code)
         if not df['outcome'].isnull().any():
+            # Validate that mapped ordinal codes are integral and reject fractional values
+            non_int = [
+                v for v in df['outcome'].dropna().unique()
+                if not (isinstance(v, (numbers.Integral, np.integer)) and not isinstance(v, (bool, np.bool_)))
+                and not (isinstance(v, (float, np.floating)) and float(v).is_integer())
+            ]
+            if non_int:
+                raise ValueError(
+                    f"Mapped ordinal outcome contains non-integral codes {non_int}. "
+                    "Ordinal endpoints must be integral codes without fractional values."
+                )
             df['outcome'] = df['outcome'].astype(int)
 
 
@@ -197,8 +208,12 @@ protocol_permits_outcome_exclusion = False  # Default False: requires explicit s
 protocol_rationale = None  # Provide documented rationale before excluding missing outcomes (e.g. 'Prespecified complete-case analysis')
 
 if df['outcome'].isnull().any():
-    if not protocol_permits_outcome_exclusion:
-        raise ValueError("Missing values detected in primary outcome, but study protocol does not verify exclusion criteria. Clarify with PI/SAP.")
+    if not (protocol_permits_outcome_exclusion and protocol_rationale and str(protocol_rationale).strip()):
+        raise ValueError(
+            "Missing values detected in primary outcome, but study protocol does not verify exclusion criteria "
+            "with a documented rationale (protocol_permits_outcome_exclusion=True and non-empty protocol_rationale required). "
+            "Clarify with PI/SAP."
+        )
     df_clean = df.dropna(subset=['outcome']).copy()
     tracker.record_stage(
         stage_name="Primary Outcome Ascertainment",
@@ -261,6 +276,17 @@ if isinstance(df_clean['outcome'].dtype, pd.CategoricalDtype) and df_clean['outc
                 k: v for k, v in outcome_ordinal_mapping.items()
                 if isinstance(v, numbers.Integral) and not isinstance(v, bool) and isinstance(k, str)
             }
+        unmapped_cats = [c for c in cats if c not in label_to_code]
+        if unmapped_cats:
+            raise ValueError(f"Declared categories {unmapped_cats} are not defined in outcome_ordinal_mapping.")
+        mapped_codes = [label_to_code[c] for c in cats]
+        if len(set(mapped_codes)) != len(mapped_codes):
+            raise ValueError(f"outcome_ordinal_mapping codes must be unique across categories (got {dict(zip(cats, mapped_codes))}).")
+        if any(b <= a for a, b in zip(mapped_codes, mapped_codes[1:])):
+            raise ValueError(
+                "outcome_ordinal_mapping codes must strictly increase in declared category order "
+                f"(got {dict(zip(cats, mapped_codes))}). Non-increasing mapping would invert ordinal direction."
+            )
         df_clean['outcome'] = df_clean['outcome'].map(label_to_code).astype(int)
     else:
         df_clean['outcome'] = df_clean['outcome'].cat.codes.astype(int)

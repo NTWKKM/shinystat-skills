@@ -53,10 +53,11 @@ def calculate_propensity_score(
     except Exception:
         try:
             # Statsmodels fit_regularized minimizes unnormalized negative log-likelihood plus L1 penalty.
-            # Use justified L1 penalty alpha=1.0 on covariates to stabilize estimates under separation
+            # Scale covariate L1 penalty by sample size (alpha = 1.0 * len(y)) to maintain consistent
+            # regularization strength relative to the summed log-likelihood across varying sample sizes,
             # while leaving the intercept unpenalized (alpha=0.0).
             # Identify intercept strictly by all-ones values and position, ensuring any varying covariate named 'const' remains penalized.
-            covariate_alpha = 1.0
+            covariate_alpha = 1.0 * float(len(y))
             alphas = np.full(X.shape[1], covariate_alpha, dtype=float)
             const_indices = [
                 i

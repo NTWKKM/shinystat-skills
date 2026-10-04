@@ -122,6 +122,8 @@ model_records = [
 def format_p_value(p_val_str, style="NEJM"):
     if p_val_str is None or pd.isna(p_val_str) or str(p_val_str).strip() in ("NA", "—", "-", "", "nan", "NaN"):
         return "—"
+    if isinstance(p_val_str, (bool, np.bool_)):
+        raise ValueError(f"p-value cannot be a boolean (got {p_val_str}).")
     try:
         p = float(p_val_str)
         if not np.isfinite(p) or not (0.0 <= p <= 1.0):

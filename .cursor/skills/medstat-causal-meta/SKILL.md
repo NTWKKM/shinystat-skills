@@ -280,15 +280,17 @@ def run_bland_altman(m1_series, m2_series, ci=0.95):
     t_crit = float(stats.t.ppf(1.0 - (1.0 - ci) / 2.0, df=n - 1))
     ci_bias = (mean_bias - t_crit * se_bias, mean_bias + t_crit * se_bias)
     
-    z_loa = float(stats.norm.ppf(1.0 - (1.0 - ci) / 2.0))
-    loa_upper = mean_bias + z_loa * sd_diff
-    loa_lower = mean_bias - z_loa * sd_diff
-    se_loa = float(np.sqrt((1.0 / n + (z_loa**2) / (2.0 * (n - 1))) * (sd_diff**2)))
+    # Limits of Agreement (LoA) represent where 95% of individual differences are expected to lie (fixed 1.96 * SD)
+    # The confidence parameter `ci` governs the confidence intervals around the mean bias and the limits of agreement.
+    z_loa_95 = 1.959963984540054  # Fixed standard 95% LoA multiplier
+    loa_upper = mean_bias + z_loa_95 * sd_diff
+    loa_lower = mean_bias - z_loa_95 * sd_diff
+    se_loa = float(np.sqrt((1.0 / n + (z_loa_95**2) / (2.0 * (n - 1))) * (sd_diff**2)))
     ci_loa_upper = (loa_upper - t_crit * se_loa, loa_upper + t_crit * se_loa)
     ci_loa_lower = (loa_lower - t_crit * se_loa, loa_lower + t_crit * se_loa)
     ci_pct = int(round(ci * 100))
     print(f"Bland-Altman: Mean Bias = {mean_bias:.2f} ({ci_pct}% CI [{ci_bias[0]:.2f}, {ci_bias[1]:.2f}]), "
-          f"{ci_pct}% LoA = [{loa_lower:.2f}, {loa_upper:.2f}] (LoA Lower {ci_pct}% CI [{ci_loa_lower[0]:.2f}, {ci_loa_lower[1]:.2f}], "
+          f"95% LoA = [{loa_lower:.2f}, {loa_upper:.2f}] (LoA Lower {ci_pct}% CI [{ci_loa_lower[0]:.2f}, {ci_loa_lower[1]:.2f}], "
           f"LoA Upper {ci_pct}% CI [{ci_loa_upper[0]:.2f}, {ci_loa_upper[1]:.2f}])")
     return {
         "mean_bias": mean_bias,

@@ -208,20 +208,25 @@ def summarize_continuous(series, group, ref_level=None):
 
 def summarize_categorical(series, group, ref_level=None):
     ct = pd.crosstab(series, group)
-    chi2, p_val_asymp, _, expected = stats.chi2_contingency(ct)
-    is_sparse = (expected < 5).any()
-    if is_sparse:
-        if ct.shape == (2, 2):
-            _, p_val = stats.fisher_exact(ct)
-            p_formatted = format_p_value(p_val)
-        else:
-            # Sparse table larger than 2x2: asymptotic chi-square is invalid
-            # Report as not estimable without exact/Monte Carlo permutation test
-            p_val = np.nan
-            p_formatted = "Not estimable (sparse table > 2x2 requires exact/permutation test)"
+    # Check that both treatment groups have observed values and table has >= 2 levels in each dimension
+    if ct.empty or ct.shape[0] < 2 or ct.shape[1] < 2:
+        p_val = np.nan
+        p_formatted = "NA"
     else:
-        p_val = p_val_asymp
-        p_formatted = format_p_value(p_val)
+        chi2, p_val_asymp, _, expected = stats.chi2_contingency(ct)
+        is_sparse = (expected < 5).any()
+        if is_sparse:
+            if ct.shape == (2, 2):
+                _, p_val = stats.fisher_exact(ct)
+                p_formatted = format_p_value(p_val)
+            else:
+                # Sparse table larger than 2x2: asymptotic chi-square is invalid
+                # Report as not estimable without exact/Monte Carlo permutation test
+                p_val = np.nan
+                p_formatted = "Not estimable (sparse table > 2x2 requires exact/permutation test)"
+        else:
+            p_val = p_val_asymp
+            p_formatted = format_p_value(p_val)
     g0, g1, ref_lbl, comp_lbl = split_groups(series, group, ref_level=ref_level)
     dummies = pd.get_dummies(series, drop_first=(series.nunique() == 2))
     smds = {}
