@@ -310,13 +310,22 @@ if "predicted_risk" in df.columns:
     cal_mask = np.isfinite(df["gold_standard"]) & np.isfinite(df["predicted_risk"])
     cal_df = df[cal_mask]
     if "is_apparent_risk" in cal_df.columns:
-        # Require documented affirmative validation provenance for every predicted_risk value;
-        # mixed, missing, or apparent flags default away from validation
-        is_app = cal_df["is_apparent_risk"].fillna(True).astype(bool)
-        prediction_provenance = "validation" if (~is_app).all() else ("apparent" if is_app.all() else "unknown")
+        # Require explicit boolean or numeric 0/1 tokens; text-coded, mixed, or invalid values -> unknown
+        raw_app = cal_df["is_apparent_risk"]
+        valid_bool = raw_app.isin([True, False, 1, 0, 1.0, 0.0])
+        if not valid_bool.all():
+            prediction_provenance = "unknown"
+        else:
+            is_app = raw_app.isin([True, 1, 1.0])
+            prediction_provenance = "validation" if (~is_app).all() else ("apparent" if is_app.all() else "unknown")
     elif "validation_risk" in cal_df.columns:
-        is_val = cal_df["validation_risk"].fillna(False).astype(bool)
-        prediction_provenance = "validation" if is_val.all() else ("apparent" if (~is_val).all() else "unknown")
+        raw_val = cal_df["validation_risk"]
+        valid_bool = raw_val.isin([True, False, 1, 0, 1.0, 0.0])
+        if not valid_bool.all():
+            prediction_provenance = "unknown"
+        else:
+            is_val = raw_val.isin([True, 1, 1.0])
+            prediction_provenance = "validation" if is_val.all() else ("apparent" if (~is_val).all() else "unknown")
     else:
         prediction_provenance = "unknown"
     risk_probs = cal_df["predicted_risk"].values
