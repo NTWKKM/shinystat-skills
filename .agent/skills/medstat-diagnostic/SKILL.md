@@ -216,21 +216,25 @@ print(f"ROC AUC: {roc_auc:.3f} (95% DeLong CI: {auc_ci[0]:.3f} - {auc_ci[1]:.3f}
 
 # Cutoff selection & evaluation protocol:
 # Optimizing a cutoff via Youden J on the full sample introduces optimistic performance bias.
-# Cutoff must be:
-# 1) Prespecified based on prior literature / clinical guidelines, OR
-# 2) Selected on a dedicated training set (or cross-validation fold) and evaluated on an independent validation set.
+# Cutoff evaluation requires either:
+# 1) A prespecified cutoff based on prior literature / clinical guidelines, OR
+# 2) Independent validation data (or test split) where the cutoff derived on training data is evaluated.
 prespecified_cutoff = None  # e.g. 50.0 (prespecified clinical decision threshold)
-if prespecified_cutoff is not None:
-    eval_cutoff = prespecified_cutoff
-    print(f"Evaluating prespecified clinical cutoff: {eval_cutoff}")
-else:
-    # If deriving cutoff empirically, do NOT evaluate on the same data without independent split:
-    print(f"Empirical optimal cutoff (Youden J on cohort): {opt_cutoff:.2f}. "
-          "Caution: evaluate on independent validation data to avoid optimistic threshold bias.")
-    eval_cutoff = opt_cutoff
+val_gold = None  # e.g. df_val["gold_standard"].values (independent validation cohort)
+val_scores = None  # e.g. df_val["biomarker"].values (independent validation cohort)
 
-# 2x2 accuracy evaluation at prespecified or training-derived cutoff
-cutoff_results = evaluate_cutoff(gold_vals, scores, eval_cutoff)
+if prespecified_cutoff is not None:
+    print(f"Evaluating prespecified clinical cutoff ({prespecified_cutoff}) on cohort:")
+    cutoff_results = evaluate_cutoff(gold_vals, scores, prespecified_cutoff)
+elif val_gold is not None and val_scores is not None:
+    print(f"Evaluating training-derived optimal cutoff ({opt_cutoff:.2f}) on independent validation data:")
+    cutoff_results = evaluate_cutoff(val_gold, val_scores, opt_cutoff)
+else:
+    # Default path: Skip in-sample 2x2 evaluation to avoid optimistic threshold bias
+    cutoff_results = None
+    print(f"Optimal Cutoff (Youden J on derivation cohort): {opt_cutoff:.2f}")
+    print("In-sample 2x2 cutoff evaluation skipped: supply a prespecified cutoff or independent validation data "
+          "to evaluate diagnostic accuracy without optimistic threshold bias.")
 
 # 4. DECISION CURVE ANALYSIS (DCA: Net Benefit with Treat All and Treat None Reference Strategies)
 def calculate_net_benefit(gold, probs, thresholds_range):
