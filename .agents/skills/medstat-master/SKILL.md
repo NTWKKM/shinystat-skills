@@ -353,12 +353,13 @@ def summarize_categorical(series, group):
             "Group 1": f"{cnt1} ({pct1:.1f}%)",
         }
 
-    # Calculate category-level SMDs
+    # Calculate category-level SMDs (excluding missing category values)
     dummies = pd.get_dummies(series, drop_first=(series.nunique() == 2))
+    non_missing_mask = series.notna()
     category_smds = {}
     for col in dummies.columns:
-        d0 = dummies.loc[group == 0, col].astype(float)
-        d1 = dummies.loc[group == 1, col].astype(float)
+        d0 = dummies.loc[(group == 0) & non_missing_mask, col].astype(float)
+        d1 = dummies.loc[(group == 1) & non_missing_mask, col].astype(float)
         diff = abs(d1.mean() - d0.mean())
         pooled_sd = np.sqrt((d1.var(ddof=1) + d0.var(ddof=1)) / 2.0) if len(d1) > 1 and len(d0) > 1 else 0.0
         if len(d1) < 2 or len(d0) < 2:

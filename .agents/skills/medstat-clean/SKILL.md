@@ -149,9 +149,9 @@ df = df_raw.copy()
 outcome_is_ordinal = False  # Set True ONLY when the SAP defines the endpoint as ordinal
 outcome_ordinal_mapping = None  # e.g. {0: 'Home', 1: 'Ward', ..., 6: 'Death'} (ordered codes -> labels)
 outcome_is_nominal = False  # Set True for nominal multicategory outcomes (e.g. subtype analysis)
+outcome_vals = set(df['outcome'].dropna().unique())
 is_ordered_cat = isinstance(df['outcome'].dtype, pd.CategoricalDtype) and df['outcome'].dtype.ordered
 if not is_ordered_cat:
-    outcome_vals = set(df['outcome'].dropna().unique())
     if not outcome_vals.issubset({0, 1}) and not outcome_is_nominal:
         if not (outcome_is_ordinal and outcome_ordinal_mapping):
             raise ValueError(
@@ -192,7 +192,7 @@ if not is_ordered_cat:
             df['outcome_code'] = df['outcome'].map(label_to_code)
         else:
             df['outcome_code'] = df['outcome']
-        if not df['outcome_code'].isnull().any():
+        if not df['outcome_code'].isnull().all():
             # Validate that mapped ordinal codes are integral and reject fractional values
             non_int = [
                 v for v in df['outcome_code'].dropna().unique()
@@ -204,9 +204,11 @@ if not is_ordered_cat:
                     f"Mapped ordinal outcome contains non-integral codes {non_int}. "
                     "Ordinal endpoints must be integral codes without fractional values."
                 )
-            df['outcome_code'] = df['outcome_code'].astype(int)
+            # Use nullable integer dtype so missing outcome rows reach audited exclusion flow
+            df['outcome_code'] = df['outcome_code'].astype("Int64")
     elif outcome_vals.issubset({0, 1}):
-        df['outcome_code'] = df['outcome'].astype(int)
+        # Preserve missing values for audited exclusion flow via nullable integer
+        df['outcome_code'] = df['outcome'].astype("Int64")
 
 
 # 3. MISSINGNESS AUDIT & SAMPLE RETENTION FLOW (SCAFFOLD TEMPLATE)
@@ -231,6 +233,8 @@ if df['outcome'].isnull().any():
             "Clarify with PI/SAP."
         )
     df_clean = df.dropna(subset=['outcome']).copy()
+    if 'outcome_code' in df_clean.columns:
+        df_clean['outcome_code'] = df_clean['outcome_code'].astype(int)
     tracker.record_stage(
         stage_name="Primary Outcome Ascertainment",
         n_remaining=len(df_clean),
@@ -238,6 +242,8 @@ if df['outcome'].isnull().any():
     )
 else:
     df_clean = df.copy()
+    if 'outcome_code' in df_clean.columns and not df_clean['outcome_code'].isnull().any():
+        df_clean['outcome_code'] = df_clean['outcome_code'].astype(int)
 
 # Address remaining missing values in covariates per study-specific strategy (e.g. MICE, indicator, or documented complete-case)
 # before declaring the cohort clean and persisting.

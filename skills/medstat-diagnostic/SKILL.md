@@ -204,6 +204,10 @@ gold_vals = clean_diag['gold_standard'].astype(int).values
 # Directionality: Apply prespecified clinical score orientation before ROC & Youden calculations
 # (e.g. low-is-abnormal markers like eGFR or Platelets have score_orientation='low_abnormal' and are inverted as -scores)
 score_orientation = "high_abnormal"  # "high_abnormal" (default) or "low_abnormal"
+if score_orientation not in {"high_abnormal", "low_abnormal"}:
+    raise ValueError(
+        f"score_orientation must be strictly 'high_abnormal' or 'low_abnormal', got: '{score_orientation}'"
+    )
 eval_scores = -scores if score_orientation == "low_abnormal" else scores
 
 fpr, tpr, thresholds = roc_curve(gold_vals, eval_scores)
@@ -306,11 +310,15 @@ if "predicted_risk" in df.columns:
     cal_mask = np.isfinite(df["gold_standard"]) & np.isfinite(df["predicted_risk"])
     cal_df = df[cal_mask]
     if "is_apparent_risk" in cal_df.columns:
-        prediction_provenance = "apparent" if cal_df["is_apparent_risk"].any() else "validation"
+        # Require documented affirmative validation provenance for every predicted_risk value;
+        # mixed, missing, or apparent flags default away from validation
+        is_app = cal_df["is_apparent_risk"].fillna(True).astype(bool)
+        prediction_provenance = "validation" if (~is_app).all() else ("apparent" if is_app.all() else "unknown")
     elif "validation_risk" in cal_df.columns:
-        prediction_provenance = "validation"
+        is_val = cal_df["validation_risk"].fillna(False).astype(bool)
+        prediction_provenance = "validation" if is_val.all() else ("apparent" if (~is_val).all() else "unknown")
     else:
-        prediction_provenance = "apparent"
+        prediction_provenance = "unknown"
     risk_probs = cal_df["predicted_risk"].values
     gold_cal = cal_df["gold_standard"].astype(int).values
     if len(risk_probs) == 0:
@@ -324,13 +332,13 @@ if "predicted_risk" in df.columns:
     # hosmer_lemeshow_test(g=10) requires at least 10 finite pairs; otherwise report as not estimable
     hl = hosmer_lemeshow_test(gold_cal, risk_probs, g=10) if len(risk_probs) >= 10 else None
 
-    print(f"Calibration Provenance: {prediction_provenance.capitalize()} (in-sample={prediction_provenance == 'apparent'})")
+    print(f"Calibration Provenance: {prediction_provenance.capitalize()} (validation={prediction_provenance == 'validation'})")
     print(f"Brier Score: {brier['brier_score']:.4f} ({brier['interpretation']})")
-    if prediction_provenance == "apparent":
-        print("Calibration Slope / Intercept: Omitted for apparent development-sample estimates (tautological/uninformative in-sample)")
-    else:
+    if prediction_provenance == "validation":
         print(f"Calibration Slope: {cal_slope['calibration_slope']:.3f} (Ideal = 1.0)")
         print(f"Calibration Intercept: {cal_slope['calibration_intercept']:.3f} (Ideal = 0.0)")
+    else:
+        print("Calibration Slope / Intercept: Omitted (requires documented affirmative validation provenance for all risk predictions)")
     print(f"ICI: {ici_res['ici']:.4f} | E50: {ici_res['e50']:.4f} | E90: {ici_res['e90']:.4f} | Emax: {ici_res['emax']:.4f}")
     if hl is None:
         print(f"Hosmer-Lemeshow: Not estimable (n={len(risk_probs)} finite pairs < 10 groups)")

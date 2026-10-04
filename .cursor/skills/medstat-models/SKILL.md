@@ -307,7 +307,8 @@ if unique_outcomes != {0, 1} and unique_outcomes != {0.0, 1.0}:
     raise ValueError(f"Outcome must contain exactly both binary classes {{0, 1}}, got: {unique_outcomes}")
 
 # Align treatment reference level in formula with configured Table 1 reference level:
-trt_term = f"C(treatment, Treatment(reference={repr(configured_ref)}))" if isinstance(configured_ref, str) or not np.issubdtype(type(configured_ref), np.number) or configured_ref != 0 else "treatment"
+# Numeric coding is used only when observed treatment levels are exactly {0, 1} with 0 as reference; otherwise encode categorically
+trt_term = "treatment" if set(treatment_levels) == {0, 1} and configured_ref == 0 else f"C(treatment, Treatment(reference={repr(configured_ref)}))"
 formula = f"outcome ~ {trt_term} + age + C(sex) + bmi"
 y_mat, X_mat = patsy.dmatrices(formula, data=df_model, return_type='dataframe')
 # Count fitted predictor parameters from expanded design matrix (excluding intercept)
