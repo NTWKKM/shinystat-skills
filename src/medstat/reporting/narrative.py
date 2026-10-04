@@ -9,6 +9,67 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
+
+
+def validate_calibration_metrics(
+    metrics: dict[str, Any],
+    provenance: str | None = None,
+    tautological_slope: bool = False,
+) -> dict[str, float]:
+    """
+    Validate calibration metrics: reject booleans and non-finite values.
+    For apparent provenance with tautological_slope=True, omit calibration slope and intercept
+    (apparent slope is 1.0 and intercept is 0.0 by construction in derivation data).
+    Otherwise, retain all valid finite metrics so they can be reported as apparent.
+    For external provenance, require full quartet: brier, slope, intercept, ici.
+    """
+    if provenance not in ("apparent", "external", None):
+        raise ValueError(
+            "calibration_provenance must be 'apparent', 'external', or None."
+        )
+    if not metrics:
+        raise ValueError(
+            "calibration_metrics must be provided when calibration_provenance is set."
+        )
+
+    for k, v in metrics.items():
+        if (
+            isinstance(v, (bool, np.bool_))
+            or not isinstance(v, (int, float, np.number))
+            or not np.isfinite(v)
+        ):
+            raise ValueError(
+                f"Calibration metric '{k}' must be a finite numeric value (got {v})."
+            )
+        if k.lower() in ("brier", "ici") and not 0.0 <= float(v) <= 1.0:
+            raise ValueError(
+                f"Calibration metric '{k}' must lie within [0, 1] (got {v})."
+            )
+
+    if provenance == "apparent":
+        if tautological_slope:
+            filtered = {
+                k: float(v)
+                for k, v in metrics.items()
+                if k.lower() not in ("slope", "intercept")
+            }
+            if not filtered:
+                raise ValueError(
+                    "Apparent validation requires at least one non-slope/intercept calibration metric (e.g., Brier score)."
+                )
+            return filtered
+        return {k: float(v) for k, v in metrics.items()}
+    elif provenance == "external":
+        required = {"brier", "slope", "intercept", "ici"}
+        missing = required - {k.lower() for k in metrics}
+        if missing:
+            raise ValueError(
+                f"External validation requires calibration metrics {sorted(required)}; missing: {sorted(missing)}."
+            )
+        return {k: float(v) for k, v in metrics.items()}
+    return {k: float(v) for k, v in metrics.items()}
+
 
 def generate_methods_narrative(
     model_type: str = "logistic",

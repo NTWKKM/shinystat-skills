@@ -61,3 +61,23 @@ The agent screens column names and value distributions against clinical patterns
     - **MICE**: Applicable under plausible MAR, scaling imputations $m$ to Fraction of Missing Information (FMI).
     - **KNN / Indicator**: As clinically justified for point-of-care or structured patterns (note: indicator imputation is not an appropriate default for missing confounders in observational analyses due to the risk of residual confounding bias).
   - Always perform sensitivity analyses across mechanisms and track audited sample retention flow ($N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$). Never perform silent listwise deletion.
+
+---
+
+## 4. 3-Pillar Triangulation & Contradiction Resolution Protocol
+
+When evaluating the analysis path, the agent must triangulate:
+1. **Proposal PICO**: Research goal (Causal, Prognostic, Survival, Diagnostic, Agreement, Meta).
+2. **Clinical Principles**: Biological mechanisms (confounding by indication, non-linearity, low-is-abnormal lab directionality).
+3. **Data Geometry Reality**: Actual columns, event count, sample size, missingness patterns.
+
+### Contradiction Resolution Table
+
+| Proposal Request | Raw Data Reality | Clinical Principle | Decisive Resolution (Anti-Hallucination) |
+| :--- | :--- | :--- | :--- |
+| **Survival Analysis (Cox PH)** | Binary status only (`status_death`), no time/duration column | Cannot compute hazard or account for censoring/varying follow-up without observation time | **REQUEST DATA OR PIVOT**: Do NOT hallucinate a time column. Request follow-up duration if censoring or variable observation time exists; permit Type 2 Multivariable Logistic/Firth regression only for a prespecified fixed horizon with complete ascertainment. |
+| **Causal Treatment Effect (PSM)** | Single-arm cohort (no control/comparator group) | Cannot evaluate comparative counterfactuals | **HALT & PIVOT**: State lack of comparator arm. Transition to Type 1 Descriptive Cohort analysis. |
+| **Diagnostic Accuracy (ROC/AUC)** | Continuous marker where lower values mean worse disease (e.g. eGFR, Platelets) | Disease concordance inverted if evaluated with $Score \ge Cutoff$ | **PRESPECIFIED ORIENTATION**: Establish biomarker directionality clinically before analysis; recode/invert low-is-abnormal scores prior to cutpoint evaluation. Report and investigate empirical $\text{AUC} < 0.50$ rather than post-hoc reversing after observing data. |
+| **Multivariable Logistic Regression** | Complete / quasi-complete separation, zero-event subgroup, or sparse data meeting prespecified criteria (e.g. low events per parameter degrees of freedom) | Standard MLE suffers from separation bias, non-convergence, and infinite ORs | **BIAS REDUCTION / FIRTH**: Enforce Firth penalized likelihood (`fit_firth_logistic`) with profile likelihood CIs for separation or related estimation issues, or follow prespecified sparse-data plan without treating EPV < 10 as an automatic universal trigger. |
+| **Rater / Device Agreement** | Two continuous device scores | Correlation measures association, not agreement | **REJECT CORRELATION**: Enforce Bland-Altman Limits of Agreement with large-sample CIs or Intraclass Correlation (ICC). |
+

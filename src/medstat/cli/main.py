@@ -20,7 +20,7 @@ import pandas as pd
 from medstat.agreement.bland_altman import bland_altman_analysis
 from medstat.agreement.icc import calculate_icc
 from medstat.agreement.kappa import calculate_kappa
-from medstat.causal.balance import calculate_smd
+from medstat.causal.balance import _normalize_smd, calculate_smd
 from medstat.causal.psm import propensity_score_match
 from medstat.cli.spec import AnalysisPlan
 from medstat.data.clean import (
@@ -50,6 +50,15 @@ from medstat.meta.forest import generate_forest_data
 from medstat.meta.models import run_meta_analysis
 from medstat.models.firth import fit_firth_cox, fit_firth_logistic
 from medstat.models.glm import fit_linear_regression, fit_standard_logistic
+from medstat.models.multilevel import (
+    calculate_design_effect,
+    fit_gee,
+    fit_random_intercept,
+)
+from medstat.models.ordinal import (
+    fit_proportional_odds,
+    test_proportional_odds,
+)
 from medstat.models.sensitivity import calculate_e_value
 from medstat.models.splines import fit_cox_rcs, fit_logistic_rcs
 from medstat.models.survival import check_proportional_hazards, fit_cox_ph
@@ -104,6 +113,21 @@ def _serialize_summary_df(sum_df: pd.DataFrame) -> list[dict[str, Any]]:
     if "term" not in df_copy.columns:
         df_copy.insert(0, "term", df_copy.index.astype(str))
     return df_copy.to_dict(orient="records")
+
+
+def _sanitize_for_json(obj: Any) -> Any:
+    """Recursively convert non-finite float/NumPy numbers to None for strict JSON serialization."""
+    if isinstance(obj, (bool, np.bool_)):
+        return bool(obj)
+    if isinstance(obj, (float, np.floating)):
+        return float(obj) if math.isfinite(obj) else None
+    if isinstance(obj, (int, np.integer)):
+        return int(obj)
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_for_json(v) for v in obj]
+    return obj
 
 
 @click.group()
@@ -547,7 +571,7 @@ def table1_cmd(
     "--model-type",
     "model_type",
     default="logistic",
-    help="Model type (logistic, linear, cox, cox_ph).",
+    help="Model type (logistic, linear, cox, cox_ph, ordinal, proportional_odds, gee, mixed).",
 )
 @click.option("--outcome", default=None, help="Outcome variable name.")
 @click.option(
@@ -581,6 +605,25 @@ def table1_cmd(
     help="Compute VanderWeele E-value for unmeasured confounding.",
 )
 @click.option(
+    "--po-test",
+    is_flag=True,
+    default=False,
+    help="Run Brant test for proportional odds assumption (for ordinal models).",
+)
+@click.option(
+    "--cluster",
+    "--cluster-col",
+    "cluster_col",
+    default=None,
+    help="Cluster identifier column for GEE / mixed-effects models.",
+)
+@click.option(
+    "--corr-structure",
+    type=click.Choice(["exchangeable", "independence", "autoregressive"]),
+    default="exchangeable",
+    help="Correlation structure for GEE models (default: exchangeable).",
+)
+@click.option(
     "--spline-var",
     default=None,
     help="Continuous variable to model with restricted cubic splines (RCS).",
@@ -604,6 +647,9 @@ def model_cmd(
     ci_method: str,
     schoenfeld: bool,
     e_value: bool,
+    po_test: bool,
+    cluster_col: str | None,
+    corr_structure: str,
     spline_var: str | None,
     knots: int,
     output: str | None,
@@ -632,6 +678,7 @@ def model_cmd(
     cols_to_check = (
         [outcome]
         + ([time_col] if time_col else [])
+        + ([cluster_col] if cluster_col else [])
         + covar_list
         + ([spline_var] if spline_var and spline_var not in covar_list else [])
     )
@@ -755,6 +802,11 @@ def model_cmd(
                 raise click.ClickException(
                     f"Exposure term '{exposure}' not found in model results for E-value calculation."
                 )
+            if len(matching) > 1:
+                raise click.ClickException(
+                    f"Exposure '{exposure}' is ambiguous for E-value calculation (matches {[str(m) for m in matching]}); "
+                    "specify a single binary exposure term."
+                )
             exp_term = sum_df.loc[matching[0]]
             or_val = exp_term.get("odds_ratio", exp_term.get("estimate"))
             ci_lo = exp_term.get("or_ci_lower", exp_term.get("ci_lower"))
@@ -776,6 +828,176 @@ def model_cmd(
     elif mtype in ("linear", "ols"):
         fit_res = fit_linear_regression(df[outcome], X_df)
         result_data["coefficients"] = _serialize_summary_df(fit_res["summary_df"])
+
+    elif mtype in ("ordinal", "proportional_odds"):
+        y_raw = df[outcome]
+        is_num = pd.api.types.is_numeric_dtype(y_raw)
+        is_ordered_cat = (
+            isinstance(y_raw.dtype, pd.CategoricalDtype) and y_raw.dtype.ordered
+        )
+        if not (is_num or is_ordered_cat):
+            raise click.BadParameter(
+                f"Ordinal outcome column '{outcome}' must be numeric or an ordered pandas Categorical, "
+                f"got unordered dtype '{y_raw.dtype}'. Please convert to numeric codes or an ordered Categorical "
+                f"to establish explicit clinical category hierarchy.",
+                param_hint="--outcome",
+            )
+        u_y = y_raw.dropna().unique()
+        if len(u_y) < 3:
+            raise click.BadParameter(
+                f"Ordinal outcome column '{outcome}' must have at least 3 categories, found {len(u_y)}: {sorted(u_y)}. "
+                "For binary outcomes (2 categories), use --type logistic.",
+                param_hint="--outcome",
+            )
+        fit_res = fit_proportional_odds(y_raw, X_df)
+        pred_df = fit_res["predictor_df"]
+        result_data["coefficients"] = _serialize_summary_df(pred_df)
+        result_data["thresholds"] = _serialize_summary_df(fit_res["threshold_df"])
+        result_data["pseudo_r2"] = fit_res.get("pseudo_r2")
+        result_data["categories"] = fit_res.get("categories")
+        result_data["log_likelihood"] = fit_res.get("log_likelihood")
+        result_data["aic"] = fit_res.get("aic")
+        result_data["bic"] = fit_res.get("bic")
+
+        if po_test:
+            po_diag = test_proportional_odds(y_raw, X_df)
+            result_data["proportional_odds_test"] = po_diag
+
+        if e_value and exposure:
+            pred_df = fit_res["predictor_df"]
+            matching = [idx for idx in pred_df.index if str(idx) == exposure]
+            if not matching:
+                matching = [
+                    idx for idx in pred_df.index if str(idx).startswith(f"{exposure}_")
+                ]
+            if not matching:
+                raise click.ClickException(
+                    f"Exposure term '{exposure}' not found in model results for E-value calculation."
+                )
+            if len(matching) > 1:
+                raise click.ClickException(
+                    f"Exposure '{exposure}' is ambiguous for E-value calculation (matches {[str(m) for m in matching]}); "
+                    "specify a single binary exposure term."
+                )
+            exp_term = pred_df.loc[matching[0]]
+            or_val = exp_term.get("odds_ratio")
+            ci_lo = exp_term.get("or_ci_lower")
+            ci_hi = exp_term.get("or_ci_upper")
+            if (
+                or_val is None
+                or ci_lo is None
+                or ci_hi is None
+                or not np.all(np.isfinite([float(or_val), float(ci_lo), float(ci_hi)]))
+            ):
+                raise click.ClickException(
+                    f"Model output for exposure '{exposure}' missing required OR or CI values for E-value calculation."
+                )
+            ev = calculate_e_value(
+                float(or_val),
+                float(ci_lo),
+                float(ci_hi),
+                estimate_type="OR",
+                rare_outcome=False,
+            )
+            ev["rare_outcome"] = False
+            ev["assumption_note"] = (
+                "E-value computed from proportional odds cumulative OR assuming common outcome "
+                "(VanderWeele & Ding 2017 square-root approximation applied: RR ≈ sqrt(OR))."
+            )
+            result_data["e_value"] = ev
+
+    elif mtype in ("gee", "multilevel_gee"):
+        if not cluster_col:
+            raise click.ClickException("GEE model requires --cluster <cluster_col>.")
+        y_raw = df[outcome]
+        u_y = y_raw.dropna().unique()
+        if len(u_y) <= 1:
+            raise click.BadParameter(
+                f"Outcome '{outcome}' is constant or has fewer than 2 distinct values.",
+                param_hint="--outcome",
+            )
+        if len(u_y) == 2:
+            u_set = set(u_y)
+            if not u_set.issubset({0, 1, 0.0, 1.0}):
+                raise click.BadParameter(
+                    f"Binary outcome '{outcome}' for GEE binomial family must be strictly numeric 0 and 1 (found: {sorted(list(u_set))}). "
+                    "Recode endpoints (0 = Non-event, 1 = Event) prior to fitting.",
+                    param_hint="--outcome",
+                )
+            fam = "binomial"
+        else:
+            if not pd.api.types.is_numeric_dtype(y_raw):
+                raise click.BadParameter(
+                    f"Continuous outcome '{outcome}' for GEE Gaussian family must be numeric, got dtype '{y_raw.dtype}'.",
+                    param_hint="--outcome",
+                )
+            fam = "gaussian"
+        if corr_structure == "autoregressive" and not time_col:
+            raise click.BadParameter(
+                "Autoregressive GEE correlation structure requires --time <time_col> "
+                "to define within-cluster ordering.",
+                param_hint="--time",
+            )
+        gee_time = pd.to_numeric(df[time_col], errors="coerce") if time_col else None
+        fit_res = fit_gee(
+            y=y_raw,
+            X=X_df,
+            cluster_ids=df[cluster_col],
+            family=fam,
+            cov_struct=corr_structure,
+            add_constant=True,
+            time=gee_time,
+        )
+        sum_df = fit_res["summary_df"]
+        result_data["coefficients"] = _serialize_summary_df(sum_df)
+        result_data["n_clusters"] = fit_res["n_clusters"]
+        result_data["cov_struct"] = fit_res["cov_struct"]
+        result_data["family"] = fit_res["family"]
+        result_data["cov_type"] = fit_res.get("cov_type")
+        result_data["small_cluster_adjustment"] = fit_res.get(
+            "small_cluster_adjustment"
+        )
+        result_data["qic"] = fit_res["qic"]
+
+        deff_res = calculate_design_effect(y_raw, df[cluster_col])
+        result_data["clustering_diagnostics"] = deff_res
+
+    elif mtype in ("mixed", "random_intercept", "lmm"):
+        if not cluster_col:
+            raise click.ClickException(
+                "Mixed-effects model requires --cluster <cluster_col>."
+            )
+        y_raw = df[outcome]
+        if not pd.api.types.is_numeric_dtype(y_raw):
+            raise click.BadParameter(
+                f"Mixed-effects model outcome '{outcome}' must be numeric (continuous). "
+                f"Got non-numeric dtype '{y_raw.dtype}'.",
+                param_hint="--outcome",
+            )
+        y_valid = y_raw.dropna()
+        if y_valid.nunique() <= 2:
+            raise click.BadParameter(
+                f"Mixed-effects model outcome '{outcome}' has {y_valid.nunique()} distinct values. "
+                "Linear mixed models require continuous outcomes; for binary or low-cardinality clustered outcomes, use '--type gee'.",
+                param_hint="--outcome",
+            )
+        fit_res = fit_random_intercept(
+            y=y_raw,
+            X=X_df,
+            cluster_ids=df[cluster_col],
+            add_constant=True,
+        )
+        sum_df = fit_res["summary_df"]
+        result_data["coefficients"] = _serialize_summary_df(sum_df)
+        result_data["n_clusters"] = fit_res["n_clusters"]
+        result_data["random_intercept_var"] = fit_res["random_intercept_var"]
+        result_data["residual_var"] = fit_res["residual_var"]
+        result_data["cluster_icc"] = fit_res["cluster_icc"]
+        result_data["aic"] = fit_res["aic"]
+        result_data["bic"] = fit_res["bic"]
+
+        deff_res = calculate_design_effect(y_raw, df[cluster_col])
+        result_data["clustering_diagnostics"] = deff_res
     else:
         raise click.UsageError(f"Unsupported model type: {mtype}")
 
@@ -826,8 +1048,9 @@ def model_cmd(
 
     if output:
         Path(output).parent.mkdir(parents=True, exist_ok=True)
+        sanitized_data = _sanitize_for_json(result_data)
         with open(output, "w") as f:
-            json.dump(result_data, f, indent=2, default=str)
+            json.dump(sanitized_data, f, indent=2, default=str, allow_nan=False)
         click.echo(f"Model results saved: {output}")
 
 
@@ -1287,19 +1510,27 @@ def psm_cmd(
         ratio=ratio,
     )
 
+    def _clean_smd(val: Any) -> float | None:
+        norm = _normalize_smd(val)
+        return float(norm) if np.isfinite(norm) else None
+
     if balance_check or love_plot:
         love_data = {
             "covariates": covar_list,
-            "smd_raw": [float(calculate_smd(df, treatment, c)) for c in covar_list],
-            "smd_pre": [float(calculate_smd(df, treatment, c)) for c in covar_list],
+            "smd_raw": [
+                _clean_smd(calculate_smd(df, treatment, c)) for c in covar_list
+            ],
+            "smd_pre": [
+                _clean_smd(calculate_smd(df, treatment, c)) for c in covar_list
+            ],
             "smd_matched": [
-                float(calculate_smd(matched_df, treatment, c)) for c in covar_list
+                _clean_smd(calculate_smd(matched_df, treatment, c)) for c in covar_list
             ],
             "smd_post": [
-                float(calculate_smd(matched_df, treatment, c)) for c in covar_list
+                _clean_smd(calculate_smd(matched_df, treatment, c)) for c in covar_list
             ],
             "post_smd": [
-                float(calculate_smd(matched_df, treatment, c)) for c in covar_list
+                _clean_smd(calculate_smd(matched_df, treatment, c)) for c in covar_list
             ],
         }
         if love_plot:
@@ -1312,9 +1543,15 @@ def psm_cmd(
             for c, pre, post in zip(
                 covar_list, love_data["smd_pre"], love_data["smd_post"]
             ):
-                status = "BALANCED" if abs(post) < 0.10 else "UNBALANCED"
+                status = (
+                    "BALANCED"
+                    if (post is not None and abs(post) < 0.10)
+                    else "UNBALANCED"
+                )
+                pre_str = f"{pre:.3f}" if pre is not None else "NaN"
+                post_str = f"{post:.3f}" if post is not None else "NaN"
                 click.echo(
-                    f"  {c:<20} | Pre-SMD: {pre:.3f} | Post-SMD: {post:.3f} | [{status}]"
+                    f"  {c:<20} | Pre-SMD: {pre_str} | Post-SMD: {post_str} | [{status}]"
                 )
             click.echo("---------------------------------------------------\n")
 
@@ -1325,21 +1562,21 @@ def psm_cmd(
                 love_data = {
                     "covariates": covar_list,
                     "smd_raw": [
-                        float(calculate_smd(df, treatment, c)) for c in covar_list
+                        _clean_smd(calculate_smd(df, treatment, c)) for c in covar_list
                     ],
                     "smd_pre": [
-                        float(calculate_smd(df, treatment, c)) for c in covar_list
+                        _clean_smd(calculate_smd(df, treatment, c)) for c in covar_list
                     ],
                     "smd_matched": [
-                        float(calculate_smd(matched_df, treatment, c))
+                        _clean_smd(calculate_smd(matched_df, treatment, c))
                         for c in covar_list
                     ],
                     "smd_post": [
-                        float(calculate_smd(matched_df, treatment, c))
+                        _clean_smd(calculate_smd(matched_df, treatment, c))
                         for c in covar_list
                     ],
                     "post_smd": [
-                        float(calculate_smd(matched_df, treatment, c))
+                        _clean_smd(calculate_smd(matched_df, treatment, c))
                         for c in covar_list
                     ],
                 }
@@ -1381,6 +1618,11 @@ def psm_cmd(
     "--egger", is_flag=True, help="Run Egger's regression test for publication bias."
 )
 @click.option(
+    "--measure",
+    default=None,
+    help="Explicit effect measure type (e.g. 'continuous', 'md', 'smd', 'log_or', 'or', 'rr').",
+)
+@click.option(
     "--output", type=click.Path(), help="Output path for meta-analysis summary JSON."
 )
 def meta_cmd(
@@ -1392,6 +1634,7 @@ def meta_cmd(
     method: str,
     forest_plot: str | None,
     egger: bool,
+    measure: str | None,
     output: str | None,
 ) -> None:
     """Perform fixed and random effects meta-analysis with Forest plot data."""
@@ -1408,6 +1651,97 @@ def meta_cmd(
     )
 
     if egger:
+        if study_col and study_col in df.columns:
+            study_series = df[study_col].dropna()
+            n_unique_studies = study_series.nunique()
+            if len(study_series) != n_unique_studies:
+                raise click.BadParameter(
+                    f"Egger's test requires independent study estimates, but duplicate study IDs were detected in '{study_col}' "
+                    f"({len(study_series)} rows with only {n_unique_studies} distinct studies). "
+                    "Each study must contribute exactly one estimate to prevent invalid funnel asymmetry testing.",
+                    param_hint="--egger",
+                )
+            n_studies = n_unique_studies
+        else:
+            n_studies = len(df)
+
+        if n_studies < 10:
+            raise click.BadParameter(
+                f"Egger's test requires at least 10 independent studies (got {n_studies}) to ensure adequate statistical power.",
+                param_hint="--egger",
+            )
+        # Determine explicit or metadata effect measure across all present columns
+        explicit_measure = measure.lower() if measure else None
+        discovered_measures = set()
+        if explicit_measure:
+            discovered_measures.add(explicit_measure)
+
+        for m_col in [
+            "measure",
+            "effect_measure",
+            "metric",
+            "effect_type",
+            "measure_type",
+        ]:
+            if m_col in df.columns:
+                unique_m = df[m_col].dropna().astype(str).str.lower().unique()
+                if len(unique_m) > 1:
+                    raise click.BadParameter(
+                        f"Mixed effect measures detected in column '{m_col}' ({unique_m}). Egger's test requires a homogeneous continuous effect measure.",
+                        param_hint="--egger",
+                    )
+                elif len(unique_m) == 1:
+                    discovered_measures.add(unique_m[0])
+
+        if len(discovered_measures) > 1:
+            raise click.BadParameter(
+                f"Conflicting effect measures detected across metadata columns and --measure ({discovered_measures}). Egger's test requires a consistent, homogeneous effect measure.",
+                param_hint="--egger",
+            )
+        elif len(discovered_measures) == 1:
+            measure_type = next(iter(discovered_measures))
+        else:
+            measure_type = None
+
+        SUPPORTED_CONTINUOUS = (
+            "continuous",
+            "md",
+            "mean_diff",
+            "mean_difference",
+            "wmd",
+        )
+        BINARY_RATIO_MEASURES = (
+            "log_or",
+            "log_odds_ratio",
+            "or",
+            "odds_ratio",
+            "rr",
+            "log_rr",
+            "risk_ratio",
+            "relative_risk",
+        )
+
+        if not measure_type:
+            raise click.BadParameter(
+                "Egger's test requires an explicit continuous effect measure. Specify --measure (e.g. --measure continuous, md) or provide a 'measure' column in the dataset. Missing or unverified effect measures are rejected to prevent invalid testing on binary log ratios.",
+                param_hint="--egger",
+            )
+
+        if measure_type in BINARY_RATIO_MEASURES:
+            raise click.BadParameter(
+                "Egger's test is invalid for binary log odds ratios due to artifactual correlation between log OR and standard error. Use continuous effect sizes or alternative tests.",
+                param_hint="--egger",
+            )
+        if measure_type == "smd":
+            raise click.BadParameter(
+                "Egger's test is invalid for standardized mean differences (SMD) due to artifactual correlation between effect size and standard error. Consider using sample-size-based precision or an alternative small-study effect test.",
+                param_hint="--egger",
+            )
+        if measure_type not in SUPPORTED_CONTINUOUS:
+            raise click.BadParameter(
+                f"Unsupported effect measure '{measure_type}' for Egger's test. Egger's test requires a supported continuous measure ({', '.join(SUPPORTED_CONTINUOUS)}).",
+                param_hint="--egger",
+            )
         res["egger_test"] = eggers_test(df[effect_col], df[se_col])
 
     if forest_plot:

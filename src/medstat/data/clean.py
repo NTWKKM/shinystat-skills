@@ -1046,6 +1046,124 @@ def get_cleaning_summary(report: dict[str, Any]) -> str:
 # Cross-exported for seamless API access (implemented in medstat.data.missing)
 from medstat.data.missing import prepare_data_for_analysis  # noqa: E402
 
+
+def build_ordinal_mapping(
+    mapping: dict[Any, Any],
+) -> dict[str, int]:
+    """
+    Build a standardized label-to-code mapping from either code->label or label->code mapping.
+    Accepts numbers.Integral keys/values while strictly excluding bool keys/values.
+    """
+    import numbers
+
+    label_to_code = {
+        v: int(k)
+        for k, v in mapping.items()
+        if isinstance(k, numbers.Integral)
+        and not isinstance(k, bool)
+        and isinstance(v, str)
+    }
+    if not label_to_code:
+        label_to_code = {
+            k: int(v)
+            for k, v in mapping.items()
+            if isinstance(v, numbers.Integral)
+            and not isinstance(v, bool)
+            and isinstance(k, str)
+        }
+    return label_to_code
+
+
+def standardize_categorical_outcome(
+    series: pd.Series,
+    outcome_ordinal_mapping: dict[Any, Any] | None = None,
+) -> pd.Series:
+    """
+    Standardize an ordered categorical or ordinal Series to integer codes before analysis/export.
+    Preserves integer-coded categories (validating against expected codes if mapping provided),
+    maps string labels via ordinal mapping, or falls back to category codes.
+    """
+    import numbers
+
+    if not (isinstance(series.dtype, pd.CategoricalDtype) and series.dtype.ordered):
+        if series.isna().any():
+            raise ValueError(
+                f"Ordinal outcome contains {int(series.isna().sum())} missing values; "
+                "resolve missingness explicitly before standardizing codes."
+            )
+        # Verify all values are integral before casting to int (reject fractional floats)
+        vals = series.dropna()
+        non_int = [
+            v
+            for v in vals.unique()
+            if not (
+                (
+                    isinstance(v, (numbers.Integral, np.integer))
+                    and not isinstance(v, (bool, np.bool_))
+                )
+                or (isinstance(v, (float, np.floating)) and float(v).is_integer())
+            )
+        ]
+        if non_int:
+            raise ValueError(
+                f"Ordinal outcome contains non-integral numeric values {non_int}. "
+                "Ordinal outcomes must be integers without fractional parts."
+            )
+        return series.astype(int)
+
+    cats = series.cat.categories
+    if series.isna().any():
+        raise ValueError(
+            f"Ordinal outcome contains {int(series.isna().sum())} missing values; "
+            "resolve missingness explicitly before standardizing codes."
+        )
+    is_int_coded = all(
+        (isinstance(c, numbers.Integral) and not isinstance(c, bool))
+        or (isinstance(c, (float, np.floating)) and float(c).is_integer())
+        for c in cats
+    )
+
+    if is_int_coded:
+        int_cats = {int(c) for c in cats}
+        if outcome_ordinal_mapping:
+            expected_codes = {
+                int(k)
+                if (isinstance(k, numbers.Integral) and not isinstance(k, bool))
+                or (isinstance(k, (float, np.floating)) and float(k).is_integer())
+                else int(v)
+                for k, v in outcome_ordinal_mapping.items()
+                if (isinstance(k, numbers.Integral) and not isinstance(k, bool))
+                or (isinstance(k, (float, np.floating)) and float(k).is_integer())
+                or (isinstance(v, numbers.Integral) and not isinstance(v, bool))
+                or (isinstance(v, (float, np.floating)) and float(v).is_integer())
+            }
+            if not int_cats.issubset(expected_codes):
+                raise ValueError(
+                    f"Categorical codes {int_cats - expected_codes} not recognized in outcome_ordinal_mapping."
+                )
+        return series.astype(int)
+    elif outcome_ordinal_mapping:
+        label_to_code = build_ordinal_mapping(outcome_ordinal_mapping)
+        unmapped = [c for c in cats if c not in label_to_code]
+        if unmapped:
+            raise ValueError(
+                f"Outcome categories {unmapped} are not defined in outcome_ordinal_mapping."
+            )
+        codes = [label_to_code[c] for c in cats]
+        if len(set(codes)) != len(codes):
+            raise ValueError(
+                f"outcome_ordinal_mapping codes must be unique across categories (got {dict(zip(cats, codes))})."
+            )
+        if any(b <= a for a, b in zip(codes, codes[1:])):
+            raise ValueError(
+                "outcome_ordinal_mapping codes must increase in the declared category order "
+                f"(got {dict(zip(cats, codes))})."
+            )
+        return series.map(label_to_code).astype(int)
+    else:
+        return pd.Series(series.cat.codes.astype(int), index=series.index)
+
+
 __all__ = [
     "DataCleaningError",
     "DataValidationError",
@@ -1070,4 +1188,6 @@ __all__ = [
     "clean_dataframe",
     "get_cleaning_summary",
     "prepare_data_for_analysis",
+    "build_ordinal_mapping",
+    "standardize_categorical_outcome",
 ]

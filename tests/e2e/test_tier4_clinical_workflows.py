@@ -413,6 +413,8 @@ def test_tier4_workflow5_multicenter_trial_meta_analysis_evidence_synthesis(
             "dl",
             "--forest-plot",
             str(forest_json),
+            "--measure",
+            "continuous",
             "--egger",
             "--output",
             str(meta_json),

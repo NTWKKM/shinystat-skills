@@ -2,7 +2,10 @@
 Publication Reporting, Table 1, and Narrative Generation Module.
 """
 
-from medstat.reporting.narrative import generate_methods_narrative
+from medstat.reporting.narrative import (
+    generate_methods_narrative,
+    validate_calibration_metrics,
+)
 from medstat.reporting.table1 import generate_table_one
 from medstat.reporting.tables import (
     Estimate,
@@ -28,4 +31,5 @@ __all__ = [
     "render_apa_table",
     "render_ascii_table",
     "generate_methods_narrative",
+    "validate_calibration_metrics",
 ]

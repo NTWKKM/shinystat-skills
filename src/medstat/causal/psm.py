@@ -52,14 +52,47 @@ def calculate_propensity_score(
         ps_clean = model.predict(X)
     except Exception:
         try:
-            model = sm.Logit(y, X).fit_regularized(disp=False)
-            ps_clean = model.predict(X)
-        except Exception:
             from medstat.models.firth import fit_firth_logistic
 
             firth_fit = fit_firth_logistic(y, clean_sub[covariates], fit_intercept=True)
             fl_model = firth_fit["model"]
             ps_clean = fl_model.predict_proba(X)[:, 1]
+        except Exception:
+            # Statsmodels fit_regularized minimizes unnormalized negative log-likelihood plus L1 penalty.
+            # Scale covariate L1 penalty by sample size (alpha = 1.0 * len(y)) to maintain consistent
+            # regularization strength relative to the summed log-likelihood across varying sample sizes,
+            # while leaving the intercept unpenalized (alpha=0.0).
+            # Identify intercept strictly by all-ones values and position, ensuring any varying covariate named 'const' remains penalized.
+            covariate_alpha = 1.0 * float(len(y))
+            alphas = np.full(X.shape[1], covariate_alpha, dtype=float)
+            const_indices = [
+                i
+                for i in range(X.shape[1])
+                if bool((X.iloc[:, i] == 1.0).all())
+                and (i == 0 or X.columns[i] == "const")
+            ]
+            for idx in const_indices:
+                alphas[idx] = 0.0
+            model = sm.Logit(y, X).fit_regularized(alpha=alphas, disp=False)
+            # Guard against degenerating to constant intercept-only fit
+            coefs = np.asarray(model.params)
+            non_const_indices = [i for i in range(len(coefs)) if i not in const_indices]
+            if len(non_const_indices) > 0 and np.all(
+                np.isclose(coefs[non_const_indices], 0.0)
+            ):
+                # If all non-intercept coefficients shrunk to zero, retry with small unscaled penalty
+                alphas_small = np.full(X.shape[1], 0.1, dtype=float)
+                for idx in const_indices:
+                    alphas_small[idx] = 0.0
+                model = sm.Logit(y, X).fit_regularized(alpha=alphas_small, disp=False)
+                coefs = np.asarray(model.params)
+                if len(non_const_indices) > 0 and np.all(
+                    np.isclose(coefs[non_const_indices], 0.0)
+                ):
+                    raise RuntimeError(
+                        "Regularized propensity score fit shrank all covariate coefficients to zero."
+                    )
+            ps_clean = model.predict(X)
 
     ps_full = pd.Series(index=df.index, dtype=float)
     ps_full.loc[clean_sub.index] = np.asarray(ps_clean, dtype=float)
