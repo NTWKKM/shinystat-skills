@@ -327,9 +327,21 @@ if has_zero_cells:
     primary_or = extract_primary_effect({term: row["odds_ratio"] for term, row in summary.iterrows()})
 else:
     try:
-        model = smf.logit(formula, data=df_model).fit(disp=False)
+        import warnings
+        from statsmodels.tools.sm_exceptions import PerfectSeparationWarning
+        # statsmodels >= 0.14 only WARNS on perfect separation and may still report convergence;
+        # record warnings so separation from continuous predictors/combinations is not silently accepted.
+        with warnings.catch_warnings(record=True) as fit_warnings:
+            warnings.simplefilter("always")
+            model = smf.logit(formula, data=df_model).fit(disp=False)
         if not model.mle_retvals.get("converged", True) or not np.all(np.isfinite(model.params)):
             raise ValueError("Standard MLE did not converge or yielded non-finite estimates.")
+        # Full-design separation diagnostic: fitted probabilities at 0/1 indicate (quasi-)complete separation
+        fitted_p = model.predict()
+        if any(issubclass(w.category, PerfectSeparationWarning) for w in fit_warnings) or np.any(
+            (fitted_p < 1e-8) | (fitted_p > 1 - 1e-8)
+        ):
+            raise ValueError("Separation detected in full fitted design (fitted probabilities at 0/1).")
         results = []
         for term in model.params.index:
             if term == "Intercept":

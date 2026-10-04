@@ -1089,6 +1089,11 @@ def standardize_categorical_outcome(
         return series.astype(int)
 
     cats = series.cat.categories
+    if series.isna().any():
+        raise ValueError(
+            f"Ordinal outcome contains {int(series.isna().sum())} missing values; "
+            "resolve missingness explicitly before standardizing codes."
+        )
     is_int_coded = all(
         isinstance(c, numbers.Integral) and not isinstance(c, bool) for c in cats
     )
@@ -1110,6 +1115,21 @@ def standardize_categorical_outcome(
         return series.astype(int)
     elif outcome_ordinal_mapping:
         label_to_code = build_ordinal_mapping(outcome_ordinal_mapping)
+        unmapped = [c for c in cats if c not in label_to_code]
+        if unmapped:
+            raise ValueError(
+                f"Outcome categories {unmapped} are not defined in outcome_ordinal_mapping."
+            )
+        codes = [label_to_code[c] for c in cats]
+        if len(set(codes)) != len(codes):
+            raise ValueError(
+                f"outcome_ordinal_mapping codes must be unique across categories (got {dict(zip(cats, codes))})."
+            )
+        if any(b <= a for a, b in zip(codes, codes[1:])):
+            raise ValueError(
+                "outcome_ordinal_mapping codes must increase in the declared category order "
+                f"(got {dict(zip(cats, codes))})."
+            )
         return series.map(label_to_code).astype(int)
     else:
         return pd.Series(series.cat.codes.astype(int), index=series.index)

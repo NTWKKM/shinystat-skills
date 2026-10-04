@@ -136,7 +136,12 @@ import statsmodels.formula.api as smf
 # ------------------------------------------------------------------------------
 # 1. PROPENSITY SCORE MATCHING (Austin 2009 Standard)
 # ------------------------------------------------------------------------------
-def run_psm_pipeline(df, treatment_col, covariate_cols, caliper_sd=0.20):
+def run_psm_pipeline(df, treatment_col, covariate_cols, caliper_sd=0.20, categorical_cols=()):
+    # categorical_cols: explicit protocol metadata (do NOT infer from dtype) so numeric-coded
+    # categorical covariates (e.g. ASA class 1-5, site codes) are modeled as factors and balanced per level.
+    categorical_cols = set(categorical_cols)
+    if not categorical_cols.issubset(covariate_cols):
+        raise ValueError(f"categorical_cols {categorical_cols - set(covariate_cols)} are not listed in covariate_cols.")
     if len(covariate_cols) != len(set(covariate_cols)):
         raise ValueError("Duplicate covariate columns detected.")
     if treatment_col in covariate_cols:
@@ -147,7 +152,9 @@ def run_psm_pipeline(df, treatment_col, covariate_cols, caliper_sd=0.20):
     for i, col in enumerate(covariate_cols):
         col_map[col] = f"{prefix}cov_{i}"
     df_safe = df.rename(columns=col_map)
-    formula = f"{prefix}trt ~ " + " + ".join(col_map[col] for col in covariate_cols)
+    formula = f"{prefix}trt ~ " + " + ".join(
+        f"C({col_map[col]})" if col in categorical_cols else col_map[col] for col in covariate_cols
+    )
     # Mirror calculate_propensity_score (src/medstat/causal/psm.py): retry with a penalized fit
     # on exceptions or non-convergence; never match on unconverged estimates.
     try:
@@ -218,8 +225,8 @@ def run_psm_pipeline(df, treatment_col, covariate_cols, caliper_sd=0.20):
     matched_ids = [t for t, c in matched_pairs] + [c for t, c in matched_pairs]
     df_matched = df.iloc[matched_ids].copy()
     for cov in covariate_cols:
-        # Encode or assess categorical covariates per category before numeric mean/var
-        if not pd.api.types.is_numeric_dtype(df_matched[cov]):
+        # Assess declared categorical covariates (and any non-numeric column) per category before numeric mean/var
+        if cov in categorical_cols or not pd.api.types.is_numeric_dtype(df_matched[cov]):
             cov_nonmissing = df_matched[[treatment_col, cov]].dropna()
             cats = pd.get_dummies(cov_nonmissing[cov], drop_first=(cov_nonmissing[cov].nunique() == 2), prefix=cov)
             sub_covs = cats.columns.tolist()

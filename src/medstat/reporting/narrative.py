@@ -39,6 +39,10 @@ def validate_calibration_metrics(
             raise ValueError(
                 f"Calibration metric '{k}' must be a finite numeric value (got {v})."
             )
+        if k.lower() in ("brier", "ici") and not 0.0 <= float(v) <= 1.0:
+            raise ValueError(
+                f"Calibration metric '{k}' must lie within [0, 1] (got {v})."
+            )
 
     if provenance == "apparent":
         filtered = {k: float(v) for k, v in metrics.items() if k.lower() != "slope"}

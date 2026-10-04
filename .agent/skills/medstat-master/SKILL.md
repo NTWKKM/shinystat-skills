@@ -289,11 +289,16 @@ def summarize_continuous(series, group):
             "SMD": smd_str
         }
     else:
-        u_stat, p_val = stats.mannwhitneyu(g1, g0, alternative='two-sided')
+        def median_iqr(g):
+            # Empty group (all values missing): explicit unavailable summary; group counts are still reported
+            if len(g) == 0:
+                return "Unavailable (no observed data)"
+            return f"{g.median():.1f} [{g.quantile(0.25):.1f}, {g.quantile(0.75):.1f}]"
+        p_val = stats.mannwhitneyu(g1, g0, alternative='two-sided').pvalue if len(g0) and len(g1) else None
         return {
             "Summary": f"Median [IQR]",
-            "Group 0 (Control)": f"{g0.median():.1f} [{g0.quantile(0.25):.1f}, {g0.quantile(0.75):.1f}]",
-            "Group 1 (Event)": f"{g1.median():.1f} [{g1.quantile(0.25):.1f}, {g1.quantile(0.75):.1f}]",
+            "Group 0 (Control)": median_iqr(g0),
+            "Group 1 (Event)": median_iqr(g1),
             "n_analyzed_by_group": {"Group 0": n_analyzed_0, "Group 1": n_analyzed_1},
             "n_missing_by_group": {"Group 0": n_missing_0, "Group 1": n_missing_1},
             "p_value": format_p(p_val),
@@ -313,6 +318,14 @@ def summarize_categorical(series, group):
             "crosstab": ct,
             "n_missing_by_group": missing_by_group,
             "p_value": "Unavailable (no observed data)",
+            "is_sparse": False,
+        }
+    if ct.shape[0] < 2 or ct.shape[1] < 2:
+        # Single category or single observed group: no association test is defined (SciPy would return p=1.0)
+        return {
+            "crosstab": ct,
+            "n_missing_by_group": missing_by_group,
+            "p_value": "Unavailable (fewer than 2 levels)",
             "is_sparse": False,
         }
     chi2, p_val, dof, expected = stats.chi2_contingency(ct)
@@ -340,7 +353,7 @@ from medstat.models.firth import fit_firth_logistic
 model_cols = ["outcome", "age", "sex", "admission_status"]
 # Before dropping rows: assess whether complete-case analysis is valid (missingness audit / MCAR-MAR plausibility,
 # see medstat-clean) and prespecify a sensitivity strategy (e.g. multiple imputation) to compare against.
-complete_case_justification = None  # e.g. "Predictor missingness <5%, MCAR plausible (Little's test p=0.42)"
+complete_case_justification = None  # e.g. "<study-specific rationale: why missingness in age/sex/admission_status is unrelated to the outcome given covariates (mechanism), and why complete cases identify the target estimand>" — low missingness or a non-significant Little's test alone does NOT establish MCAR or validity
 sensitivity_strategy = None  # e.g. "MICE (m=20) sensitivity analysis via medstat-clean"
 if not (complete_case_justification and sensitivity_strategy):
     raise ValueError("Document complete-case validity and a missing-data sensitivity strategy before dropping rows.")

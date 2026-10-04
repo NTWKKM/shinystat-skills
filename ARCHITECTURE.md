@@ -80,7 +80,7 @@ System architecture and structural specifications for `medstat-core` and the `me
 ### `medstat.meta`
 - **`models.py`**: Fixed-effects inverse variance and DerSimonian-Laird random-effects meta-analysis, Cochran's Q test, and Higgins $I^2$.
 - **`forest.py`**: Forest plot structured data generation.
-- **`bias.py`**: Egger's linear regression test for funnel plot asymmetry (applicable when $k \ge 10$ distinct studies with continuous effect measures such as mean difference or SMD; not recommended for binary log odds ratios due to artifactual correlation).
+- **`bias.py`**: Egger's linear regression test for funnel plot asymmetry (applicable when $k \ge 10$ distinct studies with unstandardized continuous effect measures such as mean difference; SMD is not supported because its effect estimate and standard error are artifactually correlated, and it is not recommended for binary log odds ratios for the same reason).
 
 ### `medstat.agreement`
 - **`bland_altman.py`**: Paired measurement difference analysis and limits of agreement with Bland–Altman (1999) large-sample approximate CIs. Supports both wide paired columns and long-format rater data.

@@ -168,7 +168,10 @@ if not is_ordered_cat:
                 k: v for k, v in outcome_ordinal_mapping.items()
                 if isinstance(v, numbers.Integral) and not isinstance(v, bool)
             }
-        valid_keys = set(outcome_ordinal_mapping.keys()) | set(label_to_code.keys())
+        valid_keys = (
+            set(outcome_ordinal_mapping.keys()) | set(label_to_code.keys())
+            | {c for c in label_to_code.values() if isinstance(c, numbers.Integral) and not isinstance(c, bool)}
+        )
         unmapped = outcome_vals - valid_keys
         if unmapped:
             raise ValueError(f"Outcome values {unmapped} are not defined in outcome_ordinal_mapping.")

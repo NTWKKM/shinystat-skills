@@ -802,6 +802,11 @@ def model_cmd(
                 raise click.ClickException(
                     f"Exposure term '{exposure}' not found in model results for E-value calculation."
                 )
+            if len(matching) > 1:
+                raise click.ClickException(
+                    f"Exposure '{exposure}' is ambiguous for E-value calculation (matches {[str(m) for m in matching]}); "
+                    "specify a single binary exposure term."
+                )
             exp_term = sum_df.loc[matching[0]]
             or_val = exp_term.get("odds_ratio", exp_term.get("estimate"))
             ci_lo = exp_term.get("or_ci_lower", exp_term.get("ci_lower"))
@@ -869,29 +874,37 @@ def model_cmd(
                 raise click.ClickException(
                     f"Exposure term '{exposure}' not found in model results for E-value calculation."
                 )
+            if len(matching) > 1:
+                raise click.ClickException(
+                    f"Exposure '{exposure}' is ambiguous for E-value calculation (matches {[str(m) for m in matching]}); "
+                    "specify a single binary exposure term."
+                )
             exp_term = pred_df.loc[matching[0]]
             or_val = exp_term.get("odds_ratio")
             ci_lo = exp_term.get("or_ci_lower")
             ci_hi = exp_term.get("or_ci_upper")
             if (
-                or_val is not None
-                and ci_lo is not None
-                and ci_hi is not None
-                and not np.isnan(float(or_val))
+                or_val is None
+                or ci_lo is None
+                or ci_hi is None
+                or not np.all(np.isfinite([float(or_val), float(ci_lo), float(ci_hi)]))
             ):
-                ev = calculate_e_value(
-                    float(or_val),
-                    float(ci_lo),
-                    float(ci_hi),
-                    estimate_type="OR",
-                    rare_outcome=False,
+                raise click.ClickException(
+                    f"Model output for exposure '{exposure}' missing required OR or CI values for E-value calculation."
                 )
-                ev["rare_outcome"] = False
-                ev["assumption_note"] = (
-                    "E-value computed from proportional odds cumulative OR assuming common outcome "
-                    "(VanderWeele & Ding 2017 square-root approximation applied: RR ≈ sqrt(OR))."
-                )
-                result_data["e_value"] = ev
+            ev = calculate_e_value(
+                float(or_val),
+                float(ci_lo),
+                float(ci_hi),
+                estimate_type="OR",
+                rare_outcome=False,
+            )
+            ev["rare_outcome"] = False
+            ev["assumption_note"] = (
+                "E-value computed from proportional odds cumulative OR assuming common outcome "
+                "(VanderWeele & Ding 2017 square-root approximation applied: RR ≈ sqrt(OR))."
+            )
+            result_data["e_value"] = ev
 
     elif mtype in ("gee", "multilevel_gee"):
         if not cluster_col:

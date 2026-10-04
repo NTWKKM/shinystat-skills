@@ -289,13 +289,17 @@ if "predicted_risk" in df.columns:
     brier = calculate_brier_score(gold_cal, risk_probs)
     cal_slope = calculate_calibration_slope_and_intercept(gold_cal, risk_probs)
     ici_res = calculate_ici(gold_cal, risk_probs)
-    hl = hosmer_lemeshow_test(gold_cal, risk_probs, g=10)
+    # hosmer_lemeshow_test(g=10) requires at least 10 finite pairs; otherwise report as not estimable
+    hl = hosmer_lemeshow_test(gold_cal, risk_probs, g=10) if len(risk_probs) >= 10 else None
 
     print(f"Brier Score: {brier['brier_score']:.4f} ({brier['interpretation']})")
     print(f"Calibration Slope: {cal_slope['calibration_slope']:.3f} (Ideal = 1.0)")
     print(f"Calibration Intercept: {cal_slope['calibration_intercept']:.3f} (Ideal = 0.0)")
-    print(f"ICI: {ici_res['ici']:.4f} | E50: {ici_res['e50']:.4f} | E90: {ici_res['e90']:.4f}")
-    print(f"Hosmer-Lemeshow: χ²={hl['statistic']:.2f}, df={hl['df']}, p={hl['p_value']:.3f}")
+    print(f"ICI: {ici_res['ici']:.4f} | E50: {ici_res['e50']:.4f} | E90: {ici_res['e90']:.4f} | Emax: {ici_res['emax']:.4f}")
+    if hl is None:
+        print(f"Hosmer-Lemeshow: Not estimable (n={len(risk_probs)} finite pairs < 10 groups)")
+    else:
+        print(f"Hosmer-Lemeshow: χ²={hl['statistic']:.2f}, df={hl['df']}, p={hl['p_value']:.3f}")
 else:
     print("Calibration evaluation skipped: 'predicted_risk' column not provided in dataset.")
 ```
