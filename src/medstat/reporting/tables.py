@@ -61,7 +61,8 @@ def format_journal_p_value(p: float, style: str = "NEJM") -> str:
     if p is None or math.isnan(p):
         return "—"
 
-    if style.upper() in ("NEJM", "JAMA"):
+    style_upper = style.upper()
+    if style_upper == "NEJM":
         if p < 0.001:
             return "P<0.001"
         elif p < 0.01:
@@ -70,6 +71,18 @@ def format_journal_p_value(p: float, style: str = "NEJM") -> str:
             return "P>0.99"
         else:
             return f"P={p:.2f}"
+    elif style_upper == "JAMA":
+        # JAMA: no leading zero before decimal
+        if p < 0.001:
+            return "P<.001"
+        elif p < 0.01:
+            val_str = f"{p:.3f}".lstrip("0")
+            return f"P={val_str}"
+        elif p > 0.99:
+            return "P>.99"
+        else:
+            val_str = f"{p:.2f}".lstrip("0")
+            return f"P={val_str}"
     else:  # APA 7
         if p < 0.001:
             return "< .001"

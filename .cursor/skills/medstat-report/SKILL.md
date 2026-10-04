@@ -234,7 +234,7 @@ def generate_methods_narrative(
     if confounders is None:
         raise ValueError("confounders list must be explicitly provided from actual analysis metadata (do not use arbitrary defaults)")
     if tests is None:
-        tests = "Welch's t-test or Mann-Whitney U test for continuous variables and Pearson Chi-Square or Fisher's exact test for categorical variables"
+        tests = "unspecified statistical tests (specific test methods omitted in analysis metadata)"
 
     confounder_str = ", ".join(confounders)
     sig_clause = ""
@@ -251,29 +251,14 @@ def generate_methods_narrative(
 
     calib_clause = ""
     if calibration_provenance is not None:
-        if calibration_provenance not in ("apparent", "external"):
-            raise ValueError("calibration_provenance must be 'apparent', 'external', or None.")
-        if not calibration_metrics:
-            raise ValueError("calibration_metrics must be provided when calibration_provenance is set.")
-        for k, v in calibration_metrics.items():
-            if isinstance(v, (bool, np.bool_)) or not isinstance(v, (int, float, np.number)) or not np.isfinite(v):
-                raise ValueError(f"Calibration metric '{k}' must be a finite numeric value (got {v}).")
-            if k.lower() in ("brier", "ici") and not 0.0 <= float(v) <= 1.0:
-                raise ValueError(f"Calibration metric '{k}' must lie within [0, 1] (got {v}).")
-        if calibration_provenance == "apparent":
-            # For apparent estimates, calibration slope is excluded per TRIPOD / core reporting rules
-            # (apparent slope is 1.0 / tautological and uninformative in-sample)
-            filtered_metrics = {k: v for k, v in calibration_metrics.items() if k.lower() != "slope"}
-            if not filtered_metrics:
-                raise ValueError("Apparent validation requires at least one non-slope calibration metric (e.g., Brier score).")
-        else:
-            required_metrics = {"brier", "slope", "intercept", "ici"}
-            missing = required_metrics - {k.lower() for k in calibration_metrics}
-            if missing:
-                raise ValueError(
-                    f"External validation requires calibration metrics {sorted(required_metrics)}; missing: {sorted(missing)}."
-                )
-            filtered_metrics = calibration_metrics
+        from medstat.reporting.narrative import validate_calibration_metrics
+
+        is_tauto = bool(fit_metadata and fit_metadata.get("tautological_slope", False))
+        filtered_metrics = validate_calibration_metrics(
+            calibration_metrics or {},
+            provenance=calibration_provenance,
+            tautological_slope=is_tauto,
+        )
         labels = {
             "slope": "calibration slope",
             "intercept": "calibration intercept",
@@ -326,7 +311,7 @@ narrative_text = generate_methods_narrative(
 print("Methods Narrative:\n", narrative_text)
 ```
 
-The agent may freely incorporate `medstat` modules (e.g. `from medstat.reporting.tables import render_records_table`, `from medstat.reporting.narrative import synthesize_methods_text`, `from medstat.reporting.checklists import generate_strobe_checklist`) or standard libraries as appropriate.
+The agent may freely incorporate `medstat` modules (e.g. `from medstat.reporting.tables import render_records_table`, `from medstat.reporting.narrative import generate_methods_narrative`, `from medstat.reporting.checklists import get_strobe_checklist`) or standard libraries as appropriate.
 
 ---
 

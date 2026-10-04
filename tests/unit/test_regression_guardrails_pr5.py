@@ -519,12 +519,12 @@ class TestReportMethodsNarrativeFixes:
         assert format_journal_p_value(0.994, style="NEJM") == "P>0.99"
 
         # Test JAMA: 3 decimals below .01, 2 decimals at/above .01, strict >.99, stripped leading 0
-        assert format_journal_p_value(0.0004, style="JAMA") == "P<0.001"
-        assert format_journal_p_value(0.008, style="JAMA") == "P=0.008"
-        assert format_journal_p_value(0.01, style="JAMA") == "P=0.01"
-        assert format_journal_p_value(0.023, style="JAMA") == "P=0.02"
-        assert format_journal_p_value(0.99, style="JAMA") == "P=0.99"
-        assert format_journal_p_value(0.995, style="JAMA") == "P>0.99"
+        assert format_journal_p_value(0.0004, style="JAMA") == "P<.001"
+        assert format_journal_p_value(0.008, style="JAMA") == "P=.008"
+        assert format_journal_p_value(0.01, style="JAMA") == "P=.01"
+        assert format_journal_p_value(0.023, style="JAMA") == "P=.02"
+        assert format_journal_p_value(0.99, style="JAMA") == "P=.99"
+        assert format_journal_p_value(0.995, style="JAMA") == "P>.99"
 
     def test_html_table_escaping(self):
         from medstat.reporting.tables import (

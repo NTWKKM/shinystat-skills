@@ -177,16 +177,25 @@ class TestPsmRegularizedFallbackPenalty:
         def mock_fit(self, *args, **kwargs):
             raise np.linalg.LinAlgError("Singular matrix")
 
-        with patch.object(sm.Logit, "fit", side_effect=mock_fit):
-            with patch.object(sm.Logit, "fit_regularized", autospec=True) as mock_reg:
-                mock_reg.return_value.predict.return_value = np.array(
-                    [0.1, 0.2, 0.8, 0.9]
-                )
-                from medstat.causal.psm import calculate_propensity_score
+        def mock_firth(*args, **kwargs):
+            raise RuntimeError("Firth failed")
 
-                ps = calculate_propensity_score(
-                    df, treatment="treatment", covariates=["x1", "x2"]
-                )
+        with patch.object(sm.Logit, "fit", side_effect=mock_fit):
+            with patch(
+                "medstat.models.firth.fit_firth_logistic", side_effect=mock_firth
+            ):
+                with patch.object(
+                    sm.Logit, "fit_regularized", autospec=True
+                ) as mock_reg:
+                    mock_reg.return_value.predict.return_value = np.array(
+                        [0.1, 0.2, 0.8, 0.9]
+                    )
+                    mock_reg.return_value.params = np.array([0.5, 1.2, -0.8])
+                    from medstat.causal.psm import calculate_propensity_score
+
+                    ps = calculate_propensity_score(
+                        df, treatment="treatment", covariates=["x1", "x2"]
+                    )
                 assert mock_reg.called
                 alphas = mock_reg.call_args.kwargs.get("alpha")
                 assert alphas is not None
@@ -230,16 +239,25 @@ class TestPsmRegularizedFallbackPenalty:
         def mock_fit(self, *args, **kwargs):
             raise np.linalg.LinAlgError("Singular matrix")
 
-        with patch.object(sm.Logit, "fit", side_effect=mock_fit):
-            with patch.object(sm.Logit, "fit_regularized", autospec=True) as mock_reg:
-                mock_reg.return_value.predict.return_value = np.array(
-                    [0.1, 0.2, 0.8, 0.9]
-                )
-                from medstat.causal.psm import calculate_propensity_score
+        def mock_firth(*args, **kwargs):
+            raise RuntimeError("Firth failed")
 
-                calculate_propensity_score(
-                    df, treatment="treatment", covariates=["const", "x1"]
-                )
+        with patch.object(sm.Logit, "fit", side_effect=mock_fit):
+            with patch(
+                "medstat.models.firth.fit_firth_logistic", side_effect=mock_firth
+            ):
+                with patch.object(
+                    sm.Logit, "fit_regularized", autospec=True
+                ) as mock_reg:
+                    mock_reg.return_value.predict.return_value = np.array(
+                        [0.1, 0.2, 0.8, 0.9]
+                    )
+                    mock_reg.return_value.params = np.array([0.5, 1.2, -0.8])
+                    from medstat.causal.psm import calculate_propensity_score
+
+                    calculate_propensity_score(
+                        df, treatment="treatment", covariates=["const", "x1"]
+                    )
                 assert mock_reg.called
                 alphas = mock_reg.call_args.kwargs.get("alpha")
                 # Intercept (added by add_constant) is at index 0 with weight 0.0

@@ -16,7 +16,7 @@ Biostatistical modeling engine supporting generalized linear models, Cox proport
 5. **Binary & Event Outcome Encoding**: Binary outcomes (logistic regression) and event indicators (Cox proportional hazards) must be explicitly encoded as numeric `0` and `1` (`1 = Event`, `0 = Non-event`). Raw text outcomes (e.g., `"Dead"`, `"Alive"`, `"Yes"`, `"No"`) are rejected to prevent clinical event inversion.
 6. **Events-Per-Variable (EPV) Diagnostic Rule**: Before fitting multivariable regression, calculate EPV according to model type: for Cox proportional hazards, calculate $\text{EPV}_{\text{Cox}} = \frac{E}{P}$ where $E$ is the total failure-event count and $P$ is the fitted predictor parameter count (degrees of freedom, excluding intercept); for logistic regression, calculate $\text{EPV}_{\text{Logistic}} = \frac{\min(N_{\text{events}}, N_{\text{non-events}})}{P}$ where $P$ is the fitted parameter count from the expanded design matrix. Note that $\text{EPV} < 10$ serves as a pragmatic risk screen for small-sample bias and overfitting rather than an absolute diagnosis of separation. If quasi-complete separation occurs, or when prespecified sparse-data criteria or estimation instability arise, standard maximum likelihood estimation (MLE) is biased or fails to converge. The agent must decisively transition to **Firth penalized likelihood** (`fit_firth_logistic` / `firth_cox`) or perform dimension reduction.
 7. **Ordinal Outcome Modeling**: Ordinal outcomes with 3+ ordered levels (mRS, GCS, NYHA) should be modeled using cumulative link proportional odds models (`fit_proportional_odds` / CLI `--type ordinal`) with Brant test verification (`--po-test`). Do not treat ordinal scores as continuous OLS linear regressions.
-8. **Clustered Data & Multilevel Modeling**: Multi-center datasets with patient clustering within hospitals violate independence. For non-survival continuous outcomes, use random-intercept mixed models (`--type mixed --cluster <col>`), and for non-survival binary/count outcomes, use GEE (`--type gee --cluster <col>`) with robust standard errors and compute Design Effect (DEFF). For censored time-to-event outcomes with clustering, direct the analysis to Cox proportional hazards regression with cluster-robust sandwich variance or shared frailty models.
+8. **Clustered Data & Multilevel Modeling**: Multi-center datasets with patient clustering within hospitals violate independence. For non-survival continuous outcomes, use random-intercept mixed models (`--type mixed --cluster <col>`). For non-survival binary outcomes, use GEE (`--type gee --cluster <col>`) with robust standard errors and compute Design Effect (DEFF); check the number of clusters first (standard sandwich standard errors require $\ge 30-40$ clusters; with fewer clusters, apply small-sample bias corrections or recommend mixed-effects models). Note that the GEE CLI path is restricted to binary outcomes (it lacks a count-family implementation). For censored time-to-event outcomes with clustering, direct the analysis to Cox proportional hazards regression with cluster-robust sandwich variance or shared frailty models.
 
 ## Execution Sequence
 
@@ -173,26 +173,33 @@ def summarize_continuous(series, group, ref_level=None):
         }
 
     # Assess normality via Shapiro-Wilk (n <= 5000) or D'Agostino-Pearson normaltest (n > 5000)
-    is_normal = True
-    if len(g0) >= 8 and len(g1) >= 8:
-        _, p_norm0 = stats.shapiro(g0) if len(g0) <= 5000 else stats.normaltest(g0)
-        _, p_norm1 = stats.shapiro(g1) if len(g1) <= 5000 else stats.normaltest(g1)
-        if p_norm0 < 0.05 or p_norm1 < 0.05:
-            is_normal = False
-    elif len(g0) >= 3 and len(g1) >= 3:
-        _, p_norm0 = stats.shapiro(g0)
-        _, p_norm1 = stats.shapiro(g1)
-        if p_norm0 < 0.05 or p_norm1 < 0.05:
-            is_normal = False
-
-    if is_normal:
-        t_stat, p_val = stats.ttest_ind(g1, g0, equal_var=False)
-        g0_summary = f"{g0.mean():.1f} ± {g0.std():.1f}"
-        g1_summary = f"{g1.mean():.1f} ± {g1.std():.1f}"
+    if len(g0) < 3 or len(g1) < 3:
+        p_val = np.nan
+        p_formatted = "Not estimable (n < 3 in at least one group)"
+        g0_summary = f"{g0.mean():.1f} ± {g0.std():.1f}" if len(g0) else "NA"
+        g1_summary = f"{g1.mean():.1f} ± {g1.std():.1f}" if len(g1) else "NA"
     else:
-        u_stat, p_val = stats.mannwhitneyu(g1, g0, alternative="two-sided")
-        g0_summary = f"{g0.median():.1f} [{g0.quantile(0.25):.1f}, {g0.quantile(0.75):.1f}]"
-        g1_summary = f"{g1.median():.1f} [{g1.quantile(0.25):.1f}, {g1.quantile(0.75):.1f}]"
+        is_normal = True
+        if len(g0) >= 8 and len(g1) >= 8:
+            _, p_norm0 = stats.shapiro(g0) if len(g0) <= 5000 else stats.normaltest(g0)
+            _, p_norm1 = stats.shapiro(g1) if len(g1) <= 5000 else stats.normaltest(g1)
+            if p_norm0 < 0.05 or p_norm1 < 0.05:
+                is_normal = False
+        else:
+            _, p_norm0 = stats.shapiro(g0)
+            _, p_norm1 = stats.shapiro(g1)
+            if p_norm0 < 0.05 or p_norm1 < 0.05:
+                is_normal = False
+
+        if is_normal:
+            t_stat, p_val = stats.ttest_ind(g1, g0, equal_var=False)
+            g0_summary = f"{g0.mean():.1f} ± {g0.std():.1f}"
+            g1_summary = f"{g1.mean():.1f} ± {g1.std():.1f}"
+        else:
+            u_stat, p_val = stats.mannwhitneyu(g1, g0, alternative="two-sided")
+            g0_summary = f"{g0.median():.1f} [{g0.quantile(0.25):.1f}, {g0.quantile(0.75):.1f}]"
+            g1_summary = f"{g1.median():.1f} [{g1.quantile(0.25):.1f}, {g1.quantile(0.75):.1f}]"
+        p_formatted = format_p_value(p_val)
 
     diff = abs(g1.mean() - g0.mean())
     pooled_sd = np.sqrt((g1.var(ddof=1) + g0.var(ddof=1)) / 2.0)
@@ -207,7 +214,7 @@ def summarize_continuous(series, group, ref_level=None):
         "comp_summary": g1_summary,
         "ref_level": ref_lbl,
         "comp_level": comp_lbl,
-        "p_value": format_p_value(p_val),
+        "p_value": p_formatted,
         "SMD": smd
     }
 
@@ -246,7 +253,10 @@ def summarize_categorical(series, group, ref_level=None):
             smds[col] = "0.000" if diff == 0 else "Not estimable"
         else:
             smds[col] = f"{diff / pooled_sd:.3f}"
-    smd_str = smds[dummies.columns[0]] if len(smds) == 1 else str(smds)
+    if len(dummies.columns) == 0 or len(smds) == 0:
+        smd_str = "Not estimable (no observed categories)"
+    else:
+        smd_str = smds[dummies.columns[0]] if len(smds) == 1 else str(smds)
     return {
         "crosstab": ct,
         "p_value": p_formatted,
@@ -273,21 +283,32 @@ import patsy
 from medstat.models.firth import fit_firth_logistic
 
 # Define missing-data strategy and complete cases before fitting:
-# Requires documented rationale for dropping incomplete cases and prespecified sensitivity analysis
+# Requires documented study-specific rationale for dropping incomplete cases and executing a prespecified sensitivity analysis
 model_cols = ["outcome", "treatment", "age", "sex", "bmi"]
-protocol_complete_case_rationale = "Prespecified complete-case analysis for primary model variables"
+protocol_complete_case_rationale = None  # e.g. "Study-specific missingness rationale: covariates missing completely at random conditional on observed baseline variables; target estimand is identifiable under complete cases"
+sensitivity_strategy = None  # e.g. "MICE multiple imputation sensitivity analysis"
+if not protocol_complete_case_rationale:
+    raise ValueError("Document study-specific complete-case validity rationale before dropping rows.")
+
 df_model = df.dropna(subset=model_cols).copy()
 n_model_excluded = len(df) - len(df_model)
 if n_model_excluded > 0:
     print(f"Excluded {n_model_excluded} incomplete cases ({protocol_complete_case_rationale}).")
-    print("A prespecified sensitivity analysis (e.g. MICE or missing-indicator) is planned to assess missingness impact.")
+    if sensitivity_strategy:
+        print(f"Executing prespecified missingness sensitivity analysis: {sensitivity_strategy}")
+        # Run sensitivity analysis here and compare effect estimates with complete-case fit:
+        # sens_fit = run_sensitivity_analysis(df, formula, strategy=sensitivity_strategy)
+    else:
+        print("Note: No missingness sensitivity analysis was performed.")
 
 # Validate outcome is strictly binary with both classes present: exactly {0, 1}
 unique_outcomes = set(df_model["outcome"].dropna().unique())
 if unique_outcomes != {0, 1} and unique_outcomes != {0.0, 1.0}:
     raise ValueError(f"Outcome must contain exactly both binary classes {{0, 1}}, got: {unique_outcomes}")
 
-formula = "outcome ~ treatment + age + C(sex) + bmi"
+# Align treatment reference level in formula with configured Table 1 reference level:
+trt_term = f"C(treatment, Treatment(reference={repr(configured_ref)}))" if isinstance(configured_ref, str) or not np.issubdtype(type(configured_ref), np.number) or configured_ref != 0 else "treatment"
+formula = f"outcome ~ {trt_term} + age + C(sex) + bmi"
 y_mat, X_mat = patsy.dmatrices(formula, data=df_model, return_type='dataframe')
 # Count fitted predictor parameters from expanded design matrix (excluding intercept)
 n_params = X_mat.shape[1] - 1
@@ -318,13 +339,13 @@ for col in cat_cols:
 # Helper to resolve treatment OR across numeric and patsy contrast terms:
 from medstat.models import extract_primary_effect
 
-# EPV diagnostic alert (screening risk; does not automatically force Firth)
-if epv < 10:
-    print(f"Warning: Low Events Per Parameter (EPV = {epv:.1f} < 10); risk of small-sample bias. Standard MLE may be unstable.")
+# Check whether prespecified sparse-data criteria (SAP) mandate penalized estimation or dimension reduction:
+sparse_data_criteria_met = False  # Set True if protocol prespecifies Firth for EPV < 10 or sparse events
 
-# Route model fit: If quasi-complete separation occurs, route to Firth penalized regression
-if has_zero_cells:
-    print("Warning: Quasi-complete separation / zero cells detected; routing to Firth penalized logistic regression to prevent separation bias.")
+# Route model fit: If quasi-complete separation occurs, or when prespecified sparse-data criteria are met, route to Firth
+if has_zero_cells or sparse_data_criteria_met:
+    route_reason = "Quasi-complete separation / zero cells detected" if has_zero_cells else "Prespecified sparse-data criteria met"
+    print(f"Warning: {route_reason}; routing to Firth penalized logistic regression to prevent small-sample/separation bias.")
     firth_res = fit_firth_logistic(y_mat.iloc[:, 0], X_mat.drop(columns=['Intercept']), fit_intercept=True, ci_method="pl")
     summary = firth_res["summary_df"]
     results = []

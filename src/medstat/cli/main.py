@@ -850,8 +850,8 @@ def model_cmd(
                 param_hint="--outcome",
             )
         fit_res = fit_proportional_odds(y_raw, X_df)
-        sum_df = fit_res["summary_df"]
-        result_data["coefficients"] = _serialize_summary_df(sum_df)
+        pred_df = fit_res.get("predictor_df", fit_res["summary_df"])
+        result_data["coefficients"] = _serialize_summary_df(pred_df)
         result_data["thresholds"] = _serialize_summary_df(fit_res["threshold_df"])
         result_data["pseudo_r2"] = fit_res.get("pseudo_r2")
         result_data["categories"] = fit_res.get("categories")

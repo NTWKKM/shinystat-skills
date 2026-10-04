@@ -148,15 +148,16 @@ df = df_raw.copy()
 # Declare the ordinal type and its category mapping explicitly (from the protocol / data dictionary):
 outcome_is_ordinal = False  # Set True ONLY when the SAP defines the endpoint as ordinal
 outcome_ordinal_mapping = None  # e.g. {0: 'Home', 1: 'Ward', ..., 6: 'Death'} (ordered codes -> labels)
+outcome_is_nominal = False  # Set True for nominal multicategory outcomes (e.g. subtype analysis)
 is_ordered_cat = isinstance(df['outcome'].dtype, pd.CategoricalDtype) and df['outcome'].dtype.ordered
 if not is_ordered_cat:
     outcome_vals = set(df['outcome'].dropna().unique())
-    if not outcome_vals.issubset({0, 1}):
+    if not outcome_vals.issubset({0, 1}) and not outcome_is_nominal:
         if not (outcome_is_ordinal and outcome_ordinal_mapping):
             raise ValueError(
                 f"Primary endpoint contains non-binary values {outcome_vals}. "
-                "Must be strictly binary {0, 1}, an ordered Categorical, or an explicitly declared "
-                "ordinal endpoint (outcome_is_ordinal=True with outcome_ordinal_mapping)."
+                "Must be strictly binary {0, 1}, an ordered Categorical, an explicitly declared "
+                "ordinal endpoint (outcome_is_ordinal=True with outcome_ordinal_mapping), or nominal (outcome_is_nominal=True)."
             )
         # Support code->label ({0: 'Home'}) or label->code ({'Home': 0}) mapping
         label_to_code = {
@@ -186,13 +187,15 @@ if not is_ordered_cat:
         unmapped = outcome_vals - valid_keys
         if unmapped:
             raise ValueError(f"Outcome values {unmapped} are not defined in outcome_ordinal_mapping.")
-        # Recode mapped text labels to protocol-defined integer codes
+        # Map to numeric outcome_code while preserving clinical outcome labels in 'outcome'
         if label_to_code and any(isinstance(v, str) for v in outcome_vals):
-            df['outcome'] = df['outcome'].replace(label_to_code)
-        if not df['outcome'].isnull().any():
+            df['outcome_code'] = df['outcome'].map(label_to_code)
+        else:
+            df['outcome_code'] = df['outcome']
+        if not df['outcome_code'].isnull().any():
             # Validate that mapped ordinal codes are integral and reject fractional values
             non_int = [
-                v for v in df['outcome'].dropna().unique()
+                v for v in df['outcome_code'].dropna().unique()
                 if not (isinstance(v, (numbers.Integral, np.integer)) and not isinstance(v, (bool, np.bool_)))
                 and not (isinstance(v, (float, np.floating)) and float(v).is_integer())
             ]
@@ -201,7 +204,9 @@ if not is_ordered_cat:
                     f"Mapped ordinal outcome contains non-integral codes {non_int}. "
                     "Ordinal endpoints must be integral codes without fractional values."
                 )
-            df['outcome'] = df['outcome'].astype(int)
+            df['outcome_code'] = df['outcome_code'].astype(int)
+    elif outcome_vals.issubset({0, 1}):
+        df['outcome_code'] = df['outcome'].astype(int)
 
 
 # 3. MISSINGNESS AUDIT & SAMPLE RETENTION FLOW (SCAFFOLD TEMPLATE)
@@ -271,7 +276,7 @@ def winsorize_tukey(series, k=1.5):
 # df_clean['sbp_winsorized'] = winsorize_tukey(df_clean['sbp'], k=1.5)
 
 # บันทึกข้อมูลที่พร้อมสำหรับการวิเคราะห์ และ persist retention flow ควบคู่กัน
-# Standardize validated outcome codes to integer dtype before export
+# Standardize validated outcome codes to integer dtype in outcome_code before export
 if isinstance(df_clean['outcome'].dtype, pd.CategoricalDtype) and df_clean['outcome'].dtype.ordered:
     cats = df_clean['outcome'].cat.categories
     is_int_coded = all(isinstance(c, numbers.Integral) and not isinstance(c, bool) for c in cats)
@@ -291,9 +296,9 @@ if isinstance(df_clean['outcome'].dtype, pd.CategoricalDtype) and df_clean['outc
             }
             if not set(cats).issubset(expected_codes):
                 raise ValueError(f"Categorical codes {set(cats) - expected_codes} not recognized in outcome_ordinal_mapping.")
-        df_clean['outcome'] = df_clean['outcome'].astype(int)
+        df_clean['outcome_code'] = df_clean['outcome'].astype(int)
     elif outcome_ordinal_mapping:
-        # Categories are text labels; convert via inverse label->code mapping
+        # Categories are text labels; convert via inverse label->code mapping into outcome_code
         label_to_code = {
             v: k for k, v in outcome_ordinal_mapping.items()
             if isinstance(k, numbers.Integral) and not isinstance(k, bool) and isinstance(v, str)
@@ -314,11 +319,14 @@ if isinstance(df_clean['outcome'].dtype, pd.CategoricalDtype) and df_clean['outc
                 "outcome_ordinal_mapping codes must strictly increase in declared category order "
                 f"(got {dict(zip(cats, mapped_codes))}). Non-increasing mapping would invert ordinal direction."
             )
-        df_clean['outcome'] = df_clean['outcome'].map(label_to_code).astype(int)
+        df_clean['outcome_code'] = df_clean['outcome'].map(label_to_code).astype(int)
     else:
-        df_clean['outcome'] = df_clean['outcome'].cat.codes.astype(int)
-else:
-    df_clean['outcome'] = df_clean['outcome'].astype(int)
+        df_clean['outcome_code'] = df_clean['outcome'].cat.codes.astype(int)
+elif outcome_is_nominal:
+    # Nominal multicategory outcome: keep outcome labels intact without forcing single binary/ordinal conversion
+    pass
+elif 'outcome_code' not in df_clean.columns:
+    df_clean['outcome_code'] = df_clean['outcome'].astype(int)
 df_clean.to_csv("clean_cohort.csv", index=False)
 with open("sample_retention_flow.json", "w") as f:
     f.write(tracker.to_json())

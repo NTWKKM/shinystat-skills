@@ -84,6 +84,7 @@ Pool effect sizes (log odds ratios, log hazard ratios, or mean differences) acro
 
 ```bash
 # Model selection: use --model random (e.g. DerSimonian-Laird via --method dl) when pre-specified by analysis plan
+# Publication bias: --egger test should only be included when number of studies >= 10 (low power / unreliable with < 10 studies)
 medstat meta --data <clinical_trials.csv> \
   --effect-col mean_diff \
   --se-col se_mean_diff \
@@ -92,7 +93,6 @@ medstat meta --data <clinical_trials.csv> \
   --method dl \
   --measure continuous \
   --forest-plot forest_plot.json \
-  --egger \
   --output meta_analysis.json
 ```
 
@@ -148,6 +148,8 @@ def run_psm_pipeline(df, treatment_col, covariate_cols, caliper_sd=0.20, categor
         raise ValueError(f"Treatment column '{treatment_col}' must not also be listed as a covariate.")
     # Fit propensity score model with collision-free column identifiers
     prefix = "_psm_tmp_"
+    while any(c.startswith(prefix) for c in df.columns):
+        prefix += "x_"
     col_map = {treatment_col: f"{prefix}trt"}
     for i, col in enumerate(covariate_cols):
         col_map[col] = f"{prefix}cov_{i}"
@@ -179,6 +181,9 @@ def run_psm_pipeline(df, treatment_col, covariate_cols, caliper_sd=0.20, categor
                 "Propensity score model failed to converge; consider Firth penalization "
                 "(medstat.models.firth.fit_firth_logistic) or covariate reduction before matching."
             ) from exc
+
+    # Work on a copy of df to guarantee the caller's DataFrame remains unchanged
+    df_work = df.copy()
     original_cols = list(df.columns)
     # Use collision-safe temporary column names if existing columns collide, or preserve original columns
     orig_has_ps = 'ps' in df.columns
@@ -189,19 +194,19 @@ def run_psm_pipeline(df, treatment_col, covariate_cols, caliper_sd=0.20, categor
     orig_row_id = df['_row_id'].copy() if orig_has_row_id else None
 
     # Clip propensity scores strictly within [1e-7, 1 - 1e-7] so logit_ps remains finite
-    df['ps'] = ps_model.predict(df_safe).clip(1e-7, 1.0 - 1e-7)
-    df['logit_ps'] = np.log(df['ps'] / (1.0 - df['ps']))
+    df_work['ps'] = ps_model.predict(df_safe).clip(1e-7, 1.0 - 1e-7)
+    df_work['logit_ps'] = np.log(df_work['ps'] / (1.0 - df_work['ps']))
     
-    valid_ps = np.isfinite(df['logit_ps']) & df[treatment_col].isin([0, 1])
+    valid_ps = np.isfinite(df_work['logit_ps']) & df_work[treatment_col].isin([0, 1])
     if not valid_ps.all():
         raise ValueError(f"Rejecting non-finite propensity scores or non-binary treatment in {(~valid_ps).sum()} rows.")
 
-    caliper = caliper_sd * df['logit_ps'].std()
+    caliper = caliper_sd * df_work['logit_ps'].std()
     
     # Assign unique internal row IDs to eliminate ambiguous selection and extraction from duplicate index labels
-    df['_row_id'] = np.arange(len(df))
-    treated = df[df[treatment_col] == 1].copy().set_index('_row_id', drop=False)
-    control = df[df[treatment_col] == 0].copy().set_index('_row_id', drop=False)
+    df_work['_row_id'] = np.arange(len(df_work))
+    treated = df_work[df_work[treatment_col] == 1].copy().set_index('_row_id', drop=False)
+    control = df_work[df_work[treatment_col] == 0].copy().set_index('_row_id', drop=False)
     
     matched_pairs = []
     available_ctrl_ids = set(control.index)

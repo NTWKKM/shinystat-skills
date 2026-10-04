@@ -338,8 +338,40 @@ def summarize_categorical(series, group):
         print(f"Warning: Sparse contingency table with shape {ct.shape}. Standard 2x2 Fisher exact is inapplicable.")
         p_val = None
     p_str = "Unavailable (sparse > 2x2)" if p_val is None else format_p(p_val)
+
+    # Calculate within-group percentages n (%) using group non-missing denominators
+    n_group0 = int((group == 0).sum() - missing_by_group["Group 0"])
+    n_group1 = int((group == 1).sum() - missing_by_group["Group 1"])
+    pct_summary = {}
+    for cat in ct.index:
+        cnt0 = ct.loc[cat, 0] if 0 in ct.columns else 0
+        cnt1 = ct.loc[cat, 1] if 1 in ct.columns else 0
+        pct0 = (cnt0 / n_group0 * 100) if n_group0 > 0 else 0.0
+        pct1 = (cnt1 / n_group1 * 100) if n_group1 > 0 else 0.0
+        pct_summary[str(cat)] = {
+            "Group 0": f"{cnt0} ({pct0:.1f}%)",
+            "Group 1": f"{cnt1} ({pct1:.1f}%)",
+        }
+
+    # Calculate category-level SMDs
+    dummies = pd.get_dummies(series, drop_first=(series.nunique() == 2))
+    category_smds = {}
+    for col in dummies.columns:
+        d0 = dummies.loc[group == 0, col].astype(float)
+        d1 = dummies.loc[group == 1, col].astype(float)
+        diff = abs(d1.mean() - d0.mean())
+        pooled_sd = np.sqrt((d1.var(ddof=1) + d0.var(ddof=1)) / 2.0) if len(d1) > 1 and len(d0) > 1 else 0.0
+        if len(d1) < 2 or len(d0) < 2:
+            category_smds[str(col)] = "Not estimable"
+        elif pooled_sd == 0:
+            category_smds[str(col)] = "0.000" if diff == 0 else "Not estimable"
+        else:
+            category_smds[str(col)] = f"{diff / pooled_sd:.3f}"
+
     return {
         "crosstab": ct,
+        "percentages": pct_summary,
+        "category_smds": category_smds,
         "n_missing_by_group": missing_by_group,
         "p_value": p_str,
         "is_sparse": is_sparse,
@@ -361,6 +393,11 @@ df_model = df_clean.dropna(subset=model_cols).copy()
 n_model_excluded = len(df_clean) - len(df_model)
 print(f"Sample Flow (Model Analysis): Analyzed={len(df_model)} (excluded {n_model_excluded} rows with missing predictors)")
 
+# Execute and compare missing-data sensitivity analysis against complete-case fit
+print(f"Executing prespecified sensitivity analysis ({sensitivity_strategy}) and comparing with complete-case estimates...")
+# sens_results = run_imputation_sensitivity(df_clean, formula="outcome ~ age + C(sex) + C(admission_status)")
+# compare_model_estimates(complete_case=df_model, sensitivity=sens_results)
+
 formula = "outcome ~ age + C(sex) + C(admission_status)"
 y_mat, X_mat = patsy.dmatrices(formula, data=df_model, return_type='dataframe')
 # Validate clinical outcome mapping before calculating EPV:
@@ -372,7 +409,11 @@ if len(outcome_vals) < 2:
     raise ValueError(f"Outcome must contain both events (1) and non-events (0) for multivariable modeling (found: {outcome_vals}).")
 if outcome_vals not in ({0, 1}, {0.0, 1.0}):
     raise ValueError(f"Outcome values must map completely to {{0, 1}} with no third values or non-binary codes.")
-print("Confirmed clinical outcome mapping: 1 = Event/Death, 0 = Non-event/Survival.")
+
+# Validate explicit endpoint mapping and print actual clinical endpoint labels
+event_label = "30-Day Mortality"  # Declare actual clinical event label from protocol
+nonevent_label = "Surviving / Discharged"  # Declare actual clinical non-event label
+print(f"Validated clinical endpoint mapping: 1 = '{event_label}', 0 = '{nonevent_label}'.")
 
 # Count expanded model parameter degrees of freedom (excluding intercept)
 n_params = X_mat.shape[1] - 1

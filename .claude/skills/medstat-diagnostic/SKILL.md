@@ -201,20 +201,24 @@ if len(gold_classes) < 2:
     raise ValueError(f"ROC analysis requires both classes {{0, 1}} to estimate discrimination (found only: {gold_classes}).")
 scores = clean_diag['test_score'].values
 gold_vals = clean_diag['gold_standard'].astype(int).values
-fpr, tpr, thresholds = roc_curve(gold_vals, scores)
+# Directionality: Apply prespecified clinical score orientation before ROC & Youden calculations
+# (e.g. low-is-abnormal markers like eGFR or Platelets have score_orientation='low_abnormal' and are inverted as -scores)
+score_orientation = "high_abnormal"  # "high_abnormal" (default) or "low_abnormal"
+eval_scores = -scores if score_orientation == "low_abnormal" else scores
+
+fpr, tpr, thresholds = roc_curve(gold_vals, eval_scores)
 roc_auc = auc(fpr, tpr)
 from medstat.diagnostic.roc import auc_ci_delong
-delong_res = auc_ci_delong(gold_vals, scores)
+delong_res = auc_ci_delong(gold_vals, eval_scores)
 auc_ci = (delong_res['ci_lower'], delong_res['ci_upper'])
 
-# Directionality: Verify prespecified clinical orientation (low-is-abnormal markers like eGFR or Platelets must be prespecified and recoded prior to analysis)
 # If an empirical AUC < 0.50 occurs contrary to clinical expectation, report and investigate potential coding/assay error rather than post-hoc flipping
 if roc_auc < 0.50:
     print(f"Warning: Empirical AUC is {roc_auc:.3f} (< 0.50). Verify biomarker clinical directionality or coding before reporting.")
 
 youden_j = tpr - fpr
 opt_idx = np.argmax(youden_j)
-opt_cutoff = thresholds[opt_idx]
+opt_cutoff = -thresholds[opt_idx] if score_orientation == "low_abnormal" else thresholds[opt_idx]
 print(f"ROC AUC: {roc_auc:.3f} (95% DeLong CI: {auc_ci[0]:.3f} - {auc_ci[1]:.3f}) | Optimal Cutoff (Youden J): {opt_cutoff:.2f}")
 
 # Cutoff selection & evaluation protocol:
@@ -298,10 +302,15 @@ from medstat.diagnostic.calibration import (
 
 # Calibration evaluates predicted risk probabilities against binary outcomes.
 # Track prediction provenance: distinguish validation (out-of-fold / independent) from apparent (in-sample)
-prediction_provenance = "apparent" if "is_apparent_risk" in df.columns or "validation_risk" not in df.columns else "validation"
 if "predicted_risk" in df.columns:
     cal_mask = np.isfinite(df["gold_standard"]) & np.isfinite(df["predicted_risk"])
     cal_df = df[cal_mask]
+    if "is_apparent_risk" in cal_df.columns:
+        prediction_provenance = "apparent" if cal_df["is_apparent_risk"].any() else "validation"
+    elif "validation_risk" in cal_df.columns:
+        prediction_provenance = "validation"
+    else:
+        prediction_provenance = "apparent"
     risk_probs = cal_df["predicted_risk"].values
     gold_cal = cal_df["gold_standard"].astype(int).values
     if len(risk_probs) == 0:
