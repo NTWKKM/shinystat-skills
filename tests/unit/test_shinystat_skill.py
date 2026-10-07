@@ -47,29 +47,39 @@ def test_shinystat_reference_manual_exists():
 
 
 def test_shinystat_multi_agent_mirrors_byte_identical():
-    """Verify exact byte-identical parity between canonical skills/shinystat and all agent mirrors."""
+    """Verify exact byte-identical parity between canonical skills/ root and all agent mirrors."""
     repo_root = Path(__file__).resolve().parent.parent.parent
-    canonical_dir = repo_root / "skills" / "shinystat"
+    canonical_dir = repo_root / "skills"
 
     mirrors = [
-        repo_root / ".agent" / "skills" / "shinystat",
-        repo_root / ".agents" / "skills" / "shinystat",
-        repo_root / ".claude" / "skills" / "shinystat",
-        repo_root / ".cursor" / "skills" / "shinystat",
+        repo_root / ".agent" / "skills",
+        repo_root / ".agents" / "skills",
+        repo_root / ".claude" / "skills",
+        repo_root / ".cursor" / "skills",
     ]
 
-    canonical_files = list(canonical_dir.rglob("*"))
-    assert len(canonical_files) > 0
+    canonical_files = {
+        path.relative_to(canonical_dir)
+        for path in canonical_dir.rglob("*")
+        if path.is_file() and path.name != ".DS_Store"
+    }
+    assert canonical_files, "No files found in canonical skills directory"
 
     for mirror in mirrors:
         assert mirror.exists(), f"Mirror {mirror} missing"
-        for canon_file in canonical_files:
-            if canon_file.is_file():
-                rel_path = canon_file.relative_to(canonical_dir)
-                mirror_file = mirror / rel_path
-                assert mirror_file.exists(), (
-                    f"File {rel_path} missing in mirror {mirror}"
-                )
-                assert mirror_file.read_bytes() == canon_file.read_bytes(), (
-                    f"Byte mismatch in {rel_path} for mirror {mirror}"
-                )
+        mirror_files = {
+            path.relative_to(mirror)
+            for path in mirror.rglob("*")
+            if path.is_file() and path.name != ".DS_Store"
+        }
+        assert mirror_files == canonical_files, (
+            f"Path mismatch for mirror {mirror}: "
+            f"missing={sorted(canonical_files - mirror_files)}, "
+            f"extra={sorted(mirror_files - canonical_files)}"
+        )
+        for rel_path in canonical_files:
+            canon_file = canonical_dir / rel_path
+            mirror_file = mirror / rel_path
+            assert mirror_file.read_bytes() == canon_file.read_bytes(), (
+                f"Byte mismatch in {rel_path} for mirror {mirror}"
+            )
