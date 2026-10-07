@@ -1,6 +1,6 @@
-# medstat-core: Headless Biostatistical Calculation Engine & CLI
+# shinystat / medstat-core: Headless Biostatistical Engine & Autonomous Agent Skill
 
-`medstat-core` is a pure headless Python biostatistical calculation engine and CLI tool with 6 self-contained Agent Skills, decoupled from interactive UI frameworks and licensed under the permissive **Apache-2.0** license.
+`medstat-core` is a pure headless Python biostatistical calculation engine and CLI tool paired with the unified `shinystat` autonomous decision-making agent skill, decoupled from interactive UI frameworks and licensed under the permissive **Apache-2.0** license.
 
 ---
 
@@ -10,17 +10,31 @@
 - **Pure Python Firth Penalized Models**: First-class support for penalized logistic and Cox proportional hazards regression via `firthmodels >= 0.8.2` with Profile Likelihood confidence intervals and penalized Likelihood Ratio Tests (LRT), resolving quasi-complete and complete separation in sparse clinical datasets.
 - **Restricted Cubic Splines (RCS)**: Non-linear relationship modeling and hazard ratio contrast curves via `patsy.cr` natural cubic splines.
 - **Audited Participant Sample Flow**: Explicit missing data handling (`complete-case`, `mice`, `knn`, `indicator`) tracking attrition flows ($N_{initial} \to N_{excluded} \to N_{analyzed}$) conforming to CONSORT, STROBE, and TRIPOD standards.
-- **Unified Click CLI**: Comprehensive subcommands (`clean`, `table1`, `model`, `diag`, `causal`, `meta`, `agreement`, `sample-size`, `report`) accepting Statistical Analysis Plans (`analysis_plan.yaml`).
+- **Unified Click CLI & Adaptive Scripting**: Comprehensive subcommands (`clean`, `table1`, `model`, `diag`, `causal`, `meta`, `agreement`, `sample-size`, `report`) accepting Statistical Analysis Plans (`analysis_plan.yaml`), complemented by autonomous Python script adaptation for complex clinical datasets.
 
 ---
 
 ## Architecture & Code Layout
 
 ```
-medstat/
+shinystat-skills/
 ├── pyproject.toml              # PEP 517/621 packaging (requires-python >= 3.12)
 ├── LICENSE                     # Apache-2.0 License
 ├── README.md                   # Project documentation
+├── ARCHITECTURE.md             # System architecture & structural diary
+├── CONTEXT.md                  # Domain vocabulary & naming diary
+├── DESIGN.md                   # Architectural Decision Records (ADRs 1–25)
+├── skills/                     # Canonical shinystat Agent Skill
+│   └── shinystat/
+│       ├── SKILL.md            # Autonomous decision core (4 pillars + Grilling Gate)
+│       └── references/
+│           └── decision-heuristics.md  # Archetype-to-model reference manual
+├── .agent/skills/              # Antigravity Workspace mirror
+├── .agents/skills/             # Antigravity / Cursor mirror
+├── .claude/skills/             # Claude Code mirror
+├── .cursor/skills/             # Cursor mirror
+├── scripts/
+│   └── install-skills.sh       # Automated multi-agent skill installer
 ├── src/medstat/
 │   ├── __init__.py             # Public package exports
 │   ├── config.py               # Headless configuration manager
@@ -36,6 +50,8 @@ medstat/
 │   │   ├── survival.py         # Kaplan-Meier, Cox PH, Schoenfeld assumption tests
 │   │   ├── firth.py            # Firth penalized logistic & Cox with Profile Likelihood CIs
 │   │   ├── splines.py          # Restricted cubic splines (RCS) & HR contrast curves
+│   │   ├── ordinal.py          # Proportional odds cumulative logit & Brant test
+│   │   ├── multilevel.py       # GEE with robust sandwich SEs & random-intercept MixedLM
 │   │   └── sensitivity.py      # E-value sensitivity analysis for unmeasured confounding
 │   ├── diagnostic/
 │   │   ├── accuracy.py         # 2x2 contingency, Sens, Spec, PPV, NPV, LR+, LR-, DOR, Wilson CIs
@@ -51,53 +67,71 @@ medstat/
 │   │   └── bias.py             # Funnel plots, Egger's regression test, Begg's test
 │   ├── agreement/
 │   │   ├── icc.py              # Pure SciPy/NumPy two-way ANOVA ICC (ICC1, ICC2, ICC3, 95% CIs)
-│   │   └── bland_altman.py     # Bland-Altman mean bias, limits of agreement (LoA) & CIs
+│   │   ├── bland_altman.py     # Bland-Altman mean bias, limits of agreement (LoA) & CIs
+│   │   └── kappa.py            # Cohen's and Fleiss' Kappa inter-rater agreement
 │   ├── power/
 │   │   └── sample_size.py      # Sample size & power calculations (means, proportions, survival)
 │   └── reporting/
 │       ├── table1.py           # Baseline characteristics Table 1 with SMDs and auto-testing
 │       ├── tables.py           # APA 7, NEJM, JAMA HTML and text table formatters
-│       └── narrative.py        # Automated Statistical Methods narrative generation
-├── .agent/skills/              # 6 self-contained Agent Skills (SKILL.md + references/)
+│       ├── narrative.py        # Automated Statistical Methods narrative generation
+│       └── checklists.py       # STROBE, CONSORT, TRIPOD, STARD, PRISMA audits
 └── tests/
     ├── conftest.py             # Pytest forwarding wrapper & shared fixtures
     ├── fixtures/               # Synthetic clinical datasets
-    ├── unit/                   # Comprehensive unit tests
+    ├── unit/                   # Comprehensive unit tests & skill parity tests
     ├── benchmarks/             # R oracle parity benchmarks
     └── e2e/                    # Clinical workflow CLI end-to-end tests
 ```
 
 ---
 
-## Agent Skills
+## Autonomous Agent Skill: `shinystat`
 
-This project ships **6 agent skills** in `.agent/skills/` (and `skills/`) that teach AI coding agents how to use the `medstat` library correctly — enforcing clinical safety rules, correct statistical methods, and publication-grade output.
+This project ships the unified **`shinystat` agent skill** (`skills/shinystat/` and mirrored in `.agent/`, `.agents/`, `.claude/`, `.cursor/`), designed following `writing-for-agents` principles with **Hybrid Progressive Disclosure**. Rather than forcing agents through rigid canned CLI commands or fragmented multi-skill handoffs, `shinystat` empowers coding agents to exercise autonomous biostatistical judgment across 4 core pillars:
 
-| Skill | Domain | Key Capabilities |
-|:------|:-------|:-----------------|
-| **medstat-master** | **Master Orchestrator** | **Ingests raw CSV, XLSX, TSV, and Parquet without requiring manual skill selection. Automatically audits data, infers clinical study design, formulates or executes a Statistical Analysis Plan (SAP), and orchestrates the downstream skills pipeline.** |
-| **medstat-clean** | Data Cleaning | Missingness audit (Little's MCAR), imputation (MICE/KNN/indicator), sample-flow tracking, rejects silent listwise deletion |
-| **medstat-models** | Regression & Survival | Table 1 (SMD), GLM/logistic, Cox PH + Schoenfeld, Firth penalized (sparse events), RCS splines, E-value sensitivity |
-| **medstat-diagnostic** | Diagnostic Accuracy | 2×2 contingency (Wilson CI), ROC + DeLong CI, paired DeLong biomarker comparison, DCA net benefit |
-| **medstat-causal-meta** | Causal & Meta-analysis | PSM (caliper 0.2×SD logit, SMD<0.10 balance), Love plot, Cohen's and Fleiss' Kappa, ICC (pure SciPy), Bland-Altman, meta-analysis (DL, Egger's for continuous effect measures if k ≥ 10) |
-| **medstat-report** | Publication Reporting | NEJM/JAMA/APA 7 styled tables, auto Methods narrative, STROBE/CONSORT/TRIPOD/STARD/PRISMA checklist audit |
+### The 4 Decision Pillars
+
+1. **Pillar 1: Data Reality Inspection**: Audits raw geometry, headers, missingness, and candidate sample sizes directly on raw data (`.csv`, `.xlsx`, `.tsv`, `.parquet`) without assuming pre-cleaned tidy shapes.
+2. **Pillar 2: Research & Estimand Triangulation**: Triangulates research proposals (PICO/PECO) against 8 clinical study archetypes (Cohort, Case-Control, RCT, Diagnostic Accuracy, Ordinal, Survival, Agreement, Clustered) documented in `references/decision-heuristics.md`.
+3. **Pillar 3: Adaptive Python Scripting**: Generates and adapts custom Python scripts combining `medstat` core calculation modules with standard scientific libraries (`pandas`, `scipy.stats`, `statsmodels`, `lifelines`, `scikit-learn`).
+4. **Pillar 4: Biostatistical Safety Invariants**: Strictly enforces clinical safety rules:
+   - **Numeric 0/1 encoding** for binary endpoints and survival event indicators (rejecting text labels like `"Yes"/"No"` to prevent inverted effects).
+   - **Sample retention flow** ($N_{initial} \to N_{excluded} \to N_{analyzed}$) with explicit exclusion tracking.
+   - **Zero silent listwise deletion**: Missingness audits (Little's MCAR) and justified handling (`complete-case`, `mice`, `knn`). Primary outcomes are never imputed.
+   - **Wilson score 95% CIs** for proportions and 2×2 diagnostic test metrics.
+   - **DeLong variance** for empirical ROC AUC comparisons.
+   - **Distinct EPV rules**: $\text{EPV}_{\text{binary}} = \frac{\min(N_1, N_0)}{P}$ vs $\text{EPV}_{\text{Cox}} = \frac{N_{\text{failures}}}{P}$.
+
+### Deterministic Grilling Gate
+
+If requirements, outcome directions, missingness strategies, or statistical assumptions are ambiguous or unsupported by data, the agent **halts immediately** and executes an interactive interview (`❓ Q1 ... ➡️ Recommended`) before proceeding with code execution.
 
 ### Skills Directory Structure
 
-Each skill follows the open `SKILL.md` standard:
+Following the open `SKILL.md` standard with progressive disclosure:
 
 ```text
-.agent/skills/<skill-name>/
-├── SKILL.md              # YAML frontmatter (name, description) + instructions
-└── references/           # Detailed reference documentation
-    └── *.md
+skills/shinystat/
+├── SKILL.md                          # Autonomous decision core (4 pillars + Grilling Gate)
+└── references/
+    └── decision-heuristics.md        # Archetype-to-model selection & diagnostic reference
 ```
 
 ### Installing Skills for Your AI Coding Agent
 
-Skills are **instruction files** that teach AI agents how to call the `medstat` Python library. The Python library itself must also be installed separately (see [Installation](#installation) below).
+You can install `shinystat` across all platforms using the provided installer script:
 
-Pick your platform and follow the corresponding setup:
+```bash
+# Automated install into all supported environments (Antigravity, Claude, Cursor)
+./scripts/install-skills.sh
+
+# Or target a specific platform / scope:
+./scripts/install-skills.sh --target antigravity --scope workspace
+./scripts/install-skills.sh --target claude --scope global
+```
+
+Pick your platform and follow the corresponding manual setup if needed:
 
 <details>
 <summary><strong>Google Antigravity</strong> (Desktop / CLI / IDE)</summary>
@@ -259,13 +293,16 @@ Muse Code also reads `AGENTS.md` at the project root for global instructions. Sk
 
 ### Enforced Clinical Rules (All Platforms)
 
-Regardless of which agent platform you use, these skills enforce:
+Regardless of which agent platform you use, `shinystat` enforces:
 
-- **Binary outcome only**: outcome/event columns must be numeric `0`/`1` — text labels (`"Dead"`/`"Alive"`) are rejected
-- **No silent missing data deletion**: must explicitly specify `--strategy` (complete-case, mice, knn, indicator)
-- **Wilson CI only** for sensitivity/specificity (not Wald)
-- **DeLong variance only** for ROC AUC confidence intervals
-- **Caliper 0.2×SD of logit propensity** for PSM, with SMD < 0.10 balance requirement
+- **Strict numeric 0/1 encoding**: outcome/event columns must be numeric `0`/`1` — text labels (`"Dead"`/`"Alive"`, `"Yes"`/`"No"`) are rejected to eliminate event inversion.
+- **Audited sample retention flow**: every analysis tracks $N_{initial} \to N_{excluded} \to N_{analyzed}$ with documented clinical justification.
+- **No silent missing data deletion**: missingness audits (Little's MCAR) and explicit handling strategies are required; primary outcomes are never imputed.
+- **Wilson score CIs only** for sensitivity/specificity and binomial proportions (not Wald).
+- **DeLong variance only** for empirical ROC AUC confidence intervals and comparisons.
+- **Separate EPV rules**: $\text{EPV}_{\text{binary}} = \frac{\min(N_1, N_0)}{P}$ vs $\text{EPV}_{\text{Cox}} = \frac{N_{\text{failures}}}{P}$.
+- **Caliper 0.2×SD of logit propensity** for PSM, with Austin (2009) balance requirement (absolute SMD < 0.10).
+- **Deterministic Grilling Gate**: mandates an interactive interview whenever ambiguity or conflicting study-data assumptions arise.
 
 ---
 
