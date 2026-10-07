@@ -96,7 +96,7 @@ This project ships the unified **`shinystat` agent skill** (`skills/shinystat/` 
 2. **Pillar 2: Research & Estimand Triangulation**: Triangulates research proposals (PICO/PECO) against 8 clinical study archetypes (Cohort, Case-Control, RCT, Diagnostic Accuracy, Ordinal, Survival, Agreement, Clustered) documented in `references/decision-heuristics.md`.
 3. **Pillar 3: Adaptive Python Scripting**: Generates and adapts custom Python scripts combining `medstat` core calculation modules with standard scientific libraries (`pandas`, `scipy.stats`, `statsmodels`, `lifelines`, `scikit-learn`).
 4. **Pillar 4: Biostatistical Safety Invariants**: Strictly enforces clinical safety rules:
-   - **Numeric 0/1 encoding** for binary endpoints and survival event indicators (rejecting text labels like `"Yes"/"No"` to prevent inverted effects).
+   - **Numeric 0/1 encoding** for binary endpoints and survival event indicators (accepting explicitly mapped text labels like `"Yes"/"No"` or `"Dead"/"Alive"`, while rejecting unmapped text labels to eliminate clinical event inversion).
    - **Sample retention flow** ($N_{initial} \to N_{excluded} \to N_{analyzed}$) with explicit exclusion tracking.
    - **Zero silent listwise deletion**: Missingness audits (Little's MCAR) and justified handling (`complete-case`, `mice`, `knn`). Primary outcomes are never imputed.
    - **Wilson score 95% CIs** for proportions and 2×2 diagnostic test metrics.
@@ -105,7 +105,7 @@ This project ships the unified **`shinystat` agent skill** (`skills/shinystat/` 
 
 ### Deterministic Grilling Gate
 
-If requirements, outcome directions, missingness strategies, or statistical assumptions are ambiguous or unsupported by data, the agent **halts immediately** and executes an interactive interview (`❓ Q1 ... ➡️ Recommended`) before proceeding with code execution.
+If requirements, outcome directions, missingness strategies, or statistical assumptions are ambiguous, unsupported by data, or affected by severe sparsity (EPV < 10 or quasi-complete separation), the agent **halts immediately** and executes an interactive interview (`❓ Q1 ... ➡️ Recommended`) before proceeding with code execution.
 
 ### Skills Directory Structure
 
@@ -295,8 +295,8 @@ Muse Code also reads `AGENTS.md` at the project root for global instructions. Sk
 
 Regardless of which agent platform you use, `shinystat` enforces:
 
-- **Strict numeric 0/1 encoding**: outcome/event columns must be numeric `0`/`1` — text labels (`"Dead"`/`"Alive"`, `"Yes"`/`"No"`) are rejected to eliminate event inversion.
-- **Audited sample retention flow**: every analysis tracks $N_{initial} \to N_{excluded} \to N_{analyzed}$ with documented clinical justification.
+- **Strict numeric 0/1 encoding**: outcome/event columns must be numeric `0`/`1` — explicitly mapped text labels like `"Dead"`/`"Alive"` or `"Yes"`/`"No"` are converted to 0/1, while unmapped text labels are rejected to eliminate event inversion.
+- **Audited sample retention flow**: every analysis tracks $N_{initial} \to N_{excluded} \to N_{analyzed}$ with documented clinical justification; excluding records with missing primary outcomes requires reviewing the protocol's disposition (e.g., ITT vs per-protocol vs sensitivity analysis) rather than relying on a general complete-case justification alone.
 - **No silent missing data deletion**: missingness audits (Little's MCAR) and explicit handling strategies are required; primary outcomes are never imputed.
 - **Wilson score CIs only** for sensitivity/specificity and binomial proportions (not Wald).
 - **DeLong variance only** for empirical ROC AUC confidence intervals and comparisons.

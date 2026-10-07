@@ -26,15 +26,20 @@ Reference guide for the `shinystat` autonomous agent. Consult this manual during
 
 ### A. Events Per Variable (EPV) & Sparse Data
 ```
-Calculate EPV:
-- Binary Logistic: EPV = min(Events, Non-Events) / P_covariates
-- Cox Proportional Hazards: EPV = Observed Failures / P_covariates (do not use censored subjects)
+Calculate EPV (where P_parameters counts fitted degrees of freedom; e.g. k-1 for categorical factors, spline basis terms):
+- Binary Logistic: EPV = min(Events, Non-Events) / P_parameters
+- Cox Proportional Hazards: EPV = Observed Failures / P_parameters (do not use censored subjects)
 
 ├── EPV ≥ 10 ──▶ Proceed with standard GLM Logistic / Cox PH
 └── EPV < 10 or Separation detected
-    ├── Strategy 1 (Preferred): Firth penalized likelihood (`medstat.models.firth`)
-    ├── Strategy 2: Pre-specified variable reduction or domain-guided composite score
-    └── Strategy 3: Report univariable associations with explicit sparse-data disclaimer
+    ├── Binary Logistic:
+    │   ├── Strategy 1 (Preferred): Firth penalized logistic regression (`fit_firth_logistic` in `medstat.models.firth`)
+    │   ├── Strategy 2: Pre-specified variable reduction or domain-guided composite score
+    │   └── Strategy 3: Report univariable associations with explicit sparse-data disclaimer
+    └── Cox Proportional Hazards (Failures / Parameter < 10):
+        ├── Strategy 1: Firth penalized Cox regression (`fit_firth_cox` in `medstat.models.firth`)
+        ├── Strategy 2: Pre-specified covariate reduction (e.g. validated clinical risk score)
+        └── Strategy 3: Univariable survival analysis (Kaplan-Meier / univariable Cox) with sparse-data disclaimer
 ```
 
 ### B. Missing Data Strategy
