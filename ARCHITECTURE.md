@@ -8,21 +8,15 @@ System architecture and structural specifications for `medstat-core` and the `me
 
 ```
                           ┌───────────────────────────┐
-                          │   medstat-master Skill    │
-                          │   (Master Orchestrator)   │
+                          │      shinystat Skill      │
+                          │ (Autonomous Decision Agent│
+                          │   + Grilling Gate)        │
                           └─────────────┬─────────────┘
-                                        │ orchestrates
+                                        │ adapts & writes
                                         ▼
                           ┌───────────────────────────┐
-                          │    Atomic Agent Skills    │
-                          │   (clean, models, diag,   │
-                          │    causal-meta, report)   │
-                          └─────────────┬─────────────┘
-                                        │ invokes
-                                        ▼
-                          ┌───────────────────────────┐
-                          │    medstat CLI & SAP      │
-                          │   (click / YAML spec)     │
+                          │  Custom Python Scripts &  │
+                          │     medstat CLI / SAP     │
                           └─────────────┬─────────────┘
                                         │ executes
                                         ▼

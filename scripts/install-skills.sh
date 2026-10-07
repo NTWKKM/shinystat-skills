@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# install-skills.sh — Agent Skills Installer for medstat
+# install-skills.sh — Agent Skills Installer for shinystat
 # Installs atomic, self-contained Agent Skills into Antigravity, Claude Code,
 # and Cursor environments.
 # ==============================================================================
@@ -20,7 +20,7 @@ print_usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Install medstat Agent Skills into your agent environment.
+Install shinystat Agent Skills into your agent environment.
 
 Options:
   -t, --target TARGET    Target platform: antigravity, claude, cursor, all
@@ -98,7 +98,7 @@ if [[ ${#SKILL_DIRS[@]} -eq 0 ]]; then
 fi
 
 echo "=========================================================="
-echo "  medstat Agent Skills Installer"
+echo "  shinystat Agent Skills Installer"
 echo "=========================================================="
 echo "Found ${#SKILL_DIRS[@]} skills in ${SKILLS_SRC}:"
 for s in "${SKILL_DIRS[@]}"; do
@@ -194,5 +194,5 @@ done
 
 echo ""
 echo "=========================================================="
-echo "  All medstat Agent Skills successfully installed!"
+echo "  All shinystat Agent Skills successfully installed!"
 echo "=========================================================="
