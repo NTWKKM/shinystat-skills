@@ -33,7 +33,7 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
 | **Cluster ICC** | `icc_cluster` | Intraclass correlation coefficient quantifying the proportion of total variance attributable to between-cluster differences in multi-center cohorts. |
 | **Generalized Estimating Equations** | `gee` | Semi-parametric population-averaged regression accounting for within-cluster correlation using empirical robust (sandwich) standard errors. |
 | **Random-Intercept Model** | `random_intercept` | Linear mixed-effects model decomposing outcome variance into fixed covariate effects and cluster-specific random shifts ($u_i \sim \mathcal{N}(0, \sigma_u^2)$). |
-| **Master Orchestration** | `medstat-master` | Autonomous intelligence layer that profiles datasets, infers clinical study design, and orchestrates downstream atomic skills without manual skill selection. |
+| **Shinystat Skill** | `shinystat` | Unified autonomous biostatistical intelligence skill that triangulates data reality with research questions, generates adaptive Python scripts, and enforces mandatory Grilling on ambiguity. |
 | **Statistical Analysis Plan** | `SAP` | Formal specification of primary estimand, data cleaning/retention strategy, planned models, and reporting standards before execution. |
 | **Gold Standard Validation** | `validate_gold_standard` | Pre-flight validation that drops missing values, rejects observed values outside $\{0, 1\}$ (and boolean types), and requires both classes only when `require_both_classes=True`. |
 | **Primary Effect Extraction** | `extract_primary_effect` | Helper accepting an estimates map and returning a finite point estimate, or `np.nan` when no supported or unambiguous estimate is found. |

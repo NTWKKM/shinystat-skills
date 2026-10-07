@@ -526,3 +526,24 @@ PR #5 latest review findings from CodeRabbit identified several clinical and sta
 
 [MEMORY_LEARN: Decision Curve Analysis (DCA) strictly requires calibrated probabilities in [0, 1]; passing uncalibrated raw continuous biomarkers corrupts net benefit calculations due to invalid threshold exchange rates.]
 
+---
+
+## ADR 25: Unified Shinystat Skill Architecture & Deterministic Grilling Gate
+
+### Context
+Maintaining multiple fragmented atomic skills (`medstat-clean`, `medstat-models`, `medstat-diagnostic`, `medstat-causal-meta`, `medstat-report`) caused cognitive fragmentation, high context load, and brittle inter-skill transitions. Furthermore, rigid execution models led agents to force canned commands onto messy real-world clinical datasets rather than exercising biostatistical judgment.
+
+### Decision
+1. **Unified Autonomous Skill (`shinystat`)**: Consolidate all domain skills into a single authoritative skill `skills/shinystat/SKILL.md` following `writing-for-agents` principles (concise core instructions, positive framing, checkable completion criteria).
+2. **Hybrid Progressive Disclosure**: Disclose detailed clinical study archetypes, model selection tables, and decision trees in `skills/shinystat/references/decision-heuristics.md` behind a context pointer, keeping the main `SKILL.md` lean (~70 lines).
+3. **Deterministic Grilling Gate**: Embed mandatory stop-and-grill rules (`❓ Q1 ... ➡️ Recommended`) when outcome/censoring mapping is ambiguous, research designs mismatch data geometry, missingness lacks clinical justification, or extreme sparse-data/separation occurs.
+4. **Preserve Computational Engine**: Maintain `medstat-core` Python package and Click CLI unchanged (442 passing tests).
+5. **Multi-Agent Mirror Parity & Automated Drift Defense**: Synchronize `shinystat` byte-for-byte across `.agent/`, `.agents/`, `.claude/`, `.cursor/`, and canonical `skills/`, verified continuously via `tests/unit/test_shinystat_skill.py`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Context Efficiency**: Drastically reduced token footprint while amplifying autonomous statistical decision-making.
+- **Anti-Hallucination Rigor**: Enforces hard-stop interviews before code execution whenever ambiguity is encountered.
+- **Full Parity**: 100% identical mirror synchronization and 442/442 unit and E2E tests passing.
+
+[MEMORY_LEARN: Consolidating modular skills into a single autonomous decision skill with progressive disclosure and deterministic grilling gates maximizes agent flexibility while eliminating silent assumptions and context sprawl.]
