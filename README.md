@@ -170,17 +170,16 @@ Claude Code discovers skills in `~/.claude/skills/` (global) or `.claude/skills/
 Upload each skill as a `.zip` file via **Upload a skill**:
 
 ```bash
-# Create zip packages for each skill (archiving the directory from its parent)
-cd shinystat-skills
-for skill_dir in .agent/skills/*/; do
-  skill_name=$(basename "$skill_dir")
-  (cd .agent/skills && zip -r ~/Desktop/"${skill_name}.zip" "$skill_name")
-done
+# Option 1: Package dedicated cloud skill for Claude Web (recommended, includes standalone recipes)
+./scripts/package-cloud-skill.sh ~/Desktop
+
+# Option 2: Package original clean local skill
+(cd skills && zip -r ~/Desktop/shinystat.zip shinystat)
 ```
 
-Then in [claude.ai](https://claude.ai): Navigate to **Customize** → **Skills** → **+** → **Create skill** → **Upload a skill** and select each `.zip` file. Ensure **Code execution and file creation** is enabled. Claude reads the YAML frontmatter from `SKILL.md` inside each skill archive.
+Then in [claude.ai](https://claude.ai): Navigate to **Customize** → **Skills** → **+** → **Create skill** → **Upload a skill** and select the `.zip` file (e.g. `shinystat-cloud.zip`). Ensure **Code execution and file creation** is enabled. Claude reads the YAML frontmatter from `SKILL.md` inside the skill archive.
 
-> **Note:** Python execution is supported in Claude Web when code execution is enabled, but availability of `medstat-core` and its dependencies depends on the execution environment. If `medstat` is not available in the environment, use the generated instructions and code locally.
+> **Note:** The dedicated cloud package (`shinystat-cloud.zip`) contains pure-Python standalone formulas in `references/python-recipes.md` so that Claude Web can execute all advanced biostatistical analyses directly in its sandbox using standard scientific libraries (`pandas`, `scipy.stats`, `statsmodels`, `lifelines`, `scikit-learn`) without needing `medstat-core` installed.
 
 </details>
 

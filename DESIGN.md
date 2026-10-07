@@ -547,3 +547,22 @@ Maintaining multiple fragmented atomic skills (`medstat-clean`, `medstat-models`
 - **Full Parity**: 100% identical mirror synchronization and 442/442 unit and E2E tests passing.
 
 [MEMORY_LEARN: Consolidating modular skills into a single autonomous decision skill with progressive disclosure and deterministic grilling gates maximizes agent flexibility while eliminating silent assumptions and context sprawl.]
+
+## ADR 26: Decoupled Shinystat Cloud Skill Package for Claude Web Sandbox
+
+### Context
+In cloud execution environments such as Claude Web (claude.ai Analysis Tool) or hosted Jupyter notebooks, the proprietary `medstat-core` Python package is not pre-installed. While standard data science libraries (`pandas`, `numpy`, `scipy`, `statsmodels`, `lifelines`, `scikit-learn`) are available, advanced biostatistical routines (Firth penalized regression, Austin & Steyerberg 2019 ICI, DeLong analytical variance, Shrout & Fleiss 1979 two-way ANOVA ICC, Bland-Altman 1999 LoA SE, Austin 2009 SMD, Little's MCAR test) risk execution errors if the agent attempts to import unavailable `medstat` modules.
+Crucially, coupling cloud-specific recipes into the canonical `skills/shinystat` skill compromises the clean architectural design of the local agent workflows.
+
+### Decision
+1. **Pristine Canonical Skill**: Retain `skills/shinystat/` and all 4 platform mirrors (`.agent/`, `.agents/`, `.claude/`, `.cursor/`) in their clean, unlinked original state without cloud recipe references.
+2. **Dedicated Cloud Skill (`packaging/cloud/shinystat-cloud/`)**: Package a dedicated autonomous skill specifically tailored for Claude Web. Embeds cloud sandbox execution guidance and links directly to `references/python-recipes.md`.
+3. **Automated Cloud Packaging Script**: Provide `scripts/package-cloud-skill.sh` to build `~/Desktop/shinystat-cloud.zip` on demand without polluting the canonical skills tree.
+4. **Desktop Artifacts**: Deliver both clean original `~/Desktop/shinystat.zip` and dedicated cloud `~/Desktop/shinystat-cloud.zip`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Clean Architecture**: Canonical skill remains pristine while Claude Web receives a dedicated, self-contained cloud bundle.
+- **Parity**: 442/442 unit and E2E tests passing.
+
+[MEMORY_LEARN: Decoupling cloud-specific execution recipes into a dedicated export package keeps canonical repository skills pristine while empowering cloud-sandboxed agents with self-contained algorithm manuals.]
