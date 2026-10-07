@@ -27,7 +27,7 @@ If requirements, outcome directions, or statistical assumptions are ambiguous or
 1. **Pillar 1: Data Reality Inspection**
    - Inspect raw geometry, headers, data types, missingness, and distributions before writing code (`df.info()`, `df.describe()`).
    - Isolate analytic cohorts from messy layouts (embedded summaries, multi-line headers, Thai/regional character sets).
-   - Evaluate Events Per Variable ($\text{EPV} = \frac{\min(N_{\text{events}}, N_{\text{non-events}})}{P_{\text{covariates}}}$) and candidate sample sizes.
+   - Evaluate Events Per Variable: for binary logistic, $\text{EPV}_{\text{binary}} = \frac{\min(N_{\text{events}}, N_{\text{non-events}})}{P_{\text{covariates}}}$; for Cox proportional hazards, calculate using observed failures, $\text{EPV}_{\text{Cox}} = \frac{N_{\text{failures}}}{P_{\text{covariates}}}$.
 
 2. **Pillar 2: Research & Estimand Triangulation**
    - Align the statistical design with the research proposal (PICO/PECO) and clinical archetype (Cohort, Case-Control, RCT, Diagnostic Accuracy, Agreement, Clustered).
@@ -64,7 +64,7 @@ When encountering any of the following triggers, **HALT execution immediately** 
 3. **Unstated Missing Data Strategy**:
    - Missing values are present in key variables without pre-specified clinical handling strategy (`complete-case`, `mice`, `knn`).
 4. **Severe Sparse Data or Separation**:
-   - $\text{EPV} < 10$ or quasi-complete separation is detected, requiring a decision between Firth penalization, covariate selection, or univariable reporting.
+   - $\text{EPV} < 10$ (or failures/parameter $< 10$ in Cox) or quasi-complete separation is detected, requiring a decision between Firth penalization, covariate selection, or univariable reporting.
 
 ---
 
@@ -73,6 +73,6 @@ When encountering any of the following triggers, **HALT execution immediately** 
 The biostatistical task is complete when:
 - [ ] Raw data geometry and clinical variables are audited and validated.
 - [ ] Any ambiguity in event mapping or estimand has passed the Grilling Gate with user confirmation.
-- [ ] A customized Python script has executed successfully without warnings of unidentified parameters or unhandled separation.
+- [ ] A customized Python script has executed successfully with verified parameter identification and resolved separation.
 - [ ] Participant retention flow ($N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$) is fully accounted for.
 - [ ] Statistical estimates with 95% confidence intervals and standard reporting tables (NEJM/JAMA/APA) are generated and presented.

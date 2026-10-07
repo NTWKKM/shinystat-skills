@@ -15,9 +15,9 @@ Reference guide for the `shinystat` autonomous agent. Consult this manual during
 | **Type 3: Survival / Time-to-Event** | Hazard Ratio (HR) | Cox Proportional Hazards | Proportional hazards test (Grambsch-Therneau / Schoenfeld) | `medstat.models.survival` |
 | **Type 4: Diagnostic Test Accuracy** | Sensitivity, Specificity, PPV, NPV, AUC | 2x2 Contingency Matrix & Empirical ROC | Wilson score 95% CIs; DeLong test for paired AUC; Directionality | `medstat.diagnostic` |
 | **Type 4b: Clinical Utility & Calib** | Net Benefit, Model Calibration | Decision Curve Analysis (DCA) & Recalibration | Brier score, Calibration slope & intercept, Austin-Steyerberg ICI | `medstat.diagnostic.dca`, `medstat.diagnostic.calibration` |
-| **Type 5: Observational Causal** | Average Treatment Effect in Treated (ATT) | Propensity Score Matching (PSM, 1:1, Caliper 0.2 SD) | Austin (2009) Covariate Balance ($|\text{SMD}| < 0.10$); VanderWeele E-value | `medstat.causal` |
+| **Type 5: Observational Causal** | Average Treatment Effect in Treated (ATT) | Propensity Score Matching (PSM, 1:1, Caliper 0.2 SD) | Austin (2009) Covariate Balance (absolute SMD < 0.10); VanderWeele E-value | `medstat.causal` |
 | **Type 6: Device / Rater Agreement** | Limits of Agreement, Reliability | Bland-Altman Difference Analysis & ICC | Bland-Altman (1999) large-sample CIs; Shrout-Fleiss two-way ANOVA | `medstat.agreement` |
-| **Type 7: Systematic Meta-Analysis** | Pooled Effect (RR/OR/MD) | DerSimonian-Laird Random-Effects | Cochran's $Q$, Higgins $I^2$; Egger's test if $k_{\text{distinct}} \ge 10$ | `medstat.meta` |
+| **Type 7: Systematic Meta-Analysis** | Pooled Effect (RR/OR/MD) | Fixed-Effects or DerSimonian-Laird Random-Effects | Condition on clinical variation; avoid DerSimonian-Laird inverse-variance for rare events (exact/Peto not supported in `medstat.meta`); small $k < 5$ caution | `medstat.meta` |
 | **Type 8: Clustered / Multi-Center** | Population-averaged or Cluster Effect | GEE with robust sandwich SE or MixedLM | Cluster Design Effect ($\text{DEFF} = 1 + (\bar{m}-1)\text{ICC}_{\text{cluster}}$) | `medstat.models.multilevel` |
 
 ---
@@ -26,7 +26,9 @@ Reference guide for the `shinystat` autonomous agent. Consult this manual during
 
 ### A. Events Per Variable (EPV) & Sparse Data
 ```
-Calculate EPV = min(Events, Non-Events) / P_covariates
+Calculate EPV:
+- Binary Logistic: EPV = min(Events, Non-Events) / P_covariates
+- Cox Proportional Hazards: EPV = Observed Failures / P_covariates (do not use censored subjects)
 
 ├── EPV ≥ 10 ──▶ Proceed with standard GLM Logistic / Cox PH
 └── EPV < 10 or Separation detected
@@ -41,7 +43,7 @@ Audit Missingness Pattern & Mechanism
 
 ├── Total Missing < 5% and Clinically Uninformative ──▶ Complete-case analysis with documented justification
 ├── Missing 5%–40% under Missing at Random (MAR) ──▶ Multiple Imputation by Chained Equations (MICE)
-├── Primary Outcome Missing ──▶ Never impute outcome; record as sample flow exclusion
+├── Primary Outcome Missing ──▶ Never impute outcome; check protocol disposition (e.g., ITT vs per-protocol vs sensitivity); if unestablished, halt at Grilling Gate for explicit clinical disposition
 └── Missingness Informative / Missing Not at Random (MNAR) ──▶ Halt at Grilling Gate for clinical review
 ```
 
