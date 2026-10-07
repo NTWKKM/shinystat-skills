@@ -1,0 +1,2440 @@
+"""
+Unified Command Line Interface for medstat-core.
+
+Provides 9 subcommands corresponding to the clinical biostatistical workflow:
+clean, table1, model, diag, agreement, causal, meta, sample-size, and report.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import re
+from pathlib import Path
+from typing import Any
+
+import click
+import numpy as np
+import pandas as pd
+
+from medstat.agreement.bland_altman import bland_altman_analysis
+from medstat.agreement.icc import calculate_icc
+from medstat.agreement.kappa import calculate_kappa
+from medstat.causal.balance import _normalize_smd, calculate_smd
+from medstat.causal.psm import propensity_score_match
+from medstat.cli.spec import AnalysisPlan
+from medstat.data.clean import (
+    MissingStrategyRequiredError,
+    _is_id_column,
+    audit_missingness,
+    detect_outliers,
+    handle_outliers,
+    prepare_data_for_analysis,
+)
+from medstat.data.loader import load_clinical_data, validate_columns
+from medstat.data.retention import SampleFlowTracker
+from medstat.diagnostic.accuracy import calculate_diagnostic_accuracy
+from medstat.diagnostic.calibration import (
+    calculate_brier_score,
+    calculate_calibration_slope_and_intercept,
+    calculate_ici,
+)
+from medstat.diagnostic.dca import calculate_dca
+from medstat.diagnostic.roc import (
+    auc_ci_delong,
+    calculate_roc_curve,
+    delong_paired_test,
+)
+from medstat.meta.bias import eggers_test
+from medstat.meta.forest import generate_forest_data
+from medstat.meta.models import run_meta_analysis
+from medstat.models.firth import fit_firth_cox, fit_firth_logistic
+from medstat.models.glm import fit_linear_regression, fit_standard_logistic
+from medstat.models.multilevel import (
+    calculate_design_effect,
+    fit_gee,
+    fit_random_intercept,
+)
+from medstat.models.ordinal import (
+    fit_proportional_odds,
+    test_proportional_odds,
+)
+from medstat.models.sensitivity import calculate_e_value
+from medstat.models.splines import fit_cox_rcs, fit_logistic_rcs
+from medstat.models.survival import check_proportional_hazards, fit_cox_ph
+from medstat.power.sample_size import (
+    calculate_sample_size_correlation,
+    calculate_sample_size_proportions,
+    calculate_sample_size_survival,
+    calculate_sample_size_t_test,
+)
+from medstat.reporting.checklists import get_checklist
+from medstat.reporting.narrative import generate_methods_narrative
+from medstat.reporting.table1 import generate_table_one
+from medstat.reporting.tables import (
+    Estimate,
+    EstimateTable,
+    PublicationRenderer,
+    render_balance_table,
+    render_bland_altman_table,
+    render_diagnostic_table,
+    render_records_table,
+)
+
+
+def check_data_missingness(
+    df: pd.DataFrame, required_cols: list[str], subcommand: str
+) -> None:
+    """Enforce clinical safety directive: block unhandled missing data in analysis subcommands."""
+    cols_to_check = [c for c in required_cols if c in df.columns]
+    if not cols_to_check:
+        return
+    missing_counts = df[cols_to_check].isna().sum()
+    cols_with_nan = missing_counts[missing_counts > 0]
+    if not cols_with_nan.empty:
+        details = "\n".join(
+            f"  - '{col}': {count} missing ({count / len(df) * 100:.1f}%)"
+            for col, count in cols_with_nan.items()
+        )
+        err_msg = (
+            f"[CLINICAL SAFETY ERROR: MissingStrategyRequiredError] Unhandled missing data detected in '{subcommand}':\n"
+            f"{details}\n\n"
+            f"Silent listwise deletion is prohibited under clinical safety directives.\n"
+            f"Run 'medstat clean' to produce a validated cohort first:\n"
+            f"  medstat clean --data <raw.csv> --strategy <complete-case|mice|knn> "
+            f'--missing-justification "<rationale>" --output <clean.csv>'
+        )
+        raise click.ClickException(err_msg)
+
+
+def _serialize_summary_df(sum_df: pd.DataFrame) -> list[dict[str, Any]]:
+    """Serialize model summary DataFrame to records, preserving the index as 'term'."""
+    df_copy = sum_df.copy()
+    if "term" not in df_copy.columns:
+        df_copy.insert(0, "term", df_copy.index.astype(str))
+    return df_copy.to_dict(orient="records")
+
+
+def _sanitize_for_json(obj: Any) -> Any:
+    """Recursively convert non-finite float/NumPy numbers to None for strict JSON serialization."""
+    if isinstance(obj, (bool, np.bool_)):
+        return bool(obj)
+    if isinstance(obj, (float, np.floating)):
+        return float(obj) if math.isfinite(obj) else None
+    if isinstance(obj, (int, np.integer)):
+        return int(obj)
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_for_json(v) for v in obj]
+    return obj
+
+
+@click.group()
+@click.version_option(version="0.1.0", prog_name="medstat")
+def cli() -> None:
+    """medstat: Clinical Biostatistics & Health Data Science CLI."""
+    pass
+
+
+# ==============================================================================
+# 0. profile
+# ==============================================================================
+@cli.command("profile")
+@click.option(
+    "--data",
+    required=True,
+    type=click.Path(exists=True),
+    help="Input clinical dataset (.csv, .xlsx, .tsv, .parquet).",
+)
+@click.option("--output", type=click.Path(), help="Output path for profile JSON.")
+def profile_cmd(data: str, output: str | None) -> None:
+    """Rapid one-shot dataset health profile and autonomous study design inference."""
+    df = load_clinical_data(data)
+    audit = audit_missingness(df)
+    n_rows, n_cols = df.shape
+
+    # Detect candidate primary endpoints
+    endpoints: list[dict[str, Any]] = []
+    for col in df.columns:
+        s = df[col].dropna()
+        if s.nunique() == 2:
+            endpoints.append(
+                {
+                    "column": col,
+                    "type": "binary",
+                    "unique_values": [str(x) for x in s.unique()[:2]],
+                }
+            )
+        else:
+            col_lower = col.lower()
+            col_tokens = set(re.split(r"[_\-\.\s]+", col_lower))
+            if any(
+                t in ("time", "duration", "followup", "survival", "surv")
+                for t in col_tokens
+            ) or col_lower.startswith("time_to_"):
+                endpoints.append({"column": col, "type": "survival_time"})
+
+    # Infer clinical design type (Type 1 to 7)
+    has_survival = any(e["type"] == "survival_time" for e in endpoints)
+    has_binary = any(e["type"] == "binary" for e in endpoints)
+    cluster_pattern = re.compile(
+        r"^(?:rater|observer|method)(?:[_\s-]?id)?(?:[_\s-]?\d+)?$", re.IGNORECASE
+    )
+    has_clusters = any(bool(cluster_pattern.match(c.strip())) for c in df.columns)
+    has_treatment = any(
+        c.lower() in ("treatment", "treat", "rx", "arm", "group", "exposure")
+        for c in df.columns
+    )
+
+    if has_survival:
+        inferred_design = "Type 3: Time-to-Event / Survival Cohort"
+        recommended_model = "cox_ph (or firth Cox if sparse)"
+    elif has_clusters:
+        inferred_design = "Type 6: Inter-Rater Reliability / Agreement Study"
+        recommended_model = "icc / bland-altman"
+    elif has_treatment and len(df.columns) > 5:
+        inferred_design = "Type 5: Observational Comparative Effectiveness (Causal PSM)"
+        recommended_model = "causal psm + multivariable logistic"
+    elif has_binary:
+        inferred_design = "Type 2: Multivariable Risk Prediction / Binary Outcome"
+        recommended_model = "logistic / firth"
+    else:
+        inferred_design = "Type 1: Cross-Sectional / Observational Study"
+        recommended_model = "linear / glm"
+
+    mcar_summary = None
+    if audit.littles_mcar:
+        mcar = audit.littles_mcar
+        mcar_summary = {
+            "statistic": round(mcar.statistic, 2),
+            "p_value": round(mcar.p_value, 4),
+            "is_mcar": mcar.is_mcar,
+            "interpretation": (
+                "No evidence against MCAR (P > 0.05)"
+                if mcar.is_mcar
+                else "Evidence against MCAR (P <= 0.05); does not distinguish MAR from MNAR"
+            ),
+        }
+
+    profile_data = {
+        "dataset": {
+            "path": str(data),
+            "n_observations": n_rows,
+            "n_variables": n_cols,
+            "overall_missing_pct": audit.overall_missing_pct,
+            "has_critical_missing": audit.has_critical_missing,
+        },
+        "littles_mcar": mcar_summary,
+        "candidate_endpoints": endpoints,
+        "inferred_study_design": inferred_design,
+        "recommended_primary_model": recommended_model,
+        "variables": {k: v.to_dict() for k, v in audit.variables.items()},
+    }
+
+    click.echo("\n========================================================")
+    click.echo("           CLINICAL DATASET HEALTH PROFILE              ")
+    click.echo("========================================================")
+    click.echo(f"  Source:             {data}")
+    click.echo(
+        f"  Cohort Size:        N = {n_rows:,} patients across {n_cols} variables"
+    )
+    click.echo(
+        f"  Missingness:        {audit.overall_missing_pct}% overall missing cells"
+    )
+    if mcar_summary:
+        click.echo(
+            f"  Little's MCAR:      P = {mcar_summary['p_value']} ({mcar_summary['interpretation']})"
+        )
+    click.echo(f"  Inferred Design:    {inferred_design}")
+    click.echo(f"  Recommended Model:  {recommended_model}")
+    if endpoints:
+        click.echo(
+            f"  Candidate Endpoints: {', '.join(e['column'] for e in endpoints[:5])}"
+        )
+    click.echo("========================================================\n")
+
+    if output:
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        with open(output, "w") as f:
+            json.dump(profile_data, f, indent=2, default=str)
+        click.echo(f"Profile report saved to: {output}")
+
+
+# ==============================================================================
+# 1. clean
+# ==============================================================================
+@cli.command("clean")
+@click.option(
+    "--data", required=True, type=click.Path(exists=True), help="Input CSV dataset."
+)
+@click.option(
+    "--strategy",
+    type=click.Choice(["complete-case", "mice", "knn", "indicator"]),
+    default=None,
+    help="Missing data strategy.",
+)
+@click.option(
+    "--mechanism",
+    type=click.Choice(["mcar", "mar", "mnar"], case_sensitive=False),
+    default=None,
+    help="Clinically assumed missingness mechanism (mcar, mar, mnar).",
+)
+@click.option(
+    "--missing-justification",
+    default=None,
+    help="Mandatory clinical justification for missing data strategy.",
+)
+@click.option(
+    "--audit-only",
+    is_flag=True,
+    help="Only run missingness audit without modifying data.",
+)
+@click.option(
+    "--audit-out", type=click.Path(), help="Output path for missingness audit JSON."
+)
+@click.option(
+    "--imputations",
+    default=5,
+    type=int,
+    help="Number of multiple imputations for MICE.",
+)
+@click.option(
+    "--neighbors", default=5, type=int, help="Number of nearest neighbors for KNN."
+)
+@click.option(
+    "--outlier-action",
+    type=click.Choice(["flag", "remove", "winsorize", "cap"], case_sensitive=False),
+    default=None,
+    help="Outlier handling action (flag, remove, winsorize, cap).",
+)
+@click.option(
+    "--outlier-cols",
+    "--outlier-col",
+    "--outlier-columns",
+    multiple=True,
+    help="Explicit numeric column(s) to evaluate and transform for outliers (default: all eligible numeric columns).",
+)
+@click.option(
+    "--iqr-multiplier",
+    default=1.5,
+    type=click.FloatRange(min=0.0, min_open=True),
+    help="Tukey's IQR multiplier for outlier detection (default: 1.5).",
+)
+@click.option("--output", type=click.Path(), help="Output cleaned CSV file path.")
+def clean_cmd(
+    data: str,
+    strategy: str | None,
+    mechanism: str | None,
+    missing_justification: str | None,
+    audit_only: bool,
+    audit_out: str | None,
+    imputations: int,
+    neighbors: int,
+    outlier_action: str | None,
+    outlier_cols: tuple[str, ...],
+    iqr_multiplier: float,
+    output: str | None,
+) -> None:
+    """Audit data missingness and apply clinically justified cleaning strategies."""
+    df = load_clinical_data(data)
+    audit = audit_missingness(df)
+
+    if audit_out and audit_only:
+        Path(audit_out).parent.mkdir(parents=True, exist_ok=True)
+        with open(audit_out, "w") as f:
+            audit_dict = audit.to_dict() if hasattr(audit, "to_dict") else audit
+            json.dump(audit_dict, f, indent=2, default=str)
+
+    if audit_only:
+        click.echo(
+            f"Missingness Audit completed for {len(df)} rows across {len(df.columns)} columns."
+        )
+        return
+
+    tracker = SampleFlowTracker(n_initial=len(df), initial_name="Total Enrolled Cohort")
+    try:
+        cleaned_df, info = prepare_data_for_analysis(
+            df,
+            required_cols=list(df.columns),
+            handle_missing=strategy,
+            missing_justification=missing_justification,
+            tracker=tracker,
+            n_imputations=imputations,
+            n_neighbors=neighbors,
+        )
+    except MissingStrategyRequiredError as e:
+        raise click.ClickException(str(e))
+
+    if outlier_action:
+        act = outlier_action.lower().strip()
+        if info.get("imputed_datasets") and act in ("remove", "winsorize", "cap"):
+            raise click.ClickException(
+                f"Outlier action '{act}' cannot be applied post-imputation when multiple imputed datasets exist. "
+                "Apply outlier handling before multiple imputation, or use --outlier-action flag."
+            )
+
+        selected_cols: list[str] = []
+        for item in outlier_cols:
+            selected_cols.extend([c.strip() for c in item.split(",") if c.strip()])
+
+        if act in ("remove", "winsorize", "cap") and not selected_cols:
+            raise click.ClickException(
+                f"Destructive outlier action '{act}' requires explicit variable selection via --outlier-cols."
+            )
+
+        num_cols = []
+        candidate_cols = selected_cols if selected_cols else list(cleaned_df.columns)
+        for c in candidate_cols:
+            if c not in cleaned_df.columns:
+                raise click.ClickException(
+                    f"Specified outlier column '{c}' not found in data."
+                )
+            if not pd.api.types.is_numeric_dtype(cleaned_df[c]):
+                if selected_cols:
+                    raise click.ClickException(
+                        f"Specified outlier column '{c}' is not numeric."
+                    )
+                continue
+            if cleaned_df[c].dropna().nunique() <= 2:
+                continue
+            if _is_id_column(c, cleaned_df[c]):
+                continue
+            s_val = cleaned_df[c].dropna()
+            if len(s_val) == 0:
+                continue
+            q25 = float(s_val.quantile(0.25))
+            q75 = float(s_val.quantile(0.75))
+            if (q75 - q25) == 0:
+                continue
+            num_cols.append(c)
+        outlier_counts: dict[str, int] = {}
+        for c in num_cols:
+            mask, stats_c = detect_outliers(
+                cleaned_df[c], method="iqr", threshold=iqr_multiplier
+            )
+            outlier_counts[c] = int(stats_c.get("outlier_count", mask.sum()))
+
+        info["outlier_counts"] = outlier_counts
+
+        if act == "remove":
+            is_outlier = pd.Series(False, index=cleaned_df.index)
+            for c in num_cols:
+                mask, _ = detect_outliers(
+                    cleaned_df[c], method="iqr", threshold=iqr_multiplier
+                )
+                is_outlier |= mask
+            cleaned_df = tracker.apply_filter(
+                cleaned_df,
+                ~is_outlier,
+                stage_name="Outlier Exclusion",
+                reason=f"Tukey's IQR outlier removal (>{iqr_multiplier}x IQR)",
+            )
+        elif act in ("winsorize", "cap"):
+            for c in num_cols:
+                cleaned_df[c] = handle_outliers(
+                    cleaned_df[c], method="iqr", action=act, threshold=iqr_multiplier
+                )
+        elif act == "flag":
+            # Per-column outlier counts recorded in info["outlier_counts"] without altering data
+            pass
+
+        info["outlier_action"] = act
+
+    assumed_mech = (
+        mechanism or ("mcar" if strategy == "complete-case" else "mar")
+    ).upper()
+    info["assumed_mechanism"] = assumed_mech
+
+    if audit_out:
+        Path(audit_out).parent.mkdir(parents=True, exist_ok=True)
+        with open(audit_out, "w") as f:
+            audit_dict = audit.to_dict() if hasattr(audit, "to_dict") else audit
+            audit_dict["assumed_mechanism"] = assumed_mech
+            audit_dict["sample_flow"] = tracker.to_dict()
+            if "outlier_action" in info:
+                audit_dict["outlier_action"] = info["outlier_action"]
+                audit_dict["outlier_counts"] = info.get("outlier_counts", {})
+            json.dump(audit_dict, f, indent=2, default=str)
+
+    if output:
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        out_p = Path(output)
+        if info.get("imputed_datasets") is not None:
+            cleaned_df.to_csv(output, index=False)
+            stem = out_p.stem
+            suffix = out_p.suffix
+            num_imps = len(info["imputed_datasets"])
+            for m_idx, imp_df in enumerate(info["imputed_datasets"]):
+                imp_path = out_p.parent / f"{stem}_imp{m_idx + 1}{suffix}"
+                imp_df.to_csv(imp_path, index=False)
+            click.echo(
+                f"Cleaned dataset saved to: {output} (Rows: {len(cleaned_df)}, Mechanism: {assumed_mech})\n"
+                f"Preserved {num_imps} imputed datasets ({stem}_imp1{suffix} to {stem}_imp{num_imps}{suffix}). "
+                f"Downstream analyses must pool results across imputations using Rubin's rules."
+            )
+        else:
+            cleaned_df.to_csv(output, index=False)
+            click.echo(
+                f"Cleaned dataset saved to: {output} (Rows: {len(cleaned_df)}, Mechanism: {assumed_mech})"
+            )
+
+
+# ==============================================================================
+# 2. table1
+# ==============================================================================
+@cli.command("table1")
+@click.option(
+    "--data", required=True, type=click.Path(exists=True), help="Input CSV dataset."
+)
+@click.option(
+    "--group", default=None, help="Grouping/strata variable (e.g. treatment)."
+)
+@click.option(
+    "--vars", default=None, help="Comma-separated list of variables to include."
+)
+@click.option("--digits", default=1, type=int, help="Decimal precision.")
+@click.option(
+    "--include-smd/--no-include-smd",
+    default=True,
+    help="Include Standardized Mean Differences.",
+)
+@click.option(
+    "--include-p/--no-include-p",
+    default=True,
+    help="Include p-values.",
+)
+@click.option("--output", type=click.Path(), help="Output path (JSON, HTML, or CSV).")
+def table1_cmd(
+    data: str,
+    group: str | None,
+    vars: str | None,
+    digits: int,
+    include_smd: bool,
+    include_p: bool,
+    output: str | None,
+) -> None:
+    df = load_clinical_data(data)
+    var_list = [v.strip() for v in vars.split(",")] if vars else None
+    if var_list:
+        validate_columns(df, var_list, "table1")
+    if group:
+        validate_columns(df, [group], "table1")
+    cols_to_check = ([group] if group else []) + (
+        var_list if var_list else list(df.columns)
+    )
+    check_data_missingness(df, cols_to_check, "table1")
+    cont_vars = None
+    cat_vars = None
+    if var_list:
+        cont_vars = [
+            v
+            for v in var_list
+            if pd.api.types.is_numeric_dtype(df[v]) and df[v].nunique() > 10
+        ]
+        cat_vars = [v for v in var_list if v not in cont_vars]
+
+    t1_df = generate_table_one(
+        df,
+        strata=group,
+        continuous_vars=cont_vars,
+        categorical_vars=cat_vars,
+        include_smd=include_smd,
+        include_p=include_p,
+        digits=digits,
+    )
+
+    if output:
+        out_p = Path(output)
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        if out_p.suffix == ".json":
+            t1_df.to_json(output, orient="records", indent=2)
+        elif out_p.suffix == ".html":
+            t1_df.to_html(output, index=False)
+        else:
+            t1_df.to_csv(output, index=False)
+        click.echo(f"Table 1 generated successfully: {output}")
+    else:
+        click.echo(t1_df.to_string())
+
+
+# ==============================================================================
+# 3. model
+# ==============================================================================
+@cli.command("model")
+@click.option("--data", type=click.Path(exists=True), help="Input CSV dataset.")
+@click.option(
+    "--spec", type=click.Path(exists=True), help="Path to SAP analysis_plan.yaml."
+)
+@click.option(
+    "--type",
+    "--model-type",
+    "model_type",
+    default="logistic",
+    help="Model type (logistic, linear, cox, cox_ph, ordinal, proportional_odds, gee, mixed).",
+)
+@click.option("--outcome", default=None, help="Outcome variable name.")
+@click.option(
+    "--time",
+    "--time-col",
+    "time_col",
+    default=None,
+    help="Survival duration variable name.",
+)
+@click.option(
+    "--exposure", default=None, help="Primary exposure/treatment variable name."
+)
+@click.option("--covariates", default=None, help="Comma-separated covariates.")
+@click.option(
+    "--method", default="standard", help="Estimation method (standard, firth)."
+)
+@click.option(
+    "--ci-method",
+    type=click.Choice(["profile", "wald"]),
+    default="profile",
+    help="Confidence interval method (profile, wald).",
+)
+@click.option(
+    "--schoenfeld",
+    is_flag=True,
+    help="Run Schoenfeld proportional hazards assumption test.",
+)
+@click.option(
+    "--e-value",
+    is_flag=True,
+    help="Compute VanderWeele E-value for unmeasured confounding.",
+)
+@click.option(
+    "--po-test",
+    is_flag=True,
+    default=False,
+    help="Run Brant test for proportional odds assumption (for ordinal models).",
+)
+@click.option(
+    "--cluster",
+    "--cluster-col",
+    "cluster_col",
+    default=None,
+    help="Cluster identifier column for GEE / mixed-effects models.",
+)
+@click.option(
+    "--corr-structure",
+    type=click.Choice(["exchangeable", "independence", "autoregressive"]),
+    default="exchangeable",
+    help="Correlation structure for GEE models (default: exchangeable).",
+)
+@click.option(
+    "--spline-var",
+    default=None,
+    help="Continuous variable to model with restricted cubic splines (RCS).",
+)
+@click.option(
+    "--knots",
+    default=4,
+    type=int,
+    help="Number of knots for restricted cubic splines (default: 4).",
+)
+@click.option("--output", type=click.Path(), help="Output results JSON file path.")
+def model_cmd(
+    data: str | None,
+    spec: str | None,
+    model_type: str,
+    outcome: str | None,
+    time_col: str | None,
+    exposure: str | None,
+    covariates: str | None,
+    method: str,
+    ci_method: str,
+    schoenfeld: bool,
+    e_value: bool,
+    po_test: bool,
+    cluster_col: str | None,
+    corr_structure: str,
+    spline_var: str | None,
+    knots: int,
+    output: str | None,
+) -> None:
+    """Fit regression or survival models or execute a pre-specified SAP plan."""
+    if spec:
+        plan = AnalysisPlan.from_yaml(spec)
+        res = plan.execute()
+        if output:
+            Path(output).parent.mkdir(parents=True, exist_ok=True)
+            with open(output, "w") as f:
+                json.dump(res, f, indent=2, default=str)
+            click.echo(f"Analysis Plan executed successfully: {output}")
+        return
+
+    if not data or not outcome:
+        raise click.UsageError(
+            "Must specify either --spec <plan.yaml> or both --data and --outcome."
+        )
+
+    df = load_clinical_data(data)
+    covar_list = [c.strip() for c in covariates.split(",")] if covariates else []
+    if exposure and exposure not in covar_list:
+        covar_list.insert(0, exposure)
+
+    cols_to_check = (
+        [outcome]
+        + ([time_col] if time_col else [])
+        + ([cluster_col] if cluster_col else [])
+        + covar_list
+        + ([spline_var] if spline_var and spline_var not in covar_list else [])
+    )
+    validate_columns(df, cols_to_check, "model")
+    check_data_missingness(df, cols_to_check, "model")
+
+    mtype = model_type.lower().strip()
+    if "firth" in mtype:
+        method = "firth"
+        if "logistic" in mtype or "binary" in mtype:
+            mtype = "logistic"
+        elif "cox" in mtype or "survival" in mtype:
+            mtype = "cox"
+
+    result_data: dict[str, Any] = {
+        "model_type": mtype,
+        "outcome": outcome,
+        "exposure": exposure,
+        "covariates": [c for c in covar_list if c != exposure],
+        "method": method,
+    }
+
+    # Dummy-encode any categorical covariates
+    X_raw = df[covar_list].copy()
+    cat_cols = [c for c in covar_list if not pd.api.types.is_numeric_dtype(X_raw[c])]
+    if cat_cols:
+        X_df = pd.get_dummies(X_raw, columns=cat_cols, drop_first=True, dtype=float)
+    else:
+        X_df = X_raw.astype(float)
+    feature_names = list(X_df.columns)
+
+    if mtype in ("cox", "cox_ph"):
+        t_col = time_col or "time"
+        t_vals = pd.to_numeric(df[t_col], errors="coerce").values
+        ev_raw = df[outcome]
+        u_ev = ev_raw.dropna().unique()
+        if len(u_ev) > 2:
+            raise click.ClickException(
+                f"Event outcome column '{outcome}' must have at most 2 levels, found {len(u_ev)}."
+            )
+        if not pd.api.types.is_numeric_dtype(ev_raw):
+            raise click.ClickException(
+                f"Event outcome column '{outcome}' must be numeric (0 for non-event, 1 for event). "
+                "Text outcomes are not permitted; please recode outcomes as 0/1, with 1 representing the event."
+            )
+        if not set(u_ev).issubset({0, 1, 0.0, 1.0}):
+            raise click.ClickException(
+                f"Event outcome column '{outcome}' contains values outside {{0, 1}}: {set(u_ev)}"
+            )
+        ev_vals = ev_raw.astype(int).values
+
+        if method == "firth":
+            firth_ci_method = "pl" if ci_method == "profile" else "wald"
+            fit_res = fit_firth_cox(
+                t_vals,
+                ev_vals,
+                X_df.values,
+                feature_names=feature_names,
+                ci_method=firth_ci_method,
+            )
+            sum_df = fit_res["summary_df"]
+            result_data["coefficients"] = _serialize_summary_df(sum_df)
+            if schoenfeld:
+                result_data["schoenfeld_test"] = {
+                    "status": "not_performed",
+                    "reason": "Schoenfeld residuals test is not performed for Firth penalized Cox models",
+                }
+        else:
+            df_cox = X_df.copy()
+            df_cox[t_col] = t_vals
+            df_cox[outcome] = ev_vals
+            fit_res = fit_cox_ph(
+                df_cox, duration_col=t_col, event_col=outcome, covariates=feature_names
+            )
+            sum_df = fit_res["summary_df"]
+            result_data["coefficients"] = _serialize_summary_df(sum_df)
+            if schoenfeld:
+                ph_res = check_proportional_hazards(fit_res["model"], df=df_cox)
+                result_data["schoenfeld_test"] = str(ph_res)
+
+    elif mtype in ("logistic", "binary"):
+        y_raw = df[outcome]
+        u_y = y_raw.dropna().unique()
+        if len(u_y) > 2:
+            raise click.ClickException(
+                f"Binary outcome column '{outcome}' must have at most 2 levels, found {len(u_y)}."
+            )
+        if not pd.api.types.is_numeric_dtype(y_raw):
+            raise click.ClickException(
+                f"Binary outcome column '{outcome}' must be numeric (0 for non-event, 1 for event). "
+                "Text outcomes are not permitted; please recode outcomes as 0/1, with 1 representing the event."
+            )
+        if not set(u_y).issubset({0, 1, 0.0, 1.0}):
+            raise click.ClickException(
+                f"Binary outcome column '{outcome}' contains values outside {{0, 1}}: {set(u_y)}"
+            )
+        y = y_raw.astype(int).values
+
+        if method == "firth":
+            firth_ci_method = "pl" if ci_method == "profile" else "wald"
+            fit_res = fit_firth_logistic(
+                y,
+                X_df,
+                feature_names=feature_names,
+                ci_method=firth_ci_method,
+            )
+            sum_df = fit_res["summary_df"]
+            result_data["coefficients"] = _serialize_summary_df(sum_df)
+        else:
+            fit_res = fit_standard_logistic(y, X_df)
+            sum_df = fit_res["summary_df"]
+            result_data["coefficients"] = _serialize_summary_df(sum_df)
+
+        if e_value and exposure:
+            matching = [idx for idx in sum_df.index if str(idx) == exposure]
+            if not matching:
+                matching = [
+                    idx for idx in sum_df.index if str(idx).startswith(f"{exposure}_")
+                ]
+            if not matching:
+                raise click.ClickException(
+                    f"Exposure term '{exposure}' not found in model results for E-value calculation."
+                )
+            if len(matching) > 1:
+                raise click.ClickException(
+                    f"Exposure '{exposure}' is ambiguous for E-value calculation (matches {[str(m) for m in matching]}); "
+                    "specify a single binary exposure term."
+                )
+            exp_term = sum_df.loc[matching[0]]
+            or_val = exp_term.get("odds_ratio", exp_term.get("estimate"))
+            ci_lo = exp_term.get("or_ci_lower", exp_term.get("ci_lower"))
+            ci_hi = exp_term.get("or_ci_upper", exp_term.get("ci_upper"))
+            if (
+                or_val is None
+                or ci_lo is None
+                or ci_hi is None
+                or np.isnan(float(or_val))
+            ):
+                raise click.ClickException(
+                    f"Model output for exposure '{exposure}' missing required OR or CI values for E-value calculation."
+                )
+            ev = calculate_e_value(
+                float(or_val), float(ci_lo), float(ci_hi), estimate_type="OR"
+            )
+            result_data["e_value"] = ev
+
+    elif mtype in ("linear", "ols"):
+        fit_res = fit_linear_regression(df[outcome], X_df)
+        result_data["coefficients"] = _serialize_summary_df(fit_res["summary_df"])
+
+    elif mtype in ("ordinal", "proportional_odds"):
+        y_raw = df[outcome]
+        is_num = pd.api.types.is_numeric_dtype(y_raw)
+        is_ordered_cat = (
+            isinstance(y_raw.dtype, pd.CategoricalDtype) and y_raw.dtype.ordered
+        )
+        if not (is_num or is_ordered_cat):
+            raise click.BadParameter(
+                f"Ordinal outcome column '{outcome}' must be numeric or an ordered pandas Categorical, "
+                f"got unordered dtype '{y_raw.dtype}'. Please convert to numeric codes or an ordered Categorical "
+                f"to establish explicit clinical category hierarchy.",
+                param_hint="--outcome",
+            )
+        u_y = y_raw.dropna().unique()
+        if len(u_y) < 3:
+            raise click.BadParameter(
+                f"Ordinal outcome column '{outcome}' must have at least 3 categories, found {len(u_y)}: {sorted(u_y)}. "
+                "For binary outcomes (2 categories), use --type logistic.",
+                param_hint="--outcome",
+            )
+        fit_res = fit_proportional_odds(y_raw, X_df)
+        pred_df = fit_res["predictor_df"]
+        result_data["coefficients"] = _serialize_summary_df(pred_df)
+        result_data["thresholds"] = _serialize_summary_df(fit_res["threshold_df"])
+        result_data["pseudo_r2"] = fit_res.get("pseudo_r2")
+        result_data["categories"] = fit_res.get("categories")
+        result_data["log_likelihood"] = fit_res.get("log_likelihood")
+        result_data["aic"] = fit_res.get("aic")
+        result_data["bic"] = fit_res.get("bic")
+
+        if po_test:
+            po_diag = test_proportional_odds(y_raw, X_df)
+            result_data["proportional_odds_test"] = po_diag
+
+        if e_value and exposure:
+            pred_df = fit_res["predictor_df"]
+            matching = [idx for idx in pred_df.index if str(idx) == exposure]
+            if not matching:
+                matching = [
+                    idx for idx in pred_df.index if str(idx).startswith(f"{exposure}_")
+                ]
+            if not matching:
+                raise click.ClickException(
+                    f"Exposure term '{exposure}' not found in model results for E-value calculation."
+                )
+            if len(matching) > 1:
+                raise click.ClickException(
+                    f"Exposure '{exposure}' is ambiguous for E-value calculation (matches {[str(m) for m in matching]}); "
+                    "specify a single binary exposure term."
+                )
+            exp_term = pred_df.loc[matching[0]]
+            or_val = exp_term.get("odds_ratio")
+            ci_lo = exp_term.get("or_ci_lower")
+            ci_hi = exp_term.get("or_ci_upper")
+            if (
+                or_val is None
+                or ci_lo is None
+                or ci_hi is None
+                or not np.all(np.isfinite([float(or_val), float(ci_lo), float(ci_hi)]))
+            ):
+                raise click.ClickException(
+                    f"Model output for exposure '{exposure}' missing required OR or CI values for E-value calculation."
+                )
+            ev = calculate_e_value(
+                float(or_val),
+                float(ci_lo),
+                float(ci_hi),
+                estimate_type="OR",
+                rare_outcome=False,
+            )
+            ev["rare_outcome"] = False
+            ev["assumption_note"] = (
+                "E-value computed from proportional odds cumulative OR assuming common outcome "
+                "(VanderWeele & Ding 2017 square-root approximation applied: RR ≈ sqrt(OR))."
+            )
+            result_data["e_value"] = ev
+
+    elif mtype in ("gee", "multilevel_gee"):
+        if not cluster_col:
+            raise click.ClickException("GEE model requires --cluster <cluster_col>.")
+        y_raw = df[outcome]
+        u_y = y_raw.dropna().unique()
+        if len(u_y) <= 1:
+            raise click.BadParameter(
+                f"Outcome '{outcome}' is constant or has fewer than 2 distinct values.",
+                param_hint="--outcome",
+            )
+        if len(u_y) == 2:
+            u_set = set(u_y)
+            if not u_set.issubset({0, 1, 0.0, 1.0}):
+                raise click.BadParameter(
+                    f"Binary outcome '{outcome}' for GEE binomial family must be strictly numeric 0 and 1 (found: {sorted(list(u_set))}). "
+                    "Recode endpoints (0 = Non-event, 1 = Event) prior to fitting.",
+                    param_hint="--outcome",
+                )
+            fam = "binomial"
+        else:
+            if not pd.api.types.is_numeric_dtype(y_raw):
+                raise click.BadParameter(
+                    f"Continuous outcome '{outcome}' for GEE Gaussian family must be numeric, got dtype '{y_raw.dtype}'.",
+                    param_hint="--outcome",
+                )
+            fam = "gaussian"
+        if corr_structure == "autoregressive" and not time_col:
+            raise click.BadParameter(
+                "Autoregressive GEE correlation structure requires --time <time_col> "
+                "to define within-cluster ordering.",
+                param_hint="--time",
+            )
+        gee_time = pd.to_numeric(df[time_col], errors="coerce") if time_col else None
+        fit_res = fit_gee(
+            y=y_raw,
+            X=X_df,
+            cluster_ids=df[cluster_col],
+            family=fam,
+            cov_struct=corr_structure,
+            add_constant=True,
+            time=gee_time,
+        )
+        sum_df = fit_res["summary_df"]
+        result_data["coefficients"] = _serialize_summary_df(sum_df)
+        result_data["n_clusters"] = fit_res["n_clusters"]
+        result_data["cov_struct"] = fit_res["cov_struct"]
+        result_data["family"] = fit_res["family"]
+        result_data["cov_type"] = fit_res.get("cov_type")
+        result_data["small_cluster_adjustment"] = fit_res.get(
+            "small_cluster_adjustment"
+        )
+        result_data["qic"] = fit_res["qic"]
+
+        deff_res = calculate_design_effect(y_raw, df[cluster_col])
+        result_data["clustering_diagnostics"] = deff_res
+
+    elif mtype in ("mixed", "random_intercept", "lmm"):
+        if not cluster_col:
+            raise click.ClickException(
+                "Mixed-effects model requires --cluster <cluster_col>."
+            )
+        y_raw = df[outcome]
+        if not pd.api.types.is_numeric_dtype(y_raw):
+            raise click.BadParameter(
+                f"Mixed-effects model outcome '{outcome}' must be numeric (continuous). "
+                f"Got non-numeric dtype '{y_raw.dtype}'.",
+                param_hint="--outcome",
+            )
+        y_valid = y_raw.dropna()
+        if y_valid.nunique() <= 2:
+            raise click.BadParameter(
+                f"Mixed-effects model outcome '{outcome}' has {y_valid.nunique()} distinct values. "
+                "Linear mixed models require continuous outcomes; for binary or low-cardinality clustered outcomes, use '--type gee'.",
+                param_hint="--outcome",
+            )
+        fit_res = fit_random_intercept(
+            y=y_raw,
+            X=X_df,
+            cluster_ids=df[cluster_col],
+            add_constant=True,
+        )
+        sum_df = fit_res["summary_df"]
+        result_data["coefficients"] = _serialize_summary_df(sum_df)
+        result_data["n_clusters"] = fit_res["n_clusters"]
+        result_data["random_intercept_var"] = fit_res["random_intercept_var"]
+        result_data["residual_var"] = fit_res["residual_var"]
+        result_data["cluster_icc"] = fit_res["cluster_icc"]
+        result_data["aic"] = fit_res["aic"]
+        result_data["bic"] = fit_res["bic"]
+
+        deff_res = calculate_design_effect(y_raw, df[cluster_col])
+        result_data["clustering_diagnostics"] = deff_res
+    else:
+        raise click.UsageError(f"Unsupported model type: {mtype}")
+
+    if spline_var:
+        result_data["spline_var"] = spline_var
+        if mtype in ("cox", "cox_ph"):
+            t_col = time_col or "time"
+            other_covars = [c for c in covar_list if c != spline_var]
+            rcs_res = fit_cox_rcs(
+                df,
+                duration_col=t_col,
+                event_col=outcome,
+                spline_var=spline_var,
+                covariates=other_covars,
+                n_knots=knots,
+            )
+            rcs_summary = rcs_res.get("summary_df")
+            if isinstance(rcs_summary, pd.DataFrame):
+                result_data["spline_estimates"] = _serialize_summary_df(rcs_summary)
+            if "contrast_df" in rcs_res and isinstance(
+                rcs_res["contrast_df"], pd.DataFrame
+            ):
+                result_data["contrast_df"] = _serialize_summary_df(
+                    rcs_res["contrast_df"]
+                )
+            result_data["knots"] = rcs_res.get("knots", [])
+            result_data["non_linear_pvalue"] = rcs_res.get("non_linear_pvalue")
+        elif mtype in ("logistic", "logit", "binary"):
+            other_covars = [c for c in covar_list if c != spline_var]
+            rcs_res = fit_logistic_rcs(
+                df,
+                outcome=outcome,
+                spline_var=spline_var,
+                covariates=other_covars,
+                n_knots=knots,
+            )
+            rcs_summary = rcs_res.get("summary_df")
+            if isinstance(rcs_summary, pd.DataFrame):
+                result_data["spline_estimates"] = _serialize_summary_df(rcs_summary)
+            if "contrast_df" in rcs_res and isinstance(
+                rcs_res["contrast_df"], pd.DataFrame
+            ):
+                result_data["contrast_df"] = _serialize_summary_df(
+                    rcs_res["contrast_df"]
+                )
+            result_data["knots"] = rcs_res.get("knots", [])
+            result_data["non_linear_pvalue"] = rcs_res.get("non_linear_pvalue")
+
+    if output:
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        sanitized_data = _sanitize_for_json(result_data)
+        with open(output, "w") as f:
+            json.dump(sanitized_data, f, indent=2, default=str, allow_nan=False)
+        click.echo(f"Model results saved: {output}")
+
+
+# ==============================================================================
+# 4. diag
+# ==============================================================================
+@cli.command("diag")
+@click.option(
+    "--data", required=True, type=click.Path(exists=True), help="Input CSV dataset."
+)
+@click.option(
+    "--gold-standard",
+    "--gold",
+    "gold_standard",
+    required=True,
+    help="Binary reference standard column.",
+)
+@click.option(
+    "--test-col",
+    "--test",
+    "test_col",
+    required=True,
+    help="Biomarker/diagnostic score column.",
+)
+@click.option(
+    "--cutoff", type=float, default=None, help="Diagnostic classification cutoff."
+)
+@click.option(
+    "--direction",
+    type=click.Choice(["high", "low"], case_sensitive=False),
+    default="high",
+    help="Direction of abnormality: 'high' if high values indicate disease, 'low' if lower values indicate disease (e.g. platelets, eGFR).",
+)
+@click.option("--roc", is_flag=True, help="Compute empirical ROC curve and AUC.")
+@click.option(
+    "--compare-roc",
+    default=None,
+    help="Second biomarker column for paired DeLong ROC comparison.",
+)
+@click.option(
+    "--dca",
+    is_flag=True,
+    help="Perform Decision Curve Analysis (requires predicted risk probabilities in [0, 1]; oriented if --direction low).",
+)
+@click.option(
+    "--calibration",
+    is_flag=True,
+    help="Compute calibration curve and Brier score (requires predicted risk probabilities in [0, 1]; oriented if --direction low).",
+)
+@click.option("--output", type=click.Path(), help="Output path for diagnostic JSON.")
+def diag_cmd(
+    data: str,
+    gold_standard: str,
+    test_col: str,
+    cutoff: float | None,
+    direction: str,
+    roc: bool,
+    compare_roc: str | None,
+    dca: bool,
+    calibration: bool,
+    output: str | None,
+) -> None:
+    """Evaluate diagnostic test accuracy, ROC curves, DeLong comparisons, and DCA."""
+    if cutoff is None and not roc and not compare_roc and not dca and not calibration:
+        raise click.ClickException(
+            "At least one analytical evaluation must be specified: "
+            "--cutoff, --roc, --compare-roc, --dca, or --calibration."
+        )
+
+    df = load_clinical_data(data)
+    cols_to_check = [gold_standard, test_col] + ([compare_roc] if compare_roc else [])
+    validate_columns(df, cols_to_check, "diag")
+    check_data_missingness(df, cols_to_check, "diag")
+
+    gold_series = df[gold_standard]
+    if not pd.api.types.is_numeric_dtype(gold_series) or pd.api.types.is_bool_dtype(
+        gold_series
+    ):
+        raise click.ClickException(
+            f"Gold standard column '{gold_standard}' must be numeric containing only 0 and 1."
+        )
+    valid_gold = gold_series.dropna()
+    unique_vals = set(valid_gold.unique())
+    if not unique_vals.issubset({0, 1}):
+        raise click.ClickException(
+            f"Gold standard column '{gold_standard}' must contain only 0 and 1 (found: {sorted(list(unique_vals))})."
+        )
+
+    test_series = df[test_col]
+    if not pd.api.types.is_numeric_dtype(test_series) or pd.api.types.is_bool_dtype(
+        test_series
+    ):
+        raise click.ClickException(f"Test score column '{test_col}' must be numeric.")
+
+    if compare_roc:
+        comp_series = df[compare_roc]
+        if not pd.api.types.is_numeric_dtype(comp_series) or pd.api.types.is_bool_dtype(
+            comp_series
+        ):
+            raise click.ClickException(
+                f"Comparison ROC column '{compare_roc}' must be numeric."
+            )
+
+    y_true = df[gold_standard].values
+    y_score = df[test_col].values
+    diag_res: dict[str, Any] = {}
+    dir_norm = direction.lower().strip()
+
+    if cutoff is not None:
+        y_pred = (
+            (y_score <= cutoff).astype(int)
+            if dir_norm == "low"
+            else (y_score >= cutoff).astype(int)
+        )
+        acc = calculate_diagnostic_accuracy(y_true, y_pred)
+        if isinstance(acc, dict):
+            acc["cutoff"] = cutoff
+            acc["direction"] = dir_norm
+        diag_res["cutoff"] = cutoff
+        diag_res["direction"] = dir_norm
+        diag_res["accuracy_at_cutoff"] = acc
+
+    if roc or compare_roc:
+        eff_score = -y_score if dir_norm == "low" else y_score
+        roc_res = calculate_roc_curve(y_true, eff_score)
+        delong_res = auc_ci_delong(y_true, eff_score)
+        diag_res["roc"] = {
+            "auc": roc_res["auc"],
+            "auc_ci": [delong_res["ci_lower"], delong_res["ci_upper"]],
+            "ci_lower": delong_res["ci_lower"],
+            "ci_upper": delong_res["ci_upper"],
+            "se": delong_res["se"],
+            "youden_index": roc_res.get("youden_index"),
+            "direction": dir_norm,
+        }
+        if compare_roc:
+            y_comp = df[compare_roc].values
+            eff_comp = -y_comp if dir_norm == "low" else y_comp
+            comp_res = delong_paired_test(y_true, eff_score, eff_comp)
+            diag_res["delong_comparison"] = comp_res
+
+    is_in_sample_recalibration = False
+    if dca or calibration:
+        valid_mask = ~(pd.isna(y_true) | pd.isna(y_score))
+        valid_scores = y_score[valid_mask]
+        if len(valid_scores) == 0:
+            raise click.ClickException(
+                "Test score contains no valid observations for DCA or calibration."
+            )
+        min_score = float(np.nanmin(valid_scores))
+        max_score = float(np.nanmax(valid_scores))
+
+        if min_score >= 0.0 and max_score <= 1.0:
+            prob_risk = (1.0 - y_score) if dir_norm == "low" else y_score
+        else:
+            if len(np.unique(valid_scores)) < 2:
+                raise click.ClickException(
+                    "Test score has no variation (all values identical). "
+                    "Cannot calibrate continuous score to event probabilities."
+                )
+            eff_score = -y_score if dir_norm == "low" else y_score
+            try:
+                import statsmodels.api as sm
+
+                X_log = sm.add_constant(eff_score[valid_mask])
+                if X_log.shape[1] < 2:
+                    raise ValueError("Score has insufficient variance for calibration.")
+                model_prob = sm.Logit(y_true[valid_mask].astype(int), X_log).fit(
+                    disp=False
+                )
+                if len(model_prob.params) < 2 or np.isnan(model_prob.params).any():
+                    raise ValueError("Model parameters could not be estimated.")
+                prob_risk = pd.Series(np.nan, index=df.index, dtype=float)
+                prob_risk.loc[valid_mask] = model_prob.predict(X_log)
+                prob_risk = prob_risk.values
+                is_in_sample_recalibration = True
+                diag_res["probability_source"] = "in-sample logistic recalibration"
+                diag_res["apparent_estimates_note"] = (
+                    "Brier, ICI, and net benefit are apparent estimates evaluated on the same data used for logistic recalibration."
+                )
+            except Exception as e:
+                raise click.ClickException(
+                    f"DCA and calibration require predicted event probabilities in [0, 1]. "
+                    f"Test score values are outside [0, 1] (min={min_score:.4f}, max={max_score:.4f}), "
+                    f"and fitting a logistic risk calibration model failed: {e}. "
+                    "Please supply calibrated event probabilities or model-predicted risks."
+                )
+    else:
+        prob_risk = y_score
+
+    if dca:
+        dca_res = calculate_dca(y_true, prob_risk)
+        if isinstance(dca_res, pd.DataFrame):
+            diag_res["dca"] = dca_res.to_dict(orient="records")
+        else:
+            diag_res["dca"] = dca_res
+
+    if calibration:
+        brier = calculate_brier_score(y_true, prob_risk)
+        if is_in_sample_recalibration:
+            slope_inter = {
+                "slope": None,
+                "intercept": None,
+                "note": "Calibration slope and intercept are not informative for in-sample logistic recalibration (derivation data yields tautological slope=1 and intercept=0).",
+            }
+        else:
+            slope_inter = calculate_calibration_slope_and_intercept(y_true, prob_risk)
+        ici = calculate_ici(y_true, prob_risk)
+        diag_res["calibration"] = {
+            "brier": brier,
+            "slope_and_intercept": slope_inter,
+            "ici": ici,
+        }
+
+    if output:
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        with open(output, "w") as f:
+            json.dump(diag_res, f, indent=2, default=str)
+        click.echo(f"Diagnostic results saved to: {output}")
+    else:
+        click.echo(json.dumps(diag_res, indent=2, default=str))
+
+
+# ==============================================================================
+# 5. agreement
+# ==============================================================================
+@cli.group("agreement")
+def agreement_grp() -> None:
+    """Evaluate rater agreement, Bland-Altman LoA, and Pure-SciPy ICC."""
+    pass
+
+
+@agreement_grp.command("icc")
+@click.option(
+    "--data", required=True, type=click.Path(exists=True), help="Input CSV dataset."
+)
+@click.option("--targets", required=True, help="Target/Subject identifier column.")
+@click.option("--raters", required=True, help="Rater identifier column.")
+@click.option("--ratings", required=True, help="Measurement score column.")
+@click.option(
+    "--type",
+    "icc_type",
+    default="icc2_k",
+    help="ICC variant (icc1, icc2, icc3, icc1_k, icc2_k, icc3_k).",
+)
+@click.option("--output", type=click.Path(), help="Output path for ICC JSON.")
+def icc_cmd(
+    data: str,
+    targets: str,
+    raters: str,
+    ratings: str,
+    icc_type: str,
+    output: str | None,
+) -> None:
+    """Compute pure-Python/SciPy Intraclass Correlation Coefficient (ICC)."""
+    df = load_clinical_data(data)
+    validate_columns(df, [targets, raters, ratings], "agreement icc")
+    check_data_missingness(df, [targets, raters, ratings], "agreement icc")
+    icc_df = calculate_icc(
+        df, targets=targets, raters=raters, ratings=ratings, icc_type=icc_type
+    )
+    if output:
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        icc_df.to_json(output, orient="records", indent=2)
+        click.echo(f"ICC results saved to: {output}")
+
+
+@agreement_grp.command("bland-altman")
+@click.option(
+    "--data", required=True, type=click.Path(exists=True), help="Input CSV dataset."
+)
+@click.option("--m1", "--method1", default=None, help="First measurement column name.")
+@click.option("--m2", "--method2", default=None, help="Second measurement column name.")
+@click.option("--output", type=click.Path(), help="Output path for Bland-Altman JSON.")
+def bland_altman_cmd(
+    data: str, m1: str | None, m2: str | None, output: str | None
+) -> None:
+    """Compute Bland-Altman mean bias and limits of agreement (LoA)."""
+    df = load_clinical_data(data)
+    if m1 and m2:
+        validate_columns(df, [m1, m2], "agreement bland-altman")
+    num_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+    if len(num_cols) < 2 and (not m1 or not m2):
+        cat_cols = [c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c])]
+        if len(cat_cols) >= 2 and len(num_cols) == 1:
+            df = df.pivot(
+                index=cat_cols[0], columns=cat_cols[1], values=num_cols[0]
+            ).reset_index()
+
+    cols = (
+        [m1, m2]
+        if m1 and m2
+        else [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])][:2]
+    )
+    check_data_missingness(df, cols, "agreement bland-altman")
+    res = bland_altman_analysis(df[cols[0]], df[cols[1]])
+    if output:
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        with open(output, "w") as f:
+            json.dump(res, f, indent=2, default=str)
+        click.echo(f"Bland-Altman analysis saved to: {output}")
+
+
+@agreement_grp.command("kappa")
+@click.option(
+    "--data",
+    required=True,
+    type=click.Path(exists=True),
+    help="Input clinical dataset (.csv, .xlsx, .tsv, .parquet).",
+)
+@click.option("--rater1", default=None, help="First rater column name.")
+@click.option("--rater2", default=None, help="Second rater column name.")
+@click.option(
+    "--targets", default=None, help="Subject/target ID column (for long format)."
+)
+@click.option("--raters", default=None, help="Rater ID column (for long format).")
+@click.option("--ratings", default=None, help="Ratings/score column (for long format).")
+@click.option(
+    "--categories",
+    default=None,
+    help="Comma-separated declared category levels (e.g. '0,0.5,1,2,3').",
+)
+@click.option("--output", type=click.Path(), help="Output path for Kappa JSON.")
+def kappa_cmd(
+    data: str,
+    rater1: str | None,
+    rater2: str | None,
+    targets: str | None,
+    raters: str | None,
+    ratings: str | None,
+    categories: str | None,
+    output: str | None,
+) -> None:
+    """Compute Fleiss' or Cohen's Kappa for categorical agreement."""
+    df = load_clinical_data(data)
+    cat_list = None
+    if categories is not None:
+        raw_list = [c.strip() for c in categories.split(",")]
+        cat_list = []
+        for c in raw_list:
+            try:
+                val = float(c)
+                cat_list.append(int(val) if val.is_integer() else val)
+            except ValueError:
+                cat_list.append(c)
+
+    # Resolve agreement columns and validate missingness
+    resolved_cols: list[str] = []
+    if rater1 is not None or rater2 is not None:
+        if not rater1 or not rater2:
+            raise click.ClickException(
+                "[agreement kappa] Both --rater1 and --rater2 must be provided for two-rater agreement."
+            )
+        resolved_cols = [rater1, rater2]
+    elif targets is not None or raters is not None or ratings is not None:
+        missing_long = [
+            param
+            for param, val in [
+                ("--targets", targets),
+                ("--raters", raters),
+                ("--ratings", ratings),
+            ]
+            if not val
+        ]
+        if missing_long:
+            raise click.ClickException(
+                f"[agreement kappa] Long format requires all three: --targets, --raters, --ratings. Missing: {', '.join(missing_long)}"
+            )
+        resolved_cols = [targets, raters, ratings]
+    elif (
+        "subject_id" in df.columns
+        and "rater_id" in df.columns
+        and any(
+            c in df.columns for c in ("rating", "ratings", "score", "measurement_score")
+        )
+    ):
+        score_col = next(
+            c
+            for c in df.columns
+            if c in ("rating", "ratings", "score", "measurement_score")
+        )
+        resolved_cols = ["subject_id", "rater_id", score_col]
+
+    if resolved_cols:
+        validate_columns(df, resolved_cols, "agreement kappa")
+        check_data_missingness(df, resolved_cols, "agreement kappa")
+
+    try:
+        res = calculate_kappa(
+            df,
+            rater1=rater1,
+            rater2=rater2,
+            targets=targets,
+            raters=raters,
+            ratings=ratings,
+            categories=cat_list,
+        )
+    except ValueError as e:
+        raise click.ClickException(str(e))
+    if output:
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        with open(output, "w") as f:
+            json.dump(res, f, indent=2, default=str)
+        click.echo(f"Kappa agreement analysis saved to: {output}")
+    else:
+        click.echo(json.dumps(res, indent=2))
+
+
+# ==============================================================================
+# 6. causal
+# ==============================================================================
+@cli.group("causal")
+def causal_grp() -> None:
+    """Propensity score matching, weighting, and balance diagnostics."""
+    pass
+
+
+@causal_grp.command("psm")
+@click.option(
+    "--data", required=True, type=click.Path(exists=True), help="Input CSV dataset."
+)
+@click.option("--treatment", required=True, help="Binary treatment column.")
+@click.option(
+    "--covariates", required=True, help="Comma-separated baseline covariates."
+)
+@click.option(
+    "--caliper", default=0.2, type=float, help="Caliper width in standard deviations."
+)
+@click.option("--ratio", default=1, type=int, help="Matching ratio.")
+@click.option(
+    "--balance-check",
+    is_flag=True,
+    help="Evaluate post-match Standardized Mean Differences.",
+)
+@click.option("--love-plot", type=click.Path(), help="Output path for Love plot JSON.")
+@click.option("--output", type=click.Path(), help="Output path for matched cohort CSV.")
+def psm_cmd(
+    data: str,
+    treatment: str,
+    covariates: str,
+    caliper: float,
+    ratio: int,
+    balance_check: bool,
+    love_plot: str | None,
+    output: str | None,
+) -> None:
+    """Execute Propensity Score Matching (PSM) with caliper and balance diagnostics."""
+    df = load_clinical_data(data)
+    covar_list = [c.strip() for c in covariates.split(",")]
+    validate_columns(df, [treatment] + covar_list, "causal psm")
+    check_data_missingness(df, [treatment] + covar_list, "causal psm")
+    matched_df, info = propensity_score_match(
+        df,
+        treatment_col=treatment,
+        covariates=covar_list,
+        caliper=caliper,
+        ratio=ratio,
+    )
+
+    def _clean_smd(val: Any) -> float | None:
+        norm = _normalize_smd(val)
+        return float(norm) if np.isfinite(norm) else None
+
+    if balance_check or love_plot:
+        love_data = {
+            "covariates": covar_list,
+            "smd_raw": [
+                _clean_smd(calculate_smd(df, treatment, c)) for c in covar_list
+            ],
+            "smd_pre": [
+                _clean_smd(calculate_smd(df, treatment, c)) for c in covar_list
+            ],
+            "smd_matched": [
+                _clean_smd(calculate_smd(matched_df, treatment, c)) for c in covar_list
+            ],
+            "smd_post": [
+                _clean_smd(calculate_smd(matched_df, treatment, c)) for c in covar_list
+            ],
+            "post_smd": [
+                _clean_smd(calculate_smd(matched_df, treatment, c)) for c in covar_list
+            ],
+        }
+        if love_plot:
+            Path(love_plot).parent.mkdir(parents=True, exist_ok=True)
+            with open(love_plot, "w") as f:
+                json.dump(love_data, f, indent=2)
+
+        if balance_check:
+            click.echo("\n--- Austin (2009) Covariate Balance Diagnostics ---")
+            for c, pre, post in zip(
+                covar_list, love_data["smd_pre"], love_data["smd_post"]
+            ):
+                status = (
+                    "BALANCED"
+                    if (post is not None and abs(post) < 0.10)
+                    else "UNBALANCED"
+                )
+                pre_str = f"{pre:.3f}" if pre is not None else "NaN"
+                post_str = f"{post:.3f}" if post is not None else "NaN"
+                click.echo(
+                    f"  {c:<20} | Pre-SMD: {pre_str} | Post-SMD: {post_str} | [{status}]"
+                )
+            click.echo("---------------------------------------------------\n")
+
+    if output:
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        if output.endswith(".json"):
+            if not (balance_check or love_plot):
+                love_data = {
+                    "covariates": covar_list,
+                    "smd_raw": [
+                        _clean_smd(calculate_smd(df, treatment, c)) for c in covar_list
+                    ],
+                    "smd_pre": [
+                        _clean_smd(calculate_smd(df, treatment, c)) for c in covar_list
+                    ],
+                    "smd_matched": [
+                        _clean_smd(calculate_smd(matched_df, treatment, c))
+                        for c in covar_list
+                    ],
+                    "smd_post": [
+                        _clean_smd(calculate_smd(matched_df, treatment, c))
+                        for c in covar_list
+                    ],
+                    "post_smd": [
+                        _clean_smd(calculate_smd(matched_df, treatment, c))
+                        for c in covar_list
+                    ],
+                }
+            with open(output, "w") as f:
+                json.dump(love_data, f, indent=2)
+            click.echo(f"Causal balance diagnostics saved: {output}")
+        else:
+            matched_df.to_csv(output, index=False)
+            click.echo(
+                f"Matched cohort saved to: {output} (Matched pairs: {len(matched_df) // 2})"
+            )
+
+
+# ==============================================================================
+# 7. meta
+# ==============================================================================
+@cli.command("meta")
+@click.option(
+    "--data", required=True, type=click.Path(exists=True), help="Input CSV dataset."
+)
+@click.option("--effect-col", required=True, help="Effect size column name.")
+@click.option("--se-col", required=True, help="Standard error column name.")
+@click.option("--study-col", required=True, help="Study name column.")
+@click.option(
+    "--model",
+    default="random",
+    type=click.Choice(["fixed", "random"]),
+    help="Fixed or random effects.",
+)
+@click.option(
+    "--method",
+    default="dl",
+    help="Estimation method (dl=DerSimonian-Laird, iv=Inverse Variance).",
+)
+@click.option(
+    "--forest-plot", type=click.Path(), help="Output path for Forest plot JSON."
+)
+@click.option(
+    "--egger", is_flag=True, help="Run Egger's regression test for publication bias."
+)
+@click.option(
+    "--measure",
+    default=None,
+    help="Explicit effect measure type (e.g. 'continuous', 'md', 'smd', 'log_or', 'or', 'rr').",
+)
+@click.option(
+    "--output", type=click.Path(), help="Output path for meta-analysis summary JSON."
+)
+def meta_cmd(
+    data: str,
+    effect_col: str,
+    se_col: str,
+    study_col: str,
+    model: str,
+    method: str,
+    forest_plot: str | None,
+    egger: bool,
+    measure: str | None,
+    output: str | None,
+) -> None:
+    """Perform fixed and random effects meta-analysis with Forest plot data."""
+    df = load_clinical_data(data)
+    validate_columns(df, [effect_col, se_col, study_col], "meta")
+    check_data_missingness(df, [effect_col, se_col, study_col], "meta")
+    res = run_meta_analysis(
+        df,
+        effect_col=effect_col,
+        se_col=se_col,
+        study_col=study_col,
+        model=model,
+        method=method,
+    )
+
+    if egger:
+        if study_col and study_col in df.columns:
+            study_series = df[study_col].dropna()
+            n_unique_studies = study_series.nunique()
+            if len(study_series) != n_unique_studies:
+                raise click.BadParameter(
+                    f"Egger's test requires independent study estimates, but duplicate study IDs were detected in '{study_col}' "
+                    f"({len(study_series)} rows with only {n_unique_studies} distinct studies). "
+                    "Each study must contribute exactly one estimate to prevent invalid funnel asymmetry testing.",
+                    param_hint="--egger",
+                )
+            n_studies = n_unique_studies
+        else:
+            n_studies = len(df)
+
+        if n_studies < 10:
+            raise click.BadParameter(
+                f"Egger's test requires at least 10 independent studies (got {n_studies}) to ensure adequate statistical power.",
+                param_hint="--egger",
+            )
+        # Determine explicit or metadata effect measure across all present columns
+        explicit_measure = measure.lower() if measure else None
+        discovered_measures = set()
+        if explicit_measure:
+            discovered_measures.add(explicit_measure)
+
+        for m_col in [
+            "measure",
+            "effect_measure",
+            "metric",
+            "effect_type",
+            "measure_type",
+        ]:
+            if m_col in df.columns:
+                unique_m = df[m_col].dropna().astype(str).str.lower().unique()
+                if len(unique_m) > 1:
+                    raise click.BadParameter(
+                        f"Mixed effect measures detected in column '{m_col}' ({unique_m}). Egger's test requires a homogeneous continuous effect measure.",
+                        param_hint="--egger",
+                    )
+                elif len(unique_m) == 1:
+                    discovered_measures.add(unique_m[0])
+
+        if len(discovered_measures) > 1:
+            raise click.BadParameter(
+                f"Conflicting effect measures detected across metadata columns and --measure ({discovered_measures}). Egger's test requires a consistent, homogeneous effect measure.",
+                param_hint="--egger",
+            )
+        elif len(discovered_measures) == 1:
+            measure_type = next(iter(discovered_measures))
+        else:
+            measure_type = None
+
+        SUPPORTED_CONTINUOUS = (
+            "continuous",
+            "md",
+            "mean_diff",
+            "mean_difference",
+            "wmd",
+        )
+        BINARY_RATIO_MEASURES = (
+            "log_or",
+            "log_odds_ratio",
+            "or",
+            "odds_ratio",
+            "rr",
+            "log_rr",
+            "risk_ratio",
+            "relative_risk",
+        )
+
+        if not measure_type:
+            raise click.BadParameter(
+                "Egger's test requires an explicit continuous effect measure. Specify --measure (e.g. --measure continuous, md) or provide a 'measure' column in the dataset. Missing or unverified effect measures are rejected to prevent invalid testing on binary log ratios.",
+                param_hint="--egger",
+            )
+
+        if measure_type in BINARY_RATIO_MEASURES:
+            raise click.BadParameter(
+                "Egger's test is invalid for binary log odds ratios due to artifactual correlation between log OR and standard error. Use continuous effect sizes or alternative tests.",
+                param_hint="--egger",
+            )
+        if measure_type == "smd":
+            raise click.BadParameter(
+                "Egger's test is invalid for standardized mean differences (SMD) due to artifactual correlation between effect size and standard error. Consider using sample-size-based precision or an alternative small-study effect test.",
+                param_hint="--egger",
+            )
+        if measure_type not in SUPPORTED_CONTINUOUS:
+            raise click.BadParameter(
+                f"Unsupported effect measure '{measure_type}' for Egger's test. Egger's test requires a supported continuous measure ({', '.join(SUPPORTED_CONTINUOUS)}).",
+                param_hint="--egger",
+            )
+        res["egger_test"] = eggers_test(df[effect_col], df[se_col])
+
+    if forest_plot:
+        Path(forest_plot).parent.mkdir(parents=True, exist_ok=True)
+        f_data = generate_forest_data(df, effect_col, se_col, study_col, res)
+        with open(forest_plot, "w") as f:
+            json.dump(f_data, f, indent=2, default=str)
+
+    if output:
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        with open(output, "w") as f:
+            json.dump(res, f, indent=2, default=str)
+        click.echo(f"Meta-analysis results saved: {output}")
+
+
+# ==============================================================================
+# 8. sample-size
+# ==============================================================================
+@cli.command("sample-size")
+@click.option(
+    "--type",
+    "test_type",
+    default="t-test",
+    help="Test type (t-test, means, proportions, survival, correlation).",
+)
+@click.option("--alpha", default=0.05, type=float, help="Type I error rate.")
+@click.option("--power", default=0.80, type=float, help="Statistical power (1 - beta).")
+@click.option(
+    "--effect-size",
+    default=None,
+    type=float,
+    help="Target effect size (Cohen's d for t-test).",
+)
+@click.option(
+    "--p1",
+    default=None,
+    type=float,
+    help="Baseline proportion for proportions test in (0, 1).",
+)
+@click.option(
+    "--p2",
+    default=None,
+    type=float,
+    help="Comparison proportion for proportions test in (0, 1).",
+)
+@click.option(
+    "--hazard-ratio",
+    "--hr",
+    default=None,
+    type=float,
+    help="Target hazard ratio for survival log-rank test.",
+)
+@click.option(
+    "--event-probability",
+    "--p-event",
+    default=None,
+    type=float,
+    help="Expected cumulative event probability for survival analysis in (0, 1].",
+)
+@click.option(
+    "--correlation-r",
+    "--r",
+    default=None,
+    type=float,
+    help="Expected Pearson correlation coefficient r in (-1, 1).",
+)
+@click.option("--output", type=click.Path(), help="Output path for sample size JSON.")
+def sample_size_cmd(
+    test_type: str,
+    alpha: float,
+    power: float,
+    effect_size: float | None,
+    p1: float | None,
+    p2: float | None,
+    hazard_ratio: float | None,
+    event_probability: float | None,
+    correlation_r: float | None,
+    output: str | None,
+) -> None:
+    """Calculate statistical power and required sample size."""
+    tt_lower = test_type.lower().strip()
+    valid_types = (
+        "t-test",
+        "t_test",
+        "ttest",
+        "means",
+        "proportions",
+        "survival",
+        "correlation",
+    )
+    if tt_lower not in valid_types:
+        raise click.ClickException(
+            f"Sample size calculation for test type '{test_type}' is not supported. Supported: {list(valid_types)}"
+        )
+
+    if not (0.0 < alpha < 1.0):
+        raise click.ClickException(
+            f"Alpha must be strictly between 0 and 1 (found: {alpha})."
+        )
+    if not (0.0 < power < 1.0):
+        raise click.ClickException(
+            f"Power must be strictly between 0 and 1 (found: {power})."
+        )
+    if power <= alpha:
+        raise click.ClickException(
+            f"Power must exceed alpha (found power={power}, alpha={alpha})."
+        )
+
+    if tt_lower in ("t-test", "t_test", "ttest", "means"):
+        if effect_size is None or effect_size <= 0:
+            raise click.ClickException(
+                "t-test/means sample size calculation requires an explicitly supplied positive --effect-size (Cohen's d > 0)."
+            )
+        es = effect_size
+        n_per_group = calculate_sample_size_t_test(
+            effect_size=es, alpha=alpha, power=power
+        )
+        res = {
+            "test_type": test_type,
+            "alpha": alpha,
+            "power": power,
+            "effect_size": es,
+            "sample_size_per_group": n_per_group,
+            "total_sample_size": n_per_group * 2,
+        }
+    elif tt_lower in ("proportions", "proportion"):
+        if p1 is None or p2 is None:
+            raise click.ClickException(
+                "Proportions sample size calculation requires explicitly supplied --p1 and --p2 (both in (0, 1))."
+            )
+        if not (0.0 < p1 < 1.0 and 0.0 < p2 < 1.0):
+            raise click.ClickException(
+                f"Proportions --p1 ({p1}) and --p2 ({p2}) must be strictly between 0 and 1."
+            )
+        if p1 == p2:
+            raise click.ClickException("Proportions --p1 and --p2 cannot be identical.")
+        prop_res = calculate_sample_size_proportions(
+            p1=p1, p2=p2, alpha=alpha, power=power
+        )
+        res = {
+            "test_type": test_type,
+            "alpha": alpha,
+            "power": power,
+            "p1": p1,
+            "p2": p2,
+            "sample_size_per_group": prop_res["n1"],
+            "total_sample_size": prop_res["total_n"],
+            "details": prop_res,
+        }
+    elif tt_lower in ("survival", "logrank", "log-rank"):
+        if hazard_ratio is None:
+            raise click.ClickException(
+                "Survival sample size calculation requires explicitly supplied --hazard-ratio (or --hr)."
+            )
+        if hazard_ratio <= 0.0 or hazard_ratio == 1.0:
+            raise click.ClickException(
+                f"Hazard ratio must be positive and not equal to 1.0, found {hazard_ratio}."
+            )
+        ev_prob = event_probability
+        if ev_prob is None:
+            raise click.ClickException(
+                "Survival sample size calculation requires an explicitly supplied event probability (--event-probability or --p-event) in (0, 1]."
+            )
+        if not (0.0 < ev_prob <= 1.0):
+            raise click.ClickException(
+                f"Event probability must be in (0, 1] (found: {ev_prob})."
+            )
+        surv_res = calculate_sample_size_survival(
+            hazard_ratio=hazard_ratio, p_event=ev_prob, alpha=alpha, power=power
+        )
+        res = {
+            "test_type": test_type,
+            "alpha": alpha,
+            "power": power,
+            "hazard_ratio": hazard_ratio,
+            "event_probability": ev_prob,
+            "required_events": surv_res["required_events"],
+            "total_sample_size": surv_res["total_n"],
+            "sample_size_per_group": surv_res["n_treated"],
+        }
+    elif tt_lower in ("correlation", "pearson"):
+        r_val = correlation_r
+        if r_val is None and effect_size is not None:
+            r_val = effect_size
+        if r_val is None:
+            raise click.ClickException(
+                "Correlation sample size calculation requires explicitly supplied --r (or --correlation-r)."
+            )
+        if not (-1.0 < r_val < 1.0 and r_val != 0.0):
+            raise click.ClickException(
+                f"Correlation r must be strictly between -1.0 and 1.0, and non-zero. Found: {r_val}."
+            )
+        corr_res = calculate_sample_size_correlation(r=r_val, alpha=alpha, power=power)
+        res = {
+            "test_type": test_type,
+            "alpha": alpha,
+            "power": power,
+            "correlation_r": r_val,
+            "total_sample_size": corr_res["required_n"],
+        }
+    else:
+        raise click.ClickException(f"Unsupported test type: {test_type}")
+
+    if output:
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        with open(output, "w") as f:
+            json.dump(res, f, indent=2)
+        click.echo(f"Sample size calculation saved: {output}")
+    else:
+        click.echo(json.dumps(res, indent=2))
+
+
+# ==============================================================================
+# 9. report
+# ==============================================================================
+@cli.command("report")
+@click.option(
+    "--results",
+    type=click.Path(exists=True),
+    help="Input model/meta analysis results JSON.",
+)
+@click.option(
+    "--style",
+    default="nejm",
+    type=click.Choice(["nejm", "jama", "apa7"]),
+    help="Journal styling.",
+)
+@click.option(
+    "--format", "out_format", default="html", help="Report format (html, markdown)."
+)
+@click.option(
+    "--checklist",
+    default=None,
+    help="Checklist audit name (strobe, consort, tripod, stard, prisma).",
+)
+@click.option("--narrative", is_flag=True, help="Generate methods narrative.")
+@click.option(
+    "--output", required=True, type=click.Path(), help="Output report file path."
+)
+def report_cmd(
+    results: str | None,
+    style: str,
+    out_format: str,
+    checklist: str | None,
+    narrative: bool,
+    output: str,
+) -> None:
+    """Render publication-grade HTML tables and reporting guideline checklists."""
+    out_p = Path(output)
+    out_p.parent.mkdir(parents=True, exist_ok=True)
+
+    if checklist:
+        chk = get_checklist(checklist)
+        out_p.write_text(chk.to_markdown(), encoding="utf-8")
+        click.echo(f"Reporting checklist saved to: {output}")
+        return
+
+    if narrative and not results:
+        text = generate_methods_narrative()
+        out_p.write_text(text, encoding="utf-8")
+        click.echo(f"Methods narrative saved to: {output}")
+        return
+
+    if results:
+        with open(results, "r") as f:
+            res_data = json.load(f)
+
+        # 1. Handle JSON list (Table 1, ICC, or general records)
+        if isinstance(res_data, list):
+            if len(res_data) > 0 and any(
+                "Characteristic" in str(k) or "characteristic" in str(k)
+                for k in res_data[0].keys()
+            ):
+                html_out = render_records_table(
+                    "Table 1. Baseline Demographic and Clinical Characteristics",
+                    res_data,
+                    style=style.upper(),
+                )
+                out_p.write_text(html_out, encoding="utf-8")
+                click.echo(f"Demographic Table 1 report saved to: {output}")
+                return
+            if len(res_data) > 0 and any(
+                "ICC" in str(k) or "Type" in str(k) for k in res_data[0].keys()
+            ):
+                html_out = render_records_table(
+                    "Table. Intraclass Correlation Coefficient (ICC) Reliability",
+                    res_data,
+                    style=style.upper(),
+                    note="Computed via pure-Python/SciPy two-way ANOVA decomposition with exact F-distribution confidence intervals.",
+                )
+                out_p.write_text(html_out, encoding="utf-8")
+                click.echo(f"ICC Reliability report saved to: {output}")
+                return
+            if len(res_data) > 0 and isinstance(res_data[0], dict):
+                html_out = render_records_table(
+                    "Table. Clinical Study Results", res_data, style=style.upper()
+                )
+                out_p.write_text(html_out, encoding="utf-8")
+                click.echo(f"Publication report saved to: {output}")
+                return
+
+        # 2. Handle Diagnostic Accuracy / ROC results
+        if isinstance(res_data, dict):
+            if any(
+                k in res_data
+                for k in (
+                    "accuracy_at_cutoff",
+                    "roc",
+                    "delong_comparison",
+                    "dca",
+                    "calibration",
+                )
+            ):
+                html_out = render_diagnostic_table(
+                    "Table. Diagnostic Test Accuracy and Clinical Performance",
+                    res_data,
+                    style=style.upper(),
+                )
+                if narrative:
+                    try:
+                        narr_text = generate_methods_narrative(
+                            model_type="diagnostic",
+                            cutoff=res_data.get("cutoff")
+                            or (
+                                res_data.get("accuracy_at_cutoff", {}).get("cutoff")
+                                if isinstance(res_data.get("accuracy_at_cutoff"), dict)
+                                else None
+                            ),
+                            direction=res_data.get("direction")
+                            or (
+                                res_data.get("roc", {}).get("direction")
+                                if isinstance(res_data.get("roc"), dict)
+                                else None
+                            ),
+                            has_roc="roc" in res_data,
+                            has_delong="delong_comparison" in res_data,
+                            has_dca="dca" in res_data,
+                            has_calibration="calibration" in res_data,
+                            diagnostic_data=res_data,
+                        )
+                        if not narr_text:
+                            raise click.ClickException(
+                                "Methods narrative is unavailable for the provided diagnostic results."
+                            )
+                        html_out += f"\n<!-- Methods Narrative -->\n<div class='methods-narrative'><p>{narr_text}</p></div>"
+                    except NotImplementedError:
+                        raise click.ClickException(
+                            "Methods narrative generation is not available for diagnostic results."
+                        )
+                out_p.write_text(html_out, encoding="utf-8")
+                click.echo(f"Diagnostic publication report saved to: {output}")
+                return
+
+            # 3. Handle Bland-Altman Agreement results
+            if any(
+                k in res_data
+                for k in (
+                    "mean_difference",
+                    "mean_diff",
+                    "bias",
+                    "limits_of_agreement",
+                    "upper_loa",
+                )
+            ):
+                html_out = render_bland_altman_table(
+                    "Table. Bland-Altman Method Comparison and Limits of Agreement",
+                    res_data,
+                    style=style.upper(),
+                )
+                out_p.write_text(html_out, encoding="utf-8")
+                click.echo(f"Bland-Altman report saved to: {output}")
+                return
+
+            # 4. Handle Causal Balance results (Love plot)
+            if "covariates" in res_data and any(
+                k in res_data
+                for k in ("smd_pre", "smd_raw", "smd_matched", "smd_post", "post_smd")
+            ):
+                html_out = render_balance_table(
+                    "Table. Baseline Covariate Balance Assessment (Austin 2009)",
+                    res_data,
+                    style=style.upper(),
+                )
+                out_p.write_text(html_out, encoding="utf-8")
+                click.echo(f"Covariate balance report saved to: {output}")
+                return
+
+        est_rows: list[Estimate] = []
+        coefs = res_data.get("coefficients", [])
+        if isinstance(coefs, list) and len(coefs) > 0:
+            for c in coefs:
+                term = str(c.get("term", c.get("feature", c.get("variable", "var"))))
+                est_candidates = [
+                    c.get("odds_ratio"),
+                    c.get("hazard_ratio"),
+                    c.get("estimate"),
+                    c.get("exp(coef)"),
+                    c.get("coef"),
+                ]
+                est_val = next((v for v in est_candidates if v is not None), None)
+                if est_val is None:
+                    raise click.ClickException(
+                        f"Missing estimate/coef for term '{term}'"
+                    )
+                est = float(est_val)
+
+                ci_lo_candidates = [
+                    c.get("hr_ci_lower"),
+                    c.get("or_ci_lower"),
+                    c.get("ci_lower"),
+                    c.get("exp(coef) lower 95%"),
+                    c.get("lower_ci"),
+                ]
+                ci_lo_val = next((v for v in ci_lo_candidates if v is not None), None)
+
+                ci_hi_candidates = [
+                    c.get("hr_ci_upper"),
+                    c.get("or_ci_upper"),
+                    c.get("ci_upper"),
+                    c.get("exp(coef) upper 95%"),
+                    c.get("upper_ci"),
+                ]
+                ci_hi_val = next((v for v in ci_hi_candidates if v is not None), None)
+
+                pval_val = c.get("p_value", c.get("p", c.get("p-val", c.get("p_val"))))
+
+                missing_keys = []
+                if ci_lo_val is None:
+                    missing_keys.append("ci_lower")
+                if ci_hi_val is None:
+                    missing_keys.append("ci_upper")
+                if pval_val is None:
+                    missing_keys.append("p_value")
+
+                if missing_keys:
+                    raise click.ClickException(
+                        f"Term '{term}' missing required keys: {', '.join(missing_keys)}"
+                    )
+
+                ci_lo = float(ci_lo_val)
+                ci_hi = float(ci_hi_val)
+                pval = float(pval_val)
+                est_rows.append(
+                    Estimate(
+                        term=term,
+                        label=term,
+                        estimate=est,
+                        ci_lower=ci_lo,
+                        ci_upper=ci_hi,
+                        p_value=pval,
+                    )
+                )
+        elif "studies" in res_data:
+            studies = res_data["studies"]
+            if isinstance(studies, dict):
+                if all(isinstance(v, dict) for v in studies.values()):
+                    studies_records = pd.DataFrame.from_dict(studies).to_dict(
+                        orient="records"
+                    )
+                else:
+                    studies_records = [studies]
+            elif isinstance(studies, list):
+                studies_records = studies
+            else:
+                studies_records = []
+
+            eff_measure = str(
+                res_data.get("effect_measure", res_data.get("scale", ""))
+            ).strip()
+            is_ratio_meta = bool(
+                res_data.get("is_ratio", False)
+            ) or eff_measure.upper() in {
+                "OR",
+                "RR",
+                "HR",
+                "ODDS_RATIO",
+                "RISK_RATIO",
+                "HAZARD_RATIO",
+            }
+            unified_scale = (
+                eff_measure
+                if eff_measure and eff_measure.lower() != "none"
+                else ("Ratio" if is_ratio_meta else "Effect")
+            )
+
+            for s in studies_records:
+                if isinstance(s, dict):
+                    pval_raw = s.get(
+                        "p_value", s.get("p", s.get("p_val", s.get("p-val")))
+                    )
+                    pval = (
+                        float(pval_raw)
+                        if (
+                            pval_raw is not None
+                            and not (isinstance(pval_raw, float) and np.isnan(pval_raw))
+                        )
+                        else float("nan")
+                    )
+                    ci_lo = s.get("ci_lower")
+                    ci_hi = s.get("ci_upper")
+                    study_name = str(s.get("study", "Study"))
+                    raw_eff = s.get("effect_size", s.get("effect"))
+                    is_study_ratio = bool(s.get("is_ratio", is_ratio_meta))
+                    eff_was_log = False
+                    if raw_eff is None and "log_effect" in s:
+                        log_eff_val = float(s["log_effect"])
+                        if is_study_ratio:
+                            raw_eff = math.exp(log_eff_val)
+                            eff_was_log = True
+                        else:
+                            raw_eff = log_eff_val
+                    elif raw_eff is not None and is_study_ratio:
+                        study_scale = str(s.get("scale", "")).lower().strip()
+                        if study_scale == "log":
+                            raw_eff = math.exp(float(raw_eff))
+                            eff_was_log = True
+
+                    if is_study_ratio and (ci_lo is not None or ci_hi is not None):
+                        explicit_ci_scale = s.get("ci_scale")
+                        if explicit_ci_scale is not None:
+                            ci_scale = str(explicit_ci_scale).lower().strip()
+                        elif eff_was_log:
+                            ci_scale = str(s.get("scale", "")).lower().strip()
+                        else:
+                            ci_scale = "natural"
+
+                        if ci_scale == "log":
+                            if ci_lo is not None:
+                                ci_lo = math.exp(float(ci_lo))
+                            if ci_hi is not None:
+                                ci_hi = math.exp(float(ci_hi))
+                        elif ci_scale == "natural":
+                            pass
+                        else:
+                            if eff_was_log:
+                                raise click.ClickException(
+                                    f"Ambiguous confidence limit scale for study '{study_name}'. "
+                                    f"When providing confidence limits with log-scale effect in ratio meta-analyses, "
+                                    f"explicit scale metadata ('ci_scale' or 'scale' as 'log' or 'natural') is required."
+                                )
+                            else:
+                                raise click.ClickException(
+                                    f"Invalid ci_scale '{ci_scale}' for study '{study_name}'. "
+                                    f"Expected 'log' or 'natural'."
+                                )
+
+                    if raw_eff is None or (
+                        isinstance(raw_eff, float) and np.isnan(raw_eff)
+                    ):
+                        raise click.ClickException(
+                            f"Missing required effect value for study '{study_name}' in meta-analysis results."
+                        )
+                    eff_val = float(raw_eff)
+                    est_rows.append(
+                        Estimate(
+                            term=study_name,
+                            label=study_name,
+                            estimate=eff_val,
+                            ci_lower=float(ci_lo)
+                            if ci_lo is not None
+                            else float("nan"),
+                            ci_upper=float(ci_hi)
+                            if ci_hi is not None
+                            else float("nan"),
+                            p_value=pval,
+                            scale=unified_scale,
+                        )
+                    )
+            re = res_data.get(
+                "random_effects",
+                res_data.get("fixed_effect", res_data.get("summary", {})),
+            )
+            if re and isinstance(re, dict):
+                re_p_raw = re.get("p_value", re.get("p", re.get("p_val")))
+                re_pval = (
+                    float(re_p_raw)
+                    if (
+                        re_p_raw is not None
+                        and not (isinstance(re_p_raw, float) and np.isnan(re_p_raw))
+                    )
+                    else float("nan")
+                )
+                raw_overall = re.get("effect_disp", re.get("effect"))
+                re_ci_lo = re.get("ci_lower")
+                re_ci_hi = re.get("ci_upper")
+                re_scale = str(re.get("scale", "")).lower().strip()
+
+                re_eff_was_log = False
+                if raw_overall is None and "log_effect" in re:
+                    log_overall = float(re["log_effect"])
+                    if is_ratio_meta:
+                        raw_overall = math.exp(log_overall)
+                        re_eff_was_log = True
+                    else:
+                        raw_overall = log_overall
+                elif raw_overall is not None and is_ratio_meta and re_scale == "log":
+                    raw_overall = math.exp(float(raw_overall))
+                    re_eff_was_log = True
+
+                if is_ratio_meta and (re_ci_lo is not None or re_ci_hi is not None):
+                    re_explicit_ci_scale = re.get("ci_scale")
+                    if re_explicit_ci_scale is not None:
+                        re_ci_scale = str(re_explicit_ci_scale).lower().strip()
+                    elif re_eff_was_log:
+                        re_ci_scale = re_scale
+                    else:
+                        re_ci_scale = "natural"
+
+                    if re_ci_scale == "log":
+                        if re_ci_lo is not None:
+                            re_ci_lo = math.exp(float(re_ci_lo))
+                        if re_ci_hi is not None:
+                            re_ci_hi = math.exp(float(re_ci_hi))
+                    elif re_ci_scale == "natural":
+                        pass
+                    else:
+                        if re_eff_was_log:
+                            raise click.ClickException(
+                                "Ambiguous confidence limit scale for overall meta-analysis effect. "
+                                "When providing confidence limits with log-scale effect in ratio meta-analyses, "
+                                "explicit scale metadata ('ci_scale' or 'scale' as 'log' or 'natural') is required."
+                            )
+                        else:
+                            raise click.ClickException(
+                                f"Invalid ci_scale '{re_ci_scale}' for overall meta-analysis effect. "
+                                "Expected 'log' or 'natural'."
+                            )
+
+                if raw_overall is None or (
+                    isinstance(raw_overall, float) and np.isnan(raw_overall)
+                ):
+                    raise click.ClickException(
+                        "Missing required overall effect value in meta-analysis summary."
+                    )
+                est_rows.append(
+                    Estimate(
+                        term="Overall Effect",
+                        label=str(re.get("label", "Overall Effect")),
+                        estimate=float(raw_overall),
+                        ci_lower=float(re_ci_lo)
+                        if re_ci_lo is not None
+                        else float("nan"),
+                        ci_upper=float(re_ci_hi)
+                        if re_ci_hi is not None
+                        else float("nan"),
+                        p_value=re_pval,
+                        scale=unified_scale,
+                    )
+                )
+
+        narr_kwargs = {
+            "model_type": res_data.get("model_type", "logistic"),
+            "outcome": res_data.get("outcome", "primary outcome"),
+            "exposure": res_data.get("exposure"),
+            "covariates": res_data.get("covariates"),
+            "missing_strategy": res_data.get(
+                "missing_strategy",
+                res_data.get("missing_data", {}).get("strategy"),
+            ),
+            "is_firth": res_data.get("method") == "firth",
+            "is_rcs": bool(
+                res_data.get("spline_var") or res_data.get("spline_estimates")
+            ),
+            "check_schoenfeld": bool(
+                res_data.get("schoenfeld_test")
+                and res_data.get("schoenfeld_test") != "not_performed"
+                and not (
+                    isinstance(res_data.get("schoenfeld_test"), dict)
+                    and res_data.get("schoenfeld_test", {}).get("status")
+                    == "not_performed"
+                )
+            ),
+        }
+
+        if out_format.lower() in ("markdown", "md") or str(output).endswith(".md"):
+            narr_text = generate_methods_narrative(**narr_kwargs)
+            out_p.write_text(narr_text, encoding="utf-8")
+        else:
+            est_tbl = EstimateTable(
+                title="Table. Multivariable Clinical Outcomes", rows=est_rows
+            )
+            html_out = PublicationRenderer.render_html(est_tbl, style=style)
+            if narrative:
+                narr_text = generate_methods_narrative(**narr_kwargs)
+                html_out += f"\n<!-- Methods Narrative -->\n<div class='methods-narrative'><p>{narr_text}</p></div>"
+            out_p.write_text(html_out, encoding="utf-8")
+        click.echo(f"Publication report saved to: {output}")
+
+
+def main() -> None:
+    """CLI Entry point."""
+    cli()
+
+
+if __name__ == "__main__":
+    main()

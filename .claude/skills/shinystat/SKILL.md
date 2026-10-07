@@ -35,6 +35,7 @@ If requirements, outcome directions, or statistical assumptions are ambiguous or
 
 3. **Pillar 3: Adaptive Python Scripting**
    - Write and adapt clean, standalone Python scripts using `medstat` core modules (`medstat.data`, `medstat.models`, `medstat.diagnostic`, `medstat.causal`, `medstat.agreement`, `medstat.reporting`) or standard scientific libraries (`pandas`, `scipy.stats`, `statsmodels`, `lifelines`, `scikit-learn`).
+   - The entire `medstat` calculation engine is bundled inside this skill under `scripts/medstat/` (and executable via `python <skill-dir>/scripts/medstat_cli.py`).
    - Tailor calculations to the specific quirks of the dataset rather than forcing rigid CLI flags.
 
 4. **Pillar 4: Biostatistical Safety Invariants**
