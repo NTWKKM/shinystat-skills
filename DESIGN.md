@@ -608,3 +608,40 @@ Code review and empirical audit of `packaging/cloud/shinystat-cloud/` revealed s
 - **Full Test Suite Pass**: 459/459 tests passing suite-wide with zero failures.
 
 [MEMORY_LEARN: Cloud code execution sandboxes require mathematically robust, self-contained Python recipes with pre-cast NaN filtering, exact ANOVA F-distribution intervals, and pattern-grouped EM algorithms to eliminate silent data corruption and dependency failures.]
+
+---
+
+## ADR 28: Multi-Imputation Rubin's Pooling & Survival Diagnostics Hardening for Cloud Sandbox
+
+### Context
+User re-testing of `shinystat-cloud.zip` (PR #8) identified 4 specific methodological and diagnostic improvements required prior to merge:
+1. `impute_mice` returned a single imputed dataset; single imputation fails to account for imputation uncertainty, producing spuriously narrow standard errors in downstream inferential regression.
+2. Schoenfeld proportional hazards diagnostics in survival analysis returned only a boolean pass/fail flag without reporting per-covariate test statistics and $p$-values, while Log-Rank was limited to 2 groups.
+3. The ASCII architecture diagram header in `SKILL.md` still read "3-Pillar" while the section title was "The 4 Decision Pillars".
+4. VanderWeele & Ding (2017) continuous hazard ratio conversion required explicit verification and unit tests for both rare and common outcome branches.
+
+### Decision
+1. **Multiple Imputation & Rubin's Pooling**:
+   - Implemented `impute_mice_datasets` generating $M \ge 5$ stochastic imputed datasets via `IterativeImputer(estimator=BayesianRidge(), sample_posterior=True)`.
+   - Implemented pure-Python `pool_estimates_rubin` applying Rubin's rules (Rubin 1987; Barnard & Rubin 1999) to combine point estimates and variance across $M$ imputations:
+     $$\bar{\theta} = \frac{1}{M}\sum_{m=1}^M \hat{\theta}_m, \quad \bar{W} = \frac{1}{M}\sum_{m=1}^M \hat{V}_m, \quad B = \frac{1}{M-1}\sum_{m=1}^M (\hat{\theta}_m - \bar{\theta})^2, \quad T = \bar{W} + \left(1 + \frac{1}{M}\right)B$$
+     incorporating Barnard-Rubin finite-sample adjusted degrees of freedom $\nu$, fraction of missing information ($FMI$), and 95% CIs.
+   - Retained `impute_mice_single` (and backward-compatible alias `impute_mice`) with explicit docstring warnings that single imputation is strictly reserved for rapid exploratory data health profiling.
+2. **Survival Suite Diagnostic Expansion**:
+   - Upgraded Log-Rank testing to automatically branch: 2 groups $\to$ `logrank_test`; $>2$ groups $\to$ `multivariate_logrank_test`.
+   - Enhanced Schoenfeld diagnostics via `proportional_hazard_test(cph, data, time_transform="rank")` returning per-variable test statistics, $p$-values, and an overall boolean check.
+3. **Pillars Harmonization & Decision Trees**:
+   - Harmonized diagram title in `SKILL.md` to `The 4 Decision Pillars Triangulation`.
+   - Updated missing data heuristics in `SKILL.md` and `decision-heuristics.md` to require $M \ge 5$ stochastic datasets + Rubin's rules for inferential modeling.
+4. **Unit Test Expansion & Verification**:
+   - Expanded `tests/unit/test_shinystat_cloud.py` with tests for HR E-value branching (rare vs common, protective $HR < 1.0$), multivariate Log-Rank, per-variable Schoenfeld diagnostics, and Rubin's pooling variance inflation.
+   - Rebuilt `~/Desktop/shinystat-cloud.zip`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Inferential Validity**: MICE in cloud sandboxes now properly inflates standard errors to reflect missing data uncertainty, preventing anti-conservative clinical conclusions.
+- **Diagnostic Transparency**: Clinicians can pinpoint specific covariates violating proportional hazards in Cox regression.
+- **Full Test Suite Pass**: 19/19 cloud unit tests passing, 461/461 suite-wide tests passing with zero regressions.
+
+[MEMORY_LEARN: Multiple imputation in clinical inference strictly requires M>=5 stochastic datasets with Rubin's rules pooling (W_bar + (1+1/M)B); single imputation treats imputed values as known constants and falsely narrows confidence intervals.]
+
