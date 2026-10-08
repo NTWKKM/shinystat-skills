@@ -983,13 +983,13 @@ def fit_logistic_regression_table(
 
 ## 11. Survival Analysis: Kaplan-Meier, Log-Rank & Cox Proportional Hazards
 
-Computes Kaplan-Meier survival estimates with median survival times, Log-Rank hypothesis test, and multivariable Cox Proportional Hazards table with Grambsch-Therneau Schoenfeld residual assumption checks.
+Computes Kaplan-Meier survival estimates with median survival times, Log-Rank hypothesis test (supports 2 or more groups), and multivariable Cox Proportional Hazards table with per-variable Grambsch-Therneau Schoenfeld residual tests.
 
 ```python
 import numpy as np
 import pandas as pd
 from lifelines import KaplanMeierFitter, CoxPHFitter
-from lifelines.statistics import logrank_test
+from lifelines.statistics import logrank_test, multivariate_logrank_test, proportional_hazard_test
 
 def fit_survival_analysis_suite(
     df: pd.DataFrame,
@@ -998,7 +998,7 @@ def fit_survival_analysis_suite(
     strata_col: str | None = None,
     covariates: list[str] | None = None
 ) -> dict:
-    """Run Kaplan-Meier, Log-Rank, and Cox PH modeling with Schoenfeld proportional hazards test."""
+    """Run Kaplan-Meier, Log-Rank, and Cox PH modeling with per-covariate Schoenfeld test."""
     clean = df.dropna(subset=[duration_col, event_col] + (covariates or []) + ([strata_col] if strata_col else [])).copy()
     
     # 1. Kaplan-Meier curve & median survival
@@ -1011,7 +1011,7 @@ def fit_survival_analysis_suite(
             kmf.fit(sub[duration_col], sub[event_col], label=str(g))
             km_results[f"Median Survival ({g})"] = float(kmf.median_survival_time_)
         
-        # Log-rank test across 2 primary strata
+        # Log-rank test (2 groups or multivariate for >2 groups)
         if len(groups) == 2:
             lr_res = logrank_test(
                 clean.loc[clean[strata_col] == groups[0], duration_col],
@@ -1020,6 +1020,9 @@ def fit_survival_analysis_suite(
                 clean.loc[clean[strata_col] == groups[1], event_col]
             )
             km_results["Log-Rank P-value"] = float(lr_res.p_value)
+        elif len(groups) > 2:
+            lr_res = multivariate_logrank_test(clean[duration_col], clean[strata_col], clean[event_col])
+            km_results["Multivariate Log-Rank P-value"] = float(lr_res.p_value)
     else:
         kmf = KaplanMeierFitter()
         kmf.fit(clean[duration_col], clean[event_col])
@@ -1047,10 +1050,12 @@ def fit_survival_analysis_suite(
             })
         cox_table = pd.DataFrame(rows)
 
-        # Proportional hazards test
+        # Proportional hazards test per covariate
         try:
-            prop_test = cph.check_assumptions(cox_data, show_plots=False)
-            schoenfeld_summary["PH_Assumptions_Passed"] = True
+            prop_test = proportional_hazard_test(cph, cox_data, time_transform="rank")
+            schoenfeld_summary["p_values"] = {k: float(v) for k, v in prop_test.summary["p"].items()}
+            schoenfeld_summary["test_statistics"] = {k: float(v) for k, v in prop_test.summary["test_statistic"].items()}
+            schoenfeld_summary["PH_Assumptions_Passed"] = bool((prop_test.summary["p"] > 0.05).all())
         except Exception as e:
             schoenfeld_summary["PH_Note"] = str(e)
 
@@ -1063,25 +1068,115 @@ def fit_survival_analysis_suite(
 
 ---
 
-## 12. Multiple Imputation by Chained Equations (MICE)
+## 12. Multiple Imputation by Chained Equations (MICE) & Rubin's Rules
 
-Pure-Python MICE implementation using Scikit-Learn `IterativeImputer` with Bayesian Ridge regression, strictly enforcing that **primary outcomes are never imputed**.
+Provides multiple stochastic imputations ($M \ge 5$) via Scikit-Learn `IterativeImputer` with Bayesian Ridge regression, strictly enforcing that **primary outcomes are never imputed**. Includes pure-Python **Rubin's rules pooling** (Rubin 1987; Barnard & Rubin 1999) to account for between-imputation variance and avoid falsely narrow standard errors.
 
 ```python
 import numpy as np
 import pandas as pd
+import scipy.stats as stats
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
 from sklearn.linear_model import BayesianRidge
 
-def impute_mice(
+def impute_mice_datasets(
+    df: pd.DataFrame,
+    features_to_impute: list[str],
+    outcome_col: str | None = None,
+    m: int = 5,
+    max_iter: int = 10,
+    random_state: int = 42
+) -> list[pd.DataFrame]:
+    """Generate M stochastic imputed datasets for valid inferential analysis under MAR."""
+    if outcome_col and outcome_col in features_to_impute:
+        raise ValueError("Clinical governance invariant: Never impute the primary outcome variable!")
+
+    datasets = []
+    for i in range(m):
+        imputer = IterativeImputer(
+            estimator=BayesianRidge(),
+            max_iter=max_iter,
+            random_state=random_state + i * 100,
+            sample_posterior=True
+        )
+        clean = df.copy()
+        clean[features_to_impute] = imputer.fit_transform(clean[features_to_impute])
+        datasets.append(clean)
+    return datasets
+
+def pool_estimates_rubin(
+    point_estimates: list[float],
+    standard_errors: list[float],
+    n_obs: int | None = None,
+    k_params: int = 1,
+    alpha: float = 0.05
+) -> dict:
+    """Pool point estimates and standard errors across M imputations using Rubin's rules."""
+    m = len(point_estimates)
+    if m < 2:
+        raise ValueError("Rubin pooling requires at least m=2 imputed datasets.")
+    theta = np.asarray(point_estimates, dtype=float)
+    V = np.asarray(standard_errors, dtype=float) ** 2
+
+    theta_bar = float(np.mean(theta))
+    W_bar = float(np.mean(V))
+    B = float(np.var(theta, ddof=1))
+    T = float(W_bar + (1.0 + 1.0 / m) * B)
+    se = float(np.sqrt(T))
+
+    # Degrees of freedom with Barnard & Rubin (1999) finite-sample adjustment
+    if B > 0 and W_bar > 0:
+        r = float((1.0 + 1.0 / m) * B / W_bar)
+        df_old = (m - 1) * (1.0 + 1.0 / r) ** 2
+        if n_obs is not None:
+            nu_com = max(1.0, float(n_obs - k_params))
+            lam = r / (r + 1.0)
+            df_obs = ((nu_com + 1.0) / (nu_com + 3.0)) * nu_com * (1.0 - lam)
+            df = float((df_old * df_obs) / (df_old + df_obs))
+        else:
+            df = float(df_old)
+    elif B > 0 and W_bar <= 0:
+        r = np.inf
+        df = float(m - 1)
+    else:
+        r = 0.0
+        df = np.inf
+
+    t_stat = theta_bar / se if se > 0 else 0.0
+    if np.isfinite(df) and df > 0:
+        p_val = float(2.0 * stats.t.sf(abs(t_stat), df))
+        t_crit = float(stats.t.ppf(1.0 - alpha / 2.0, df))
+    else:
+        p_val = float(2.0 * stats.norm.sf(abs(t_stat)))
+        t_crit = float(stats.norm.ppf(1.0 - alpha / 2.0))
+
+    ci_lower = float(theta_bar - t_crit * se)
+    ci_upper = float(theta_bar + t_crit * se)
+    fmi = float((r + 2.0 / (df + 3.0)) / (r + 1.0)) if (r > 0 and np.isfinite(df)) else 0.0
+
+    return {
+        "pooled_estimate": theta_bar,
+        "pooled_se": se,
+        "ci_lower": ci_lower,
+        "ci_upper": ci_upper,
+        "p_value": p_val,
+        "within_variance": W_bar,
+        "between_variance": B,
+        "total_variance": T,
+        "df": df,
+        "fmi": fmi,
+        "m_imputations": m,
+    }
+
+def impute_mice_single(
     df: pd.DataFrame,
     features_to_impute: list[str],
     outcome_col: str | None = None,
     max_iter: int = 10,
     random_state: int = 42
 ) -> pd.DataFrame:
-    """Perform MICE imputation on covariates, preserving primary outcome integrity."""
+    """Deterministic single MICE imputation strictly for rapid exploratory data health profiling."""
     clean = df.copy()
     if outcome_col and outcome_col in features_to_impute:
         raise ValueError("Clinical governance invariant: Never impute the primary outcome variable!")
@@ -1092,9 +1187,11 @@ def impute_mice(
         random_state=random_state,
         sample_posterior=False
     )
-    
     clean[features_to_impute] = imputer.fit_transform(clean[features_to_impute])
     return clean
+
+# Backward-compatible alias for exploratory single imputation
+impute_mice = impute_mice_single
 ```
 
 ---

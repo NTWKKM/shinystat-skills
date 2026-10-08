@@ -15,7 +15,7 @@ If requirements, outcome directions, or primary estimands are ambiguous or unsup
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│                   3-Pillar Triangulation Decision                      │
+│                   The 4 Decision Pillars Triangulation                 │
 │   [1. Data Reality] ⟷ [2. Research Estimand] ⟷ [3. Clinical Principles]  │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │
@@ -38,7 +38,7 @@ If requirements, outcome directions, or primary estimands are ambiguous or unsup
 
 3. **Pillar 3: Adaptive Standalone Python Scripting**
    - **Cloud Sandbox Protocol**: Write self-contained, executable Python scripts using standard scientific libraries pre-installed in the environment (`pandas`, `numpy`, `scipy.stats`, `statsmodels`, `lifelines`, `scikit-learn`). **Do not attempt to `import medstat`** as external custom packages are not installed in the cloud sandbox.
-   - Consult [python-recipes.md](references/python-recipes.md) for pure-Python, zero-custom-dependency implementations of advanced biostatistical algorithms (Firth's penalized logistic regression with profile likelihood CIs, single and paired DeLong tests, Wilson score CIs, Austin 2009 SMD with zero-variance safeguards, Austin & Steyerberg 2019 ICI, Vickers DCA Net Benefit, Bland-Altman LoA with 1999 large-sample SEs, pure SciPy Shrout & Fleiss 1979 ANOVA ICC with exact F-CIs, Little's MCAR EM test, VanderWeele E-value, Kaplan-Meier/Cox suite, MICE, and NEJM/JAMA table formatting).
+   - Consult [python-recipes.md](references/python-recipes.md) for pure-Python, zero-custom-dependency implementations of advanced biostatistical algorithms (Firth's penalized logistic regression with profile likelihood CIs, single and paired DeLong tests, Wilson score CIs, Austin 2009 SMD with zero-variance safeguards, Austin & Steyerberg 2019 ICI, Vickers DCA Net Benefit, Bland-Altman LoA with 1999 large-sample SEs, pure SciPy Shrout & Fleiss 1979 ANOVA ICC with exact F-CIs, Little's MCAR EM test, VanderWeele E-value, Kaplan-Meier/multi-group log-rank/Cox PH suite with Schoenfeld diagnostics, MICE with Rubin's rules pooling, and NEJM/JAMA table formatting).
 
 4. **Pillar 4: Biostatistical Safety Invariants**
    - **Strict Numeric 0/1 Encoding**: Binary endpoints and survival event indicators must be numeric `0` and `1` (`1 = Event`, `0 = Non-event / Censored`). Text labels (`"Yes"/"No"`, `"Dead"/"Alive"`) must be mapped explicitly.
@@ -56,7 +56,7 @@ When encountering critical clinical ambiguities, **HALT execution** and intervie
 - **Consolidated Interview**: If multiple ambiguities exist, batch them into a single consolidated interview (`❓ Q1`, `❓ Q2`) with actionable recommendations rather than stopping repeatedly.
 - **Pragmatic Missing Data Defaults**:
   - If missingness in non-primary variables is **$< 5\%$** and clinically uninformative: Proceed with complete-case analysis with documented sensitivity notes; do NOT block execution with an unnecessary halt.
-  - If missingness is **$5\% - 40\%$**: Propose MICE ([Recipe 12](references/python-recipes.md#12-multiple-imputation-by-chained-equations-mice)) as the recommended biostatistical path.
+  - If missingness is **$5\% - 40\%$**: Propose MICE ([Recipe 12](references/python-recipes.md#12-multiple-imputation-by-chained-equations-mice--rubins-rules)) as the recommended biostatistical path ($M \ge 5$ stochastic datasets pooled via Rubin's rules for inferential modeling; single imputation strictly for data health profiling).
   - Only halt unconditionally when the **primary outcome** is missing without prespecified protocol disposition, or missingness is manifestly informative / MNAR.
 
 ```

@@ -306,20 +306,35 @@ def test_littles_mcar_pattern_grouped_em(recipes):
 
 
 # -----------------------------------------------------------------------------
-# 10. Recipe 9: VanderWeele E-Value Prevalence Branching
+# 10. Recipe 9: VanderWeele E-Value Prevalence Branching (OR & HR)
 # -----------------------------------------------------------------------------
 
 
 def test_e_value_prevalence_branching(recipes):
     calc_e = recipes["calculate_e_value"]
-    # Rare outcome OR=4.0
+    # 1. Odds Ratio (OR)
     rare_e = calc_e(4.0, lower=2.0, estimate_type="OR", rare_outcome=True)
-    # Common outcome OR=4.0 (transformed by sqrt)
     common_e = calc_e(4.0, lower=2.0, estimate_type="OR", rare_outcome=False)
 
     assert np.isclose(rare_e["e_value_point"], 7.464, atol=1e-2)
     assert np.isclose(common_e["e_value_point"], 3.414, atol=1e-2)
     assert rare_e["e_value_point"] > common_e["e_value_point"]
+
+    # 2. Hazard Ratio (HR) - VanderWeele & Ding (2017) continuous conversion
+    rare_hr = calc_e(2.0, lower=1.2, estimate_type="HR", rare_outcome=True)
+    common_hr = calc_e(2.0, lower=1.2, estimate_type="HR", rare_outcome=False)
+
+    # For rare outcome: HR=2.0 -> RR*=2.0 -> E-value ≈ 3.414
+    assert np.isclose(rare_hr["e_value_point"], 3.414, atol=1e-2)
+    # For common outcome: HR=2.0 -> RR*=(1-0.5^sqrt(2))/(1-0.5^sqrt(0.5)) ≈ 1.6125 -> E-value ≈ 2.606
+    assert np.isclose(common_hr["e_value_point"], 2.606, atol=1e-2)
+    assert rare_hr["e_value_point"] > common_hr["e_value_point"]
+    assert rare_hr["e_value_ci"] > common_hr["e_value_ci"]
+
+    # Protective HR (< 1.0)
+    prot_rare = calc_e(0.5, upper=0.8, estimate_type="HR", rare_outcome=True)
+    assert prot_rare["e_value_point"] > 1.0
+    assert prot_rare["e_value_ci"] > 1.0
 
 
 # -----------------------------------------------------------------------------
@@ -343,7 +358,7 @@ def test_logistic_regression_table(recipes):
     assert "Adjusted OR (95% CI)" in res_df.columns
 
 
-def test_survival_analysis_suite(recipes):
+def test_survival_analysis_suite_two_groups(recipes):
     fit_surv = recipes["fit_survival_analysis_suite"]
     np.random.seed(42)
     df = pd.DataFrame(
@@ -362,12 +377,42 @@ def test_survival_analysis_suite(recipes):
         covariates=["age"],
     )
     assert "km_summary" in res
+    assert "Log-Rank P-value" in res["km_summary"]
     assert "cox_table" in res
     assert len(res["cox_table"]) == 1
+    assert "schoenfeld_diagnostics" in res
+    assert "p_values" in res["schoenfeld_diagnostics"]
+    assert "test_statistics" in res["schoenfeld_diagnostics"]
+    assert "age" in res["schoenfeld_diagnostics"]["p_values"]
+    assert isinstance(res["schoenfeld_diagnostics"]["PH_Assumptions_Passed"], bool)
 
 
-def test_mice_imputation(recipes):
-    mice = recipes["impute_mice"]
+def test_survival_analysis_suite_multivariate_logrank(recipes):
+    fit_surv = recipes["fit_survival_analysis_suite"]
+    np.random.seed(42)
+    # 3 groups for strata
+    df = pd.DataFrame(
+        {
+            "time": np.random.exponential(10, size=90) + 1,
+            "event": np.random.binomial(1, 0.5, size=90),
+            "stage": np.random.choice(["I", "II", "III"], size=90),
+            "age": np.random.normal(50, 10, size=90),
+        }
+    )
+    res = fit_surv(
+        df,
+        duration_col="time",
+        event_col="event",
+        strata_col="stage",
+        covariates=["age"],
+    )
+    assert "Multivariate Log-Rank P-value" in res["km_summary"]
+    assert 0.0 <= res["km_summary"]["Multivariate Log-Rank P-value"] <= 1.0
+
+
+def test_mice_imputation_single(recipes):
+    mice_single = recipes["impute_mice_single"]
+    mice_alias = recipes["impute_mice"]
     np.random.seed(42)
     df = pd.DataFrame(
         {
@@ -376,11 +421,86 @@ def test_mice_imputation(recipes):
             "lab2": [10.0, 12.0, np.nan, 15.0, 11.0],
         }
     )
-    imputed = mice(df, features_to_impute=["lab1", "lab2"], outcome_col="outcome")
+    imputed = mice_single(
+        df, features_to_impute=["lab1", "lab2"], outcome_col="outcome"
+    )
     assert not imputed[["lab1", "lab2"]].isna().any().any()
+    # Backward compatible alias check
+    imputed_alias = mice_alias(
+        df, features_to_impute=["lab1", "lab2"], outcome_col="outcome"
+    )
+    assert not imputed_alias[["lab1", "lab2"]].isna().any().any()
+
     # Attempting to impute primary outcome must raise ValueError
     with pytest.raises(ValueError, match="Never impute the primary outcome"):
-        mice(df, features_to_impute=["outcome", "lab1"], outcome_col="outcome")
+        mice_single(df, features_to_impute=["outcome", "lab1"], outcome_col="outcome")
+
+
+def test_mice_multiple_datasets_and_rubin_pooling(recipes):
+    impute_datasets = recipes["impute_mice_datasets"]
+    pool_rubin = recipes["pool_estimates_rubin"]
+
+    np.random.seed(42)
+    n = 80
+    df = pd.DataFrame(
+        {
+            "outcome": np.random.binomial(1, 0.3, size=n),
+            "x1": np.where(
+                np.random.rand(n) < 0.2, np.nan, np.random.normal(10, 2, size=n)
+            ),
+            "x2": np.where(
+                np.random.rand(n) < 0.2, np.nan, np.random.normal(50, 5, size=n)
+            ),
+        }
+    )
+
+    # 1. Impute M=5 stochastic datasets
+    m = 5
+    datasets = impute_datasets(
+        df, features_to_impute=["x1", "x2"], outcome_col="outcome", m=m
+    )
+    assert len(datasets) == m
+    for d in datasets:
+        assert not d[["x1", "x2"]].isna().any().any()
+        assert (d["outcome"] == df["outcome"]).all(), (
+            "Primary outcome must remain unchanged!"
+        )
+
+    # Stochastic check: values should not all be identical across imputations
+    imputed_x1_vals = [d.loc[df["x1"].isna(), "x1"].values for d in datasets]
+    assert not np.allclose(imputed_x1_vals[0], imputed_x1_vals[1]), (
+        "MICE stochastic posterior should introduce variance"
+    )
+
+    # 2. Fit models on each dataset and pool with Rubin's rules
+    estimates = []
+    ses = []
+    for d in datasets:
+        # Simple sample mean and standard error of x1
+        estimates.append(float(d["x1"].mean()))
+        ses.append(float(d["x1"].std() / np.sqrt(len(d))))
+
+    pooled = pool_rubin(estimates, ses, n_obs=n, k_params=1)
+
+    assert "pooled_estimate" in pooled
+    assert "pooled_se" in pooled
+    assert "ci_lower" in pooled
+    assert "ci_upper" in pooled
+    assert "between_variance" in pooled
+    assert "within_variance" in pooled
+    assert "total_variance" in pooled
+    assert "df" in pooled
+    assert "fmi" in pooled
+
+    # Variance inflation: total variance > within variance because between variance > 0
+    assert pooled["between_variance"] > 0
+    assert pooled["total_variance"] > pooled["within_variance"]
+    assert pooled["ci_lower"] < pooled["pooled_estimate"] < pooled["ci_upper"]
+    assert pooled["m_imputations"] == m
+
+    # Require m >= 2
+    with pytest.raises(ValueError, match="at least m=2"):
+        pool_rubin([1.0], [0.2])
 
 
 def test_publication_table_html_rendering(recipes):

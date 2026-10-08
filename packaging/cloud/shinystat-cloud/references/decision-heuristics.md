@@ -49,7 +49,7 @@ Calculate diagnostic EPV:
 Audit Missingness Pattern & Mechanism (Recipe 8: Little's MCAR Test)
 
 ├── Total Missing < 5% in non-primary variables ──▶ Complete-case analysis with documented justification
-├── Missing 5%–40% under Missing at Random (MAR) ──▶ Multiple Imputation by Chained Equations (Recipe 12: MICE)
+├── Missing 5%–40% under Missing at Random (MAR) ──▶ Multiple Imputation by Chained Equations (Recipe 12: MICE; M ≥ 5 datasets + Rubin's rules for inference)
 ├── Primary Outcome Missing ──▶ Never impute outcome; preserve true sample retention flow (N_initial ➔ N_analyzed)
 └── Missingness Informative / MNAR ──▶ Halt for clinical domain review or sensitivity bounds
 ```
