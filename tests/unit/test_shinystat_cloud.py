@@ -811,7 +811,7 @@ def test_each_recipe_is_self_contained():
                 df_m = pd.DataFrame(
                     {
                         "y": [0, 0, 1, 1, 0, 1],
-                        "x1": [1.0, np.nan, 3.0, 4.0, np.nan, 6.0],
+                        "x1": [1.2, np.nan, 3.5, 3.8, np.nan, 6.1],
                         "x2": [10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
                     }
                 )
@@ -998,237 +998,258 @@ def test_survival_strict_binary_event_negative_duration_and_cohort_separation(re
 
 def test_mice_input_guards_and_bounds(recipes):
     impute_datasets = recipes["impute_mice_datasets"]
+    impute_single = recipes["impute_mice_single"]
 
-    # 1. m < 1 rejected
+    # 1. m < 1 rejected (impute_mice_datasets specific)
     df = pd.DataFrame({"y": [1, 0, 1], "x": [10.0, np.nan, 12.0]})
     with pytest.raises(ValueError, match="m must be >= 1"):
         impute_datasets(df, features_to_impute=["x"], outcome_col="y", m=0)
 
-    # 2. 100% missing column rejected
-    df_all_nan = pd.DataFrame({"y": [1, 0, 1], "x": [np.nan, np.nan, np.nan]})
-    with pytest.raises(ValueError, match="100% missing"):
-        impute_datasets(df_all_nan, features_to_impute=["x"], outcome_col="y", m=2)
+    # Parameterize shared guards across both stochastic datasets and single imputation
+    imputers = [
+        lambda *args, **kwargs: impute_datasets(*args, m=2, **kwargs),
+        lambda *args, **kwargs: impute_single(*args, **kwargs),
+    ]
 
-    # 3. Non-numeric / text column rejected
-    df_text = pd.DataFrame({"y": [1, 0, 1], "x": ["cat", "dog", None]})
-    with pytest.raises(ValueError, match="non-numeric"):
-        impute_datasets(df_text, features_to_impute=["x"], outcome_col="y", m=2)
+    for imp_fn in imputers:
+        # 2. max_iter <= 0 rejected (boundary testing for zero and negative iterations)
+        with pytest.raises(ValueError, match="max_iter must be an integer >= 1"):
+            imp_fn(df, features_to_impute=["x"], outcome_col="y", max_iter=0)
+        with pytest.raises(ValueError, match="max_iter must be an integer >= 1"):
+            imp_fn(df, features_to_impute=["x"], outcome_col="y", max_iter=-1)
 
-    # 4. Respect min_value bounds (values never imputed below bound)
-    np.random.seed(42)
-    n = 80
-    df_bounded = pd.DataFrame(
-        {
-            "dead": np.random.binomial(1, 0.3, size=n),
-            "hr": np.where(
-                np.random.rand(n) < 0.3, np.nan, np.random.normal(70, 10, size=n)
-            ),
-        }
-    )
-    datasets = impute_datasets(
-        df_bounded,
-        features_to_impute=["hr"],
-        outcome_col="dead",
-        m=3,
-        min_value={"hr": 50.0},
-    )
-    for d in datasets:
-        assert (d["hr"] >= 50.0).all(), (
-            "Imputed heart rate must respect minimum bound 50.0"
+        # 3. 100% missing column rejected
+        df_all_nan = pd.DataFrame({"y": [1, 0, 1], "x": [np.nan, np.nan, np.nan]})
+        with pytest.raises(ValueError, match="100% missing"):
+            imp_fn(df_all_nan, features_to_impute=["x"], outcome_col="y")
+
+        # 4. Non-numeric / text column rejected
+        df_text = pd.DataFrame({"y": [1, 0, 1], "x": ["cat", "dog", None]})
+        with pytest.raises(ValueError, match="non-numeric"):
+            imp_fn(df_text, features_to_impute=["x"], outcome_col="y")
+
+        # 5. Respect min_value bounds
+        np.random.seed(42)
+        n = 80
+        df_bounded = pd.DataFrame(
+            {
+                "dead": np.random.binomial(1, 0.3, size=n),
+                "hr": np.where(
+                    np.random.rand(n) < 0.3, np.nan, np.random.normal(70, 10, size=n)
+                ),
+            }
         )
-
-    # 5. Reject binary/dummy target in features_to_impute
-    df_bin = pd.DataFrame(
-        {
-            "y": [1, 0, 1, 0],
-            "bin_target": [0, 1, 0, np.nan],
-            "age": [50.0, 60.0, 55.0, 65.0],
-        }
-    )
-    with pytest.raises(ValueError, match="binary/dummy"):
-        impute_datasets(df_bin, features_to_impute=["bin_target"], outcome_col="y", m=2)
-
-    # 6. Reject boolean target in features_to_impute
-    df_bool = pd.DataFrame(
-        {
-            "y": [1, 0, 1, 0],
-            "bool_target": [True, False, True, False],
-            "age": [50.0, 60.0, 55.0, 65.0],
-        }
-    )
-    with pytest.raises(ValueError, match="non-numeric"):
-        impute_datasets(
-            df_bool, features_to_impute=["bool_target"], outcome_col="y", m=2
+        res_bounded = imp_fn(
+            df_bounded,
+            features_to_impute=["hr"],
+            outcome_col="dead",
+            min_value={"hr": 50.0},
         )
+        bounded_dfs = res_bounded if isinstance(res_bounded, list) else [res_bounded]
+        for d in bounded_dfs:
+            assert (d["hr"] >= 50.0).all(), (
+                "Imputed heart rate must respect minimum bound 50.0"
+            )
 
-    # 7. Reject categorical predictor with missing values
-    df_missing_pred = pd.DataFrame(
-        {
-            "y": [1, 0, 1, 0],
-            "age": [50.0, np.nan, 55.0, 65.0],
-            "bin_pred": [0, 1, np.nan, 1],
-        }
-    )
-    with pytest.raises(ValueError, match="binary/dummy and contains missing values"):
-        impute_datasets(
-            df_missing_pred,
+        # 6. Reject binary/dummy target in features_to_impute
+        df_bin = pd.DataFrame(
+            {
+                "y": [1, 0, 1, 0],
+                "bin_target": [0, 1, 0, np.nan],
+                "age": [50.0, 60.0, 55.0, 65.0],
+            }
+        )
+        with pytest.raises(ValueError, match="binary/dummy"):
+            imp_fn(df_bin, features_to_impute=["bin_target"], outcome_col="y")
+
+        # 7. Reject boolean target in features_to_impute
+        df_bool = pd.DataFrame(
+            {
+                "y": [1, 0, 1, 0],
+                "bool_target": [True, False, True, False],
+                "age": [50.0, 60.0, 55.0, 65.0],
+            }
+        )
+        with pytest.raises(ValueError, match="non-numeric"):
+            imp_fn(df_bool, features_to_impute=["bool_target"], outcome_col="y")
+
+        # 8. Reject categorical predictor with missing values
+        df_missing_pred = pd.DataFrame(
+            {
+                "y": [1, 0, 1, 0],
+                "age": [50.0, np.nan, 55.0, 65.0],
+                "bin_pred": [0, 1, np.nan, 1],
+            }
+        )
+        with pytest.raises(
+            ValueError, match="binary/dummy and contains missing values"
+        ):
+            imp_fn(
+                df_missing_pred,
+                features_to_impute=["age"],
+                outcome_col="y",
+                predictors=["bin_pred"],
+            )
+
+        # 9. Fully observed categorical predictor succeeds as conditioning feature
+        df_valid_pred = pd.DataFrame(
+            {
+                "y": [1, 0, 1, 0, 0, 1],
+                "age": [50.0, np.nan, 55.0, 65.0, 70.0, 60.0],
+                "bin_pred": [0, 1, 1, 1, 0, 0],
+            }
+        )
+        res_valid = imp_fn(
+            df_valid_pred,
             features_to_impute=["age"],
             outcome_col="y",
             predictors=["bin_pred"],
-            m=2,
         )
+        valid_dfs = res_valid if isinstance(res_valid, list) else [res_valid]
+        for d in valid_dfs:
+            assert not d["age"].isna().any()
 
-    # 8. Fully observed categorical predictor succeeds as conditioning feature
-    df_valid_pred = pd.DataFrame(
-        {
-            "y": [1, 0, 1, 0, 0, 1],
-            "age": [50.0, np.nan, 55.0, 65.0, 70.0, 60.0],
-            "bin_pred": [0, 1, 1, 1, 0, 0],
-        }
-    )
-    res_valid = impute_datasets(
-        df_valid_pred,
-        features_to_impute=["age"],
-        outcome_col="y",
-        predictors=["bin_pred"],
-        m=2,
-    )
-    assert len(res_valid) == 2
-    for d in res_valid:
-        assert not d["age"].isna().any()
-
-    # 9. Reject discrete integer category codes {1, 2} and {1, 2, 3}
-    df_cat_codes = pd.DataFrame(
-        {
-            "y": [1, 0, 1, 0, 1],
-            "stage": [1, 2, 3, 2, np.nan],
-            "age": [50.0, 52.0, 55.0, 60.0, 65.0],
-        }
-    )
-    with pytest.raises(ValueError, match="discrete integer category codes"):
-        impute_datasets(
-            df_cat_codes,
-            features_to_impute=["stage"],
-            outcome_col="y",
-            predictors=["age"],
-            m=2,
+        # 10. Reject discrete integer category codes {1, 2} and {1, 2, 3}
+        df_cat_codes = pd.DataFrame(
+            {
+                "y": [1, 0, 1, 0, 1],
+                "stage": [1, 2, 3, 2, np.nan],
+                "age": [50.0, 52.0, 55.0, 60.0, 65.0],
+            }
         )
+        with pytest.raises(ValueError, match="discrete integer category codes"):
+            imp_fn(
+                df_cat_codes,
+                features_to_impute=["stage"],
+                outcome_col="y",
+                predictors=["age"],
+            )
 
-    df_cat_12 = pd.DataFrame(
-        {
-            "y": [1, 0, 1, 0, 1],
-            "group": [1, 2, 1, 2, np.nan],
-            "age": [50.0, 52.0, 55.0, 60.0, 65.0],
-        }
-    )
-    with pytest.raises(ValueError, match="unique observed values"):
-        impute_datasets(
-            df_cat_12,
-            features_to_impute=["group"],
-            outcome_col="y",
-            predictors=["age"],
-            m=2,
+        df_cat_12 = pd.DataFrame(
+            {
+                "y": [1, 0, 1, 0, 1],
+                "group": [1, 2, 1, 2, np.nan],
+                "age": [50.0, 52.0, 55.0, 60.0, 65.0],
+            }
         )
+        with pytest.raises(ValueError, match="unique observed values"):
+            imp_fn(
+                df_cat_12,
+                features_to_impute=["group"],
+                outcome_col="y",
+                predictors=["age"],
+            )
 
-    # 10. Reject declared categorical and ordinal targets
-    df_cat_dtype = pd.DataFrame(
-        {
-            "y": [1, 0, 1, 0, 1],
-            "grade": pd.Categorical(["A", "B", "C", "A", None]),
-            "age": [50.0, 52.0, 55.0, 60.0, 65.0],
-        }
-    )
-    with pytest.raises(ValueError, match="declared as categorical"):
-        impute_datasets(
-            df_cat_dtype,
-            features_to_impute=["grade"],
-            outcome_col="y",
-            predictors=["age"],
-            m=2,
+        # 11. Reject declared categorical and ordinal targets
+        df_cat_dtype = pd.DataFrame(
+            {
+                "y": [1, 0, 1, 0, 1],
+                "grade": pd.Categorical(["A", "B", "C", "A", None]),
+                "age": [50.0, 52.0, 55.0, 60.0, 65.0],
+            }
         )
+        with pytest.raises(ValueError, match="declared as categorical"):
+            imp_fn(
+                df_cat_dtype,
+                features_to_impute=["grade"],
+                outcome_col="y",
+                predictors=["age"],
+            )
 
-    with pytest.raises(ValueError, match="declared as ordinal"):
-        impute_datasets(
-            df_cat_codes,
-            features_to_impute=["age"],
-            outcome_col="y",
-            target_types={"age": "ordinal"},
-            m=2,
-        )
+        with pytest.raises(ValueError, match="declared as ordinal"):
+            imp_fn(
+                df_cat_codes,
+                features_to_impute=["age"],
+                outcome_col="y",
+                target_types={"age": "ordinal"},
+            )
 
-    # 11. Reject partially missing continuous predictor not in features_to_impute
-    df_miss_cont = pd.DataFrame(
-        {
-            "y": [1, 0, 1, 0, 1],
-            "x1": [10.0, np.nan, 12.0, 14.0, 15.0],
-            "x2": [100.0, 110.0, np.nan, 130.0, 140.0],
-        }
-    )
-    with pytest.raises(
-        ValueError, match="Conditioning-only predictors must be fully observed"
-    ):
-        impute_datasets(
-            df_miss_cont,
-            features_to_impute=["x1"],
-            outcome_col="y",
-            predictors=["x2"],
-            m=2,
+        # 12. Reject partially missing continuous predictor not in features_to_impute
+        df_miss_cont = pd.DataFrame(
+            {
+                "y": [1, 0, 1, 0, 1],
+                "x1": [10.0, np.nan, 12.0, 14.0, 15.0],
+                "x2": [100.0, 110.0, np.nan, 130.0, 140.0],
+            }
         )
+        with pytest.raises(
+            ValueError, match="Conditioning-only predictors must be fully observed"
+        ):
+            imp_fn(
+                df_miss_cont,
+                features_to_impute=["x1"],
+                outcome_col="y",
+                predictors=["x2"],
+            )
 
-    # 12. Reject partially missing primary outcome
-    df_miss_outcome = pd.DataFrame(
-        {
-            "y": [1, 0, np.nan, 0, 1],
-            "x1": [10.0, np.nan, 12.0, 14.0, 15.0],
-            "x2": [100.0, 110.0, 120.0, 130.0, 140.0],
-        }
-    )
-    with pytest.raises(
-        ValueError, match="Primary outcome column 'y' contains missing values"
-    ):
-        impute_datasets(
-            df_miss_outcome,
-            features_to_impute=["x1"],
-            outcome_col="y",
-            predictors=["x2"],
-            m=2,
+        # 13. Reject partially missing primary outcome
+        df_miss_outcome = pd.DataFrame(
+            {
+                "y": [1, 0, np.nan, 0, 1],
+                "x1": [10.0, np.nan, 12.0, 14.0, 15.0],
+                "x2": [100.0, 110.0, 120.0, 130.0, 140.0],
+            }
         )
+        with pytest.raises(
+            ValueError, match="Primary outcome column 'y' contains missing values"
+        ):
+            imp_fn(
+                df_miss_outcome,
+                features_to_impute=["x1"],
+                outcome_col="y",
+                predictors=["x2"],
+            )
 
-    # 13. Reject non-finite values in conditioning matrix
-    df_inf = pd.DataFrame(
-        {
-            "y": [1, 0, 1, 0, 1],
-            "x1": [10.0, np.nan, 12.0, np.inf, 15.0],
-            "x2": [100.0, 110.0, 120.0, 130.0, 140.0],
-        }
-    )
-    with pytest.raises(ValueError, match="contains non-finite values"):
-        impute_datasets(
-            df_inf,
-            features_to_impute=["x1"],
-            outcome_col="y",
-            predictors=["x2"],
-            m=2,
+        # 14. Reject non-finite values in conditioning matrix
+        df_inf = pd.DataFrame(
+            {
+                "y": [1, 0, 1, 0, 1],
+                "x1": [10.0, np.nan, 12.0, np.inf, 15.0],
+                "x2": [100.0, 110.0, 120.0, 130.0, 140.0],
+            }
         )
+        with pytest.raises(ValueError, match="contains non-finite values"):
+            imp_fn(
+                df_inf,
+                features_to_impute=["x1"],
+                outcome_col="y",
+                predictors=["x2"],
+            )
 
-    # 14. Reject invalid bound ordering (min_value >= max_value)
-    df_order = pd.DataFrame(
-        {
-            "y": [1, 0, 1, 0, 1],
-            "x1": [10.0, np.nan, 12.0, 14.0, 15.0],
-            "x2": [100.0, 110.0, 120.0, 130.0, 140.0],
-        }
-    )
-    with pytest.raises(ValueError, match="Invalid bound ordering"):
-        impute_datasets(
-            df_order,
-            features_to_impute=["x1"],
-            outcome_col="y",
-            predictors=["x2"],
-            m=2,
-            min_value={"x1": 50.0},
-            max_value={"x1": 20.0},
+        # 15. Reject invalid bound ordering (min_value >= max_value)
+        df_order = pd.DataFrame(
+            {
+                "y": [1, 0, 1, 0, 1],
+                "x1": [10.0, np.nan, 12.0, 14.0, 15.0],
+                "x2": [100.0, 110.0, 120.0, 130.0, 140.0],
+            }
         )
+        with pytest.raises(ValueError, match="Invalid bound ordering"):
+            imp_fn(
+                df_order,
+                features_to_impute=["x1"],
+                outcome_col="y",
+                predictors=["x2"],
+                min_value={"x1": 50.0},
+                max_value={"x1": 20.0},
+            )
+
+        # 16. Reject perfectly predicted continuous target (RSS == 0)
+        # x1 is an exact linear function of x2: x1 = 2 * x2 + 5
+        df_perf = pd.DataFrame(
+            {
+                "y": [0, 1, 0, 1, 0, 1],
+                "x2": [10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
+                "x1": [25.0, 45.0, 65.0, 85.0, np.nan, np.nan],
+            }
+        )
+        with pytest.raises(ValueError, match="Degenerate residual sum of squares"):
+            imp_fn(
+                df_perf,
+                features_to_impute=["x1"],
+                outcome_col="y",
+                predictors=["x2"],
+            )
 
 
 def test_mice_posterior_degrees_of_freedom_rank_and_bounds(recipes):

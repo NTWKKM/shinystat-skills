@@ -1363,6 +1363,9 @@ def impute_mice_datasets(
     if m < 1:
         raise ValueError(f"Number of imputations m must be >= 1 (got {m}).")
 
+    if not isinstance(max_iter, int) or max_iter < 1:
+        raise ValueError(f"Number of iterations max_iter must be an integer >= 1 (got {max_iter}).")
+
     if outcome_col and outcome_col in features_to_impute:
         raise ValueError("Clinical governance invariant: Never impute the primary outcome variable!")
 
@@ -1500,12 +1503,23 @@ def impute_mice_datasets(
                 Xty = X_obs.T @ y_obs
                 beta_hat = np.linalg.solve(XtX, Xty)
                 residuals = y_obs - X_obs @ beta_hat
+                rss = float(np.sum(residuals**2))
+                if rss <= 1e-12:
+                    raise ValueError(
+                        f"Degenerate residual sum of squares for feature '{feat}' (RSS <= 1e-12). "
+                        "The target is perfectly predicted by conditioning features; "
+                        "flat-prior Bayesian regression variance posterior is improper for deterministic relationships."
+                    )
                 df_resid = n_obs - p
-                s2 = max(float(np.sum(residuals**2) / df_resid), 1e-12)
+                s2 = rss / df_resid
 
                 # 1. Parameter uncertainty: Draw sigma*^2 ~ Inv-Chi2(df_resid, s2)
                 g = rng.chisquare(df_resid)
-                sigma_sq = (df_resid * s2) / max(g, 1e-9)
+                if g <= 0.0 or not np.isfinite(g):
+                    raise RuntimeError(f"Numerical failure in chi-square posterior draw for feature '{feat}'.")
+                sigma_sq = (df_resid * s2) / g
+                if not np.isfinite(sigma_sq) or sigma_sq <= 0.0:
+                    raise RuntimeError(f"Non-finite or non-positive variance posterior draw for feature '{feat}'.")
                 sigma = np.sqrt(sigma_sq)
 
                 # 2. Parameter uncertainty: Draw beta* ~ N(beta_hat, sigma^2 * (XtX)^-1)
@@ -1644,6 +1658,9 @@ def impute_mice_single(
     target_types: dict[str, str] | None = None
 ) -> pd.DataFrame:
     """Deterministic single MICE imputation strictly for rapid exploratory data health profiling."""
+    if not isinstance(max_iter, int) or max_iter < 1:
+        raise ValueError(f"Number of iterations max_iter must be an integer >= 1 (got {max_iter}).")
+
     if outcome_col and outcome_col in features_to_impute:
         raise ValueError("Clinical governance invariant: Never impute the primary outcome variable!")
 
@@ -1775,6 +1792,14 @@ def impute_mice_single(
             XtX = X_obs.T @ X_obs
             Xty = X_obs.T @ y_obs
             beta_hat = np.linalg.solve(XtX, Xty)
+            residuals = y_obs - X_obs @ beta_hat
+            rss = float(np.sum(residuals**2))
+            if rss <= 1e-12:
+                raise ValueError(
+                    f"Degenerate residual sum of squares for feature '{feat}' (RSS <= 1e-12). "
+                    "The target is perfectly predicted by conditioning features; "
+                    "deterministic linear relationships cannot be modeled as continuous stochastic processes."
+                )
 
             # Deterministic prediction (posterior mean) for exploratory profiling
             y_imp = X_mis @ beta_hat
