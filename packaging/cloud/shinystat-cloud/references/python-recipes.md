@@ -1360,11 +1360,21 @@ def impute_mice_datasets(
     7. Conditioning completeness: Conditioning-only predictors must be fully observed. Primary outcome must
        not contain missing values without prior explicit cohort disposition.
     """
-    if m < 1:
-        raise ValueError(f"Number of imputations m must be >= 1 (got {m}).")
+    if not isinstance(m, int) or isinstance(m, bool) or m < 1:
+        raise ValueError(
+            f"Number of imputations m must be an integer >= 1; got {m!r} "
+            f"of type {type(m).__name__}."
+        )
 
-    if not isinstance(max_iter, int) or max_iter < 1:
-        raise ValueError(f"Number of iterations max_iter must be an integer >= 1 (got {max_iter}).")
+    if (
+        not isinstance(max_iter, int)
+        or isinstance(max_iter, bool)
+        or max_iter < 1
+    ):
+        raise ValueError(
+            f"max_iter must be an integer >= 1; got {max_iter!r} "
+            f"of type {type(max_iter).__name__}."
+        )
 
     if outcome_col and outcome_col in features_to_impute:
         raise ValueError("Clinical governance invariant: Never impute the primary outcome variable!")
@@ -1657,9 +1667,15 @@ def impute_mice_single(
     max_value: float | dict[str, float] | None = None,
     target_types: dict[str, str] | None = None
 ) -> pd.DataFrame:
-    """Deterministic single MICE imputation strictly for rapid exploratory data health profiling."""
-    if not isinstance(max_iter, int) or max_iter < 1:
-        raise ValueError(f"Number of iterations max_iter must be an integer >= 1 (got {max_iter}).")
+    if (
+        not isinstance(max_iter, int)
+        or isinstance(max_iter, bool)
+        or max_iter < 1
+    ):
+        raise ValueError(
+            f"max_iter must be an integer >= 1; got {max_iter!r} "
+            f"of type {type(max_iter).__name__}."
+        )
 
     if outcome_col and outcome_col in features_to_impute:
         raise ValueError("Clinical governance invariant: Never impute the primary outcome variable!")

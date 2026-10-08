@@ -1000,10 +1000,11 @@ def test_mice_input_guards_and_bounds(recipes):
     impute_datasets = recipes["impute_mice_datasets"]
     impute_single = recipes["impute_mice_single"]
 
-    # 1. m < 1 rejected (impute_mice_datasets specific)
+    # 1. m < 1, float, or bool rejected (impute_mice_datasets specific)
     df = pd.DataFrame({"y": [1, 0, 1], "x": [10.0, np.nan, 12.0]})
-    with pytest.raises(ValueError, match="m must be >= 1"):
-        impute_datasets(df, features_to_impute=["x"], outcome_col="y", m=0)
+    for invalid_m in [0, -1, 2.5, True]:
+        with pytest.raises(ValueError, match="m must be an integer >= 1"):
+            impute_datasets(df, features_to_impute=["x"], outcome_col="y", m=invalid_m)
 
     # Parameterize shared guards across both stochastic datasets and single imputation
     imputers = [
@@ -1012,11 +1013,12 @@ def test_mice_input_guards_and_bounds(recipes):
     ]
 
     for imp_fn in imputers:
-        # 2. max_iter <= 0 rejected (boundary testing for zero and negative iterations)
-        with pytest.raises(ValueError, match="max_iter must be an integer >= 1"):
-            imp_fn(df, features_to_impute=["x"], outcome_col="y", max_iter=0)
-        with pytest.raises(ValueError, match="max_iter must be an integer >= 1"):
-            imp_fn(df, features_to_impute=["x"], outcome_col="y", max_iter=-1)
+        # 2. max_iter <= 0, float, or bool rejected (boundary testing for zero, negative, float, and bool)
+        for invalid_iter in [0, -1, 5.0, True]:
+            with pytest.raises(ValueError, match="max_iter must be an integer >= 1"):
+                imp_fn(
+                    df, features_to_impute=["x"], outcome_col="y", max_iter=invalid_iter
+                )
 
         # 3. 100% missing column rejected
         df_all_nan = pd.DataFrame({"y": [1, 0, 1], "x": [np.nan, np.nan, np.nan]})
