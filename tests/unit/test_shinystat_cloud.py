@@ -611,3 +611,365 @@ def test_publication_table_html_rendering(recipes):
     assert "border-top: 2px solid #000000" in html
     assert "Table 2. Multivariable Logistic Regression" in html
     assert "1.05 (1.01–1.09)" in html
+
+
+# -----------------------------------------------------------------------------
+# 12. Recipe Self-Containment in Isolated Namespaces
+# -----------------------------------------------------------------------------
+
+
+def test_each_recipe_is_self_contained():
+    """Verify that every python code block in python-recipes.md executes in an isolated namespace."""
+    content = RECIPES_PATH.read_text(encoding="utf-8")
+    blocks = re.findall(r"```python\n(.*?)\n```", content, re.DOTALL)
+    assert len(blocks) >= 13, f"Expected at least 13 recipes, got {len(blocks)}"
+    for idx, block in enumerate(blocks, start=1):
+        isolated_ns = {}
+        try:
+            exec(block, isolated_ns)
+        except Exception as e:
+            pytest.fail(f"Recipe {idx} failed to execute in an isolated namespace: {e}")
+
+
+# -----------------------------------------------------------------------------
+# 13. High-Priority Invariant: Strict Binary Outcome Validation Across Recipes
+# -----------------------------------------------------------------------------
+
+
+def test_delong_strict_binary_validation(recipes):
+    auc_ci = recipes["auc_ci_delong"]
+    delong_paired = recipes["delong_paired_test"]
+
+    # Continuous floats (e.g. 0.9, 1.9) must NOT silently cast to 0/1
+    with pytest.raises(ValueError, match="strictly binary"):
+        auc_ci([0.9, 0.0, 1.0, 0.0], [0.8, 0.2, 0.9, 0.1])
+
+    # Non-binary categories (e.g. 2) must be rejected
+    with pytest.raises(ValueError, match="strictly binary"):
+        auc_ci([2, 0, 1, 0], [0.8, 0.2, 0.9, 0.1])
+
+    # Paired test length mismatch
+    with pytest.raises(ValueError, match="Length mismatch"):
+        delong_paired([1, 0, 1, 0], [0.8, 0.2], [0.7, 0.3, 0.6, 0.4])
+
+    with pytest.raises(ValueError, match="strictly binary"):
+        delong_paired([0, 1, 2, 0], [0.8, 0.2, 0.5, 0.1], [0.7, 0.3, 0.6, 0.2])
+
+
+def test_calibration_and_dca_strict_binary_and_probability_validation(recipes):
+    eval_calib = recipes["evaluate_calibration"]
+    calc_dca = recipes["calculate_dca"]
+
+    # Non-binary outcome
+    with pytest.raises(ValueError, match="strictly binary"):
+        eval_calib([0.5, 1.0, 0.0, 1.0], [0.6, 0.8, 0.2, 0.7])
+
+    # Out of range probabilities in calibration
+    with pytest.raises(ValueError, match="range \\[0, 1\\]"):
+        eval_calib([1, 0, 1, 0], [1.5, 0.2, 0.8, -0.1])
+
+    # Length mismatch in calibration
+    with pytest.raises(ValueError, match="Length mismatch"):
+        eval_calib([1, 0, 1], [0.8, 0.2])
+
+    # Non-binary outcome in DCA
+    with pytest.raises(ValueError, match="strictly binary"):
+        calc_dca([0, 2, 1, 0], [0.1, 0.9, 0.8, 0.2])
+
+    # Length mismatch in DCA
+    with pytest.raises(ValueError, match="Length mismatch"):
+        calc_dca([1, 0, 1], [0.8, 0.2])
+
+
+def test_psm_and_logistic_strict_binary_and_retention_audit(recipes):
+    psm_match = recipes["match_propensity_scores"]
+    fit_table = recipes["fit_logistic_regression_table"]
+
+    df_invalid = pd.DataFrame(
+        {
+            "treated": [0, 1, 2, 0],
+            "age": [50, 60, 55, 65],
+        }
+    )
+    # PSM rejects non-binary treatment
+    with pytest.raises(ValueError, match="strictly binary"):
+        psm_match(df_invalid, treatment_col="treated", confounders=["age"])
+
+    # Logistic rejects non-binary outcome
+    with pytest.raises(ValueError, match="strictly binary"):
+        fit_table(df_invalid, outcome="treated", covariates=["age"])
+
+    # Retention audit verification in PSM and Logistic
+    np.random.seed(42)
+    df_valid = pd.DataFrame(
+        {
+            "y": [0, 1, 1, 0, 1, 0, 1, 0],
+            "trt": [1, 0, 1, 0, 1, 0, 1, 0],
+            "age": [50, np.nan, 55, 65, 45, 70, 60, 58],
+            "sex": ["F", "M", "F", "M", "F", "M", "F", "M"],
+        }
+    )
+    res_psm = psm_match(df_valid, treatment_col="trt", confounders=["age", "sex"])
+    assert "retention_audit" in res_psm
+    assert res_psm["retention_audit"]["n_initial"] == 8
+    assert res_psm["retention_audit"]["n_excluded"] == 1
+    assert res_psm["retention_audit"]["n_analyzed"] == 7
+    # Balance table includes categorical dummy level
+    assert any("sex" in str(v) for v in res_psm["balance_df"]["Variable"])
+
+    res_logistic = fit_table(df_valid, outcome="y", covariates=["age"])
+    assert "retention_audit" in res_logistic.attrs
+    assert res_logistic.attrs["retention_audit"]["n_initial"] == 8
+    assert res_logistic.attrs["retention_audit"]["n_excluded"] == 1
+    assert res_logistic.attrs["retention_audit"]["n_analyzed"] == 7
+
+
+def test_survival_strict_binary_event_negative_duration_and_cohort_separation(recipes):
+    fit_surv = recipes["fit_survival_analysis_suite"]
+
+    df_invalid_event = pd.DataFrame(
+        {
+            "time": [10.0, 12.0, 5.0, 8.0],
+            "event": [1, 0, 2, 0],
+        }
+    )
+    with pytest.raises(ValueError, match="strictly binary"):
+        fit_surv(df_invalid_event, duration_col="time", event_col="event")
+
+    df_invalid_time = pd.DataFrame(
+        {
+            "time": [10.0, -2.0, 5.0, 8.0],
+            "event": [1, 0, 1, 0],
+        }
+    )
+    with pytest.raises(ValueError, match="non-negative"):
+        fit_surv(df_invalid_time, duration_col="time", event_col="event")
+
+    # Cohort separation: missing covariate must NOT drop patient from KM cohort
+    df_cohort = pd.DataFrame(
+        {
+            "time": [10.0, 12.0, 15.0, 20.0, 25.0],
+            "event": [1, 0, 1, 0, 1],
+            "age": [50, 60, np.nan, 70, 80],
+        }
+    )
+    res = fit_surv(
+        df_cohort, duration_col="time", event_col="event", covariates=["age"]
+    )
+    assert res["retention_km"]["n_analyzed"] == 5, (
+        "KM cohort must retain patient with missing Cox covariate"
+    )
+    assert res["retention_cox"]["n_analyzed"] == 4, (
+        "Cox cohort must drop patient with missing Cox covariate"
+    )
+    assert "no_ph_violation_detected" in res["schoenfeld_diagnostics"]
+
+
+# -----------------------------------------------------------------------------
+# 14. High-Priority Invariant: MICE Type Safety, Constraints & Rubin B=0 Adjustment
+# -----------------------------------------------------------------------------
+
+
+def test_mice_input_guards_and_bounds(recipes):
+    impute_datasets = recipes["impute_mice_datasets"]
+
+    # 1. m < 1 rejected
+    df = pd.DataFrame({"y": [1, 0, 1], "x": [10.0, np.nan, 12.0]})
+    with pytest.raises(ValueError, match="m must be >= 1"):
+        impute_datasets(df, features_to_impute=["x"], outcome_col="y", m=0)
+
+    # 2. 100% missing column rejected
+    df_all_nan = pd.DataFrame({"y": [1, 0, 1], "x": [np.nan, np.nan, np.nan]})
+    with pytest.raises(ValueError, match="100% missing"):
+        impute_datasets(df_all_nan, features_to_impute=["x"], outcome_col="y", m=2)
+
+    # 3. Non-numeric / text column rejected
+    df_text = pd.DataFrame({"y": [1, 0, 1], "x": ["cat", "dog", None]})
+    with pytest.raises(ValueError, match="non-numeric"):
+        impute_datasets(df_text, features_to_impute=["x"], outcome_col="y", m=2)
+
+    # 4. Respect min_value bounds (values never imputed below bound)
+    np.random.seed(42)
+    n = 80
+    df_bounded = pd.DataFrame(
+        {
+            "dead": np.random.binomial(1, 0.3, size=n),
+            "hr": np.where(
+                np.random.rand(n) < 0.3, np.nan, np.random.normal(70, 10, size=n)
+            ),
+        }
+    )
+    datasets = impute_datasets(
+        df_bounded,
+        features_to_impute=["hr"],
+        outcome_col="dead",
+        m=3,
+        min_value={"hr": 50.0},
+    )
+    for d in datasets:
+        assert (d["hr"] >= 50.0).all(), (
+            "Imputed heart rate must respect minimum bound 50.0"
+        )
+
+
+def test_rubin_pooling_barnard_rubin_b0_limit_and_error_handling(recipes):
+    pool_rubin = recipes["pool_estimates_rubin"]
+
+    # 1. Length mismatch
+    with pytest.raises(ValueError, match="Length mismatch"):
+        pool_rubin([1.0, 1.2], [0.2])
+
+    # 2. Negative SE
+    with pytest.raises(ValueError, match="non-negative"):
+        pool_rubin([1.0, 1.2], [-0.1, 0.2])
+
+    # 3. Non-finite values
+    with pytest.raises(ValueError, match="strictly finite"):
+        pool_rubin([np.nan, 1.0], [0.2, 0.2])
+
+    # 4. n_obs <= k_params
+    with pytest.raises(ValueError, match="strictly greater"):
+        pool_rubin([1.0, 1.1], [0.2, 0.2], n_obs=2, k_params=2)
+
+    # 5. Barnard & Rubin (1999) when B = 0 and finite complete-data df:
+    # When B = 0, nu_BR = nu_com * (nu_com + 1) / (nu_com + 3) where nu_com = n_obs - k_params
+    n_obs = 100
+    k_params = 1
+    nu_com = float(n_obs - k_params)  # 99.0
+    expected_df = nu_com * (nu_com + 1.0) / (nu_com + 3.0)  # 99 * 100 / 102 ≈ 97.0588
+
+    res_b0 = pool_rubin(
+        [2.0, 2.0, 2.0], [0.5, 0.5, 0.5], n_obs=n_obs, k_params=k_params
+    )
+    assert res_b0["between_variance"] == 0.0
+    assert np.isclose(res_b0["df"], expected_df, atol=1e-3)
+    assert not np.isinf(res_b0["df"]), (
+        "Finite-sample degrees of freedom when B=0 must NOT be infinite!"
+    )
+    assert res_b0["fmi"] == 0.0
+
+
+# -----------------------------------------------------------------------------
+# 15. High-Priority Invariant: Firth Rank Deficiency & Convergence Verification
+# -----------------------------------------------------------------------------
+
+
+def test_firth_rank_deficiency_and_ci_method(recipes):
+    fit_firth = recipes["fit_firth_logistic"]
+
+    # Collinear columns (rank-deficient design matrix)
+    x1 = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    x2 = 2.0 * x1
+    X_collinear = np.column_stack([x1, x2])
+    y = np.array([0, 0, 0, 1, 1, 1])
+
+    with pytest.raises(ValueError, match="rank-deficient"):
+        fit_firth(X_collinear, y)
+
+    # Non-binary outcome
+    with pytest.raises(ValueError, match="strictly 0 and 1"):
+        fit_firth(np.column_stack([x1]), np.array([0, 1, 2, 0, 1, 0]))
+
+    # Valid fit returns ci_method
+    X_valid = np.column_stack([x1])
+    res = fit_firth(X_valid, y)
+    assert "ci_method" in res
+    assert len(res["ci_method"]) == 2  # intercept + x1
+    assert all(m in {"profile", "wald_fallback"} for m in res["ci_method"])
+
+
+# -----------------------------------------------------------------------------
+# 16. Medium-Priority Checks: Little's MCAR Edge Cases & ICC Boundary Limits
+# -----------------------------------------------------------------------------
+
+
+def test_littles_mcar_edge_cases(recipes):
+    littles_test = recipes["littles_mcar_test"]
+
+    # Completely missing dataset
+    df_all_nan = pd.DataFrame(np.full((10, 3), np.nan), columns=["a", "b", "c"])
+    with pytest.raises(ValueError, match="completely missing"):
+        littles_test(df_all_nan, ["a", "b", "c"])
+
+    # 100% missing column
+    df_col_nan = pd.DataFrame(
+        {
+            "a": [1.0, 2.0, 3.0],
+            "b": [np.nan, np.nan, np.nan],
+        }
+    )
+    with pytest.raises(ValueError, match="100% missing"):
+        littles_test(df_col_nan, ["a", "b"])
+
+    # Valid test returns telemetry
+    df_valid = pd.DataFrame(
+        {
+            "a": [1.0, 2.0, 3.0, 4.0, np.nan],
+            "b": [2.0, 3.0, np.nan, 5.0, np.nan],
+        }
+    )
+    res = littles_test(df_valid, ["a", "b"])
+    assert "converged" in res
+    assert "n_iterations" in res
+    assert "n_excluded_rows" in res
+    assert res["n_excluded_rows"] == 1  # 5th row is completely NaN
+
+
+def test_icc_perfect_agreement_and_all_constant(recipes):
+    calc_icc = recipes["calculate_icc_matrix"]
+
+    # 1. Perfect agreement across varying targets: MSW=0, MSE=0, MSB>0
+    # Targets vary: 10, 20, 30. All 3 raters agree perfectly.
+    perfect_mat = np.array(
+        [
+            [10.0, 10.0, 10.0],
+            [20.0, 20.0, 20.0],
+            [30.0, 30.0, 30.0],
+        ]
+    )
+    res_perf = calc_icc(perfect_mat)
+    assert (res_perf["ICC"] == 1.0).all()
+    assert (res_perf["CI_lower"] == 1.0).all()
+    assert (res_perf["CI_upper"] == 1.0).all()
+
+    # 2. All-constant matrix: targets don't vary either (every cell is 5.0)
+    constant_mat = np.full((4, 3), 5.0)
+    res_const = calc_icc(constant_mat)
+    assert res_const["ICC"].isna().all()
+    assert res_const["CI_lower"].isna().all()
+
+
+def test_table_one_column_mapping_and_html_escaping(recipes):
+    gen_table = recipes["generate_table_one"]
+    render_table = recipes["render_publication_table"]
+
+    df = pd.DataFrame(
+        {
+            "arm": ["A", "A", "B", "B"],
+            "age": [50, 52, 60, 62],
+            "stage": ["I", "II", "I", "II"],
+        }
+    )
+    t1 = gen_table(
+        df, strata="arm", continuous_vars=["age"], categorical_vars=["stage"]
+    )
+    # All rows must share exact same column headers
+    cols = list(t1.columns)
+    assert "arm=A (N = 2)" in cols
+    assert "arm=B (N = 2)" in cols
+    assert "arm=A" not in cols, "Must not create fragmented duplicate column keys"
+
+    # HTML renderer escapes XSS / markup
+    df_xss = pd.DataFrame(
+        {
+            "<script>alert(1)</script>": ["<b>high</b>", "1.05 & 2.0"],
+        }
+    )
+    html_out = render_table(
+        df_xss, title="<Title & Header>", footnote="<Footnote & Note>"
+    )
+    assert "<script>" not in html_out
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html_out
+    assert "&lt;Title &amp; Header&gt;" in html_out
+    assert "&lt;Footnote &amp; Note&gt;" in html_out
+    assert "&lt;b&gt;high&lt;/b&gt;" in html_out

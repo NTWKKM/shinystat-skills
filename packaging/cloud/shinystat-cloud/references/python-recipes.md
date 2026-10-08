@@ -31,6 +31,8 @@ def calculate_smd(treated: np.ndarray, control: np.ndarray) -> float:
 
 def calculate_binary_smd(p0: float, p1: float) -> float:
     """Calculate Austin (2009) Standardized Mean Difference for binary proportions."""
+    if np.isnan(p0) or np.isnan(p1):
+        return np.nan
     sd_bin = np.sqrt((p0 * (1.0 - p0) + p1 * (1.0 - p1)) / 2.0)
     if sd_bin == 0:
         return 0.0 if p0 == p1 else np.nan
@@ -49,11 +51,13 @@ def generate_table_one(
     groups = sorted(clean_df[strata].unique())
     rows = []
     
+    # Unified group column mapping to prevent count vs measurement column divergence
+    col_labels = {g: f"{strata}={g} (N = {int(np.sum(clean_df[strata] == g))})" for g in groups}
+
     # 1. Total counts header
     total_counts = {"Characteristic": f"Overall (N = {len(clean_df)})"}
     for g in groups:
-        n_g = int(np.sum(clean_df[strata] == g))
-        total_counts[f"{strata}={g} (N = {n_g})"] = ""
+        total_counts[col_labels[g]] = f"n = {int(np.sum(clean_df[strata] == g))}"
     total_counts["P-value"] = ""
     total_counts["SMD"] = ""
     rows.append(total_counts)
@@ -68,9 +72,9 @@ def generate_table_one(
                 if len(vals) > 0:
                     med = np.median(vals)
                     q25, q75 = np.percentile(vals, [25, 75])
-                    row[f"{strata}={g}"] = f"{med:.1f} [{q25:.1f}, {q75:.1f}]"
+                    row[col_labels[g]] = f"{med:.1f} [{q25:.1f}, {q75:.1f}]"
                 else:
-                    row[f"{strata}={g}"] = "-"
+                    row[col_labels[g]] = "-"
             try:
                 pval = stats.kruskal(*group_vals).pvalue if len(groups) > 1 and all(len(v) for v in group_vals) else np.nan
             except Exception:
@@ -80,9 +84,9 @@ def generate_table_one(
                 if len(vals) > 0:
                     mean = np.mean(vals)
                     sd = np.std(vals, ddof=1) if len(vals) > 1 else 0.0
-                    row[f"{strata}={g}"] = f"{mean:.1f} ({sd:.1f})"
+                    row[col_labels[g]] = f"{mean:.1f} ({sd:.1f})"
                 else:
-                    row[f"{strata}={g}"] = "-"
+                    row[col_labels[g]] = "-"
             try:
                 pval = stats.f_oneway(*group_vals).pvalue if len(groups) > 1 and all(len(v) for v in group_vals) else np.nan
             except Exception:
@@ -124,16 +128,19 @@ def generate_table_one(
             for g in groups:
                 sub_g = var_clean[var_clean[strata] == g]
                 cnt = int(np.sum(sub_g[var] == cat))
-                pct = (cnt / len(sub_g) * 100.0) if len(sub_g) > 0 else 0.0
-                row[f"{strata}={g}"] = f"{cnt} ({pct:.1f}%)"
+                pct = (cnt / len(sub_g) * 100.0) if len(sub_g) > 0 else np.nan
+                row[col_labels[g]] = f"{cnt} ({pct:.1f}%)" if not np.isnan(pct) else "-"
             row["P-value"] = p_str if idx == 0 else ""
             
             if len(groups) == 2:
                 g0_sub = var_clean[var_clean[strata] == groups[0]]
                 g1_sub = var_clean[var_clean[strata] == groups[1]]
-                p0 = np.mean(g0_sub[var] == cat) if len(g0_sub) > 0 else 0.0
-                p1 = np.mean(g1_sub[var] == cat) if len(g1_sub) > 0 else 0.0
-                smd_cat = calculate_binary_smd(p0, p1)
+                if len(g0_sub) == 0 or len(g1_sub) == 0:
+                    smd_cat = np.nan
+                else:
+                    p0 = float(np.mean(g0_sub[var] == cat))
+                    p1 = float(np.mean(g1_sub[var] == cat))
+                    smd_cat = calculate_binary_smd(p0, p1)
                 row["SMD"] = f"{smd_cat:.2f}" if not np.isnan(smd_cat) else "-"
             else:
                 row["SMD"] = ""
@@ -166,6 +173,13 @@ def calculate_ci_wilson_score(k: int, n: int, ci: float = 0.95) -> tuple[float, 
 
 def calculate_2x2_metrics(tp: int, fp: int, fn: int, tn: int, ci: float = 0.95) -> dict:
     """Calculate sensitivity, specificity, PPV, NPV, LR+, LR-, and DOR with complete 95% CIs."""
+    for count_val, name in [(tp, "tp"), (fp, "fp"), (fn, "fn"), (tn, "tn")]:
+        if int(count_val) < 0:
+            raise ValueError(f"Contingency cell count '{name}' must be non-negative (>= 0).")
+    tp, fp, fn, tn = int(tp), int(fp), int(fn), int(tn)
+    if tp + fp + fn + tn == 0:
+        raise ValueError("Total sample size in 2x2 contingency table must be > 0.")
+
     alpha = 1.0 - ci
     z = stats.norm.ppf(1.0 - alpha / 2.0)
 
@@ -234,8 +248,13 @@ def auc_ci_delong(y_true, y_score, direction: str = "high", alpha: float = 0.05)
     """Compute empirical AUC and DeLong analytical 95% confidence interval with directionality."""
     y_raw = np.asarray(y_true, dtype=float)
     s_raw = np.asarray(y_score, dtype=float)
+    if len(y_raw) != len(s_raw):
+        raise ValueError(f"Length mismatch: y_true ({len(y_raw)}) and y_score ({len(s_raw)}) must have identical lengths.")
     valid = ~(np.isnan(y_raw) | np.isnan(s_raw))
-    y_t = y_raw[valid].astype(int)
+    y_valid = y_raw[valid]
+    if not np.all(np.isin(y_valid, [0, 1])):
+        raise ValueError("Binary outcome y_true must contain strictly binary values (0 and 1).")
+    y_t = y_valid.astype(int)
     y_s = s_raw[valid]
     if direction == "low":
         y_s = -y_s
@@ -275,8 +294,13 @@ def delong_paired_test(y_true, score1, score2, alpha: float = 0.05) -> dict:
     y_raw = np.asarray(y_true, dtype=float)
     s1_raw = np.asarray(score1, dtype=float)
     s2_raw = np.asarray(score2, dtype=float)
+    if len(y_raw) != len(s1_raw) or len(y_raw) != len(s2_raw):
+        raise ValueError(f"Length mismatch: y_true ({len(y_raw)}), score1 ({len(s1_raw)}), and score2 ({len(s2_raw)}) must have identical lengths.")
     valid = ~(np.isnan(y_raw) | np.isnan(s1_raw) | np.isnan(s2_raw))
-    y_t = y_raw[valid].astype(int)
+    y_valid = y_raw[valid]
+    if not np.all(np.isin(y_valid, [0, 1])):
+        raise ValueError("Binary outcome y_true must contain strictly binary values (0 and 1).")
+    y_t = y_valid.astype(int)
     s1 = s1_raw[valid]
     s2 = s2_raw[valid]
 
@@ -328,9 +352,17 @@ def evaluate_calibration(y_true, y_pred) -> dict:
     """Compute Brier Score, Calibration Slope/Intercept, and Austin & Steyerberg (2019) ICI."""
     y_raw = np.asarray(y_true, dtype=float)
     p_raw = np.asarray(y_pred, dtype=float)
+    if len(y_raw) != len(p_raw):
+        raise ValueError(f"Length mismatch: y_true ({len(y_raw)}) and y_pred ({len(p_raw)}) must have identical lengths.")
     valid = ~(np.isnan(y_raw) | np.isnan(p_raw))
-    y_t = y_raw[valid].astype(int)
-    y_p = np.clip(p_raw[valid], 1e-6, 1.0 - 1e-6)
+    y_valid = y_raw[valid]
+    if not np.all(np.isin(y_valid, [0, 1])):
+        raise ValueError("Binary outcome y_true must contain strictly binary values (0 and 1).")
+    p_valid = p_raw[valid]
+    if (p_valid < 0.0).any() or (p_valid > 1.0).any():
+        raise ValueError("Predicted probabilities y_pred must be in the range [0, 1].")
+    y_t = y_valid.astype(int)
+    y_p = np.clip(p_valid, 1e-6, 1.0 - 1e-6)
 
     # 1. Brier score
     brier = float(np.mean((y_t - y_p) ** 2))
@@ -370,11 +402,22 @@ def evaluate_calibration(y_true, y_pred) -> dict:
     }
 
 def calculate_dca(y_true, y_pred, thresholds: np.ndarray | None = None) -> pd.DataFrame:
-    """Calculate Vickers & Elkin (2006) Clinical Net Benefit across decision thresholds."""
+    """Calculate Vickers & Elkin (2006) Clinical Net Benefit across decision thresholds.
+    
+    Validation & Performance Note:
+    If predicted scores fall outside [0, 1], an in-sample logistic recalibration is fitted.
+    Evaluating net benefit on the same dataset used for recalibration reflects apparent
+    development performance. For rigorous validation, evaluate on independent test data.
+    """
     y_raw = np.asarray(y_true, dtype=float)
     p_raw = np.asarray(y_pred, dtype=float)
+    if len(y_raw) != len(p_raw):
+        raise ValueError(f"Length mismatch: y_true ({len(y_raw)}) and y_pred ({len(p_raw)}) must have identical lengths.")
     valid = ~(np.isnan(y_raw) | np.isnan(p_raw))
-    y_t = y_raw[valid].astype(int)
+    y_valid = y_raw[valid]
+    if not np.all(np.isin(y_valid, [0, 1])):
+        raise ValueError("Binary outcome y_true must contain strictly binary values (0 and 1).")
+    y_t = y_valid.astype(int)
     y_p = p_raw[valid]
 
     # Map raw biomarker to probability if not in [0, 1]
@@ -418,6 +461,8 @@ def calculate_bland_altman(m1, m2, ci: float = 0.95) -> dict:
     """Compute Bland-Altman mean difference and 95% Limits of Agreement with 1999 large-sample CIs."""
     v1 = np.asarray(m1, dtype=float)
     v2 = np.asarray(m2, dtype=float)
+    if len(v1) != len(v2):
+        raise ValueError(f"Length mismatch: m1 ({len(v1)}) and m2 ({len(v2)}) must have identical lengths.")
     valid = ~(np.isnan(v1) | np.isnan(v2))
     diffs = v1[valid] - v2[valid]
     n = len(diffs)
@@ -457,6 +502,20 @@ def calculate_icc_matrix(values: np.ndarray, alpha: float = 0.05) -> pd.DataFram
         raise ValueError("ICC requires at least 2 targets and 2 raters.")
 
     grand_mean = np.mean(mat)
+    # Check all-constant matrix: target variance is zero, reliability undefined
+    if np.all(mat == grand_mean):
+        return pd.DataFrame([
+            {"Type": t, "Description": d, "ICC": np.nan, "CI_lower": np.nan, "CI_upper": np.nan, "F": np.nan, "pval": np.nan}
+            for t, d in [
+                ("ICC1", "One-way random (single)"),
+                ("ICC2", "Two-way random agreement"),
+                ("ICC3", "Two-way mixed consistency"),
+                ("ICC1k", "One-way random (average)"),
+                ("ICC2k", "Two-way random agreement (avg)"),
+                ("ICC3k", "Two-way mixed consistency (avg)"),
+            ]
+        ])
+
     row_means = np.mean(mat, axis=1)
     col_means = np.mean(mat, axis=0)
 
@@ -464,7 +523,7 @@ def calculate_icc_matrix(values: np.ndarray, alpha: float = 0.05) -> pd.DataFram
     SSB = float(k * np.sum((row_means - grand_mean) ** 2))
     SSJ = float(n * np.sum((col_means - grand_mean) ** 2))
     SSE = max(float(SST - SSB - SSJ), 0.0)
-    SSW = float(SST - SSB)
+    SSW = max(float(SST - SSB), 0.0)
 
     df_B, df_J, df_E, df_W = n - 1, k - 1, (n - 1) * (k - 1), n * (k - 1)
     MSB = SSB / df_B if df_B > 0 else 0.0
@@ -472,54 +531,73 @@ def calculate_icc_matrix(values: np.ndarray, alpha: float = 0.05) -> pd.DataFram
     MSE = SSE / df_E if df_E > 0 else 0.0
     MSW = SSW / df_W if df_W > 0 else 0.0
 
-    icc1 = (MSB - MSW) / (MSB + (k - 1) * MSW) if (MSB + (k - 1) * MSW) != 0 else np.nan
-    denom_icc2 = MSB + (k - 1) * MSE + (k / n) * (MSJ - MSE)
-    icc2 = (MSB - MSE) / denom_icc2 if denom_icc2 != 0 else np.nan
-    denom_icc3 = MSB + (k - 1) * MSE
-    icc3 = (MSB - MSE) / denom_icc3 if denom_icc3 != 0 else np.nan
-
-    icc1k = (MSB - MSW) / MSB if MSB != 0 else np.nan
-    denom_icc2k = MSB + (MSJ - MSE) / n
-    icc2k = (MSB - MSE) / denom_icc2k if denom_icc2k != 0 else np.nan
-    icc3k = (MSB - MSE) / MSB if MSB != 0 else np.nan
-
-    f_obs_1 = MSB / MSW if MSW > 0 else np.nan
-    p_1 = float(stats.f.sf(f_obs_1, df_B, df_W)) if not np.isnan(f_obs_1) else np.nan
-    f_obs_23 = MSB / MSE if MSE > 0 else np.nan
-    p_23 = float(stats.f.sf(f_obs_23, df_B, df_E)) if not np.isnan(f_obs_23) else np.nan
-
-    # Exact F-distribution CIs (McGraw & Wong 1996 / Shrout & Fleiss 1979)
+    # Perfect agreement boundary handling
     # 1. Model 1
-    f1_l = stats.f.ppf(1.0 - alpha / 2.0, df_B, df_W)
-    f1_u = stats.f.ppf(1.0 - alpha / 2.0, df_W, df_B)
-    fl1 = f_obs_1 / f1_l if f1_l > 0 else np.nan
-    fu1 = f_obs_1 * f1_u
-    ci_icc1 = ((fl1 - 1.0) / (fl1 + k - 1.0), (fu1 - 1.0) / (fu1 + k - 1.0))
-    ci_icc1k = (1.0 - 1.0 / fl1 if fl1 > 0 else np.nan, 1.0 - 1.0 / fu1 if fu1 > 0 else np.nan)
+    if MSW == 0 and MSB > 0:
+        icc1 = 1.0
+        icc1k = 1.0
+        ci_icc1 = (1.0, 1.0)
+        ci_icc1k = (1.0, 1.0)
+        f_obs_1 = np.inf
+        p_1 = 0.0
+    else:
+        icc1 = (MSB - MSW) / (MSB + (k - 1) * MSW) if (MSB + (k - 1) * MSW) != 0 else np.nan
+        icc1k = (MSB - MSW) / MSB if MSB != 0 else np.nan
+        f_obs_1 = MSB / MSW if MSW > 0 else np.nan
+        p_1 = float(stats.f.sf(f_obs_1, df_B, df_W)) if not np.isnan(f_obs_1) else np.nan
+        f1_l = stats.f.ppf(1.0 - alpha / 2.0, df_B, df_W)
+        f1_u = stats.f.ppf(1.0 - alpha / 2.0, df_W, df_B)
+        fl1 = f_obs_1 / f1_l if (not np.isnan(f_obs_1) and f1_l > 0) else np.nan
+        fu1 = f_obs_1 * f1_u if not np.isnan(f_obs_1) else np.nan
+        ci_icc1 = ((fl1 - 1.0) / (fl1 + k - 1.0) if not np.isnan(fl1) else np.nan, (fu1 - 1.0) / (fu1 + k - 1.0) if not np.isnan(fu1) else np.nan)
+        ci_icc1k = (1.0 - 1.0 / fl1 if (not np.isnan(fl1) and fl1 > 0) else np.nan, 1.0 - 1.0 / fu1 if (not np.isnan(fu1) and fu1 > 0) else np.nan)
 
-    # 2. Model 3
-    f3_l = stats.f.ppf(1.0 - alpha / 2.0, df_B, df_E)
-    f3_u = stats.f.ppf(1.0 - alpha / 2.0, df_E, df_B)
-    fl3 = f_obs_23 / f3_l if f3_l > 0 else np.nan
-    fu3 = f_obs_23 * f3_u
-    ci_icc3 = ((fl3 - 1.0) / (fl3 + k - 1.0), (fu3 - 1.0) / (fu3 + k - 1.0))
-    ci_icc3k = (1.0 - 1.0 / fl3 if fl3 > 0 else np.nan, 1.0 - 1.0 / fu3 if fu3 > 0 else np.nan)
+    # 2. Model 3 (Consistency)
+    if MSE == 0 and MSB > 0:
+        icc3 = 1.0
+        icc3k = 1.0
+        ci_icc3 = (1.0, 1.0)
+        ci_icc3k = (1.0, 1.0)
+        f_obs_23 = np.inf
+        p_23 = 0.0
+    else:
+        denom_icc3 = MSB + (k - 1) * MSE
+        icc3 = (MSB - MSE) / denom_icc3 if denom_icc3 != 0 else np.nan
+        icc3k = (MSB - MSE) / MSB if MSB != 0 else np.nan
+        f_obs_23 = MSB / MSE if MSE > 0 else np.nan
+        p_23 = float(stats.f.sf(f_obs_23, df_B, df_E)) if not np.isnan(f_obs_23) else np.nan
+        f3_l = stats.f.ppf(1.0 - alpha / 2.0, df_B, df_E)
+        f3_u = stats.f.ppf(1.0 - alpha / 2.0, df_E, df_B)
+        fl3 = f_obs_23 / f3_l if (not np.isnan(f_obs_23) and f3_l > 0) else np.nan
+        fu3 = f_obs_23 * f3_u if not np.isnan(f_obs_23) else np.nan
+        ci_icc3 = ((fl3 - 1.0) / (fl3 + k - 1.0) if not np.isnan(fl3) else np.nan, (fu3 - 1.0) / (fu3 + k - 1.0) if not np.isnan(fu3) else np.nan)
+        ci_icc3k = (1.0 - 1.0 / fl3 if (not np.isnan(fl3) and fl3 > 0) else np.nan, 1.0 - 1.0 / fu3 if (not np.isnan(fu3) and fu3 > 0) else np.nan)
 
-    # 3. Model 2
-    F_J = MSJ / MSE if MSE > 0 else 1.0
-    r2 = icc2
-    v_num = df_E * (k * r2 * F_J + n * (1.0 + (k - 1) * r2) - k * r2) ** 2
-    v_den = df_B * (k * r2 * F_J) ** 2 + (n * (1.0 + (k - 1) * r2) - k * r2) ** 2
-    v = max(v_num / v_den, 1.0) if v_den != 0 else 1.0
-    f2_u = stats.f.ppf(1.0 - alpha / 2.0, df_B, v)
-    f2_l = stats.f.ppf(1.0 - alpha / 2.0, v, df_B)
-    denom_L2 = f2_u * (k * MSJ + (k * n - k - n) * MSE) + n * MSB
-    L2 = n * (MSB - f2_u * MSE) / denom_L2 if denom_L2 != 0 else np.nan
-    denom_U2 = k * MSJ + (k * n - k - n) * MSE + n * f2_l * MSB
-    U2 = n * (f2_l * MSB - MSE) / denom_U2 if denom_U2 != 0 else np.nan
-    ci_icc2 = (L2, U2)
-    ci_icc2k = ((k * L2) / (1.0 + (k - 1) * L2) if (1.0 + (k - 1) * L2) != 0 else np.nan,
-                (k * U2) / (1.0 + (k - 1) * U2) if (1.0 + (k - 1) * U2) != 0 else np.nan)
+    # 3. Model 2 (Absolute Agreement)
+    if MSE == 0 and MSJ == 0 and MSB > 0:
+        icc2 = 1.0
+        icc2k = 1.0
+        ci_icc2 = (1.0, 1.0)
+        ci_icc2k = (1.0, 1.0)
+    else:
+        denom_icc2 = MSB + (k - 1) * MSE + (k / n) * (MSJ - MSE)
+        icc2 = (MSB - MSE) / denom_icc2 if denom_icc2 != 0 else np.nan
+        denom_icc2k = MSB + (MSJ - MSE) / n
+        icc2k = (MSB - MSE) / denom_icc2k if denom_icc2k != 0 else np.nan
+        F_J = MSJ / MSE if MSE > 0 else 1.0
+        r2 = icc2 if not np.isnan(icc2) else 0.0
+        v_num = df_E * (k * r2 * F_J + n * (1.0 + (k - 1) * r2) - k * r2) ** 2
+        v_den = df_B * (k * r2 * F_J) ** 2 + (n * (1.0 + (k - 1) * r2) - k * r2) ** 2
+        v = max(v_num / v_den, 1.0) if v_den != 0 else 1.0
+        f2_u = stats.f.ppf(1.0 - alpha / 2.0, df_B, v)
+        f2_l = stats.f.ppf(1.0 - alpha / 2.0, v, df_B)
+        denom_L2 = f2_u * (k * MSJ + (k * n - k - n) * MSE) + n * MSB
+        L2 = n * (MSB - f2_u * MSE) / denom_L2 if denom_L2 != 0 else np.nan
+        denom_U2 = k * MSJ + (k * n - k - n) * MSE + n * f2_l * MSB
+        U2 = n * (f2_l * MSB - MSE) / denom_U2 if denom_U2 != 0 else np.nan
+        ci_icc2 = (L2, U2)
+        ci_icc2k = ((k * L2) / (1.0 + (k - 1) * L2) if (1.0 + (k - 1) * L2) != 0 else np.nan,
+                    (k * U2) / (1.0 + (k - 1) * U2) if (1.0 + (k - 1) * U2) != 0 else np.nan)
 
     return pd.DataFrame([
         {"Type": "ICC1", "Description": "One-way random (single)", "ICC": icc1, "CI_lower": ci_icc1[0], "CI_upper": ci_icc1[1], "F": f_obs_1, "pval": p_1},
@@ -549,13 +627,37 @@ def match_propensity_scores(
     confounders: list[str],
     caliper_sd: float = 0.2
 ) -> dict:
-    """1:1 Nearest-Neighbor PSM with caliper, returning pair IDs and pre/post SMD balance."""
-    clean = df.dropna(subset=[treatment_col] + confounders).copy()
-    
+    """1:1 Nearest-Neighbor PSM with caliper, returning pair IDs, retention audit, and pre/post SMD balance."""
+    # Self-contained Austin (2009) SMD helper to guarantee standalone execution
+    def _calc_smd_local(t_arr, c_arr):
+        t = np.asarray(t_arr, dtype=float)
+        c = np.asarray(c_arr, dtype=float)
+        t = t[~np.isnan(t)]
+        c = c[~np.isnan(c)]
+        if len(t) == 0 or len(c) == 0:
+            return np.nan
+        mean_t, mean_c = np.mean(t), np.mean(c)
+        var_t = np.var(t, ddof=1) if len(t) > 1 else 0.0
+        var_c = np.var(c, ddof=1) if len(c) > 1 else 0.0
+        pooled_sd = np.sqrt((var_t + var_c) / 2.0)
+        if pooled_sd == 0:
+            return 0.0 if mean_t == mean_c else np.nan
+        return float((mean_t - mean_c) / pooled_sd)
+
+    n_initial = len(df)
+    clean = df.dropna(subset=[treatment_col] + confounders).copy().reset_index(drop=True)
+    n_analyzed = len(clean)
+    n_excluded = n_initial - n_analyzed
+
+    # Validate treatment column strictly binary
+    treatment_vals = clean[treatment_col].to_numpy()
+    if not np.all(np.isin(treatment_vals, [0, 1])):
+        raise ValueError(f"Treatment column '{treatment_col}' must contain strictly binary values (0 and 1).")
+    y = treatment_vals.astype(int)
+
     # Handle categorical confounders via dummy encoding
     X_raw = pd.get_dummies(clean[confounders], drop_first=True, dtype=float)
     X = sm.add_constant(X_raw)
-    y = clean[treatment_col].astype(int)
 
     # Fit propensity score model
     ps_model = sm.Logit(y, X).fit(disp=False)
@@ -594,34 +696,44 @@ def match_propensity_scores(
             pair_counter += 1
 
     matched_df = pd.DataFrame(matched_records)
+    if len(matched_df) > 0:
+        matched_clean = matched_df.reset_index(drop=True)
+        matched_X = pd.get_dummies(matched_clean[confounders], drop_first=True, dtype=float)
+    else:
+        matched_X = pd.DataFrame(columns=X_raw.columns)
 
-    # Compute balance diagnostics (pre- vs post-match SMDs)
+    # Compute balance diagnostics across ALL modeled confounders (including dummy-encoded levels)
     balance_rows = []
-    for var in confounders:
-        if pd.api.types.is_numeric_dtype(clean[var]):
-            t_pre = clean.loc[clean[treatment_col] == 1, var].to_numpy()
-            c_pre = clean.loc[clean[treatment_col] == 0, var].to_numpy()
-            smd_pre = calculate_smd(t_pre, c_pre)
+    for var in X_raw.columns:
+        t_pre = X_raw.loc[clean[treatment_col] == 1, var].to_numpy()
+        c_pre = X_raw.loc[clean[treatment_col] == 0, var].to_numpy()
+        smd_pre = _calc_smd_local(t_pre, c_pre)
 
-            if len(matched_df) > 0:
-                t_post = matched_df.loc[matched_df[treatment_col] == 1, var].to_numpy()
-                c_post = matched_df.loc[matched_df[treatment_col] == 0, var].to_numpy()
-                smd_post = calculate_smd(t_post, c_post)
-            else:
-                smd_post = np.nan
+        if len(matched_df) > 0 and var in matched_X.columns:
+            t_post = matched_X.loc[matched_clean[treatment_col] == 1, var].to_numpy()
+            c_post = matched_X.loc[matched_clean[treatment_col] == 0, var].to_numpy()
+            smd_post = _calc_smd_local(t_post, c_post)
+        else:
+            smd_post = np.nan
 
-            balance_rows.append({
-                "Variable": var,
-                "Pre-Match SMD": smd_pre,
-                "Post-Match SMD": smd_post,
-                "Balanced (<0.10)": abs(smd_post) < 0.10 if not np.isnan(smd_post) else False
-            })
+        balance_rows.append({
+            "Variable": var,
+            "Pre-Match SMD": smd_pre,
+            "Post-Match SMD": smd_post,
+            "Balanced (<0.10)": abs(smd_post) < 0.10 if not np.isnan(smd_post) else False
+        })
 
     return {
         "matched_df": matched_df,
         "balance_df": pd.DataFrame(balance_rows),
         "n_matched_pairs": pair_counter - 1,
         "n_unmatched_treated": len(treated) - (pair_counter - 1),
+        "retention_audit": {
+            "n_initial": n_initial,
+            "n_excluded": n_excluded,
+            "n_analyzed": n_analyzed,
+            "exclusion_reasons": f"Missing values in {[treatment_col] + confounders}" if n_excluded > 0 else "None",
+        },
     }
 ```
 
@@ -629,7 +741,7 @@ def match_propensity_scores(
 
 ## 7. Firth's Penalized Likelihood Logistic Regression
 
-When sample sizes are small or monotone separation occurs ($\text{EPV} < 10$), standard MLE estimates explode ($\text{OR} \to \infty$). Firth's penalized logistic regression modifies the score equation by Jeffreys invariant prior: $U^*(\beta) = U(\beta) + a(\beta)$, where $a_j = \frac{1}{2}\text{tr}(I^{-1}\frac{\partial I}{\partial \beta_j}) = \sum_i h_i (0.5 - \pi_i) x_{ij}$. Implements **step-halving** to guarantee convergence and **profile likelihood confidence intervals** to eliminate Hauck-Donner explosion.
+When sample sizes are small or monotone separation occurs ($\text{EPV} < 10$), standard MLE estimates explode ($\text{OR} \to \infty$). Firth's penalized logistic regression modifies the score equation by Jeffreys invariant prior: $U^*(\beta) = U(\beta) + a(\beta)$, where $a_j = \frac{1}{2}\text{tr}(I^{-1}\frac{\partial I}{\partial \beta_j}) = \sum_i h_i (0.5 - \pi_i) x_{ij}$. Reduces first-order parameter estimation bias (Heinze & Schemper, 2002). Implements **step-halving** to guarantee likelihood monotonicity and **profile likelihood confidence intervals** to eliminate Hauck-Donner explosion.
 
 ```python
 import numpy as np
@@ -658,10 +770,17 @@ def fit_firth_logistic(
     X_arr = np.asarray(X, dtype=float)
     y_arr = np.asarray(y, dtype=float).ravel()
     
+    if not np.all(np.isin(y_arr, [0, 1])):
+        raise ValueError("Binary outcome y must contain strictly 0 and 1.")
+
     if fit_intercept and not np.allclose(X_arr[:, 0], 1.0):
         X_arr = np.column_stack([np.ones(len(y_arr)), X_arr])
 
     n, p = X_arr.shape
+    rank = np.linalg.matrix_rank(X_arr)
+    if rank < p:
+        raise ValueError(f"Design matrix is rank-deficient (rank {rank} < {p} parameters). Collinear features must be removed.")
+
     beta = np.zeros(p)
     current_pll = _firth_penalized_loglik(beta, X_arr, y_arr)
 
@@ -690,19 +809,27 @@ def fit_firth_logistic(
             beta_new = beta + alpha_step * step
             new_pll = _firth_penalized_loglik(beta_new, X_arr, y_arr)
 
-        if np.max(np.abs(beta_new - beta)) < tol:
-            beta = beta_new
-            current_pll = new_pll
-            converged = True
+        if new_pll < current_pll:
+            # Monotonicity failed even after step halving
+            converged = False
             break
+
+        param_step = np.max(np.abs(beta_new - beta))
+        score_norm = np.max(np.abs(u_star))
         beta = beta_new
         current_pll = new_pll
 
+        # Both parameter movement and score gradient must satisfy convergence
+        if param_step < tol and score_norm < (tol * max(1.0, float(n))):
+            converged = True
+            break
+
     se = np.sqrt(np.diag(I_inv))
 
-    # Profile Likelihood Confidence Intervals (chi2 cutoff = 3.841)
+    # Profile Likelihood Confidence Intervals (chi2 cutoff = 3.841) with explicit fallback tracking
     ci_lower = np.zeros(p)
     ci_upper = np.zeros(p)
+    ci_method = ["profile"] * p
     target_pll = current_pll - 0.5 * stats.chi2.ppf(0.95, df=1)
 
     for j in range(p):
@@ -716,24 +843,36 @@ def fit_firth_logistic(
                 b_full[other_idx] = nuis
                 return -_firth_penalized_loglik(b_full, X_arr, y_arr)
             res = optimize.minimize(nuisance_loss, beta[other_idx], method="Nelder-Mead")
+            if not res.success:
+                return np.nan
             return -res.fun - target_pll
 
-        # Root search with Wald fallback
+        # Root search with explicit Wald fallback tracking
         try:
             low_guess = beta[j] - 2.5 * se[j]
             while profile_obj(low_guess) > 0 and low_guess > beta[j] - 20 * se[j]:
                 low_guess -= se[j]
+            val_low = profile_obj(low_guess)
+            val_mid = profile_obj(beta[j])
+            if np.isnan(val_low) or np.isnan(val_mid) or val_low * val_mid > 0:
+                raise ValueError("Profile root bracket failure")
             ci_lower[j] = optimize.brentq(profile_obj, low_guess, beta[j])
         except Exception:
             ci_lower[j] = beta[j] - 1.96 * se[j]
+            ci_method[j] = "wald_fallback"
 
         try:
             high_guess = beta[j] + 2.5 * se[j]
             while profile_obj(high_guess) > 0 and high_guess < beta[j] + 20 * se[j]:
                 high_guess += se[j]
+            val_high = profile_obj(high_guess)
+            val_mid = profile_obj(beta[j])
+            if np.isnan(val_high) or np.isnan(val_mid) or val_high * val_mid > 0:
+                raise ValueError("Profile root bracket failure")
             ci_upper[j] = optimize.brentq(profile_obj, beta[j], high_guess)
         except Exception:
             ci_upper[j] = beta[j] + 1.96 * se[j]
+            ci_method[j] = "wald_fallback"
 
     return {
         "coefficients": beta,
@@ -742,6 +881,7 @@ def fit_firth_logistic(
         "ci_lower": np.exp(ci_lower),
         "ci_upper": np.exp(ci_upper),
         "converged": converged,
+        "ci_method": ci_method,
     }
 ```
 
@@ -749,7 +889,7 @@ def fit_firth_logistic(
 
 ## 8. Little's (1988) MCAR Multivariate Missingness Test
 
-Pattern-grouped Expectation-Maximization (EM) ML parameter estimation under multivariate normality with Little's $d^2$ distance statistic: $d^2 = \sum_s n_s (\bar{y}_{s, obs} - \hat{\mu}_{obs})^T \hat{\Sigma}_{obs, obs}^{-1} (\bar{y}_{s, obs} - \hat{\mu}_{obs})$, with degrees of freedom $df = \sum p_s - P$.
+Pattern-grouped Expectation-Maximization (EM) ML parameter estimation under multivariate normality with Little's $d^2$ distance statistic: $d^2 = \sum_s n_s (\bar{y}_{s, obs} - \hat{\mu}_{obs})^T \hat{\Sigma}_{obs, obs}^{-1} (\bar{y}_{s, obs} - \hat{\mu}_{obs})$, with degrees of freedom $df = \sum p_s - P$. Tests the null hypothesis $H_0: \text{MCAR}$. Note that a non-significant test does not establish MAR or distinguish MAR from MNAR. Ridge covariance adjustment represents a numerical regularization approximation.
 
 ```python
 import numpy as np
@@ -757,20 +897,48 @@ import pandas as pd
 import scipy.stats as stats
 
 def littles_mcar_test(df: pd.DataFrame, variables: list[str], max_iter: int = 100, tol: float = 1e-5) -> dict:
-    """Perform Roderick Little's (1988) MCAR test via pattern-grouped EM ML estimation."""
+    """Perform Roderick Little's (1988) MCAR test via pattern-grouped EM ML estimation.
+    
+    Statistical & Regularization Notes:
+    - Tests the null hypothesis H0: Missing Completely at Random (MCAR). A non-significant
+      result does NOT establish MAR or rule out MNAR.
+    - Ridge covariance stabilization (Sigma + epsilon * I) is a numerical regularization
+      approximation to ensure positive definiteness in small or collinear patterns.
+    """
     data = df[variables].to_numpy(dtype=float, copy=True)
     N, P = data.shape
     nan_mask = np.isnan(data)
 
     if not np.any(nan_mask):
-        return {"chi2": 0.0, "df": 0, "p_value": 1.0, "mcar_rejected": False, "n_patterns": 1}
+        return {
+            "chi2": 0.0,
+            "df": 0,
+            "p_value": 1.0,
+            "mcar_rejected": False,
+            "n_patterns": 1,
+            "converged": True,
+            "n_iterations": 0,
+            "n_excluded_rows": 0,
+        }
 
-    # Drop rows that are completely missing
+    # Validate that data is not completely missing
+    if nan_mask.all():
+        raise ValueError("Dataset is completely missing (100% NaN); Little's MCAR test cannot be computed.")
+
+    for j, col_name in enumerate(variables):
+        if nan_mask[:, j].all():
+            raise ValueError(f"Variable '{col_name}' has 0 observed values (100% missing); MCAR cannot be tested.")
+
+    # Drop rows that are completely missing across all tested variables
     row_all_nan = nan_mask.all(axis=1)
-    if np.any(row_all_nan):
+    n_excluded_rows = int(np.sum(row_all_nan))
+    if n_excluded_rows > 0:
         data = data[~row_all_nan]
         nan_mask = nan_mask[~row_all_nan]
         N = len(data)
+
+    if N == 0:
+        raise ValueError("No rows with observed values remain; Little's MCAR test cannot be computed.")
 
     # Group into unique missingness patterns using boolean indicator tuples
     obs_mask = ~nan_mask
@@ -797,7 +965,17 @@ def littles_mcar_test(df: pd.DataFrame, variables: list[str], max_iter: int = 10
 
     df_stat = total_p_s - P
     if df_stat <= 0:
-        return {"chi2": 0.0, "df": max(0, df_stat), "p_value": 1.0, "mcar_rejected": False, "n_patterns": len(parsed_patterns)}
+        return {
+            "chi2": np.nan,
+            "df": int(df_stat),
+            "p_value": np.nan,
+            "mcar_rejected": False,
+            "n_patterns": len(parsed_patterns),
+            "converged": False,
+            "n_iterations": 0,
+            "n_excluded_rows": n_excluded_rows,
+            "note": "Untestable: degrees of freedom <= 0 (insufficient overlap across missingness patterns)."
+        }
 
     # EM Algorithm initialization
     mu = np.nanmean(data, axis=0)
@@ -812,7 +990,10 @@ def littles_mcar_test(df: pd.DataFrame, variables: list[str], max_iter: int = 10
     Sigma += np.eye(P) * scale_ridge
 
     # EM loop
+    converged = False
+    n_iterations = 0
     for iteration in range(max_iter):
+        n_iterations = iteration + 1
         sum_y = np.zeros(P)
         sum_yy = np.zeros((P, P))
         for pat in parsed_patterns:
@@ -842,10 +1023,11 @@ def littles_mcar_test(df: pd.DataFrame, variables: list[str], max_iter: int = 10
 
         if max(np.max(np.abs(mu_next - mu)), np.max(np.abs(Sigma_next - Sigma))) < tol:
             mu, Sigma = mu_next, Sigma_next
+            converged = True
             break
         mu, Sigma = mu_next, Sigma_next
 
-    # Calculate Little's d2 statistic
+    # Calculate Little's d2 distance statistic
     d2 = 0.0
     for pat in parsed_patterns:
         O_s, n_s, idx = pat["O_s"], pat["n_s"], pat["indices"]
@@ -867,6 +1049,9 @@ def littles_mcar_test(df: pd.DataFrame, variables: list[str], max_iter: int = 10
         "p_value": float(p_val),
         "mcar_rejected": bool(p_val < 0.05),
         "n_patterns": len(parsed_patterns),
+        "converged": converged,
+        "n_iterations": n_iterations,
+        "n_excluded_rows": n_excluded_rows,
     }
 ```
 
@@ -892,6 +1077,12 @@ def calculate_e_value(
         raise ValueError("Estimate must be strictly positive (> 0) on ratio scale.")
     low = float(lower) if lower is not None else None
     up = float(upper) if upper is not None else None
+    if low is not None and low <= 0.0:
+        raise ValueError("lower limit must be strictly positive (> 0) on ratio scale.")
+    if up is not None and up <= 0.0:
+        raise ValueError("upper limit must be strictly positive (> 0) on ratio scale.")
+    if low is not None and up is not None and low > up:
+        raise ValueError(f"lower confidence limit ({low}) cannot exceed upper confidence limit ({up}).")
 
     # Conversion to Risk Ratio (RR) scale
     if estimate_type == "OR":
@@ -943,8 +1134,15 @@ def fit_logistic_regression_table(
     covariates: list[str]
 ) -> pd.DataFrame:
     """Generate publication-ready Logistic Regression table with Crude & Adjusted ORs."""
+    n_initial = len(df)
     clean = df.dropna(subset=[outcome] + covariates).copy()
-    y = clean[outcome].astype(int)
+    n_analyzed = len(clean)
+    n_excluded = n_initial - n_analyzed
+
+    outcome_vals = clean[outcome].to_numpy()
+    if not np.all(np.isin(outcome_vals, [0, 1])):
+        raise ValueError(f"Outcome column '{outcome}' must contain strictly binary values (0 and 1).")
+    y = outcome_vals.astype(int)
     
     # 1. Multivariable model
     X_multi = sm.add_constant(clean[covariates].astype(float))
@@ -976,7 +1174,14 @@ def fit_logistic_regression_table(
             "P-value": p_val_str
         })
         
-    return pd.DataFrame(rows)
+    res_df = pd.DataFrame(rows)
+    res_df.attrs["retention_audit"] = {
+        "n_initial": n_initial,
+        "n_excluded": n_excluded,
+        "n_analyzed": n_analyzed,
+        "exclusion_reasons": f"Missing values in {[outcome] + covariates}" if n_excluded > 0 else "None",
+    }
+    return res_df
 ```
 
 ---
@@ -999,14 +1204,26 @@ def fit_survival_analysis_suite(
     covariates: list[str] | None = None
 ) -> dict:
     """Run Kaplan-Meier, Log-Rank, and Cox PH modeling with per-covariate Schoenfeld test."""
-    clean = df.dropna(subset=[duration_col, event_col] + (covariates or []) + ([strata_col] if strata_col else [])).copy()
+    n_initial = len(df)
     
-    # 1. Kaplan-Meier curve & median survival
+    # 1. Unadjusted Kaplan-Meier cohort: subset duration, event, and strata (preserves KM cohort)
+    km_cols = [duration_col, event_col] + ([strata_col] if strata_col else [])
+    clean_km = df.dropna(subset=km_cols).copy()
+
+    # Validate event indicator strictly binary and duration non-negative
+    ev_km = clean_km[event_col].to_numpy()
+    if not np.all(np.isin(ev_km, [0, 1])):
+        raise ValueError(f"Event indicator '{event_col}' must contain strictly binary values (0 = Censored, 1 = Event).")
+    dur_km = clean_km[duration_col].to_numpy()
+    if (dur_km < 0).any():
+        raise ValueError(f"Duration column '{duration_col}' must contain non-negative values (>= 0).")
+
+    # Kaplan-Meier curve & median survival
     km_results = {}
     if strata_col:
-        groups = clean[strata_col].unique()
+        groups = clean_km[strata_col].unique()
         for g in groups:
-            sub = clean[clean[strata_col] == g]
+            sub = clean_km[clean_km[strata_col] == g]
             kmf = KaplanMeierFitter()
             kmf.fit(sub[duration_col], sub[event_col], label=str(g))
             km_results[f"Median Survival ({g})"] = float(kmf.median_survival_time_)
@@ -1014,26 +1231,34 @@ def fit_survival_analysis_suite(
         # Log-rank test (2 groups or multivariate for >2 groups)
         if len(groups) == 2:
             lr_res = logrank_test(
-                clean.loc[clean[strata_col] == groups[0], duration_col],
-                clean.loc[clean[strata_col] == groups[1], duration_col],
-                clean.loc[clean[strata_col] == groups[0], event_col],
-                clean.loc[clean[strata_col] == groups[1], event_col]
+                clean_km.loc[clean_km[strata_col] == groups[0], duration_col],
+                clean_km.loc[clean_km[strata_col] == groups[1], duration_col],
+                clean_km.loc[clean_km[strata_col] == groups[0], event_col],
+                clean_km.loc[clean_km[strata_col] == groups[1], event_col]
             )
             km_results["Log-Rank P-value"] = float(lr_res.p_value)
         elif len(groups) > 2:
-            lr_res = multivariate_logrank_test(clean[duration_col], clean[strata_col], clean[event_col])
+            lr_res = multivariate_logrank_test(clean_km[duration_col], clean_km[strata_col], clean_km[event_col])
             km_results["Multivariate Log-Rank P-value"] = float(lr_res.p_value)
     else:
         kmf = KaplanMeierFitter()
-        kmf.fit(clean[duration_col], clean[event_col])
+        kmf.fit(clean_km[duration_col], clean_km[event_col])
         km_results["Overall Median Survival"] = float(kmf.median_survival_time_)
 
-    # 2. Cox Proportional Hazards model
+    # 2. Cox Proportional Hazards model on complete-covariate cohort
     cox_table = pd.DataFrame()
     schoenfeld_summary = {}
+    n_analyzed_cox = 0
     if covariates:
+        cox_cols = [duration_col, event_col] + covariates
+        clean_cox = df.dropna(subset=cox_cols).copy()
+        n_analyzed_cox = len(clean_cox)
+        ev_cox = clean_cox[event_col].to_numpy()
+        if not np.all(np.isin(ev_cox, [0, 1])):
+            raise ValueError(f"Event indicator '{event_col}' must contain strictly binary values.")
+
         cph = CoxPHFitter()
-        cox_data = clean[[duration_col, event_col] + covariates]
+        cox_data = clean_cox[cox_cols]
         cph.fit(cox_data, duration_col=duration_col, event_col=event_col)
         
         summary = cph.summary
@@ -1055,14 +1280,19 @@ def fit_survival_analysis_suite(
             prop_test = proportional_hazard_test(cph, cox_data, time_transform="rank")
             schoenfeld_summary["p_values"] = {k: float(v) for k, v in prop_test.summary["p"].items()}
             schoenfeld_summary["test_statistics"] = {k: float(v) for k, v in prop_test.summary["test_statistic"].items()}
-            schoenfeld_summary["PH_Assumptions_Passed"] = bool((prop_test.summary["p"] > 0.05).all())
+            passed = bool((prop_test.summary["p"] > 0.05).all())
+            schoenfeld_summary["no_ph_violation_detected"] = passed
+            schoenfeld_summary["PH_Assumptions_Passed"] = passed  # backward compatibility
+            schoenfeld_summary["PH_Note"] = "No proportional hazards violation detected (p > 0.05)." if passed else "Potential PH assumption violation detected (p <= 0.05)."
         except Exception as e:
             schoenfeld_summary["PH_Note"] = str(e)
 
     return {
         "km_summary": km_results,
         "cox_table": cox_table,
-        "schoenfeld_diagnostics": schoenfeld_summary
+        "schoenfeld_diagnostics": schoenfeld_summary,
+        "retention_km": {"n_initial": n_initial, "n_analyzed": len(clean_km), "n_excluded": n_initial - len(clean_km)},
+        "retention_cox": {"n_initial": n_initial, "n_analyzed": n_analyzed_cox, "n_excluded": n_initial - n_analyzed_cox} if covariates else None,
     }
 ```
 
@@ -1070,7 +1300,7 @@ def fit_survival_analysis_suite(
 
 ## 12. Multiple Imputation by Chained Equations (MICE) & Rubin's Rules
 
-Provides multiple stochastic imputations ($M \ge 5$) via Scikit-Learn `IterativeImputer` with Bayesian Ridge regression, strictly enforcing that **primary outcomes are never imputed**. Includes pure-Python **Rubin's rules pooling** (Rubin 1987; Barnard & Rubin 1999) to account for between-imputation variance and avoid falsely narrow standard errors.
+Provides multiple stochastic imputations ($M \ge 5$) via Scikit-Learn `IterativeImputer` with Bayesian Ridge regression, strictly enforcing that **primary outcomes are never imputed**. Configured for continuous/numeric clinical features with optional boundary constraints (`min_value`, `max_value`). Categorical confounders must be dummy-encoded before imputation. Includes pure-Python **Rubin's rules pooling** (Rubin 1987; Barnard & Rubin 1999) with finite-sample degrees of freedom adjustment. Ratio effect measures (OR, HR) must be pooled on the log scale and exponentiated.
 
 ```python
 import numpy as np
@@ -1087,16 +1317,23 @@ def impute_mice_datasets(
     predictors: list[str] | None = None,
     m: int = 5,
     max_iter: int = 10,
-    random_state: int = 42
+    random_state: int = 42,
+    min_value: float | dict[str, float] | None = None,
+    max_value: float | dict[str, float] | None = None
 ) -> list[pd.DataFrame]:
     """Generate M stochastic imputed datasets for valid inferential analysis under MAR.
     
     Clinical Governance Invariants:
     1. Never impute the primary outcome variable (its original values remain untouched).
-    2. The primary outcome and additional covariates MUST be included as predictors in the
+    2. Primary outcome and additional covariates MUST be included as predictors in the
        imputation model per standard biostatistical methodology (van Buuren; Moons et al. 2006)
        to prevent severe attenuation towards the null.
+    3. Continuous/numeric feature scope: Categorical features must be dummy-encoded before imputation.
+    4. Observed values of features_to_impute are preserved intact; only missing values are imputed.
     """
+    if m < 1:
+        raise ValueError(f"Number of imputations m must be >= 1 (got {m}).")
+
     if outcome_col and outcome_col in features_to_impute:
         raise ValueError("Clinical governance invariant: Never impute the primary outcome variable!")
 
@@ -1107,17 +1344,57 @@ def impute_mice_datasets(
             "otherwise chained imputation degenerates to unconditional mean imputation."
         )
 
+    # Validate feature types and missingness
+    for c in cols:
+        if df[c].isna().all():
+            raise ValueError(f"Column '{c}' has 0 observed values (100% missing) and cannot be imputed or conditioned upon.")
+        if not pd.api.types.is_numeric_dtype(df[c]):
+            raise ValueError(
+                f"Column '{c}' is non-numeric ({df[c].dtype}). "
+                "Recipe 12 implements Gaussian MICE for continuous variables. "
+                "Categorical features must be numerically/dummy encoded before imputation."
+            )
+
+    # Build min/max bounds arrays for IterativeImputer
+    if isinstance(min_value, dict):
+        min_arr = np.array([min_value.get(c, -np.inf) for c in cols])
+    elif min_value is not None:
+        min_arr = min_value
+    else:
+        min_arr = -np.inf
+
+    if isinstance(max_value, dict):
+        max_arr = np.array([max_value.get(c, np.inf) for c in cols])
+    elif max_value is not None:
+        max_arr = max_value
+    else:
+        max_arr = np.inf
+
     datasets = []
     for i in range(m):
         imputer = IterativeImputer(
             estimator=BayesianRidge(),
             max_iter=max_iter,
             random_state=random_state + i * 100,
-            sample_posterior=True
+            sample_posterior=True,
+            min_value=min_arr,
+            max_value=max_arr
         )
         clean = df.copy()
-        filled = pd.DataFrame(imputer.fit_transform(clean[cols].astype(float)), columns=cols, index=clean.index)
-        clean[features_to_impute] = filled[features_to_impute]
+        filled = pd.DataFrame(
+            imputer.fit_transform(clean[cols].astype(float)),
+            columns=cols,
+            index=clean.index
+        )
+        # Preserve observed values strictly, impute only missing entries
+        for feat in features_to_impute:
+            missing_mask = clean[feat].isna()
+            clean.loc[missing_mask, feat] = filled.loc[missing_mask, feat]
+
+        # Primary outcome column preserved untouched
+        if outcome_col:
+            clean[outcome_col] = df[outcome_col]
+
         datasets.append(clean)
     return datasets
 
@@ -1128,13 +1405,35 @@ def pool_estimates_rubin(
     k_params: int = 1,
     alpha: float = 0.05
 ) -> dict:
-    """Pool point estimates and standard errors across M imputations using Rubin's rules."""
+    """Pool point estimates and standard errors across M imputations using Rubin's rules.
+    
+    Clinical & Statistical Invariant:
+    When pooling ratio effect estimates (such as Odds Ratios or Hazard Ratios), pooling
+    MUST be performed on the log scale (log OR, log HR) with log-scale standard errors,
+    and then exponentiated for reporting and hypothesis testing.
+    """
     m = len(point_estimates)
+    if len(point_estimates) != len(standard_errors):
+        raise ValueError(
+            f"Length mismatch: point_estimates ({len(point_estimates)}) and "
+            f"standard_errors ({len(standard_errors)}) must have identical lengths."
+        )
     if m < 2:
         raise ValueError("Rubin pooling requires at least m=2 imputed datasets.")
-    theta = np.asarray(point_estimates, dtype=float)
-    V = np.asarray(standard_errors, dtype=float) ** 2
 
+    theta = np.asarray(point_estimates, dtype=float)
+    ses = np.asarray(standard_errors, dtype=float)
+
+    if not np.all(np.isfinite(theta)) or not np.all(np.isfinite(ses)):
+        raise ValueError("point_estimates and standard_errors must contain strictly finite values (no NaN or inf).")
+
+    if (ses < 0.0).any():
+        raise ValueError("standard_errors must be strictly non-negative (>= 0).")
+
+    if n_obs is not None and n_obs <= k_params:
+        raise ValueError(f"n_obs ({n_obs}) must be strictly greater than k_params ({k_params}).")
+
+    V = ses ** 2
     theta_bar = float(np.mean(theta))
     W_bar = float(np.mean(V))
     B = float(np.var(theta, ddof=1))
@@ -1142,22 +1441,35 @@ def pool_estimates_rubin(
     se = float(np.sqrt(T))
 
     # Degrees of freedom with Barnard & Rubin (1999) finite-sample adjustment
+    if n_obs is not None:
+        nu_com = max(1.0, float(n_obs - k_params))
+        nu_com_adj = ((nu_com + 1.0) / (nu_com + 3.0)) * nu_com
+    else:
+        nu_com = None
+        nu_com_adj = None
+
     if B > 0 and W_bar > 0:
         r = float((1.0 + 1.0 / m) * B / W_bar)
         df_old = (m - 1) * (1.0 + 1.0 / r) ** 2
-        if n_obs is not None:
-            nu_com = max(1.0, float(n_obs - k_params))
+        if nu_com_adj is not None:
             lam = r / (r + 1.0)
-            df_obs = ((nu_com + 1.0) / (nu_com + 3.0)) * nu_com * (1.0 - lam)
+            df_obs = nu_com_adj * (1.0 - lam)
             df = float((df_old * df_obs) / (df_old + df_obs))
         else:
             df = float(df_old)
-    elif B > 0 and W_bar <= 0:
+        fmi = float((r + 2.0 / (df + 3.0)) / (r + 1.0)) if np.isfinite(df) else float(r / (r + 1.0))
+    elif B == 0 and W_bar > 0:
+        r = 0.0
+        df = float(nu_com_adj) if nu_com_adj is not None else np.inf
+        fmi = 0.0
+    elif B > 0 and W_bar == 0:
         r = np.inf
         df = float(m - 1)
-    else:
+        fmi = 1.0
+    else:  # B == 0 and W_bar == 0
         r = 0.0
-        df = np.inf
+        df = float(nu_com_adj) if nu_com_adj is not None else np.inf
+        fmi = 0.0
 
     t_stat = theta_bar / se if se > 0 else 0.0
     if np.isfinite(df) and df > 0:
@@ -1169,7 +1481,6 @@ def pool_estimates_rubin(
 
     ci_lower = float(theta_bar - t_crit * se)
     ci_upper = float(theta_bar + t_crit * se)
-    fmi = float((r + 2.0 / (df + 3.0)) / (r + 1.0)) if (r > 0 and np.isfinite(df)) else 0.0
 
     return {
         "pooled_estimate": theta_bar,
@@ -1191,7 +1502,9 @@ def impute_mice_single(
     outcome_col: str | None = None,
     predictors: list[str] | None = None,
     max_iter: int = 10,
-    random_state: int = 42
+    random_state: int = 42,
+    min_value: float | dict[str, float] | None = None,
+    max_value: float | dict[str, float] | None = None
 ) -> pd.DataFrame:
     """Deterministic single MICE imputation strictly for rapid exploratory data health profiling."""
     if outcome_col and outcome_col in features_to_impute:
@@ -1204,15 +1517,51 @@ def impute_mice_single(
             "otherwise chained imputation degenerates to unconditional mean imputation."
         )
 
+    for c in cols:
+        if df[c].isna().all():
+            raise ValueError(f"Column '{c}' has 0 observed values (100% missing) and cannot be imputed or conditioned upon.")
+        if not pd.api.types.is_numeric_dtype(df[c]):
+            raise ValueError(
+                f"Column '{c}' is non-numeric ({df[c].dtype}). "
+                "Recipe 12 implements Gaussian MICE for continuous variables. "
+                "Categorical features must be numerically/dummy encoded before imputation."
+            )
+
+    if isinstance(min_value, dict):
+        min_arr = np.array([min_value.get(c, -np.inf) for c in cols])
+    elif min_value is not None:
+        min_arr = min_value
+    else:
+        min_arr = -np.inf
+
+    if isinstance(max_value, dict):
+        max_arr = np.array([max_value.get(c, np.inf) for c in cols])
+    elif max_value is not None:
+        max_arr = max_value
+    else:
+        max_arr = np.inf
+
     imputer = IterativeImputer(
         estimator=BayesianRidge(),
         max_iter=max_iter,
         random_state=random_state,
-        sample_posterior=False
+        sample_posterior=False,
+        min_value=min_arr,
+        max_value=max_arr
     )
     clean = df.copy()
-    filled = pd.DataFrame(imputer.fit_transform(clean[cols].astype(float)), columns=cols, index=clean.index)
-    clean[features_to_impute] = filled[features_to_impute]
+    filled = pd.DataFrame(
+        imputer.fit_transform(clean[cols].astype(float)),
+        columns=cols,
+        index=clean.index
+    )
+    for feat in features_to_impute:
+        missing_mask = clean[feat].isna()
+        clean.loc[missing_mask, feat] = filled.loc[missing_mask, feat]
+
+    if outcome_col:
+        clean[outcome_col] = df[outcome_col]
+
     return clean
 
 # Backward-compatible alias for exploratory single imputation
@@ -1223,34 +1572,51 @@ impute_mice = impute_mice_single
 
 ## 13. Publication-Grade HTML Table Renderer (NEJM / JAMA Standards)
 
-Renders any summary DataFrame into an ICMJE-compliant publication table with 3 horizontal rules (top border, header border, bottom border), zero vertical dividers, and standard clinical typography.
+Renders any summary DataFrame into an ICMJE-compliant publication table with 3 horizontal rules (top border, header border, bottom border), zero vertical dividers, and standard clinical typography with full data escaping.
 
 ```python
+import html
 import pandas as pd
 
-def render_publication_table(df: pd.DataFrame, title: str = "Table 1. Cohort Characteristics", style: str = "nejm") -> str:
-    """Render pandas DataFrame into journal-compliant 3-rule publication HTML."""
+def render_publication_table(
+    df: pd.DataFrame,
+    title: str = "Table 1. Cohort Characteristics",
+    style: str = "nejm",
+    footnote: str | None = None
+) -> str:
+    """Render pandas DataFrame into journal-compliant 3-rule publication HTML with escaped data."""
     border_color = "#000000" if style == "nejm" else "#333333"
-    html = f"""<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 20px 0;">
-  <p style="font-weight: bold; font-size: 15px; margin-bottom: 8px;">{title}</p>
+    escaped_title = html.escape(str(title))
+    table_html = f"""<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 20px 0;">
+  <p style="font-weight: bold; font-size: 15px; margin-bottom: 8px;">{escaped_title}</p>
   <table style="border-collapse: collapse; width: 100%; border-top: 2px solid {border_color}; border-bottom: 2px solid {border_color}; font-size: 13px;">
     <thead>
       <tr style="border-bottom: 1px solid {border_color}; text-align: left;">
 """
     for col in df.columns:
-        html += f'        <th style="padding: 6px 10px; font-weight: 600;">{col}</th>\n'
-    html += "      </tr>\n    </thead>\n    <tbody>\n"
+        escaped_col = html.escape(str(col))
+        table_html += f'        <th style="padding: 6px 10px; font-weight: 600;">{escaped_col}</th>\n'
+    table_html += "      </tr>\n    </thead>\n    <tbody>\n"
 
     for _, row in df.iterrows():
-        html += "      <tr>\n"
+        table_html += "      <tr>\n"
         for col in df.columns:
             val = str(row[col]) if row[col] is not None else ""
-            html += f'        <td style="padding: 5px 10px;">{val}</td>\n'
-        html += "      </tr>\n"
+            escaped_val = html.escape(val)
+            table_html += f'        <td style="padding: 5px 10px;">{escaped_val}</td>\n'
+        table_html += "      </tr>\n"
 
-    html += """    </tbody>
-  </table>
-  <p style="font-size: 11px; color: #666; margin-top: 6px;">Data presented as mean (SD), median [IQR], or count (%). P-values calculated using two-sided tests.</p>
-</div>"""
-    return html
+    table_html += "    </tbody>\n  </table>\n"
+
+    if footnote is None:
+        footnote_text = "Data presented as mean (SD), median [IQR], or count (%). P-values calculated using two-sided tests."
+    else:
+        footnote_text = footnote
+
+    if footnote_text:
+        escaped_footnote = html.escape(str(footnote_text))
+        table_html += f'  <p style="font-size: 11px; color: #666; margin-top: 6px;">{escaped_footnote}</p>\n'
+
+    table_html += "</div>"
+    return table_html
 ```

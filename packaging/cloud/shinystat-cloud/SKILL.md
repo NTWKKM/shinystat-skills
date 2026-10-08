@@ -16,12 +16,12 @@ If requirements, outcome directions, or primary estimands are ambiguous or unsup
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │                   The 4 Decision Pillars Triangulation                 │
-│   [1. Data Reality] ⟷ [2. Research Estimand] ⟷ [3. Clinical Principles]  │
+│  [1. Data Reality] ⟷ [2. Research Estimand] ⟷ [3. Standalone Scripting]│
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │
                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│            4. Adaptive Standalone Scripting & Safety Invariants        │
+│                   4. Biostatistical Safety Invariants                  │
 │   - Self-contained Python (`statsmodels`, `scipy`, `lifelines`)        │
 │   - Strict 0/1 encoding | Retention flow | No silent deletion | 95% CIs│
 └────────────────────────────────────────────────────────────────────────┘
@@ -55,8 +55,8 @@ When encountering critical clinical ambiguities, **HALT execution** and intervie
 ### Batched Interview & Pragmatic Defaults:
 - **Consolidated Interview**: If multiple ambiguities exist, batch them into a single consolidated interview (`❓ Q1`, `❓ Q2`) with actionable recommendations rather than stopping repeatedly.
 - **Pragmatic Missing Data Defaults**:
-  - If missingness in non-primary variables is **$< 5\%$** and clinically uninformative: Proceed with complete-case analysis with documented sensitivity notes; do NOT block execution with an unnecessary halt.
-  - If missingness is **$5\% - 40\%$**: Propose MICE ([Recipe 12](references/python-recipes.md#12-multiple-imputation-by-chained-equations-mice--rubins-rules)) as the recommended biostatistical path ($M \ge 5$ stochastic datasets pooled via Rubin's rules for inferential modeling; single imputation strictly for data health profiling).
+  - If per-variable missingness or complete-case loss in non-primary variables is **$< 5\%$** and clinically uninformative: Proceed with complete-case analysis with documented sensitivity notes; do NOT block execution with an unnecessary halt.
+  - If missingness is **$5\% - 40\%$**: Propose MICE ([Recipe 12](references/python-recipes.md#12-multiple-imputation-by-chained-equations-mice--rubins-rules)) as the recommended biostatistical path ($M \ge 5$ stochastic datasets pooled via Rubin's rules for inferential modeling; single imputation strictly for data health profiling). Note: Little's test examines $H_0: \text{MCAR}$; failing to reject MCAR ($p \ge 0.05$) does not prove MCAR or establish MAR.
   - Only halt unconditionally when the **primary outcome** is missing without prespecified protocol disposition, or missingness is manifestly informative / MNAR.
 
 ```

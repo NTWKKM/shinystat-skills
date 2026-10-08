@@ -42,13 +42,13 @@ Calculate diagnostic EPV:
         └── Strategy 3: Univariable survival analysis (Kaplan-Meier / univariable Cox) with sparse-data disclaimer
 ```
 
-*Note on Modern EPV Evidence:* As demonstrated by Vittinghoff & McCulloch (2007) and van Smeden et al. (2016), EPV < 10 is an exploratory diagnostic indicator rather than an unconditional hard stop. Firth penalization resolves monotone separation and eliminates small-sample parameter estimation bias; however, for prediction modeling, shrinkage/penalization is required to control overfitting.
+*Note on Modern EPV Evidence:* As demonstrated by Vittinghoff & McCulloch (2007) and van Smeden et al. (2016), EPV < 10 is an exploratory diagnostic indicator rather than an unconditional hard stop. Firth penalization resolves monotone separation and reduces first-order finite-sample parameter estimation bias (Heinze & Schemper, 2002); however, for prediction modeling, shrinkage/penalization is required to control overfitting.
 
 ### B. Missing Data Strategy
 ```
-Audit Missingness Pattern & Mechanism (Recipe 8: Little's MCAR Test)
+Audit Missingness Pattern & Mechanism (Recipe 8: Little's MCAR Test; note H0: MCAR; failing to reject does not prove MCAR)
 
-├── Total Missing < 5% in non-primary variables ──▶ Complete-case analysis with documented justification
+├── Per-variable missingness < 5% in non-primary covariates ──▶ Complete-case analysis with documented justification
 ├── Missing 5%–40% under Missing at Random (MAR) ──▶ Multiple Imputation by Chained Equations (Recipe 12: MICE; M ≥ 5 datasets + Rubin's rules for inference)
 ├── Primary Outcome Missing ──▶ Never impute outcome; preserve true sample retention flow (N_initial ➔ N_analyzed)
 └── Missingness Informative / MNAR ──▶ Halt for clinical domain review or sensitivity bounds
