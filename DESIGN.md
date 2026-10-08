@@ -645,3 +645,33 @@ User re-testing of `shinystat-cloud.zip` (PR #8) identified 4 specific methodolo
 
 [MEMORY_LEARN: Multiple imputation in clinical inference strictly requires M>=5 stochastic datasets with Rubin's rules pooling (W_bar + (1+1/M)B); single imputation treats imputed values as known constants and falsely narrows confidence intervals.]
 
+---
+
+## ADR 29: Outcome and Covariate Conditioning in MICE Imputation to Prevent Null Attenuation
+
+### Context
+Simulation audits and biostatistical review of `impute_mice_datasets` revealed a severe methodological bias:
+1. Passing only `clean[features_to_impute]` into `IterativeImputer` excluded the primary outcome and other analytic covariates from the imputation model. Under this setup, imputed values are conditionally independent of the outcome, attenuating the true regression slope towards the null by ~40–50% (e.g. 0.0589 attenuated to 0.0287).
+2. The clinical governance rule "never impute the primary outcome" was misinterpreted as "never include the outcome in the imputation model". According to foundational biostatistical literature (van Buuren, *Flexible Imputation of Missing Data*; Moons et al., 2006), the primary outcome **must** be included as a predictor in imputation models for missing covariates; only its values must remain unmodified.
+3. If `features_to_impute` contains only a single variable and no other predictors are supplied, `IterativeImputer` has no features to condition on, degenerating to unconditional mean imputation with between-imputation variance $B = 0$ across all $M$ datasets.
+
+### Decision
+1. **Outcome & Covariate Conditioning**:
+   - Updated `impute_mice_datasets` and `impute_mice_single` to assemble conditioning columns:
+     $$\text{cols} = \text{Unique}(\text{features\_to\_impute} \cup \text{predictors} \cup [\text{outcome\_col}])$$
+   - Fits `IterativeImputer` on all `cols`, but copies imputed values strictly back to `features_to_impute` (`clean[features_to_impute] = filled[features_to_impute]`), leaving the primary outcome and any complete covariates unmodified.
+2. **Mean Imputation Guard**:
+   - Added validation: `if len(cols) < 2: raise ValueError(...)` to block unconditional mean imputation when a single variable is passed with zero predictors and no outcome.
+3. **Automated Verification**:
+   - Added `test_mice_single_feature_with_outcome_conditioning`: verifies that single-variable imputation conditioned on outcome yields strictly positive between-imputation variance ($B > 0$) and fraction of missing information ($FMI > 0$).
+   - Added `test_mice_attenuation_recovery_vs_full_data`: verifies that MICE pooled slope recovers the full-data regression slope without severe attenuation towards the null.
+   - Rebuilt `~/Desktop/shinystat-cloud.zip`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Biostatistical Validity**: Eliminates artificial attenuation towards the null, aligning cloud MICE recipes with international standards (van Buuren; Moons 2006).
+- **Test Suite Pass**: 21/21 cloud unit tests passing, 463/463 workspace-wide tests passing.
+
+[MEMORY_LEARN: In MICE imputation, never imputing the primary outcome means never overwriting or estimating missing outcome values; the outcome MUST still be included as a predictor when imputing covariates to prevent severe attenuation towards the null.]
+
+

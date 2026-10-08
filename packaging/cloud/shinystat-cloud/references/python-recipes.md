@@ -1084,13 +1084,28 @@ def impute_mice_datasets(
     df: pd.DataFrame,
     features_to_impute: list[str],
     outcome_col: str | None = None,
+    predictors: list[str] | None = None,
     m: int = 5,
     max_iter: int = 10,
     random_state: int = 42
 ) -> list[pd.DataFrame]:
-    """Generate M stochastic imputed datasets for valid inferential analysis under MAR."""
+    """Generate M stochastic imputed datasets for valid inferential analysis under MAR.
+    
+    Clinical Governance Invariants:
+    1. Never impute the primary outcome variable (its original values remain untouched).
+    2. The primary outcome and additional covariates MUST be included as predictors in the
+       imputation model per standard biostatistical methodology (van Buuren; Moons et al. 2006)
+       to prevent severe attenuation towards the null.
+    """
     if outcome_col and outcome_col in features_to_impute:
         raise ValueError("Clinical governance invariant: Never impute the primary outcome variable!")
+
+    cols = list(dict.fromkeys(features_to_impute + (predictors or []) + ([outcome_col] if outcome_col else [])))
+    if len(cols) < 2:
+        raise ValueError(
+            "MICE requires >= 1 additional predictor (or outcome variable) to condition on; "
+            "otherwise chained imputation degenerates to unconditional mean imputation."
+        )
 
     datasets = []
     for i in range(m):
@@ -1101,7 +1116,8 @@ def impute_mice_datasets(
             sample_posterior=True
         )
         clean = df.copy()
-        clean[features_to_impute] = imputer.fit_transform(clean[features_to_impute])
+        filled = pd.DataFrame(imputer.fit_transform(clean[cols].astype(float)), columns=cols, index=clean.index)
+        clean[features_to_impute] = filled[features_to_impute]
         datasets.append(clean)
     return datasets
 
@@ -1173,13 +1189,20 @@ def impute_mice_single(
     df: pd.DataFrame,
     features_to_impute: list[str],
     outcome_col: str | None = None,
+    predictors: list[str] | None = None,
     max_iter: int = 10,
     random_state: int = 42
 ) -> pd.DataFrame:
     """Deterministic single MICE imputation strictly for rapid exploratory data health profiling."""
-    clean = df.copy()
     if outcome_col and outcome_col in features_to_impute:
         raise ValueError("Clinical governance invariant: Never impute the primary outcome variable!")
+
+    cols = list(dict.fromkeys(features_to_impute + (predictors or []) + ([outcome_col] if outcome_col else [])))
+    if len(cols) < 2:
+        raise ValueError(
+            "MICE requires >= 1 additional predictor (or outcome variable) to condition on; "
+            "otherwise chained imputation degenerates to unconditional mean imputation."
+        )
 
     imputer = IterativeImputer(
         estimator=BayesianRidge(),
@@ -1187,7 +1210,9 @@ def impute_mice_single(
         random_state=random_state,
         sample_posterior=False
     )
-    clean[features_to_impute] = imputer.fit_transform(clean[features_to_impute])
+    clean = df.copy()
+    filled = pd.DataFrame(imputer.fit_transform(clean[cols].astype(float)), columns=cols, index=clean.index)
+    clean[features_to_impute] = filled[features_to_impute]
     return clean
 
 # Backward-compatible alias for exploratory single imputation

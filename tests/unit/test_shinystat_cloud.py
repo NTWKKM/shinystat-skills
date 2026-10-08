@@ -503,6 +503,99 @@ def test_mice_multiple_datasets_and_rubin_pooling(recipes):
         pool_rubin([1.0], [0.2])
 
 
+def test_mice_single_feature_with_outcome_conditioning(recipes):
+    impute_datasets = recipes["impute_mice_datasets"]
+    pool_rubin = recipes["pool_estimates_rubin"]
+
+    np.random.seed(42)
+    n = 100
+    df = pd.DataFrame(
+        {
+            "dead": np.random.binomial(1, 0.3, size=n),
+            "bp": np.where(
+                np.random.rand(n) < 0.4, np.nan, np.random.normal(120, 15, size=n)
+            ),
+        }
+    )
+
+    # 1. Single feature to impute with outcome as predictor must succeed and have between-variance > 0
+    datasets = impute_datasets(df, features_to_impute=["bp"], outcome_col="dead", m=5)
+    assert len(datasets) == 5
+    for d in datasets:
+        assert not d["bp"].isna().any()
+        assert (d["dead"] == df["dead"]).all(), (
+            "Primary outcome must remain completely untouched"
+        )
+
+    means = [float(d["bp"].mean()) for d in datasets]
+    ses = [float(d["bp"].std() / np.sqrt(len(d))) for d in datasets]
+    pooled = pool_rubin(means, ses, n_obs=n, k_params=1)
+
+    assert pooled["between_variance"] > 0.0, (
+        "Stochastic MICE conditioned on outcome must yield B > 0"
+    )
+    assert pooled["fmi"] > 0.0, (
+        "Fraction of Missing Information must be strictly positive"
+    )
+
+    # 2. Single feature without any other predictor or outcome must raise ValueError (prevents mean imputation)
+    with pytest.raises(ValueError, match="requires >= 1 additional predictor"):
+        impute_datasets(
+            df, features_to_impute=["bp"], outcome_col=None, predictors=None
+        )
+
+
+def test_mice_attenuation_recovery_vs_full_data(recipes):
+    import statsmodels.api as sm
+
+    impute_datasets = recipes["impute_mice_datasets"]
+
+    np.random.seed(42)
+    n = 500
+    bp = np.random.normal(120, 15, size=n)
+    log_odds = -7.0 + 0.05 * bp
+    prob = 1.0 / (1.0 + np.exp(-log_odds))
+    dead = np.random.binomial(1, prob, size=n)
+
+    df_full = pd.DataFrame({"bp": bp, "dead": dead})
+    fit_full = sm.Logit(df_full["dead"], sm.add_constant(df_full[["bp"]])).fit(
+        disp=False
+    )
+    slope_full = float(fit_full.params["bp"])
+
+    # 40% missing in bp
+    df_miss = df_full.copy()
+    df_miss.loc[np.random.rand(n) < 0.4, "bp"] = np.nan
+
+    # Impute using outcome as predictor
+    datasets = impute_datasets(
+        df_miss, features_to_impute=["bp"], outcome_col="dead", m=5, random_state=42
+    )
+
+    slopes_mice = []
+    ses_mice = []
+    for d in datasets:
+        fit = sm.Logit(d["dead"], sm.add_constant(d[["bp"]])).fit(disp=False)
+        slopes_mice.append(float(fit.params["bp"]))
+        ses_mice.append(float(fit.bse["bp"]))
+
+    import warnings
+
+    from statsmodels.tools.sm_exceptions import ConvergenceWarning
+
+    warnings.filterwarnings("ignore", category=ConvergenceWarning)
+
+    pool_rubin = recipes["pool_estimates_rubin"]
+    pooled = pool_rubin(slopes_mice, ses_mice, n_obs=n, k_params=2)
+
+    # Slope must retain true positive association without severe attenuation towards null
+    assert pooled["pooled_estimate"] > 0.030
+    assert pooled["p_value"] < 0.001
+    assert pooled["between_variance"] > 0.0
+    assert pooled["total_variance"] > pooled["within_variance"]
+    assert np.isclose(pooled["pooled_estimate"], slope_full, atol=0.02)
+
+
 def test_publication_table_html_rendering(recipes):
     render_table = recipes["render_publication_table"]
     df = pd.DataFrame(
