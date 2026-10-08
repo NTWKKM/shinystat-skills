@@ -5,15 +5,26 @@ early_access: false
 tone_instructions: "Review with high rigor for clinical safety, statistical accuracy, Python standards, and agent skills."
 
 reviews:
-  profile: "chill"
+  profile: "assertive"
   request_changes_workflow: false
   high_level_summary: true
   poem: false
-  review_status: true
+  review_status: false
   collapse_walkthrough: false
   path_filters:
     - "!uv.lock"
     - "!**/*.csv"
+    - "!.agent/**"
+    - "!.agents/**"
+    - "!.claude/**"
+    - "!.cursor/**"
+    - "!**/scripts/medstat/**"
+    - "!skills/**/scripts/medstat/**"
+  path_instructions:
+    - path: "packaging/cloud/**"
+      instructions: "Review biostatistical algorithms and Python recipes for mathematical rigor, numerical stability, NaN edge-case handling, and clinical safety."
+    - path: "tests/**"
+      instructions: "Review unit tests for assertion coverage, numerical tolerance, and statistical invariant verification."
   auto_review:
     enabled: true
     drafts: false

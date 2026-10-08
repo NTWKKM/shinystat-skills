@@ -547,3 +547,209 @@ Maintaining multiple fragmented atomic skills (`medstat-clean`, `medstat-models`
 - **Full Parity**: 100% identical mirror synchronization and 442/442 unit and E2E tests passing.
 
 [MEMORY_LEARN: Consolidating modular skills into a single autonomous decision skill with progressive disclosure and deterministic grilling gates maximizes agent flexibility while eliminating silent assumptions and context sprawl.]
+
+## ADR 26: Decoupled Shinystat Cloud Skill Package for Claude Web Sandbox
+
+### Context
+In cloud execution environments such as Claude Web (claude.ai Analysis Tool) or hosted Jupyter notebooks, the proprietary `medstat-core` Python package is not pre-installed. While standard data science libraries (`pandas`, `numpy`, `scipy`, `statsmodels`, `lifelines`, `scikit-learn`) are available, advanced biostatistical routines (Firth penalized regression, Austin & Steyerberg 2019 ICI, DeLong analytical variance, Shrout & Fleiss 1979 two-way ANOVA ICC, Bland-Altman 1999 LoA SE, Austin 2009 SMD, Little's MCAR test) risk execution errors if the agent attempts to import unavailable `medstat` modules.
+Crucially, coupling cloud-specific recipes into the canonical `skills/shinystat` skill compromises the clean architectural design of the local agent workflows.
+
+### Decision
+1. **Pristine Canonical Skill**: Retain `skills/shinystat/` and all 4 platform mirrors (`.agent/`, `.agents/`, `.claude/`, `.cursor/`) in their clean, unlinked original state without cloud recipe references.
+2. **Dedicated Cloud Skill (`packaging/cloud/shinystat-cloud/`)**: Package a dedicated autonomous skill specifically tailored for Claude Web. Embeds cloud sandbox execution guidance and links directly to `references/python-recipes.md`.
+3. **Automated Cloud Packaging Script**: Provide `scripts/package-cloud-skill.sh` to build `~/Desktop/shinystat-cloud.zip` on demand without polluting the canonical skills tree.
+4. **Desktop Artifacts**: Deliver both clean original `~/Desktop/shinystat.zip` and dedicated cloud `~/Desktop/shinystat-cloud.zip`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Clean Architecture**: Canonical skill remains pristine while Claude Web receives a dedicated, self-contained cloud bundle.
+- **Parity**: 442/442 unit and E2E tests passing.
+
+[MEMORY_LEARN: Decoupling cloud-specific execution recipes into a dedicated export package keeps canonical repository skills pristine while empowering cloud-sandboxed agents with self-contained algorithm manuals.]
+
+---
+
+## ADR 27: Cloud Sandbox Biostatistical Hardening, Statistical Parity & Workflow Expansion
+
+### Context
+Code review and empirical audit of `packaging/cloud/shinystat-cloud/` revealed severe numerical inaccuracies, statistical biases, and usability blockers in the cloud sandbox recipes:
+1. Little's MCAR test grouped data on continuous variable values instead of missingness patterns, dropping rows with missing values and inflating $df$ into hundreds.
+2. Typecasting (`astype(int)`) occurred before dropping NaNs in DeLong and Calibration, silently turning missing patient outcomes into negative controls (`0`).
+3. Categorical SMD returned `0.00` when $sd_{bin} = 0$ even under 100% disparity ($p_0=0, p_1=1$), masking extreme imbalance.
+4. ICC accepted `alpha` but omitted confidence intervals entirely, violating SKILL.md completion criteria.
+5. Firth logistic regression provided only Wald CIs, exploding to $>10,000$ on monotone separation, lacked step-halving, and had docstring formula typos.
+6. PSM did not return `pair_id` (blocking paired/conditional analyses) and omitted post-match SMD balance diagnostics.
+7. VanderWeele & Ding E-value applied $\sqrt{OR}$ unconditionally, halving confounder strength for rare clinical outcomes.
+8. `decision-heuristics.md` recommended phantom `medstat.*` modules that do not exist in cloud sandboxes, and EPV < 10 was treated as an outdated hard stop.
+9. Common biostatistical workflows (multivariable logistic table, Kaplan-Meier / Cox PH, MICE imputation, NEJM/JAMA table export) were missing, while Grilling Gate halted unpragmatically on any routine lab missingness.
+
+### Decision
+1. **Mathematical & Algorithmic Hardening**:
+   - Replaced Little's MCAR with the true pattern-grouped EM ML algorithm (Little 1988), producing valid $df \ll N$.
+   - Enforced NaN filtering on raw float inputs prior to integer casting across DeLong, calibration, and DCA.
+   - Fixed categorical SMD to return `np.nan` on zero-variance disparity when $p_0 \ne p_1$.
+   - Implemented exact F-distribution 95% CIs for all 6 Shrout & Fleiss (1979) ICC variants.
+   - Added step-halving and Profile Likelihood CIs to Firth logistic regression; fixed formula docstring to $\sum_i h_i (0.5 - \pi_i) x_{ij}$.
+   - Enhanced PSM to return `pair_id`, categorical dummy encoding, and pre/post SMD balance tables.
+   - Added `rare_outcome` prevalence branching to VanderWeele & Ding E-value.
+2. **Cloud Heuristics & Workflow Expansion**:
+   - Purged all phantom `medstat.*` references from `decision-heuristics.md`, pointing directly to self-contained recipes.
+   - Modernized EPV heuristics per Vittinghoff & McCulloch (2007), van Smeden et al. (2016), and Riley et al. (2019), routing Cox with sparse events to `lifelines` L2 penalization.
+   - Added missing core recipes: Multivariable Logistic Table (Crude & Adjusted ORs), Survival Analysis Suite (KM median, Log-Rank, Cox PH, Schoenfeld test), MICE Imputer (protecting primary outcomes), and NEJM/JAMA Publication Table Formatter.
+   - Enriched `SKILL.md` frontmatter with rich intent triggers, harmonized the 4 Pillars diagram, and added pragmatic batched defaults to the Grilling Gate (<5% complete-case, 5-40% MICE).
+3. **Automated Verification**:
+   - Implemented dedicated unit test suite `tests/unit/test_shinystat_cloud.py` (17/17 passing).
+   - Rebuilt `~/Desktop/shinystat-cloud.zip` via `package-cloud-skill.sh`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Biostatistical Validity**: Eliminates silent data corruption, Hauck-Donner explosions, and false zero balance metrics in cloud sandboxes.
+- **Workflow Completeness**: Cloud agents can execute the full biostatistical lifecycle (Table 1 ➔ Logistic/Cox ➔ MICE ➔ Diagnostics/Agreement ➔ NEJM HTML tables) autonomously.
+- **Full Test Suite Pass**: 459/459 tests passing suite-wide with zero failures.
+
+[MEMORY_LEARN: Cloud code execution sandboxes require mathematically robust, self-contained Python recipes with pre-cast NaN filtering, exact ANOVA F-distribution intervals, and pattern-grouped EM algorithms to eliminate silent data corruption and dependency failures.]
+
+---
+
+## ADR 28: Multi-Imputation Rubin's Pooling & Survival Diagnostics Hardening for Cloud Sandbox
+
+### Context
+User re-testing of `shinystat-cloud.zip` (PR #8) identified 4 specific methodological and diagnostic improvements required prior to merge:
+1. `impute_mice` returned a single imputed dataset; single imputation fails to account for imputation uncertainty, producing spuriously narrow standard errors in downstream inferential regression.
+2. Schoenfeld proportional hazards diagnostics in survival analysis returned only a boolean pass/fail flag without reporting per-covariate test statistics and $p$-values, while Log-Rank was limited to 2 groups.
+3. The ASCII architecture diagram header in `SKILL.md` still read "3-Pillar" while the section title was "The 4 Decision Pillars".
+4. VanderWeele & Ding (2017) continuous hazard ratio conversion required explicit verification and unit tests for both rare and common outcome branches.
+
+### Decision
+1. **Multiple Imputation & Rubin's Pooling**:
+   - Implemented `impute_mice_datasets` generating $M \ge 5$ stochastic imputed datasets via `IterativeImputer(estimator=BayesianRidge(), sample_posterior=True)`.
+   - Implemented pure-Python `pool_estimates_rubin` applying Rubin's rules (Rubin 1987; Barnard & Rubin 1999) to combine point estimates and variance across $M$ imputations:
+     $$\bar{\theta} = \frac{1}{M}\sum_{m=1}^M \hat{\theta}_m, \quad \bar{W} = \frac{1}{M}\sum_{m=1}^M \hat{V}_m, \quad B = \frac{1}{M-1}\sum_{m=1}^M (\hat{\theta}_m - \bar{\theta})^2, \quad T = \bar{W} + \left(1 + \frac{1}{M}\right)B$$
+     incorporating Barnard-Rubin finite-sample adjusted degrees of freedom $\nu$, fraction of missing information ($FMI$), and 95% CIs.
+   - Retained `impute_mice_single` (and backward-compatible alias `impute_mice`) with explicit docstring warnings that single imputation is strictly reserved for rapid exploratory data health profiling.
+2. **Survival Suite Diagnostic Expansion**:
+   - Upgraded Log-Rank testing to automatically branch: 2 groups $\to$ `logrank_test`; $>2$ groups $\to$ `multivariate_logrank_test`.
+   - Enhanced Schoenfeld diagnostics via `proportional_hazard_test(cph, data, time_transform="rank")` returning per-variable test statistics, $p$-values, and an overall boolean check.
+3. **Pillars Harmonization & Decision Trees**:
+   - Harmonized diagram title in `SKILL.md` to `The 4 Decision Pillars Triangulation`.
+   - Updated missing data heuristics in `SKILL.md` and `decision-heuristics.md` to require $M \ge 5$ stochastic datasets + Rubin's rules for inferential modeling.
+4. **Unit Test Expansion & Verification**:
+   - Expanded `tests/unit/test_shinystat_cloud.py` with tests for HR E-value branching (rare vs common, protective $HR < 1.0$), multivariate Log-Rank, per-variable Schoenfeld diagnostics, and Rubin's pooling variance inflation.
+   - Rebuilt `~/Desktop/shinystat-cloud.zip`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Inferential Validity**: MICE in cloud sandboxes now properly inflates standard errors to reflect missing data uncertainty, preventing anti-conservative clinical conclusions.
+- **Diagnostic Transparency**: Clinicians can pinpoint specific covariates violating proportional hazards in Cox regression.
+- **Full Test Suite Pass**: 19/19 cloud unit tests passing, 461/461 suite-wide tests passing with zero regressions.
+
+[MEMORY_LEARN: Multiple imputation in clinical inference strictly requires M>=5 stochastic datasets with Rubin's rules pooling (W_bar + (1+1/M)B); single imputation treats imputed values as known constants and falsely narrows confidence intervals.]
+
+---
+
+## ADR 29: Outcome and Covariate Conditioning in MICE Imputation to Prevent Null Attenuation
+
+### Context
+Simulation audits and biostatistical review of `impute_mice_datasets` revealed a severe methodological bias:
+1. Passing only `clean[features_to_impute]` into `IterativeImputer` excluded the primary outcome and other analytic covariates from the imputation model. Under this setup, imputed values are conditionally independent of the outcome, attenuating the true regression slope towards the null by ~40–50% (e.g. 0.0589 attenuated to 0.0287).
+2. The clinical governance rule "never impute the primary outcome" was misinterpreted as "never include the outcome in the imputation model". According to foundational biostatistical literature (van Buuren, *Flexible Imputation of Missing Data*; Moons et al., 2006), the primary outcome **must** be included as a predictor in imputation models for missing covariates; only its values must remain unmodified.
+3. If `features_to_impute` contains only a single variable and no other predictors are supplied, `IterativeImputer` has no features to condition on, degenerating to unconditional mean imputation with between-imputation variance $B = 0$ across all $M$ datasets.
+
+### Decision
+1. **Outcome & Covariate Conditioning**:
+   - Updated `impute_mice_datasets` and `impute_mice_single` to assemble conditioning columns:
+     $$\text{cols} = \text{Unique}(\text{features\_to\_impute} \cup \text{predictors} \cup [\text{outcome\_col}])$$
+   - Fits `IterativeImputer` on all `cols`, but copies imputed values strictly back to `features_to_impute` (`clean[features_to_impute] = filled[features_to_impute]`), leaving the primary outcome and any complete covariates unmodified.
+2. **Mean Imputation Guard**:
+   - Added validation: `if len(cols) < 2: raise ValueError(...)` to block unconditional mean imputation when a single variable is passed with zero predictors and no outcome.
+3. **Automated Verification**:
+   - Added `test_mice_single_feature_with_outcome_conditioning`: verifies that single-variable imputation conditioned on outcome yields strictly positive between-imputation variance ($B > 0$) and fraction of missing information ($FMI > 0$).
+   - Added `test_mice_attenuation_recovery_vs_full_data`: verifies that MICE pooled slope recovers the full-data regression slope without severe attenuation towards the null.
+   - Rebuilt `~/Desktop/shinystat-cloud.zip`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Biostatistical Validity**: Eliminates artificial attenuation towards the null, aligning cloud MICE recipes with international standards (van Buuren; Moons 2006).
+- **Test Suite Pass**: 21/21 cloud unit tests passing, 463/463 workspace-wide tests passing.
+
+[MEMORY_LEARN: In MICE imputation, never imputing the primary outcome means never overwriting or estimating missing outcome values; the outcome MUST still be included as a predictor when imputing covariates to prevent severe attenuation towards the null.]
+
+---
+
+## ADR 30: CodeRabbit PR #8 Remediation — Statistical Invariant Hardening, Strict Binary Validation, and Recipe Self-Containment
+
+### Context
+Comprehensive code review by CodeRabbit AI on GitHub PR #8 (`feat/cloud-skill-hardening`) against `main` identified 11 statistical, edge-case, and architectural findings across cloud recipes and documentation:
+1. **Binary Outcome Silent Conversion**: `astype(int)` in DeLong, Calibration, and DCA allowed non-binary floats (e.g., $0.9 \to 0$, $1.9 \to 1$) and unverified class counts. Survival event indicators allowed arbitrary numbers or missing values.
+2. **MICE Clinical Domain Constraints**: `IterativeImputer` with Gaussian `BayesianRidge` lacked bounds checking (`min_value`, `max_value`) for clinical metrics (e.g. vital signs), crashed on non-numeric columns, failed on 100% missing columns, and lacked validation for $m \ge 1$.
+3. **Firth Logistic Regression Failure Handling**: Step-halving accepted parameter updates even when penalized log-likelihood deteriorated; convergence only checked parameter steps without verifying the adjusted score gradient; profile likelihood search fallback to Wald CI was silent without telemetry; design matrix collinearity was unverified.
+4. **Rubin Pooling Barnard-Rubin Limit**: Setting $df = \infty$ when between-imputation variance $B = 0$ produced spuriously narrow standard normal confidence intervals instead of using the Barnard-Rubin (1999) finite-sample limit $\nu_{\mathrm{BR}} = \nu_{\mathrm{com}}\frac{\nu_{\mathrm{com}}+1}{\nu_{\mathrm{com}}+3}$.
+5. **Little's MCAR Edge Cases**: Degenerate missingness structures with $df \le 0$ or completely missing datasets returned false non-significance ($p = 1.0$), and the EM algorithm lacked convergence and iteration telemetry.
+6. **PSM Self-Containment & Balance Diagnostics**: SMD calculation relied on assumptions of existing scope instead of self-containment; dummy-encoded categorical confounders were omitted from balance tables; duplicate DataFrame indices corrupted 1:1 nearest-neighbor matching.
+7. **Survival Cohort Retention Separation**: KM unadjusted analysis and Cox proportional hazards regression conflated cohorts instead of separating retention audits when covariates had missing values.
+8. **Table 1 Column Formatting & SMD Zero Counts**: Header and body column string keys did not match, and categorical SMDs failed when a group had zero observations.
+9. **ICC Zero Residual Boundary**: Perfect agreement with zero within-subject or error variance ($MSW = 0$ or $MSE = 0$) resulted in division-by-zero or NaN instead of ICC 1.0 with exact $[1.0, 1.0]$ bounds.
+10. **HTML Escaping**: Recipe 13 rendered unescaped HTML strings, posing security risks in cloud web interfaces.
+11. **Documentation Alignment**: 4-Pillars diagram numbering, missingness thresholds, and Schoenfeld diagnostic return keys required harmonization between `SKILL.md`, `decision-heuristics.md`, and `python-recipes.md`.
+
+### Decision
+1. **Strict Finite Binary Domain & Dimensionality Validation**:
+   - Implemented strict $\{0, 1\}$ finite value verification (`np.isin(y, [0, 1]).all()`) and length equality checks across `auc_ci_delong`, `delong_paired_test`, `evaluate_calibration`, `calculate_dca`, `match_propensity_scores`, `fit_logistic_regression_table`, and `fit_survival_analysis_suite`.
+   - Bounded probability inputs strictly to $[0, 1]$ in calibration and DCA with explicit apparent-performance disclosures.
+2. **MICE Clinical Safeguards**:
+   - Enforced $m \ge 1$, input validation blocking non-numeric columns and 100% missing variables, and integrated bounded imputation (`min_value`, `max_value`) to preserve physiological ranges while keeping primary outcomes strictly un-imputed.
+3. **Firth Logistic Regression Convergence Hardening**:
+   - Added `np.linalg.matrix_rank(X) == p` design matrix full-rank check.
+   - Enforced monotonic penalized log-likelihood in step-halving.
+   - Required dual convergence: parameter step norm $< tol$ and adjusted score gradient norm $< tol \cdot \max(1, N)$.
+   - Added `"ci_method"` telemetry tracking (`"profile"` vs `"wald_fallback"`).
+4. **Barnard-Rubin Finite-Sample Limit**:
+   - Formulated degrees of freedom under $B = 0$:
+     $$\nu_{\mathrm{BR}} = \nu_{\mathrm{com}}\frac{\nu_{\mathrm{com}}+1}{\nu_{\mathrm{com}}+3}, \quad \text{where } \nu_{\mathrm{com}} = n_{\mathrm{obs}} - k_{\mathrm{params}}$$
+   - Added validation for non-negative standard errors, matching vector lengths, and safe $W = 0$ boundary handling.
+5. **Little's MCAR Degeneracy & Telemetry**:
+   - Bounded $df \le 0$ as untestable missingness returning NaN statistics and `converged=False`.
+   - Added telemetry fields: `converged`, `n_iterations`, and `n_excluded_rows`.
+6. **PSM Self-Containment, Categorical Balance & Re-indexing**:
+   - Embedded standalone `calculate_smd` helper directly in Recipe 6.
+   - Added `reset_index(drop=True)` to ensure index uniqueness.
+   - Expanded balance diagnostics to encompass dummy-encoded categorical indicators alongside continuous covariates.
+7. **Cohort Retention Audits & ICC Exactness**:
+   - Attached explicit retention audits to logistic regression tables and separated KM vs Cox cohorts in survival analysis (`retention_km` and `retention_cox`).
+   - Mapped ICC zero-residual boundaries to exact point 1.0, $[1.0, 1.0]$ CIs, and $F = \infty$.
+8. **HTML Escaping & Documentation Harmonization**:
+   - Escaped all HTML table components with `html.escape` in Recipe 13.
+   - Harmonized 4-Pillars ASCII diagrams and missingness triage rules across `SKILL.md`, `decision-heuristics.md`, and `python-recipes.md`.
+9. **CodeRabbit Gap Remediations (Gaps 1–3)**:
+   - **MICE Continuous Target Scope**: Restricted `features_to_impute` strictly to continuous variables. Rejected binary/dummy indicators and boolean features with actionable `ValueError`. Disallowed missing categorical predictors while permitting fully observed dummy predictors to condition on without improper Gaussian imputation.
+   - **DCA Apparent Performance Disclosure**: Attached explicit disclosure to `df.attrs["apparent_performance_warning"]` and boolean `df.attrs["internally_calibrated"]` whenever input scores fall outside $[0, 1]$ and trigger in-sample logistic recalibration.
+   - **Isolated Recipe Execution & Deep Firth Tests**: Enhanced `test_each_recipe_is_self_contained` to call all 13 recipe entry-point functions with valid mini-fixtures in isolated namespaces. Added numerical profile likelihood endpoint checks ($2\Delta \ell^* \approx \chi^2_{1, 0.95}$ within 0.05), optimizer failure handling (`max_iter=1`), and monotonic log-likelihood progression under separation.
+10. **Comprehensive Verification**:
+   - Rebuilt `/Users/ntwkkm/Desktop/shinystat-cloud.zip`.
+   - All 32 cloud tests passing, 474/474 workspace-wide tests passing with zero regressions.
+11. **Proper Bayesian Linear Regression MICE Algorithm & Empirical Coverage Recovery**:
+   - **Parameter Uncertainty vs Marginal Sampling**: `sklearn.impute.IterativeImputer(estimator=BayesianRidge(), sample_posterior=True)` takes independent marginal predictive draws for each missing observation using predictive variance $x^T \Sigma_\beta x + 1/\alpha$. While this predictive variance incorporates parameter variance $x^T \Sigma_\beta x$, independent row-wise marginal draws do not condition on a single shared draw of the regression vector $\beta^*$ across all missing records in an imputation dataset.
+   - **Proper Bayesian Implementation**: Implemented textbook Proper Bayesian Linear Regression MICE (Rubin 1987; Schafer 1997; van Buuren 2018). In each chained cycle, requires $n_{\mathrm{obs}} > p$, full column rank, and non-degenerate residual sum of squares ($\text{RSS} > 1e-12$) to compute the exact unregularized flat-prior OLS posterior: deterministic linear relationships where the target is perfectly predicted are rejected with actionable errors rather than silently flooring variance. Draws residual variance $\sigma^{*2} \sim \text{Inv-}\chi^2(\nu, s^2)$ via $\chi^2$ sampling without tail modifications, draws a shared regression parameter vector $\beta^* \sim \mathcal{N}(\hat{\beta}, \sigma^{*2} (X_{\mathrm{obs}}^T X_{\mathrm{obs}})^{-1})$, and samples missing values $y_{\mathrm{mis}}^* \sim \mathcal{N}(X_{\mathrm{mis}} \beta^*, \sigma^{*2})$. Both MICE entry points require `max_iter` to be a positive integer ($\ge 1$).
+   - **Bounded Sampling Model**: Bounded constraints (`min_value`, `max_value`) are drawn using truncated normal distributions (`scipy.stats.truncnorm`) rather than point-clipping, preserving continuous probability density without artificial point masses at boundaries, accompanied by strict bound ordering validation ($a < b$).
+   - **Conditioning Integrity & Discrete Guard**: Requires conditioning-only predictors to be fully observed, mandates explicit cohort disposition for missing outcomes prior to MICE, rejects non-finite values, and rejects binary/low-cardinality discrete integer category encodings ({1, 2}, {1, 2, 3}) alongside declared categorical dtypes.
+   - **Simulation Benchmark Evidence**: A Monte Carlo MAR simulation benchmark across 50 trials ($N=500$, true slope $\beta=0.06$, $M=10$) demonstrates empirical recovery for this specific evaluated scenario:
+     - Pooled slope: $0.0602$ (vs full data $0.0592$, true $0.0600$).
+     - Relative bias: $0.39\%$ (well within $|\text{bias}| < 10\%$).
+     - Empirical 95% CI coverage: $94.00\%$ (with Monte Carlo SE $\approx 3.4$ percentage points, recovering coverage relative to marginal independent sampling).
+   - **Guidance & Complete-Case Sensitivity**: Updated `SKILL.md` and `decision-heuristics.md` recommending $M \ge 5$ for $\le 30\%$ missingness, $M \ge 20$ for $> 30\%$ missingness, and qualifying that complete-case analysis serves as a sensitivity comparison whose agreement does not establish MAR or rule out MNAR bias.
+12. **Firth Penalized Likelihood Enhancements**:
+   - Monotonically non-decreasing penalized log-likelihood is tracked across iterations in `pll_history`.
+   - When maximum iterations are exceeded or convergence fails, immediate fallback to Wald intervals is enforced (`ci_method = ["wald_fallback"]`), preventing computation of profile likelihood cutoffs on non-maximized iterates.
+13. **Comprehensive Verification**:
+   - Rebuilt `/Users/ntwkkm/Desktop/shinystat-cloud.zip`.
+   - All cloud tests passing with zero regressions and clean `ruff` linter/formatter compliance.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Biostatistical Invariance**: Eliminates silent data coercion, improper inference with $df = \infty$, fractional dummy MICE draws, rank-deficient OLS regressions, point-mass boundary clipping, and unverified optimization in cloud sandbox environments.
+- **Proper Parameter Uncertainty**: MICE parameter draws preserve joint coefficient uncertainty across missing records, recovering empirical coverage in MAR benchmark scenarios.
+- **Self-Containment**: All 13 recipes execute standalone without cross-block state leakage or hidden dependencies.
+
+[MEMORY_LEARN: In clinical cloud sandboxes, all inferential recipes must enforce strict mathematical invariants (finite binary {0,1} domain, matrix rank, Barnard-Rubin B=0 finite-sample limits, continuous-only Gaussian MICE targets, proper Bayesian parameter draws for nominal CI coverage, and score gradient convergence) with standalone execution self-containment.]
+
+

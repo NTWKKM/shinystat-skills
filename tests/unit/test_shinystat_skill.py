@@ -32,6 +32,17 @@ def test_shinystat_canonical_skill_exists_and_valid():
     assert "The Deterministic Grilling Gate" in body
     assert "Completion Criteria" in body
     assert "references/decision-heuristics.md" in body
+    assert "scripts/medstat" in body
+
+    # Bundled scripts checks
+    scripts_dir = canonical_skill.parent / "scripts"
+    assert (scripts_dir / "medstat_cli.py").exists(), "scripts/medstat_cli.py missing"
+    assert (scripts_dir / "medstat" / "cli" / "main.py").exists(), (
+        "scripts/medstat/cli/main.py missing"
+    )
+    assert (scripts_dir / "medstat" / "models" / "firth.py").exists(), (
+        "scripts/medstat/models/firth.py missing"
+    )
 
 
 def test_shinystat_reference_manual_exists():
@@ -58,10 +69,18 @@ def test_shinystat_multi_agent_mirrors_byte_identical():
         repo_root / ".cursor" / "skills",
     ]
 
+    def _is_valid_skill_file(path: Path) -> bool:
+        return (
+            path.is_file()
+            and path.name != ".DS_Store"
+            and not path.name.endswith(".pyc")
+            and "__pycache__" not in path.parts
+        )
+
     canonical_files = {
         path.relative_to(canonical_dir)
         for path in canonical_dir.rglob("*")
-        if path.is_file() and path.name != ".DS_Store"
+        if _is_valid_skill_file(path)
     }
     assert canonical_files, "No files found in canonical skills directory"
 
@@ -70,7 +89,7 @@ def test_shinystat_multi_agent_mirrors_byte_identical():
         mirror_files = {
             path.relative_to(mirror)
             for path in mirror.rglob("*")
-            if path.is_file() and path.name != ".DS_Store"
+            if _is_valid_skill_file(path)
         }
         assert mirror_files == canonical_files, (
             f"Path mismatch for mirror {mirror}: "
