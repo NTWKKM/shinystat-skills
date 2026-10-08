@@ -421,7 +421,9 @@ def calculate_dca(y_true, y_pred, thresholds: np.ndarray | None = None) -> pd.Da
     y_p = p_raw[valid]
 
     # Map raw biomarker to probability if not in [0, 1]
+    internally_calibrated = False
     if (y_p < 0.0).any() or (y_p > 1.0).any():
+        internally_calibrated = True
         calib_fit = sm.Logit(y_t, sm.add_constant(y_p)).fit(disp=False)
         y_p = calib_fit.predict(sm.add_constant(y_p))
 
@@ -443,7 +445,16 @@ def calculate_dca(y_true, y_pred, thresholds: np.ndarray | None = None) -> pd.Da
         records.append({"threshold": pt, "net_benefit": float(nb_all), "strategy": "Treat All"})
         records.append({"threshold": pt, "net_benefit": 0.0, "strategy": "Treat None"})
 
-    return pd.DataFrame(records)
+    res_df = pd.DataFrame(records)
+    if internally_calibrated:
+        res_df.attrs["apparent_performance_warning"] = (
+            "Input scores fell outside [0, 1] and were calibrated in-sample using logistic regression. "
+            "Net benefit estimates reflect apparent development performance and may be over-optimistic."
+        )
+    else:
+        res_df.attrs["apparent_performance_warning"] = None
+    res_df.attrs["internally_calibrated"] = internally_calibrated
+    return res_df
 ```
 
 ---
@@ -1300,7 +1311,7 @@ def fit_survival_analysis_suite(
 
 ## 12. Multiple Imputation by Chained Equations (MICE) & Rubin's Rules
 
-Provides multiple stochastic imputations ($M \ge 5$) via Scikit-Learn `IterativeImputer` with Bayesian Ridge regression, strictly enforcing that **primary outcomes are never imputed**. Configured for continuous/numeric clinical features with optional boundary constraints (`min_value`, `max_value`). Categorical confounders must be dummy-encoded before imputation. Includes pure-Python **Rubin's rules pooling** (Rubin 1987; Barnard & Rubin 1999) with finite-sample degrees of freedom adjustment. Ratio effect measures (OR, HR) must be pooled on the log scale and exponentiated.
+Provides multiple stochastic imputations ($M \ge 5$) via Scikit-Learn `IterativeImputer` with Bayesian Ridge regression, strictly enforcing that **primary outcomes are never imputed**. Configured strictly for continuous/numeric clinical features with optional boundary constraints (`min_value`, `max_value`). Imputation targets (`features_to_impute`) must be continuous variables; Gaussian posterior draws produce continuous/fractional numbers, so bounds of $[0, 1]$ do not enforce binary $\{0, 1\}$ values or mutually exclusive dummy group membership. Fully observed dummy-encoded variables may be supplied in `predictors` to serve as conditioning features. Missing categorical targets require variable-type-specific imputation (e.g., logistic/polytomous regression or complete-case analysis) and must not be included in `features_to_impute`. Includes pure-Python **Rubin's rules pooling** (Rubin 1987; Barnard & Rubin 1999) with finite-sample degrees of freedom adjustment. Ratio effect measures (OR, HR) must be pooled on the log scale and exponentiated.
 
 ```python
 import numpy as np
@@ -1328,7 +1339,11 @@ def impute_mice_datasets(
     2. Primary outcome and additional covariates MUST be included as predictors in the
        imputation model per standard biostatistical methodology (van Buuren; Moons et al. 2006)
        to prevent severe attenuation towards the null.
-    3. Continuous/numeric feature scope: Categorical features must be dummy-encoded before imputation.
+    3. Continuous imputation targets only: features_to_impute must be continuous variables.
+       Gaussian MICE (BayesianRidge) draws continuous posterior samples and cannot enforce
+       binary {0, 1} values or mutually exclusive dummy group membership. Fully observed
+       categorical dummies may be supplied in 'predictors' to condition on, but missing
+       categorical targets require variable-type-specific imputation.
     4. Observed values of features_to_impute are preserved intact; only missing values are imputed.
     """
     if m < 1:
@@ -1344,16 +1359,48 @@ def impute_mice_datasets(
             "otherwise chained imputation degenerates to unconditional mean imputation."
         )
 
-    # Validate feature types and missingness
+    # Validate that features_to_impute are strictly continuous
+    for feat in features_to_impute:
+        if df[feat].isna().all():
+            raise ValueError(f"Column '{feat}' has 0 observed values (100% missing) and cannot be imputed.")
+        if pd.api.types.is_bool_dtype(df[feat]) or not pd.api.types.is_numeric_dtype(df[feat]):
+            raise ValueError(
+                f"Column '{feat}' in features_to_impute is non-numeric ({df[feat].dtype}). "
+                "Recipe 12 implements Gaussian MICE for continuous variables. "
+                "Missing categorical targets require variable-type-specific imputation."
+            )
+        non_null_vals = df[feat].dropna().unique()
+        if len(non_null_vals) <= 2 and set(non_null_vals).issubset({0, 1, 0.0, 1.0}):
+            raise ValueError(
+                f"Column '{feat}' in features_to_impute is binary/dummy ({set(non_null_vals)}). "
+                "Recipe 12 implements Gaussian MICE (BayesianRidge) for continuous variables; "
+                "Gaussian posterior draws produce fractional values and cannot enforce binary {0, 1} "
+                "values or mutually exclusive dummy group membership. Restrict features_to_impute "
+                "to continuous variables. Fully observed categorical dummies may be included in 'predictors' "
+                "to condition on, or use variable-type-specific imputation."
+            )
+
+    # Validate conditioning columns and predictors
     for c in cols:
         if df[c].isna().all():
-            raise ValueError(f"Column '{c}' has 0 observed values (100% missing) and cannot be imputed or conditioned upon.")
-        if not pd.api.types.is_numeric_dtype(df[c]):
+            raise ValueError(f"Column '{c}' has 0 observed values (100% missing) and cannot be conditioned upon.")
+        if pd.api.types.is_bool_dtype(df[c]) or not pd.api.types.is_numeric_dtype(df[c]):
             raise ValueError(
                 f"Column '{c}' is non-numeric ({df[c].dtype}). "
-                "Recipe 12 implements Gaussian MICE for continuous variables. "
-                "Categorical features must be numerically/dummy encoded before imputation."
+                "All features in MICE conditioning matrix must be numeric. "
+                "Categorical predictors must be dummy-encoded before inclusion in 'predictors'."
             )
+
+    if predictors:
+        for pred in predictors:
+            if df[pred].isna().any():
+                non_null_p = df[pred].dropna().unique()
+                if len(non_null_p) <= 2 and set(non_null_p).issubset({0, 1, 0.0, 1.0}):
+                    raise ValueError(
+                        f"Predictor '{pred}' is binary/dummy and contains missing values. "
+                        "Gaussian MICE cannot impute categorical variables. "
+                        "Categorical predictors must be fully observed to condition on in Gaussian MICE."
+                    )
 
     # Build min/max bounds arrays for IterativeImputer
     if isinstance(min_value, dict):
@@ -1517,15 +1564,48 @@ def impute_mice_single(
             "otherwise chained imputation degenerates to unconditional mean imputation."
         )
 
+    # Validate that features_to_impute are strictly continuous
+    for feat in features_to_impute:
+        if df[feat].isna().all():
+            raise ValueError(f"Column '{feat}' has 0 observed values (100% missing) and cannot be imputed.")
+        if pd.api.types.is_bool_dtype(df[feat]) or not pd.api.types.is_numeric_dtype(df[feat]):
+            raise ValueError(
+                f"Column '{feat}' in features_to_impute is non-numeric ({df[feat].dtype}). "
+                "Recipe 12 implements Gaussian MICE for continuous variables. "
+                "Missing categorical targets require variable-type-specific imputation."
+            )
+        non_null_vals = df[feat].dropna().unique()
+        if len(non_null_vals) <= 2 and set(non_null_vals).issubset({0, 1, 0.0, 1.0}):
+            raise ValueError(
+                f"Column '{feat}' in features_to_impute is binary/dummy ({set(non_null_vals)}). "
+                "Recipe 12 implements Gaussian MICE (BayesianRidge) for continuous variables; "
+                "Gaussian posterior draws produce fractional values and cannot enforce binary {0, 1} "
+                "values or mutually exclusive dummy group membership. Restrict features_to_impute "
+                "to continuous variables. Fully observed categorical dummies may be included in 'predictors' "
+                "to condition on, or use variable-type-specific imputation."
+            )
+
+    # Validate conditioning columns and predictors
     for c in cols:
         if df[c].isna().all():
-            raise ValueError(f"Column '{c}' has 0 observed values (100% missing) and cannot be imputed or conditioned upon.")
-        if not pd.api.types.is_numeric_dtype(df[c]):
+            raise ValueError(f"Column '{c}' has 0 observed values (100% missing) and cannot be conditioned upon.")
+        if pd.api.types.is_bool_dtype(df[c]) or not pd.api.types.is_numeric_dtype(df[c]):
             raise ValueError(
                 f"Column '{c}' is non-numeric ({df[c].dtype}). "
-                "Recipe 12 implements Gaussian MICE for continuous variables. "
-                "Categorical features must be numerically/dummy encoded before imputation."
+                "All features in MICE conditioning matrix must be numeric. "
+                "Categorical predictors must be dummy-encoded before inclusion in 'predictors'."
             )
+
+    if predictors:
+        for pred in predictors:
+            if df[pred].isna().any():
+                non_null_p = df[pred].dropna().unique()
+                if len(non_null_p) <= 2 and set(non_null_p).issubset({0, 1, 0.0, 1.0}):
+                    raise ValueError(
+                        f"Predictor '{pred}' is binary/dummy and contains missing values. "
+                        "Gaussian MICE cannot impute categorical variables. "
+                        "Categorical predictors must be fully observed to condition on in Gaussian MICE."
+                    )
 
     if isinstance(min_value, dict):
         min_arr = np.array([min_value.get(c, -np.inf) for c in cols])

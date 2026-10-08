@@ -619,7 +619,7 @@ def test_publication_table_html_rendering(recipes):
 
 
 def test_each_recipe_is_self_contained():
-    """Verify that every python code block in python-recipes.md executes in an isolated namespace."""
+    """Verify that every python code block in python-recipes.md executes and runs in an isolated namespace."""
     content = RECIPES_PATH.read_text(encoding="utf-8")
     blocks = re.findall(r"```python\n(.*?)\n```", content, re.DOTALL)
     assert len(blocks) >= 13, f"Expected at least 13 recipes, got {len(blocks)}"
@@ -628,7 +628,146 @@ def test_each_recipe_is_self_contained():
         try:
             exec(block, isolated_ns)
         except Exception as e:
-            pytest.fail(f"Recipe {idx} failed to execute in an isolated namespace: {e}")
+            pytest.fail(
+                f"Recipe {idx} failed to import/define in an isolated namespace: {e}"
+            )
+
+        try:
+            if idx == 1:
+                df = pd.DataFrame(
+                    {
+                        "arm": ["A", "A", "B", "B"],
+                        "age": [40.0, 50.0, 60.0, 70.0],
+                        "sex": ["M", "F", "M", "F"],
+                    }
+                )
+                res = isolated_ns["generate_table_one"](
+                    df, strata="arm", continuous_vars=["age"], categorical_vars=["sex"]
+                )
+                assert isinstance(res, pd.DataFrame)
+            elif idx == 2:
+                res = isolated_ns["calculate_2x2_metrics"](tp=40, fp=10, fn=5, tn=45)
+                assert "Sensitivity" in res
+            elif idx == 3:
+                res1 = isolated_ns["auc_ci_delong"]([1, 0, 1, 0], [0.9, 0.1, 0.8, 0.2])
+                assert "auc" in res1
+                res2 = isolated_ns["delong_paired_test"](
+                    [1, 0, 1, 0], [0.9, 0.1, 0.8, 0.2], [0.8, 0.2, 0.7, 0.3]
+                )
+                assert "p_value" in res2
+            elif idx == 4:
+                res1 = isolated_ns["evaluate_calibration"](
+                    [1, 0, 1, 0], [0.8, 0.2, 0.7, 0.3]
+                )
+                assert "brier_score" in res1
+                res2 = isolated_ns["calculate_dca"]([1, 0, 1, 0], [0.8, 0.2, 0.7, 0.3])
+                assert isinstance(res2, pd.DataFrame)
+            elif idx == 5:
+                res1 = isolated_ns["calculate_bland_altman"](
+                    [10.0, 20.0, 30.0], [10.2, 19.8, 30.1]
+                )
+                assert "mean_diff" in res1
+                res2 = isolated_ns["calculate_icc_matrix"](
+                    np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+                )
+                assert isinstance(res2, pd.DataFrame)
+            elif idx == 6:
+                df_psm = pd.DataFrame(
+                    {
+                        "trt": [0, 0, 1, 1, 0, 1],
+                        "age": [20.0, 25.0, 30.0, 35.0, 22.0, 32.0],
+                        "sex": ["M", "F", "M", "F", "F", "M"],
+                    }
+                )
+                res = isolated_ns["match_propensity_scores"](
+                    df_psm, treatment_col="trt", confounders=["age", "sex"]
+                )
+                assert "matched_df" in res
+            elif idx == 7:
+                X = np.array(
+                    [
+                        [1.0, 2.0],
+                        [2.0, 1.0],
+                        [3.0, 4.0],
+                        [4.0, 3.0],
+                        [5.0, 5.0],
+                        [6.0, 7.0],
+                    ]
+                )
+                y = np.array([0, 0, 0, 1, 1, 1])
+                res = isolated_ns["fit_firth_logistic"](X, y)
+                assert "coefficients" in res
+            elif idx == 8:
+                df_mcar = pd.DataFrame(
+                    {
+                        "a": [1.0, 2.0, 3.0, 4.0, np.nan],
+                        "b": [2.0, 3.0, np.nan, 5.0, 6.0],
+                    }
+                )
+                res = isolated_ns["littles_mcar_test"](df_mcar, ["a", "b"])
+                assert "p_value" in res
+            elif idx == 9:
+                res = isolated_ns["calculate_e_value"](
+                    2.5, lower=1.5, upper=4.0, estimate_type="OR", rare_outcome=True
+                )
+                assert "e_value_point" in res
+            elif idx == 10:
+                df_l = pd.DataFrame(
+                    {"y": [0, 0, 1, 1, 0, 1], "x1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]}
+                )
+                res = isolated_ns["fit_logistic_regression_table"](
+                    df_l, outcome="y", covariates=["x1"]
+                )
+                assert isinstance(res, pd.DataFrame)
+            elif idx == 11:
+                df_s = pd.DataFrame(
+                    {
+                        "t": [10.0, 20.0, 30.0, 40.0],
+                        "e": [1, 0, 1, 0],
+                        "arm": ["A", "A", "B", "B"],
+                        "age": [50.0, 60.0, 55.0, 65.0],
+                    }
+                )
+                res = isolated_ns["fit_survival_analysis_suite"](
+                    df_s,
+                    duration_col="t",
+                    event_col="e",
+                    strata_col="arm",
+                    covariates=["age"],
+                )
+                assert "km_summary" in res
+            elif idx == 12:
+                df_m = pd.DataFrame(
+                    {
+                        "y": [0, 0, 1, 1, 0, 1],
+                        "x1": [1.0, np.nan, 3.0, 4.0, np.nan, 6.0],
+                        "x2": [10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
+                    }
+                )
+                dsets = isolated_ns["impute_mice_datasets"](
+                    df_m,
+                    features_to_impute=["x1"],
+                    outcome_col="y",
+                    predictors=["x2"],
+                    m=2,
+                )
+                assert len(dsets) == 2
+                single_m = isolated_ns["impute_mice_single"](
+                    df_m, features_to_impute=["x1"], outcome_col="y", predictors=["x2"]
+                )
+                assert isinstance(single_m, pd.DataFrame)
+                pooled = isolated_ns["pool_estimates_rubin"](
+                    [1.0, 1.1], [0.2, 0.2], n_obs=100, k_params=1
+                )
+                assert "pooled_estimate" in pooled
+            elif idx == 13:
+                df_r = pd.DataFrame({"Var": ["Age"], "Val": ["50 ± 10"]})
+                res = isolated_ns["render_publication_table"](df_r, title="Table 1")
+                assert "<table" in res
+        except Exception as e:
+            pytest.fail(
+                f"Recipe {idx} failed to run with valid test fixture in an isolated namespace: {e}"
+            )
 
 
 # -----------------------------------------------------------------------------
@@ -679,6 +818,22 @@ def test_calibration_and_dca_strict_binary_and_probability_validation(recipes):
     # Length mismatch in DCA
     with pytest.raises(ValueError, match="Length mismatch"):
         calc_dca([1, 0, 1], [0.8, 0.2])
+
+    # DCA internal calibration disclosure checks
+    # 1. Scores within [0, 1] do not trigger calibration or warning
+    dca_valid = calc_dca([1, 0, 1, 0], [0.8, 0.2, 0.7, 0.3])
+    assert dca_valid.attrs["apparent_performance_warning"] is None
+    assert dca_valid.attrs["internally_calibrated"] is False
+
+    # 2. Raw biomarker scores outside [0, 1] trigger internal logistic calibration and disclosure
+    dca_uncalib = calc_dca([1, 0, 1, 0], [-1.5, 0.2, 2.5, 0.4])
+    assert dca_uncalib.attrs["internally_calibrated"] is True
+    assert dca_uncalib.attrs["apparent_performance_warning"] is not None
+    assert (
+        "apparent development performance"
+        in dca_uncalib.attrs["apparent_performance_warning"]
+    )
+    assert "over-optimistic" in dca_uncalib.attrs["apparent_performance_warning"]
 
 
 def test_psm_and_logistic_strict_binary_and_retention_audit(recipes):
@@ -811,6 +966,66 @@ def test_mice_input_guards_and_bounds(recipes):
             "Imputed heart rate must respect minimum bound 50.0"
         )
 
+    # 5. Reject binary/dummy target in features_to_impute
+    df_bin = pd.DataFrame(
+        {
+            "y": [1, 0, 1, 0],
+            "bin_target": [0, 1, 0, np.nan],
+            "age": [50.0, 60.0, 55.0, 65.0],
+        }
+    )
+    with pytest.raises(ValueError, match="binary/dummy"):
+        impute_datasets(df_bin, features_to_impute=["bin_target"], outcome_col="y", m=2)
+
+    # 6. Reject boolean target in features_to_impute
+    df_bool = pd.DataFrame(
+        {
+            "y": [1, 0, 1, 0],
+            "bool_target": [True, False, True, False],
+            "age": [50.0, 60.0, 55.0, 65.0],
+        }
+    )
+    with pytest.raises(ValueError, match="non-numeric"):
+        impute_datasets(
+            df_bool, features_to_impute=["bool_target"], outcome_col="y", m=2
+        )
+
+    # 7. Reject categorical predictor with missing values
+    df_missing_pred = pd.DataFrame(
+        {
+            "y": [1, 0, 1, 0],
+            "age": [50.0, np.nan, 55.0, 65.0],
+            "bin_pred": [0, 1, np.nan, 1],
+        }
+    )
+    with pytest.raises(ValueError, match="binary/dummy and contains missing values"):
+        impute_datasets(
+            df_missing_pred,
+            features_to_impute=["age"],
+            outcome_col="y",
+            predictors=["bin_pred"],
+            m=2,
+        )
+
+    # 8. Fully observed categorical predictor succeeds as conditioning feature
+    df_valid_pred = pd.DataFrame(
+        {
+            "y": [1, 0, 1, 0],
+            "age": [50.0, np.nan, 55.0, 65.0],
+            "bin_pred": [0, 1, 0, 1],
+        }
+    )
+    res_valid = impute_datasets(
+        df_valid_pred,
+        features_to_impute=["age"],
+        outcome_col="y",
+        predictors=["bin_pred"],
+        m=2,
+    )
+    assert len(res_valid) == 2
+    for d in res_valid:
+        assert not d["age"].isna().any()
+
 
 def test_rubin_pooling_barnard_rubin_b0_limit_and_error_handling(recipes):
     pool_rubin = recipes["pool_estimates_rubin"]
@@ -876,6 +1091,75 @@ def test_firth_rank_deficiency_and_ci_method(recipes):
     assert "ci_method" in res
     assert len(res["ci_method"]) == 2  # intercept + x1
     assert all(m in {"profile", "wald_fallback"} for m in res["ci_method"])
+
+    # 4. Likelihood monotonicity and optimizer convergence under separation
+    # Separation dataset: standard MLE explodes
+    x_sep = np.array([-3.0, -2.0, -1.5, -1.0, 1.0, 1.5, 2.0, 3.0])
+    y_sep = np.array([0, 0, 0, 0, 1, 1, 1, 1])
+    X_sep = np.column_stack([x_sep])
+    res_sep = fit_firth(X_sep, y_sep)
+    assert res_sep["converged"] is True, "Firth must converge under complete separation"
+    assert np.isfinite(res_sep["coefficients"]).all(), (
+        "Firth coefficients must remain finite under separation"
+    )
+
+    # Verify that final penalized log-likelihood is strictly greater than initial zero-beta log-likelihood
+    pll_fn = recipes["_firth_penalized_loglik"]
+    X_sep_aug = np.column_stack([np.ones(len(y_sep)), X_sep])
+    pll_init = pll_fn(np.zeros(2), X_sep_aug, y_sep)
+    pll_final = pll_fn(res_sep["coefficients"], X_sep_aug, y_sep)
+    assert pll_final > pll_init, (
+        "Penalized log-likelihood must strictly improve from starting point"
+    )
+
+    # 5. Optimizer failure handling: max_iter=1 on non-converged model returns converged=False
+    res_unconv = fit_firth(X_sep, y_sep, max_iter=1)
+    assert res_unconv["converged"] is False, (
+        "Optimizer must flag converged=False when max_iter is exceeded"
+    )
+
+    # 6. Numerical Profile Endpoints verification
+    # For any parameter with profile CI, the drop in profile log-likelihood from pll_final
+    # must match 0.5 * chi2.ppf(0.95, df=1) ≈ 1.92073
+    if res_sep["ci_method"][1] == "profile":
+        import scipy.optimize as opt
+        import scipy.stats as stats
+
+        chi2_crit = 0.5 * stats.chi2.ppf(0.95, df=1)
+
+        # Profile lower bound on log scale
+        beta1_low = float(np.log(res_sep["ci_lower"][1]))
+
+        def nuisance_obj_low(b0):
+            return -pll_fn(
+                np.array([float(np.squeeze(b0)), beta1_low]), X_sep_aug, y_sep
+            )
+
+        opt_low = opt.minimize(
+            nuisance_obj_low, res_sep["coefficients"][0], method="Nelder-Mead"
+        )
+        pll_prof_low = -opt_low.fun
+        drop_low = pll_final - pll_prof_low
+        assert np.isclose(drop_low, chi2_crit, atol=0.05), (
+            f"Profile lower bound drop ({drop_low:.4f}) must equal chi2 cutoff ({chi2_crit:.4f})"
+        )
+
+        # Profile upper bound on log scale
+        beta1_high = float(np.log(res_sep["ci_upper"][1]))
+
+        def nuisance_obj_high(b0):
+            return -pll_fn(
+                np.array([float(np.squeeze(b0)), beta1_high]), X_sep_aug, y_sep
+            )
+
+        opt_high = opt.minimize(
+            nuisance_obj_high, res_sep["coefficients"][0], method="Nelder-Mead"
+        )
+        pll_prof_high = -opt_high.fun
+        drop_high = pll_final - pll_prof_high
+        assert np.isclose(drop_high, chi2_crit, atol=0.05), (
+            f"Profile upper bound drop ({drop_high:.4f}) must equal chi2 cutoff ({chi2_crit:.4f})"
+        )
 
 
 # -----------------------------------------------------------------------------

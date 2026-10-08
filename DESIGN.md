@@ -720,16 +720,20 @@ Comprehensive code review by CodeRabbit AI on GitHub PR #8 (`feat/cloud-skill-ha
 8. **HTML Escaping & Documentation Harmonization**:
    - Escaped all HTML table components with `html.escape` in Recipe 13.
    - Harmonized 4-Pillars ASCII diagrams and missingness triage rules across `SKILL.md`, `decision-heuristics.md`, and `python-recipes.md`.
-9. **Comprehensive Verification**:
-   - Expanded `tests/unit/test_shinystat_cloud.py` to 32 tests, including standalone execution tests for all 13 recipes in isolated namespaces.
+9. **CodeRabbit Gap Remediations (Gaps 1–3)**:
+   - **MICE Continuous Target Scope**: Restricted `features_to_impute` strictly to continuous variables. Rejected binary/dummy indicators and boolean features with actionable `ValueError`. Disallowed missing categorical predictors while permitting fully observed dummy predictors to condition on without improper Gaussian imputation.
+   - **DCA Apparent Performance Disclosure**: Attached explicit disclosure to `df.attrs["apparent_performance_warning"]` and boolean `df.attrs["internally_calibrated"]` whenever input scores fall outside $[0, 1]$ and trigger in-sample logistic recalibration.
+   - **Isolated Recipe Execution & Deep Firth Tests**: Enhanced `test_each_recipe_is_self_contained` to call all 13 recipe entry-point functions with valid mini-fixtures in isolated namespaces. Added numerical profile likelihood endpoint checks ($2\Delta \ell^* \approx \chi^2_{1, 0.95}$ within 0.05), optimizer failure handling (`max_iter=1`), and monotonic log-likelihood progression under separation.
+10. **Comprehensive Verification**:
    - Rebuilt `/Users/ntwkkm/Desktop/shinystat-cloud.zip`.
+   - All 32 cloud tests passing, 474/474 workspace-wide tests passing with zero regressions.
 
 ### Consequences
 - **Status**: Accepted & Verified.
-- **Biostatistical Invariance**: Eliminates silent data coercion, improper inference with $df = \infty$, unhandled collinearity, and non-convergent optimization in cloud sandbox environments.
+- **Biostatistical Invariance**: Eliminates silent data coercion, improper inference with $df = \infty$, fractional dummy MICE draws, unhandled collinearity, and unverified optimization in cloud sandbox environments.
 - **Self-Containment**: All 13 recipes execute standalone without cross-block state leakage or hidden dependencies.
 - **Full Test Suite Pass**: 32/32 cloud tests passing, 474/474 workspace-wide tests passing with zero regressions.
 
-[MEMORY_LEARN: In clinical cloud sandboxes, all inferential recipes must enforce strict mathematical invariants (finite binary {0,1} domain, matrix rank, Barnard-Rubin B=0 finite-sample limits, and score gradient convergence) with standalone execution self-containment.]
+[MEMORY_LEARN: In clinical cloud sandboxes, all inferential recipes must enforce strict mathematical invariants (finite binary {0,1} domain, matrix rank, Barnard-Rubin B=0 finite-sample limits, continuous-only Gaussian MICE targets, and score gradient convergence) with standalone execution self-containment.]
 
 
