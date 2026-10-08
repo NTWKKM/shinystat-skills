@@ -596,6 +596,77 @@ def test_mice_attenuation_recovery_vs_full_data(recipes):
     assert np.isclose(pooled["pooled_estimate"], slope_full, atol=0.02)
 
 
+def test_mice_simulation_bias_and_coverage(recipes):
+    """Rigorous 50-trial Monte Carlo simulation verifying |bias| < 10% and coverage >= 90% under MAR."""
+    import warnings
+
+    import statsmodels.api as sm
+    from statsmodels.tools.sm_exceptions import ConvergenceWarning
+
+    warnings.filterwarnings("ignore", category=ConvergenceWarning)
+
+    impute_datasets = recipes["impute_mice_datasets"]
+    pool_rubin = recipes["pool_estimates_rubin"]
+
+    num_trials = 50
+    true_beta = 0.06
+    slopes = []
+    cov_count = 0
+
+    for trial in range(num_trials):
+        rng = np.random.default_rng(trial)
+        n = 500
+        bp = rng.normal(120, 15, size=n)
+        log_odds = -7.0 + true_beta * bp
+        prob = 1.0 / (1.0 + np.exp(-log_odds))
+        dead = rng.binomial(1, prob, size=n)
+
+        df_full = pd.DataFrame({"bp": bp, "dead": dead})
+        df_miss = df_full.copy()
+        # MAR missingness: higher missingness among events
+        miss_prob = np.where(dead == 1, 0.6, 0.2)
+        df_miss.loc[rng.random(n) < miss_prob, "bp"] = np.nan
+
+        m = 10
+        datasets = impute_datasets(
+            df_miss,
+            features_to_impute=["bp"],
+            outcome_col="dead",
+            m=m,
+            max_iter=5,
+            random_state=trial * 100,
+        )
+
+        imp_slopes = []
+        imp_ses = []
+        for d in datasets:
+            fit = sm.Logit(d["dead"], sm.add_constant(d[["bp"]])).fit(disp=False)
+            imp_slopes.append(float(fit.params["bp"]))
+            imp_ses.append(float(fit.bse["bp"]))
+
+        pooled = pool_rubin(imp_slopes, imp_ses, n_obs=n, k_params=2)
+        th = pooled["pooled_estimate"]
+        ci_low = pooled["ci_lower"]
+        ci_high = pooled["ci_upper"]
+
+        if ci_low <= true_beta <= ci_high:
+            cov_count += 1
+        slopes.append(th)
+
+    mean_slope = float(np.mean(slopes))
+    rel_bias = abs(mean_slope - true_beta) / true_beta
+    coverage = cov_count / num_trials
+
+    # Assert relative bias < 10%
+    assert rel_bias < 0.10, (
+        f"MICE relative bias ({rel_bias:.2%}) must be < 10% (mean slope: {mean_slope:.4f}, true: {true_beta})"
+    )
+    # Assert empirical coverage >= 90%
+    assert coverage >= 0.90, (
+        f"MICE empirical CI coverage ({coverage:.2%}) must be >= 90% (target nominal 95%)"
+    )
+
+
 def test_publication_table_html_rendering(recipes):
     render_table = recipes["render_publication_table"]
     df = pd.DataFrame(
