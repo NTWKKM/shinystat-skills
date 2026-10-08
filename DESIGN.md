@@ -728,23 +728,27 @@ Comprehensive code review by CodeRabbit AI on GitHub PR #8 (`feat/cloud-skill-ha
    - Rebuilt `/Users/ntwkkm/Desktop/shinystat-cloud.zip`.
    - All 32 cloud tests passing, 474/474 workspace-wide tests passing with zero regressions.
 11. **Proper Bayesian Linear Regression MICE Algorithm & Empirical Coverage Recovery**:
-   - **Underlying Root Cause**: `sklearn.impute.IterativeImputer(estimator=BayesianRidge(), sample_posterior=True)` only samples residual observation noise around a fixed posterior mean point estimate $\hat{\beta}$. It fails to draw regression parameters $(\beta^*, \sigma^{*2})$, systematically deflating between-imputation variance $B$ and collapsing 95% CI coverage to 83% under MAR.
-   - **Proper Bayesian Implementation**: Replaced `IterativeImputer` with textbook Proper Bayesian Linear Regression MICE (Rubin 1987; Schafer 1997; van Buuren 2018). In each chained cycle, draws residual variance $\sigma^{*2} \sim \text{Inv-}\chi^2(\nu, s^2)$ via $\chi^2$ sampling, draws regression coefficients $\beta^* \sim \mathcal{N}(\hat{\beta}, \sigma^{*2} (X_{\mathrm{obs}}^T X_{\mathrm{obs}})^{-1})$, and samples missing values $y_{\mathrm{mis}}^* \sim \mathcal{N}(X_{\mathrm{mis}} \beta^*, \sigma^{*2})$.
-   - **Simulation Proof**: Monte Carlo MAR simulation over 50 trials ($N=500$, true slope $\beta=0.06$, $M=10$) demonstrates:
+   - **Parameter Uncertainty vs Marginal Sampling**: `sklearn.impute.IterativeImputer(estimator=BayesianRidge(), sample_posterior=True)` takes independent marginal predictive draws for each missing observation using predictive variance $x^T \Sigma_\beta x + 1/\alpha$. While this predictive variance incorporates parameter variance $x^T \Sigma_\beta x$, independent row-wise marginal draws do not condition on a single shared draw of the regression vector $\beta^*$ across all missing records in an imputation dataset.
+   - **Proper Bayesian Implementation**: Implemented textbook Proper Bayesian Linear Regression MICE (Rubin 1987; Schafer 1997; van Buuren 2018). In each chained cycle, requires $n_{\mathrm{obs}} > p$ and full column rank to compute the exact unregularized flat-prior OLS posterior: draws residual variance $\sigma^{*2} \sim \text{Inv-}\chi^2(\nu, s^2)$ via $\chi^2$ sampling, draws a shared regression parameter vector $\beta^* \sim \mathcal{N}(\hat{\beta}, \sigma^{*2} (X_{\mathrm{obs}}^T X_{\mathrm{obs}})^{-1})$, and samples missing values $y_{\mathrm{mis}}^* \sim \mathcal{N}(X_{\mathrm{mis}} \beta^*, \sigma^{*2})$.
+   - **Bounded Sampling Model**: Bounded constraints (`min_value`, `max_value`) are drawn using truncated normal distributions (`scipy.stats.truncnorm`) rather than point-clipping, preserving continuous probability density without artificial point masses at boundaries, accompanied by strict bound ordering validation ($a < b$).
+   - **Conditioning Integrity & Discrete Guard**: Requires conditioning-only predictors to be fully observed, mandates explicit cohort disposition for missing outcomes prior to MICE, rejects non-finite values, and rejects binary/low-cardinality discrete integer category encodings ({1, 2}, {1, 2, 3}) alongside declared categorical dtypes.
+   - **Simulation Benchmark Evidence**: A Monte Carlo MAR simulation benchmark across 50 trials ($N=500$, true slope $\beta=0.06$, $M=10$) demonstrates empirical recovery for this specific evaluated scenario:
      - Pooled slope: $0.0602$ (vs full data $0.0592$, true $0.0600$).
      - Relative bias: $0.39\%$ (well within $|\text{bias}| < 10\%$).
-     - Empirical 95% CI coverage: $94.00\%$ (recovered from $83\%$, nominal $95\%$).
-   - **Guidance & Complete-Case Sensitivity**: Updated `SKILL.md` and `decision-heuristics.md` recommending $M \ge 5$ for $<30\%$ missingness, $M \ge 20$ for $>30\%$ missingness, and mandating Complete-Case Analysis as an indispensable sensitivity benchmark alongside pooled MICE.
-12. **Final Verification**:
+     - Empirical 95% CI coverage: $94.00\%$ (with Monte Carlo SE $\approx 3.4$ percentage points, recovering coverage relative to marginal independent sampling).
+   - **Guidance & Complete-Case Sensitivity**: Updated `SKILL.md` and `decision-heuristics.md` recommending $M \ge 5$ for $\le 30\%$ missingness, $M \ge 20$ for $> 30\%$ missingness, and qualifying that complete-case analysis serves as a sensitivity comparison whose agreement does not establish MAR or rule out MNAR bias.
+12. **Firth Penalized Likelihood Enhancements**:
+   - Monotonically non-decreasing penalized log-likelihood is tracked across iterations in `pll_history`.
+   - When maximum iterations are exceeded or convergence fails, immediate fallback to Wald intervals is enforced (`ci_method = ["wald_fallback"]`), preventing computation of profile likelihood cutoffs on non-maximized iterates.
+13. **Comprehensive Verification**:
    - Rebuilt `/Users/ntwkkm/Desktop/shinystat-cloud.zip`.
-   - 33/33 cloud tests passing (including `test_mice_simulation_bias_and_coverage`), 475/475 workspace-wide tests passing with zero regressions and clean `ruff` linter/formatter compliance.
+   - All cloud tests passing with zero regressions and clean `ruff` linter/formatter compliance.
 
 ### Consequences
 - **Status**: Accepted & Verified.
-- **Biostatistical Invariance**: Eliminates silent data coercion, improper inference with $df = \infty$, fractional dummy MICE draws, unhandled collinearity, and unverified optimization in cloud sandbox environments.
-- **Proper Parameter Uncertainty**: MICE confidence intervals achieve nominal ~95% coverage (94.00% verified) by properly propagating parameter sampling variance into Rubin's between-imputation variance $B$.
+- **Biostatistical Invariance**: Eliminates silent data coercion, improper inference with $df = \infty$, fractional dummy MICE draws, rank-deficient OLS regressions, point-mass boundary clipping, and unverified optimization in cloud sandbox environments.
+- **Proper Parameter Uncertainty**: MICE parameter draws preserve joint coefficient uncertainty across missing records, recovering empirical coverage in MAR benchmark scenarios.
 - **Self-Containment**: All 13 recipes execute standalone without cross-block state leakage or hidden dependencies.
-- **Full Test Suite Pass**: 33/33 cloud tests passing, 475/475 workspace-wide tests passing with zero regressions.
 
 [MEMORY_LEARN: In clinical cloud sandboxes, all inferential recipes must enforce strict mathematical invariants (finite binary {0,1} domain, matrix rank, Barnard-Rubin B=0 finite-sample limits, continuous-only Gaussian MICE targets, proper Bayesian parameter draws for nominal CI coverage, and score gradient convergence) with standalone execution self-containment.]
 

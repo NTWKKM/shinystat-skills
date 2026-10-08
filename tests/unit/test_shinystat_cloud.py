@@ -1081,9 +1081,9 @@ def test_mice_input_guards_and_bounds(recipes):
     # 8. Fully observed categorical predictor succeeds as conditioning feature
     df_valid_pred = pd.DataFrame(
         {
-            "y": [1, 0, 1, 0],
-            "age": [50.0, np.nan, 55.0, 65.0],
-            "bin_pred": [0, 1, 0, 1],
+            "y": [1, 0, 1, 0, 0, 1],
+            "age": [50.0, np.nan, 55.0, 65.0, 70.0, 60.0],
+            "bin_pred": [0, 1, 1, 1, 0, 0],
         }
     )
     res_valid = impute_datasets(
@@ -1096,6 +1096,224 @@ def test_mice_input_guards_and_bounds(recipes):
     assert len(res_valid) == 2
     for d in res_valid:
         assert not d["age"].isna().any()
+
+    # 9. Reject discrete integer category codes {1, 2} and {1, 2, 3}
+    df_cat_codes = pd.DataFrame(
+        {
+            "y": [1, 0, 1, 0, 1],
+            "stage": [1, 2, 3, 2, np.nan],
+            "age": [50.0, 52.0, 55.0, 60.0, 65.0],
+        }
+    )
+    with pytest.raises(ValueError, match="discrete integer category codes"):
+        impute_datasets(
+            df_cat_codes,
+            features_to_impute=["stage"],
+            outcome_col="y",
+            predictors=["age"],
+            m=2,
+        )
+
+    df_cat_12 = pd.DataFrame(
+        {
+            "y": [1, 0, 1, 0, 1],
+            "group": [1, 2, 1, 2, np.nan],
+            "age": [50.0, 52.0, 55.0, 60.0, 65.0],
+        }
+    )
+    with pytest.raises(ValueError, match="unique observed values"):
+        impute_datasets(
+            df_cat_12,
+            features_to_impute=["group"],
+            outcome_col="y",
+            predictors=["age"],
+            m=2,
+        )
+
+    # 10. Reject declared categorical and ordinal targets
+    df_cat_dtype = pd.DataFrame(
+        {
+            "y": [1, 0, 1, 0, 1],
+            "grade": pd.Categorical(["A", "B", "C", "A", None]),
+            "age": [50.0, 52.0, 55.0, 60.0, 65.0],
+        }
+    )
+    with pytest.raises(ValueError, match="declared as categorical"):
+        impute_datasets(
+            df_cat_dtype,
+            features_to_impute=["grade"],
+            outcome_col="y",
+            predictors=["age"],
+            m=2,
+        )
+
+    with pytest.raises(ValueError, match="declared as ordinal"):
+        impute_datasets(
+            df_cat_codes,
+            features_to_impute=["age"],
+            outcome_col="y",
+            target_types={"age": "ordinal"},
+            m=2,
+        )
+
+    # 11. Reject partially missing continuous predictor not in features_to_impute
+    df_miss_cont = pd.DataFrame(
+        {
+            "y": [1, 0, 1, 0, 1],
+            "x1": [10.0, np.nan, 12.0, 14.0, 15.0],
+            "x2": [100.0, 110.0, np.nan, 130.0, 140.0],
+        }
+    )
+    with pytest.raises(
+        ValueError, match="Conditioning-only predictors must be fully observed"
+    ):
+        impute_datasets(
+            df_miss_cont,
+            features_to_impute=["x1"],
+            outcome_col="y",
+            predictors=["x2"],
+            m=2,
+        )
+
+    # 12. Reject partially missing primary outcome
+    df_miss_outcome = pd.DataFrame(
+        {
+            "y": [1, 0, np.nan, 0, 1],
+            "x1": [10.0, np.nan, 12.0, 14.0, 15.0],
+            "x2": [100.0, 110.0, 120.0, 130.0, 140.0],
+        }
+    )
+    with pytest.raises(
+        ValueError, match="Primary outcome column 'y' contains missing values"
+    ):
+        impute_datasets(
+            df_miss_outcome,
+            features_to_impute=["x1"],
+            outcome_col="y",
+            predictors=["x2"],
+            m=2,
+        )
+
+    # 13. Reject non-finite values in conditioning matrix
+    df_inf = pd.DataFrame(
+        {
+            "y": [1, 0, 1, 0, 1],
+            "x1": [10.0, np.nan, 12.0, np.inf, 15.0],
+            "x2": [100.0, 110.0, 120.0, 130.0, 140.0],
+        }
+    )
+    with pytest.raises(ValueError, match="contains non-finite values"):
+        impute_datasets(
+            df_inf,
+            features_to_impute=["x1"],
+            outcome_col="y",
+            predictors=["x2"],
+            m=2,
+        )
+
+    # 14. Reject invalid bound ordering (min_value >= max_value)
+    df_order = pd.DataFrame(
+        {
+            "y": [1, 0, 1, 0, 1],
+            "x1": [10.0, np.nan, 12.0, 14.0, 15.0],
+            "x2": [100.0, 110.0, 120.0, 130.0, 140.0],
+        }
+    )
+    with pytest.raises(ValueError, match="Invalid bound ordering"):
+        impute_datasets(
+            df_order,
+            features_to_impute=["x1"],
+            outcome_col="y",
+            predictors=["x2"],
+            m=2,
+            min_value={"x1": 50.0},
+            max_value={"x1": 20.0},
+        )
+
+
+def test_mice_posterior_degrees_of_freedom_rank_and_bounds(recipes):
+    impute_datasets = recipes["impute_mice_datasets"]
+    impute_single = recipes["impute_mice_single"]
+
+    # 1. Saturated design / Insufficient observed cases: n_obs <= p
+    # p = 3 (intercept, x2, y). We give only 3 observed rows for x1 (n_obs = 3 <= 3)
+    df_sat = pd.DataFrame(
+        {
+            "y": [0, 1, 0, 1, 0],
+            "x1": [10.5, 20.2, 30.8, np.nan, np.nan],
+            "x2": [10.0, 20.0, 30.0, 40.0, 50.0],
+        }
+    )
+    with pytest.raises(ValueError, match="Insufficient observed cases"):
+        impute_datasets(
+            df_sat,
+            features_to_impute=["x1"],
+            outcome_col="y",
+            predictors=["x2"],
+            m=2,
+        )
+    with pytest.raises(ValueError, match="Insufficient observed cases"):
+        impute_single(
+            df_sat,
+            features_to_impute=["x1"],
+            outcome_col="y",
+            predictors=["x2"],
+        )
+
+    # 2. Collinear predictors: rank-deficient design
+    # x2 and x3 are identical, causing rank(X_obs) < p
+    df_collinear = pd.DataFrame(
+        {
+            "y": [0, 1, 0, 1, 0, 1, 0],
+            "x1": [10.5, 20.2, 30.8, 40.1, 50.3, np.nan, np.nan],
+            "x2": [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0],
+            "x3": [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0],
+        }
+    )
+    with pytest.raises(ValueError, match="rank-deficient"):
+        impute_datasets(
+            df_collinear,
+            features_to_impute=["x1"],
+            outcome_col="y",
+            predictors=["x2", "x3"],
+            m=2,
+        )
+    with pytest.raises(ValueError, match="rank-deficient"):
+        impute_single(
+            df_collinear,
+            features_to_impute=["x1"],
+            outcome_col="y",
+            predictors=["x2", "x3"],
+        )
+
+    # 3. Truncated normal sampling without boundary point masses
+    # Generate 100 observations with 40% missingness, bounded strictly between 60.0 and 80.0
+    rng = np.random.default_rng(123)
+    n = 100
+    age = rng.normal(70, 15, size=n)
+    y = rng.binomial(1, 0.4, size=n)
+    df_bounded = pd.DataFrame({"y": y, "age": age})
+    mis_mask = rng.random(n) < 0.4
+    df_bounded.loc[mis_mask, "age"] = np.nan
+
+    datasets = impute_datasets(
+        df_bounded,
+        features_to_impute=["age"],
+        outcome_col="y",
+        m=5,
+        min_value={"age": 60.0},
+        max_value={"age": 80.0},
+        random_state=42,
+    )
+    for d in datasets:
+        imp_vals = d.loc[mis_mask, "age"].values
+        # All imputed draws must strictly lie within [60.0, 80.0]
+        assert (imp_vals >= 60.0).all() and (imp_vals <= 80.0).all()
+        # Must NOT collapse into spikes / point masses at the bounds (unlike clipping)
+        assert not np.isclose(imp_vals, 60.0).any(), "Draws must not spike on min bound"
+        assert not np.isclose(imp_vals, 80.0).any(), "Draws must not spike on max bound"
+        # Must retain continuous distribution variance
+        assert np.var(imp_vals) > 5.0, "Truncated Gaussian draws must maintain variance"
 
 
 def test_rubin_pooling_barnard_rubin_b0_limit_and_error_handling(recipes):
@@ -1174,63 +1392,84 @@ def test_firth_rank_deficiency_and_ci_method(recipes):
         "Firth coefficients must remain finite under separation"
     )
 
-    # Verify that final penalized log-likelihood is strictly greater than initial zero-beta log-likelihood
-    pll_fn = recipes["_firth_penalized_loglik"]
-    X_sep_aug = np.column_stack([np.ones(len(y_sep)), X_sep])
-    pll_init = pll_fn(np.zeros(2), X_sep_aug, y_sep)
-    pll_final = pll_fn(res_sep["coefficients"], X_sep_aug, y_sep)
-    assert pll_final > pll_init, (
-        "Penalized log-likelihood must strictly improve from starting point"
+    # Verify monotonicity across all accepted iterations in pll_history
+    assert "pll_history" in res_sep, "Firth result must record pll_history"
+    pll_hist = res_sep["pll_history"]
+    assert len(pll_hist) >= 2, "Must record at least initial and final likelihood"
+    for i in range(len(pll_hist) - 1):
+        assert pll_hist[i + 1] >= pll_hist[i] - 1e-10, (
+            f"Penalized log-likelihood must be monotonically non-decreasing at iteration {i}: "
+            f"{pll_hist[i]} -> {pll_hist[i + 1]}"
+        )
+    assert pll_hist[-1] > pll_hist[0], (
+        "Penalized log-likelihood must strictly improve from start"
     )
 
-    # 5. Optimizer failure handling: max_iter=1 on non-converged model returns converged=False
+    # 5. Optimizer failure handling: max_iter=1 on non-converged model returns converged=False and wald_fallback
     res_unconv = fit_firth(X_sep, y_sep, max_iter=1)
     assert res_unconv["converged"] is False, (
         "Optimizer must flag converged=False when max_iter is exceeded"
     )
+    assert res_unconv["ci_method"] == ["wald_fallback", "wald_fallback"], (
+        "Non-converged fit must immediately fall back to Wald CIs without attempting profile likelihood"
+    )
+    expected_wald_low = np.exp(
+        res_unconv["coefficients"] - 1.96 * res_unconv["standard_errors"]
+    )
+    expected_wald_high = np.exp(
+        res_unconv["coefficients"] + 1.96 * res_unconv["standard_errors"]
+    )
+    assert np.allclose(res_unconv["ci_lower"], expected_wald_low), (
+        "ci_lower must match Wald fallback formula"
+    )
+    assert np.allclose(res_unconv["ci_upper"], expected_wald_high), (
+        "ci_upper must match Wald fallback formula"
+    )
 
     # 6. Numerical Profile Endpoints verification
-    # For any parameter with profile CI, the drop in profile log-likelihood from pll_final
-    # must match 0.5 * chi2.ppf(0.95, df=1) ≈ 1.92073
-    if res_sep["ci_method"][1] == "profile":
-        import scipy.optimize as opt
-        import scipy.stats as stats
+    # Require profile intervals for this known converged fixture
+    assert res_sep["ci_method"][1] == "profile", (
+        "Fixture under complete separation must produce validated profile likelihood intervals"
+    )
+    import scipy.optimize as opt
+    import scipy.stats as stats
 
-        chi2_crit = 0.5 * stats.chi2.ppf(0.95, df=1)
+    pll_fn = recipes["_firth_penalized_loglik"]
+    X_sep_aug = np.column_stack([np.ones(len(y_sep)), X_sep])
+    pll_final = res_sep["pll_history"][-1]
+    chi2_crit = 0.5 * stats.chi2.ppf(0.95, df=1)
 
-        # Profile lower bound on log scale
-        beta1_low = float(np.log(res_sep["ci_lower"][1]))
+    # Profile lower bound on log scale
+    beta1_low = float(np.log(res_sep["ci_lower"][1]))
 
-        def nuisance_obj_low(b0):
-            return -pll_fn(
-                np.array([float(np.squeeze(b0)), beta1_low]), X_sep_aug, y_sep
-            )
+    def nuisance_obj_low(b0):
+        return -pll_fn(np.array([float(np.squeeze(b0)), beta1_low]), X_sep_aug, y_sep)
 
-        opt_low = opt.minimize(
-            nuisance_obj_low, res_sep["coefficients"][0], method="Nelder-Mead"
-        )
-        pll_prof_low = -opt_low.fun
-        drop_low = pll_final - pll_prof_low
-        assert np.isclose(drop_low, chi2_crit, atol=0.05), (
-            f"Profile lower bound drop ({drop_low:.4f}) must equal chi2 cutoff ({chi2_crit:.4f})"
-        )
+    opt_low = opt.minimize(
+        nuisance_obj_low, res_sep["coefficients"][0], method="Nelder-Mead"
+    )
+    assert opt_low.success, "Nuisance optimizer for lower bound must succeed"
+    pll_prof_low = -opt_low.fun
+    drop_low = pll_final - pll_prof_low
+    assert np.isclose(drop_low, chi2_crit, atol=0.05), (
+        f"Profile lower bound drop ({drop_low:.4f}) must equal chi2 cutoff ({chi2_crit:.4f})"
+    )
 
-        # Profile upper bound on log scale
-        beta1_high = float(np.log(res_sep["ci_upper"][1]))
+    # Profile upper bound on log scale
+    beta1_high = float(np.log(res_sep["ci_upper"][1]))
 
-        def nuisance_obj_high(b0):
-            return -pll_fn(
-                np.array([float(np.squeeze(b0)), beta1_high]), X_sep_aug, y_sep
-            )
+    def nuisance_obj_high(b0):
+        return -pll_fn(np.array([float(np.squeeze(b0)), beta1_high]), X_sep_aug, y_sep)
 
-        opt_high = opt.minimize(
-            nuisance_obj_high, res_sep["coefficients"][0], method="Nelder-Mead"
-        )
-        pll_prof_high = -opt_high.fun
-        drop_high = pll_final - pll_prof_high
-        assert np.isclose(drop_high, chi2_crit, atol=0.05), (
-            f"Profile upper bound drop ({drop_high:.4f}) must equal chi2 cutoff ({chi2_crit:.4f})"
-        )
+    opt_high = opt.minimize(
+        nuisance_obj_high, res_sep["coefficients"][0], method="Nelder-Mead"
+    )
+    assert opt_high.success, "Nuisance optimizer for upper bound must succeed"
+    pll_prof_high = -opt_high.fun
+    drop_high = pll_final - pll_prof_high
+    assert np.isclose(drop_high, chi2_crit, atol=0.05), (
+        f"Profile upper bound drop ({drop_high:.4f}) must equal chi2 cutoff ({chi2_crit:.4f})"
+    )
 
 
 # -----------------------------------------------------------------------------

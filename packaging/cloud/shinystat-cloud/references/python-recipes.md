@@ -794,6 +794,7 @@ def fit_firth_logistic(
 
     beta = np.zeros(p)
     current_pll = _firth_penalized_loglik(beta, X_arr, y_arr)
+    pll_history = [float(current_pll)]
 
     converged = False
     for iteration in range(max_iter):
@@ -829,6 +830,7 @@ def fit_firth_logistic(
         score_norm = np.max(np.abs(u_star))
         beta = beta_new
         current_pll = new_pll
+        pll_history.append(float(current_pll))
 
         # Both parameter movement and score gradient must satisfy convergence
         if param_step < tol and score_norm < (tol * max(1.0, float(n))):
@@ -837,53 +839,60 @@ def fit_firth_logistic(
 
     se = np.sqrt(np.diag(I_inv))
 
-    # Profile Likelihood Confidence Intervals (chi2 cutoff = 3.841) with explicit fallback tracking
+    # Profile Likelihood Confidence Intervals (chi2 cutoff = 3.841)
+    # A profile likelihood interval requires the maximized penalized likelihood at convergence.
+    # If the model fails to converge, profile inference must not be reported; fallback to Wald intervals.
     ci_lower = np.zeros(p)
     ci_upper = np.zeros(p)
-    ci_method = ["profile"] * p
-    target_pll = current_pll - 0.5 * stats.chi2.ppf(0.95, df=1)
+    if not converged:
+        ci_lower = beta - 1.96 * se
+        ci_upper = beta + 1.96 * se
+        ci_method = ["wald_fallback"] * p
+    else:
+        ci_method = ["profile"] * p
+        target_pll = current_pll - 0.5 * stats.chi2.ppf(0.95, df=1)
 
-    for j in range(p):
-        other_idx = [idx for idx in range(p) if idx != j]
-        def profile_obj(b_j):
-            if len(other_idx) == 0:
-                return _firth_penalized_loglik(np.array([b_j]), X_arr, y_arr) - target_pll
-            def nuisance_loss(nuis):
-                b_full = np.zeros(p)
-                b_full[j] = b_j
-                b_full[other_idx] = nuis
-                return -_firth_penalized_loglik(b_full, X_arr, y_arr)
-            res = optimize.minimize(nuisance_loss, beta[other_idx], method="Nelder-Mead")
-            if not res.success:
-                return np.nan
-            return -res.fun - target_pll
+        for j in range(p):
+            other_idx = [idx for idx in range(p) if idx != j]
+            def profile_obj(b_j):
+                if len(other_idx) == 0:
+                    return _firth_penalized_loglik(np.array([b_j]), X_arr, y_arr) - target_pll
+                def nuisance_loss(nuis):
+                    b_full = np.zeros(p)
+                    b_full[j] = b_j
+                    b_full[other_idx] = nuis
+                    return -_firth_penalized_loglik(b_full, X_arr, y_arr)
+                res = optimize.minimize(nuisance_loss, beta[other_idx], method="Nelder-Mead")
+                if not res.success:
+                    return np.nan
+                return -res.fun - target_pll
 
-        # Root search with explicit Wald fallback tracking
-        try:
-            low_guess = beta[j] - 2.5 * se[j]
-            while profile_obj(low_guess) > 0 and low_guess > beta[j] - 20 * se[j]:
-                low_guess -= se[j]
-            val_low = profile_obj(low_guess)
-            val_mid = profile_obj(beta[j])
-            if np.isnan(val_low) or np.isnan(val_mid) or val_low * val_mid > 0:
-                raise ValueError("Profile root bracket failure")
-            ci_lower[j] = optimize.brentq(profile_obj, low_guess, beta[j])
-        except Exception:
-            ci_lower[j] = beta[j] - 1.96 * se[j]
-            ci_method[j] = "wald_fallback"
+            # Root search with explicit Wald fallback tracking
+            try:
+                low_guess = beta[j] - 2.5 * se[j]
+                while profile_obj(low_guess) > 0 and low_guess > beta[j] - 20 * se[j]:
+                    low_guess -= se[j]
+                val_low = profile_obj(low_guess)
+                val_mid = profile_obj(beta[j])
+                if np.isnan(val_low) or np.isnan(val_mid) or val_low * val_mid > 0:
+                    raise ValueError("Profile root bracket failure")
+                ci_lower[j] = optimize.brentq(profile_obj, low_guess, beta[j])
+            except Exception:
+                ci_lower[j] = beta[j] - 1.96 * se[j]
+                ci_method[j] = "wald_fallback"
 
-        try:
-            high_guess = beta[j] + 2.5 * se[j]
-            while profile_obj(high_guess) > 0 and high_guess < beta[j] + 20 * se[j]:
-                high_guess += se[j]
-            val_high = profile_obj(high_guess)
-            val_mid = profile_obj(beta[j])
-            if np.isnan(val_high) or np.isnan(val_mid) or val_high * val_mid > 0:
-                raise ValueError("Profile root bracket failure")
-            ci_upper[j] = optimize.brentq(profile_obj, beta[j], high_guess)
-        except Exception:
-            ci_upper[j] = beta[j] + 1.96 * se[j]
-            ci_method[j] = "wald_fallback"
+            try:
+                high_guess = beta[j] + 2.5 * se[j]
+                while profile_obj(high_guess) > 0 and high_guess < beta[j] + 20 * se[j]:
+                    high_guess += se[j]
+                val_high = profile_obj(high_guess)
+                val_mid = profile_obj(beta[j])
+                if np.isnan(val_high) or np.isnan(val_mid) or val_high * val_mid > 0:
+                    raise ValueError("Profile root bracket failure")
+                ci_upper[j] = optimize.brentq(profile_obj, beta[j], high_guess)
+            except Exception:
+                ci_upper[j] = beta[j] + 1.96 * se[j]
+                ci_method[j] = "wald_fallback"
 
     return {
         "coefficients": beta,
@@ -893,6 +902,7 @@ def fit_firth_logistic(
         "ci_upper": np.exp(ci_upper),
         "converged": converged,
         "ci_method": ci_method,
+        "pll_history": pll_history,
     }
 ```
 
@@ -1311,7 +1321,7 @@ def fit_survival_analysis_suite(
 
 ## 12. Multiple Imputation by Chained Equations (MICE) & Rubin's Rules
 
-Provides multiple stochastic imputations ($M \ge 5$) via **Proper Bayesian Linear Regression MICE** (Rubin 1987; Schafer 1997; van Buuren 2018), strictly enforcing that **primary outcomes are never imputed**. Jointly samples parameter uncertainty ($\sigma^{*2} \sim \text{Inv-}\chi^2$, $\beta^* \sim N(\hat{\beta}, \sigma^{*2}(X^TX)^{-1})$) and residual noise ($y^* \sim N(X\beta^*, \sigma^{*2})$) at every chained cycle. This guarantees true between-imputation variance inflation, eliminating the residual attenuation and CI undercoverage (~83%) that occur when parameter uncertainty is ignored. Configured strictly for continuous/numeric clinical features with optional boundary constraints (`min_value`, `max_value`). Imputation targets (`features_to_impute`) must be continuous variables. Fully observed dummy-encoded variables may be supplied in `predictors` to serve as conditioning features. Missing categorical targets require variable-type-specific imputation (e.g., logistic/polytomous regression or complete-case analysis) and must not be included in `features_to_impute`. Includes pure-Python **Rubin's rules pooling** (Rubin 1987; Barnard & Rubin 1999) with finite-sample degrees of freedom adjustment. Ratio effect measures (OR, HR) must be pooled on the log scale and exponentiated.
+Provides multiple stochastic imputations ($M \ge 5$) via **Proper Bayesian Linear Regression MICE** (Rubin 1987; Schafer 1997; van Buuren 2018), strictly enforcing that **primary outcomes are never imputed**. Jointly samples parameter uncertainty per cycle ($\sigma^{*2} \sim \text{Inv-}\chi^2(\nu, s^2)$, $\beta^* \sim N(\hat{\beta}, \sigma^{*2}(X^TX)^{-1})$) and missing values ($y_{\mathrm{mis}}^* \sim N(X_{\mathrm{mis}}\beta^*, \sigma^{*2})$) at every chained cycle. Drawing a shared parameter vector per cycle correctly propagates model estimation uncertainty across all missing records, whereas independent marginal predictions fail to preserve joint coefficient variation. Configured strictly for continuous/numeric clinical features with optional boundary constraints (`min_value`, `max_value`) sampled via truncated Gaussian distributions. Imputation targets (`features_to_impute`) must be continuous variables. Fully observed dummy-encoded variables may be supplied in `predictors` to serve as conditioning features. Missing categorical targets require variable-type-specific imputation (e.g., logistic/polytomous regression) and must not be included in `features_to_impute`. Includes pure-Python **Rubin's rules pooling** (Rubin 1987; Barnard & Rubin 1999) with finite-sample degrees of freedom adjustment. Ratio effect measures (OR, HR) must be pooled on the log scale and exponentiated.
 
 ```python
 import numpy as np
@@ -1327,7 +1337,8 @@ def impute_mice_datasets(
     max_iter: int = 10,
     random_state: int = 42,
     min_value: float | dict[str, float] | None = None,
-    max_value: float | dict[str, float] | None = None
+    max_value: float | dict[str, float] | None = None,
+    target_types: dict[str, str] | None = None
 ) -> list[pd.DataFrame]:
     """Generate M stochastic imputed datasets for valid inferential analysis under MAR.
     
@@ -1336,12 +1347,18 @@ def impute_mice_datasets(
     2. Primary outcome and additional covariates MUST be included as predictors in the
        imputation model per standard biostatistical methodology (van Buuren; Moons et al. 2006)
        to prevent severe attenuation towards the null.
-    3. Proper Bayesian draws: Samples both parameter uncertainty (beta*, sigma*) and residual noise
-       to ensure valid between-imputation variance (B > 0) and nominal 95% coverage under Rubin's rules.
+    3. Proper Bayesian draws: Jointly samples parameter uncertainty (beta*, sigma*) and missing values.
+       In an evaluated 50-trial MAR simulation benchmark, recovered empirical coverage (~94%, MCSE ~3.4 pp).
     4. Continuous imputation targets only: features_to_impute must be continuous variables.
-       Fully observed categorical dummies may be supplied in 'predictors' to condition on, but missing
-       categorical targets require variable-type-specific imputation.
+       Value-based guards screen against binary and low-cardinality discrete integers ({1, 2}, {1, 2, 3}),
+       but explicit target-type validation remains essential. Missing categorical targets require
+       variable-type-specific models.
     5. Observed values of features_to_impute are preserved intact; only missing values are imputed.
+    6. Bounded sampling: When min_value or max_value is supplied, draws are generated via truncated normal
+       sampling rather than clipping, preserving continuous probability density without boundary point masses.
+       Note that bounding modifies the conditional model; inferential claims should be qualified accordingly.
+    7. Conditioning completeness: Conditioning-only predictors must be fully observed. Primary outcome must
+       not contain missing values without prior explicit cohort disposition.
     """
     if m < 1:
         raise ValueError(f"Number of imputations m must be >= 1 (got {m}).")
@@ -1360,6 +1377,17 @@ def impute_mice_datasets(
     for feat in features_to_impute:
         if df[feat].isna().all():
             raise ValueError(f"Column '{feat}' has 0 observed values (100% missing) and cannot be imputed.")
+        if isinstance(df[feat].dtype, pd.CategoricalDtype) or df[feat].dtype.name == "category":
+            raise ValueError(
+                f"Column '{feat}' is declared as categorical. "
+                "Recipe 12 implements Gaussian MICE for continuous variables. "
+                "Missing categorical targets require variable-type-specific imputation."
+            )
+        if target_types and target_types.get(feat) in {"categorical", "ordinal", "binary"}:
+            raise ValueError(
+                f"Column '{feat}' is declared as {target_types.get(feat)}. "
+                "Recipe 12 implements Gaussian MICE strictly for continuous targets."
+            )
         if pd.api.types.is_bool_dtype(df[feat]) or not pd.api.types.is_numeric_dtype(df[feat]):
             raise ValueError(
                 f"Column '{feat}' in features_to_impute is non-numeric ({df[feat].dtype}). "
@@ -1367,17 +1395,22 @@ def impute_mice_datasets(
                 "Missing categorical targets require variable-type-specific imputation."
             )
         non_null_vals = df[feat].dropna().unique()
-        if len(non_null_vals) <= 2 and set(non_null_vals).issubset({0, 1, 0.0, 1.0}):
+        vals_set = set(non_null_vals)
+        if len(non_null_vals) <= 2:
             raise ValueError(
-                f"Column '{feat}' in features_to_impute is binary/dummy ({set(non_null_vals)}). "
-                "Recipe 12 implements Gaussian MICE for continuous variables; "
+                f"Column '{feat}' in features_to_impute is binary/dummy ({vals_set}) with <= 2 unique observed values. "
+                "Binary/dummy variables cannot be imputed using Gaussian linear regression MICE; "
                 "Gaussian posterior draws produce fractional values and cannot enforce binary {0, 1} "
-                "values or mutually exclusive dummy group membership. Restrict features_to_impute "
-                "to continuous variables. Fully observed categorical dummies may be included in 'predictors' "
-                "to condition on, or use variable-type-specific imputation."
+                "or group membership. Restrict features_to_impute to continuous variables."
+            )
+        if vals_set.issubset({1, 2, 3, 1.0, 2.0, 3.0}) or vals_set.issubset({0, 1, 2, 0.0, 1.0, 2.0}):
+            raise ValueError(
+                f"Column '{feat}' in features_to_impute has discrete integer category codes ({vals_set}). "
+                "Categorical and ordinal variables must not be imputed via Gaussian linear regression MICE; "
+                "they require variable-type-specific models (e.g. polytomous/ordinal logistic MICE)."
             )
 
-    # Validate conditioning columns and predictors
+    # Validate conditioning columns, predictors, and outcome
     for c in cols:
         if df[c].isna().all():
             raise ValueError(f"Column '{c}' has 0 observed values (100% missing) and cannot be conditioned upon.")
@@ -1387,17 +1420,44 @@ def impute_mice_datasets(
                 "All features in MICE conditioning matrix must be numeric. "
                 "Categorical predictors must be dummy-encoded before inclusion in 'predictors'."
             )
+        obs_c = df[c].dropna().values
+        if len(obs_c) > 0 and not np.all(np.isfinite(obs_c)):
+            raise ValueError(
+                f"Column '{c}' contains non-finite values (inf / -inf). "
+                "Non-finite values must be cleaned prior to MICE."
+            )
 
     if predictors:
         for pred in predictors:
-            if df[pred].isna().any():
+            if pred not in features_to_impute and df[pred].isna().any():
                 non_null_p = df[pred].dropna().unique()
-                if len(non_null_p) <= 2 and set(non_null_p).issubset({0, 1, 0.0, 1.0}):
+                if len(non_null_p) <= 2:
                     raise ValueError(
                         f"Predictor '{pred}' is binary/dummy and contains missing values. "
                         "Gaussian MICE cannot impute categorical variables. "
                         "Categorical predictors must be fully observed to condition on in Gaussian MICE."
                     )
+                raise ValueError(
+                    f"Conditioning predictor '{pred}' contains missing values. "
+                    "Conditioning-only predictors must be fully observed. "
+                    "If this continuous predictor requires imputation, include it in 'features_to_impute'."
+                )
+
+    if outcome_col and df[outcome_col].isna().any():
+        raise ValueError(
+            f"Primary outcome column '{outcome_col}' contains missing values. "
+            "Clinical governance invariant: Never impute the primary outcome variable. "
+            "Rows with missing outcome must have an explicit cohort disposition (e.g. complete-case exclusion) prior to MICE."
+        )
+
+    # Validate bound ordering
+    for feat in features_to_impute:
+        low_val = min_value[feat] if isinstance(min_value, dict) and feat in min_value else (min_value if isinstance(min_value, (int, float)) else None)
+        high_val = max_value[feat] if isinstance(max_value, dict) and feat in max_value else (max_value if isinstance(max_value, (int, float)) else None)
+        if low_val is not None and high_val is not None and low_val >= high_val:
+            raise ValueError(
+                f"Invalid bound ordering for feature '{feat}': min_value ({low_val}) must be strictly less than max_value ({high_val})."
+            )
 
     rng = np.random.default_rng(random_state)
     datasets = []
@@ -1424,13 +1484,24 @@ def impute_mice_datasets(
                 X_mis = np.column_stack([np.ones(mis_mask.sum()), clean.loc[mis_mask, pred_cols].values])
 
                 n_obs, p = X_obs.shape
-                # Regularized OLS for numerical stability
-                XtX = X_obs.T @ X_obs + 1e-5 * np.eye(p)
+                if n_obs <= p:
+                    raise ValueError(
+                        f"Insufficient observed cases for feature '{feat}': n_obs ({n_obs}) must be strictly greater "
+                        f"than number of parameters p ({p}) to form a valid Bayesian regression posterior."
+                    )
+                rank_obs = np.linalg.matrix_rank(X_obs)
+                if rank_obs < p:
+                    raise ValueError(
+                        f"Design matrix for feature '{feat}' is rank-deficient (rank {rank_obs} < {p} parameters). "
+                        "Collinear predictors or zero-variance columns must be removed before Bayesian regression MICE."
+                    )
+
+                XtX = X_obs.T @ X_obs
                 Xty = X_obs.T @ y_obs
                 beta_hat = np.linalg.solve(XtX, Xty)
                 residuals = y_obs - X_obs @ beta_hat
-                df_resid = max(1, n_obs - p)
-                s2 = np.sum(residuals**2) / df_resid
+                df_resid = n_obs - p
+                s2 = max(float(np.sum(residuals**2) / df_resid), 1e-12)
 
                 # 1. Parameter uncertainty: Draw sigma*^2 ~ Inv-Chi2(df_resid, s2)
                 g = rng.chisquare(df_resid)
@@ -1442,19 +1513,17 @@ def impute_mice_datasets(
                 L = np.linalg.cholesky(V_inv)
                 beta_star = beta_hat + sigma * (L @ rng.normal(size=p))
 
-                # 3. Residual uncertainty: Draw y_mis* ~ N(X_mis @ beta*, sigma^2)
-                y_imp = X_mis @ beta_star + sigma * rng.normal(size=len(X_mis))
+                # 3. Residual uncertainty: Draw y_mis* ~ N(X_mis @ beta*, sigma^2) with truncated normal support under bounds
+                mu = X_mis @ beta_star
+                low_val = min_value[feat] if isinstance(min_value, dict) and feat in min_value else (min_value if isinstance(min_value, (int, float)) else None)
+                high_val = max_value[feat] if isinstance(max_value, dict) and feat in max_value else (max_value if isinstance(max_value, (int, float)) else None)
 
-                # Enforce clinical min/max bounds if provided
-                if isinstance(min_value, dict) and feat in min_value:
-                    y_imp = np.maximum(y_imp, min_value[feat])
-                elif isinstance(min_value, (int, float)):
-                    y_imp = np.maximum(y_imp, min_value)
-
-                if isinstance(max_value, dict) and feat in max_value:
-                    y_imp = np.minimum(y_imp, max_value[feat])
-                elif isinstance(max_value, (int, float)):
-                    y_imp = np.minimum(y_imp, max_value)
+                if low_val is not None or high_val is not None:
+                    a_param = (low_val - mu) / sigma if low_val is not None else -np.inf
+                    b_param = (high_val - mu) / sigma if high_val is not None else np.inf
+                    y_imp = stats.truncnorm.rvs(a=a_param, b=b_param, loc=mu, scale=sigma, random_state=rng)
+                else:
+                    y_imp = mu + sigma * rng.normal(size=len(X_mis))
 
                 clean.loc[mis_mask, feat] = y_imp
 
@@ -1475,7 +1544,7 @@ def pool_estimates_rubin(
     """Pool point estimates and standard errors across M imputations using Rubin's rules.
     
     Clinical & Statistical Invariant:
-    When pooling ratio effect estimates (such as Odds Ratios or Hazard Ratios), pooling
+    When pooling ratio effect measures (such as Odds Ratios or Hazard Ratios), pooling
     MUST be performed on the log scale (log OR, log HR) with log-scale standard errors,
     and then exponentiated for reporting and hypothesis testing.
     """
@@ -1571,7 +1640,8 @@ def impute_mice_single(
     max_iter: int = 10,
     random_state: int = 42,
     min_value: float | dict[str, float] | None = None,
-    max_value: float | dict[str, float] | None = None
+    max_value: float | dict[str, float] | None = None,
+    target_types: dict[str, str] | None = None
 ) -> pd.DataFrame:
     """Deterministic single MICE imputation strictly for rapid exploratory data health profiling."""
     if outcome_col and outcome_col in features_to_impute:
@@ -1588,6 +1658,17 @@ def impute_mice_single(
     for feat in features_to_impute:
         if df[feat].isna().all():
             raise ValueError(f"Column '{feat}' has 0 observed values (100% missing) and cannot be imputed.")
+        if isinstance(df[feat].dtype, pd.CategoricalDtype) or df[feat].dtype.name == "category":
+            raise ValueError(
+                f"Column '{feat}' is declared as categorical. "
+                "Recipe 12 implements Gaussian MICE for continuous variables. "
+                "Missing categorical targets require variable-type-specific imputation."
+            )
+        if target_types and target_types.get(feat) in {"categorical", "ordinal", "binary"}:
+            raise ValueError(
+                f"Column '{feat}' is declared as {target_types.get(feat)}. "
+                "Recipe 12 implements Gaussian MICE strictly for continuous targets."
+            )
         if pd.api.types.is_bool_dtype(df[feat]) or not pd.api.types.is_numeric_dtype(df[feat]):
             raise ValueError(
                 f"Column '{feat}' in features_to_impute is non-numeric ({df[feat].dtype}). "
@@ -1595,17 +1676,22 @@ def impute_mice_single(
                 "Missing categorical targets require variable-type-specific imputation."
             )
         non_null_vals = df[feat].dropna().unique()
-        if len(non_null_vals) <= 2 and set(non_null_vals).issubset({0, 1, 0.0, 1.0}):
+        vals_set = set(non_null_vals)
+        if len(non_null_vals) <= 2:
             raise ValueError(
-                f"Column '{feat}' in features_to_impute is binary/dummy ({set(non_null_vals)}). "
-                "Recipe 12 implements Gaussian MICE (BayesianRidge) for continuous variables; "
+                f"Column '{feat}' in features_to_impute is binary/dummy ({vals_set}) with <= 2 unique observed values. "
+                "Binary/dummy variables cannot be imputed using Gaussian linear regression MICE; "
                 "Gaussian posterior draws produce fractional values and cannot enforce binary {0, 1} "
-                "values or mutually exclusive dummy group membership. Restrict features_to_impute "
-                "to continuous variables. Fully observed categorical dummies may be included in 'predictors' "
-                "to condition on, or use variable-type-specific imputation."
+                "or group membership. Restrict features_to_impute to continuous variables."
+            )
+        if vals_set.issubset({1, 2, 3, 1.0, 2.0, 3.0}) or vals_set.issubset({0, 1, 2, 0.0, 1.0, 2.0}):
+            raise ValueError(
+                f"Column '{feat}' in features_to_impute has discrete integer category codes ({vals_set}). "
+                "Categorical and ordinal variables must not be imputed via Gaussian linear regression MICE; "
+                "they require variable-type-specific models."
             )
 
-    # Validate conditioning columns and predictors
+    # Validate conditioning columns, predictors, and outcome
     for c in cols:
         if df[c].isna().all():
             raise ValueError(f"Column '{c}' has 0 observed values (100% missing) and cannot be conditioned upon.")
@@ -1615,17 +1701,44 @@ def impute_mice_single(
                 "All features in MICE conditioning matrix must be numeric. "
                 "Categorical predictors must be dummy-encoded before inclusion in 'predictors'."
             )
+        obs_c = df[c].dropna().values
+        if len(obs_c) > 0 and not np.all(np.isfinite(obs_c)):
+            raise ValueError(
+                f"Column '{c}' contains non-finite values (inf / -inf). "
+                "Non-finite values must be cleaned prior to MICE."
+            )
 
     if predictors:
         for pred in predictors:
-            if df[pred].isna().any():
+            if pred not in features_to_impute and df[pred].isna().any():
                 non_null_p = df[pred].dropna().unique()
-                if len(non_null_p) <= 2 and set(non_null_p).issubset({0, 1, 0.0, 1.0}):
+                if len(non_null_p) <= 2:
                     raise ValueError(
                         f"Predictor '{pred}' is binary/dummy and contains missing values. "
                         "Gaussian MICE cannot impute categorical variables. "
                         "Categorical predictors must be fully observed to condition on in Gaussian MICE."
                     )
+                raise ValueError(
+                    f"Conditioning predictor '{pred}' contains missing values. "
+                    "Conditioning-only predictors must be fully observed. "
+                    "If this continuous predictor requires imputation, include it in 'features_to_impute'."
+                )
+
+    if outcome_col and df[outcome_col].isna().any():
+        raise ValueError(
+            f"Primary outcome column '{outcome_col}' contains missing values. "
+            "Clinical governance invariant: Never impute the primary outcome variable. "
+            "Rows with missing outcome must have an explicit cohort disposition (e.g. complete-case exclusion) prior to MICE."
+        )
+
+    # Validate bound ordering
+    for feat in features_to_impute:
+        low_val = min_value[feat] if isinstance(min_value, dict) and feat in min_value else (min_value if isinstance(min_value, (int, float)) else None)
+        high_val = max_value[feat] if isinstance(max_value, dict) and feat in max_value else (max_value if isinstance(max_value, (int, float)) else None)
+        if low_val is not None and high_val is not None and low_val >= high_val:
+            raise ValueError(
+                f"Invalid bound ordering for feature '{feat}': min_value ({low_val}) must be strictly less than max_value ({high_val})."
+            )
 
     clean = df.copy()
     # Initialize missing entries with column mean
@@ -1647,22 +1760,32 @@ def impute_mice_single(
             X_mis = np.column_stack([np.ones(mis_mask.sum()), clean.loc[mis_mask, pred_cols].values])
 
             n_obs, p = X_obs.shape
-            XtX = X_obs.T @ X_obs + 1e-5 * np.eye(p)
+            if n_obs <= p:
+                raise ValueError(
+                    f"Insufficient observed cases for feature '{feat}': n_obs ({n_obs}) must be strictly greater "
+                    f"than number of parameters p ({p}) to form a valid Bayesian regression posterior."
+                )
+            rank_obs = np.linalg.matrix_rank(X_obs)
+            if rank_obs < p:
+                raise ValueError(
+                    f"Design matrix for feature '{feat}' is rank-deficient (rank {rank_obs} < {p} parameters). "
+                    "Collinear predictors or zero-variance columns must be removed before Bayesian regression MICE."
+                )
+
+            XtX = X_obs.T @ X_obs
             Xty = X_obs.T @ y_obs
             beta_hat = np.linalg.solve(XtX, Xty)
 
             # Deterministic prediction (posterior mean) for exploratory profiling
             y_imp = X_mis @ beta_hat
 
-            if isinstance(min_value, dict) and feat in min_value:
-                y_imp = np.maximum(y_imp, min_value[feat])
-            elif isinstance(min_value, (int, float)):
-                y_imp = np.maximum(y_imp, min_value)
+            low_val = min_value[feat] if isinstance(min_value, dict) and feat in min_value else (min_value if isinstance(min_value, (int, float)) else None)
+            high_val = max_value[feat] if isinstance(max_value, dict) and feat in max_value else (max_value if isinstance(max_value, (int, float)) else None)
 
-            if isinstance(max_value, dict) and feat in max_value:
-                y_imp = np.minimum(y_imp, max_value[feat])
-            elif isinstance(max_value, (int, float)):
-                y_imp = np.minimum(y_imp, max_value)
+            if low_val is not None:
+                y_imp = np.maximum(y_imp, low_val)
+            if high_val is not None:
+                y_imp = np.minimum(y_imp, high_val)
 
             clean.loc[mis_mask, feat] = y_imp
 
