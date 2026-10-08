@@ -566,3 +566,45 @@ Crucially, coupling cloud-specific recipes into the canonical `skills/shinystat`
 - **Parity**: 442/442 unit and E2E tests passing.
 
 [MEMORY_LEARN: Decoupling cloud-specific execution recipes into a dedicated export package keeps canonical repository skills pristine while empowering cloud-sandboxed agents with self-contained algorithm manuals.]
+
+---
+
+## ADR 27: Cloud Sandbox Biostatistical Hardening, Statistical Parity & Workflow Expansion
+
+### Context
+Code review and empirical audit of `packaging/cloud/shinystat-cloud/` revealed severe numerical inaccuracies, statistical biases, and usability blockers in the cloud sandbox recipes:
+1. Little's MCAR test grouped data on continuous variable values instead of missingness patterns, dropping rows with missing values and inflating $df$ into hundreds.
+2. Typecasting (`astype(int)`) occurred before dropping NaNs in DeLong and Calibration, silently turning missing patient outcomes into negative controls (`0`).
+3. Categorical SMD returned `0.00` when $sd_{bin} = 0$ even under 100% disparity ($p_0=0, p_1=1$), masking extreme imbalance.
+4. ICC accepted `alpha` but omitted confidence intervals entirely, violating SKILL.md completion criteria.
+5. Firth logistic regression provided only Wald CIs, exploding to $>10,000$ on monotone separation, lacked step-halving, and had docstring formula typos.
+6. PSM did not return `pair_id` (blocking paired/conditional analyses) and omitted post-match SMD balance diagnostics.
+7. VanderWeele & Ding E-value applied $\sqrt{OR}$ unconditionally, halving confounder strength for rare clinical outcomes.
+8. `decision-heuristics.md` recommended phantom `medstat.*` modules that do not exist in cloud sandboxes, and EPV < 10 was treated as an outdated hard stop.
+9. Common biostatistical workflows (multivariable logistic table, Kaplan-Meier / Cox PH, MICE imputation, NEJM/JAMA table export) were missing, while Grilling Gate halted unpragmatically on any routine lab missingness.
+
+### Decision
+1. **Mathematical & Algorithmic Hardening**:
+   - Replaced Little's MCAR with the true pattern-grouped EM ML algorithm (Little 1988), producing valid $df \ll N$.
+   - Enforced NaN filtering on raw float inputs prior to integer casting across DeLong, calibration, and DCA.
+   - Fixed categorical SMD to return `np.nan` on zero-variance disparity when $p_0 \ne p_1$.
+   - Implemented exact F-distribution 95% CIs for all 6 Shrout & Fleiss (1979) ICC variants.
+   - Added step-halving and Profile Likelihood CIs to Firth logistic regression; fixed formula docstring to $\sum_i h_i (0.5 - \pi_i) x_{ij}$.
+   - Enhanced PSM to return `pair_id`, categorical dummy encoding, and pre/post SMD balance tables.
+   - Added `rare_outcome` prevalence branching to VanderWeele & Ding E-value.
+2. **Cloud Heuristics & Workflow Expansion**:
+   - Purged all phantom `medstat.*` references from `decision-heuristics.md`, pointing directly to self-contained recipes.
+   - Modernized EPV heuristics per Vittinghoff & McCulloch (2007), van Smeden et al. (2016), and Riley et al. (2019), routing Cox with sparse events to `lifelines` L2 penalization.
+   - Added missing core recipes: Multivariable Logistic Table (Crude & Adjusted ORs), Survival Analysis Suite (KM median, Log-Rank, Cox PH, Schoenfeld test), MICE Imputer (protecting primary outcomes), and NEJM/JAMA Publication Table Formatter.
+   - Enriched `SKILL.md` frontmatter with rich intent triggers, harmonized the 4 Pillars diagram, and added pragmatic batched defaults to the Grilling Gate (<5% complete-case, 5-40% MICE).
+3. **Automated Verification**:
+   - Implemented dedicated unit test suite `tests/unit/test_shinystat_cloud.py` (17/17 passing).
+   - Rebuilt `~/Desktop/shinystat-cloud.zip` via `package-cloud-skill.sh`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Biostatistical Validity**: Eliminates silent data corruption, Hauck-Donner explosions, and false zero balance metrics in cloud sandboxes.
+- **Workflow Completeness**: Cloud agents can execute the full biostatistical lifecycle (Table 1 ➔ Logistic/Cox ➔ MICE ➔ Diagnostics/Agreement ➔ NEJM HTML tables) autonomously.
+- **Full Test Suite Pass**: 459/459 tests passing suite-wide with zero failures.
+
+[MEMORY_LEARN: Cloud code execution sandboxes require mathematically robust, self-contained Python recipes with pre-cast NaN filtering, exact ANOVA F-distribution intervals, and pattern-grouped EM algorithms to eliminate silent data corruption and dependency failures.]
