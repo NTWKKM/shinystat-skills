@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 from medstat.figures.base import FigureResult, export_source_data
@@ -48,12 +49,24 @@ def plot_dca(
             strat, {"color": CLINICAL_PALETTE["accent"], "lw": 1.5, "ls": "-"}
         )
         ax.plot(sub["threshold"], sub["net_benefit"], label=strat, **cfg)
-        max_nb = max(max_nb, float(sub["net_benefit"].max()))
+        valid_strat_nb = sub["net_benefit"].dropna()
+        if not valid_strat_nb.empty:
+            strat_max = float(valid_strat_nb.max())
+            if np.isfinite(strat_max):
+                max_nb = max(max_nb, strat_max)
 
     # Treat None horizontal reference at 0
     ax.axhline(0.0, color=CLINICAL_PALETTE["primary"], ls=":", lw=0.8, alpha=0.5)
 
-    ax.set_xlim(0.0, 1.0)
+    valid_thresh = df["threshold"].dropna()
+    t_min = float(valid_thresh.min()) if not valid_thresh.empty else 0.0
+    t_max = float(valid_thresh.max()) if not valid_thresh.empty else 1.0
+    x_min = t_min if np.isfinite(t_min) else 0.0
+    x_max = t_max if np.isfinite(t_max) else 1.0
+    if x_min >= x_max:
+        x_min, x_max = 0.0, 1.0
+
+    ax.set_xlim(x_min, x_max)
     ax.set_ylim(-0.05, max_nb * 1.15)
     ax.set_xlabel("Threshold Probability (pt)", labelpad=6)
     ax.set_ylabel("Net Benefit", labelpad=6)

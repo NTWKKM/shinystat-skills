@@ -58,8 +58,8 @@ If requirements, outcome directions, statistical assumptions, or document format
      - Markdown (`.md`): GitHub-flavored markdown with linked asset directory.
      - PDF (`.pdf`): High-fidelity document printing via Playwright Chromium.
    - **Reporting Integrity Verification (`verify_report_integrity`)**:
-     - *Traceability*: Every number in narrative text traces back to `results_dict` ($\pm 0.02$).
-     - *Zero-PHI*: Hard regex block against Hospital Numbers (`HN`), Thai 13-digit National IDs, phone numbers, and patient names.
+     - *Traceability*: Narrative numbers matched against `results_dict` within $\pm 0.02$ / 1% (or percentage scale $\pm 0.05$), with up to 15% allowance (min 1) for structural/non-data numbers and common constants bypassed.
+     - *Zero-PHI Screening*: Automated regex screening for Hospital Numbers (`HN`), 13-digit Thai National IDs, phone numbers, and honorific-prefixed names (`Mr.`, `นาย`, `นพ.`). Names without honorific prefixes are not detected.
      - *Causal Caveats*: Observational PSM and regression models must explicitly state unmeasured confounding and E-values.
 
 ---
@@ -98,4 +98,4 @@ The biostatistical task is complete when:
 - [ ] Participant retention flow ($N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$) is fully accounted for.
 - [ ] Statistical estimates with 95% confidence intervals and standard reporting tables (NEJM/JAMA/APA) are generated and presented.
 - [ ] Publication-grade figures (300 DPI) and multi-format documents (`.docx`, `.pptx`, `.html`, `.md`, `.pdf`) are rendered per user requirements.
-- [ ] Pillar 5 reporting integrity audit has passed with zero PHI, numerical traceability, and causal inference caveats.
+- [ ] Pillar 5 reporting integrity audit has passed with automated Zero-PHI regex scan, numerical traceability, causal inference caveats, and manual PHI review prior to external release.

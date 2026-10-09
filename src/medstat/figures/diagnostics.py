@@ -152,7 +152,7 @@ def plot_schoenfeld_residuals(
     csv_path = export_source_data(source_df, png_path)
 
     alt_text = f"Schoenfeld residual plot for {var_name} evaluating proportional hazards assumption."
-    caption = f"Figure. {title} for {var_name}. A horizontal loess trend confirms constant hazard ratio over time."
+    caption = f"Figure. {title} for {var_name}. A horizontal loess trend is consistent with proportional hazards over time."
 
     return FigureResult(
         png_path=png_path,
@@ -229,7 +229,7 @@ def plot_mice_diagnostics(
     csv_path = export_source_data(source_df, png_path)
 
     alt_text = f"MICE density overlay comparing observed versus imputed distributions for {var_name}."
-    caption = f"Figure. {title} for {var_name}. Overlapping density profiles confirm preservation of distributional properties without aberrant outliers."
+    caption = f"Figure. {title} for {var_name}. Overlapping density profiles suggest preservation of distributional properties without aberrant outliers."
 
     return FigureResult(
         png_path=png_path,

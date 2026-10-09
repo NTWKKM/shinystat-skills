@@ -3,9 +3,12 @@ tests/unit/test_recipes_snapshot.py: Baseline snapshot capture and regression te
 for all 13 biostatistical recipes in python-recipes.md.
 """
 
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -186,14 +189,18 @@ def test_capture_or_verify_baseline_snapshot():
     current_results = run_all_recipes(ns)
 
     if not SNAPSHOT_PATH.exists():
-        # First time: capture baseline
-        SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        SNAPSHOT_PATH.write_text(
-            json.dumps(current_results, indent=2), encoding="utf-8"
+        if os.environ.get("UPDATE_RECIPES_SNAPSHOT") == "1":
+            SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
+            SNAPSHOT_PATH.write_text(
+                json.dumps(current_results, indent=2), encoding="utf-8"
+            )
+            assert SNAPSHOT_PATH.exists()
+            print(f"Captured initial baseline snapshot at {SNAPSHOT_PATH}")
+            return
+        pytest.fail(
+            f"Baseline snapshot missing at {SNAPSHOT_PATH}. "
+            "To capture or update baseline snapshot, run with UPDATE_RECIPES_SNAPSHOT=1"
         )
-        assert SNAPSHOT_PATH.exists()
-        print(f"Captured initial baseline snapshot at {SNAPSHOT_PATH}")
-        return
 
     # Subsequent runs: assert zero regression on all baseline keys
     snapshot = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))

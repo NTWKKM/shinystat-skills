@@ -782,9 +782,9 @@ Users requested comprehensive document and visual presentation generation across
    - `render_pptx`: Native PowerPoint 16:9 widescreen presentation via `python-pptx` (`13.333" x 7.5"`) with 1-figure-per-slide layout and structured takeaway cards.
    - `render_pdf`: Headless Chromium PDF printing via Playwright (`page.pdf()`), with LibreOffice (`soffice`) fallback.
 5. **Pillar 5: Reporting Integrity (`medstat.reporting.integrity`)**:
-   - Numerical Traceability: Every narrative number is cross-checked against `results_dict` ($\pm 0.02$).
-   - Zero-PHI Enforcement: Deterministic regex scan suppressing Hospital Numbers (`HN`), Thai 13-digit National IDs, phone numbers, patient names, and dates of birth.
-   - Causal Invariants: Observational PSM and regression models must explicitly state unmeasured confounding and E-values.
+   - Numerical Traceability: Every narrative number is cross-checked against `results_dict` ($\pm 0.02$ absolute, 1% relative, or $\pm 0.05$ on percentage scale), allowing up to 15% untraced numbers (min 1) for descriptive/narrative labels while ignoring common integers (1, 2, 5, 10, 95, 100).
+   - Zero-PHI Enforcement: Deterministic regex scan identifying Hospital Numbers (`HN`), Thai 13-digit National IDs, phone numbers, honorific-prefixed personal names, and dates of birth across narrative, table headers, and figure alt-text. Passing automated screening flags absence of detected markers but requires mandatory clinical/manual PHI review prior to external release.
+   - Causal Invariants: Observational PSM, Cox, and logistic/odds-ratio models must explicitly state unmeasured or residual confounding and E-values.
    - Retention and Methods: Enforces participant disposition accounting and statistical method disclosures.
 
 ### Consequences

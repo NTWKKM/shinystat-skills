@@ -81,7 +81,12 @@ def _flatten_numbers(val: Any) -> list[float]:
 
 # PHI detection patterns (HIPAA 18 Identifiers + Thai PDPA)
 PHI_PATTERNS = [
-    (re.compile(r"\b(?:HN|hn|H\.N\.)\s*[:#-]?\s*\d{4,}\b"), "Hospital Number (HN)"),
+    (
+        re.compile(
+            r"\b(?:HN|hn|H\.N\.)\s*[:#/-]?\s*\d{2,}(?:[-/]\d{2,})+\b|\b(?:HN|hn|H\.N\.)\s*[:#/-]?\s*\d{4,}\b"
+        ),
+        "Hospital Number (HN)",
+    ),
     (
         re.compile(r"\b\d{1}[-\s]?\d{4}[-\s]?\d{5}[-\s]?\d{2}[-\s]?\d{1}\b"),
         "Thai Citizen ID (13 digits)",
@@ -94,7 +99,7 @@ PHI_PATTERNS = [
     ),
     (
         re.compile(
-            r"\b(?:Mr\.|Mrs\.|Ms\.|Dr\.|นาย|นาง|นางสาว|นพ\.|พญ\.)\s+[A-Za-zก-๙]{2,}\b"
+            r"\b(?:Mr\.?|Mrs\.?|Ms\.?|Dr\.?|นาย|นาง|นางสาว|นพ\.?|พญ\.?|ดร\.?)\s+[A-Za-zก-๙]{2,}\b"
         ),
         "Personal Name Marker",
     ),
@@ -142,8 +147,12 @@ IGNORED_NUMBERS = {
 def _extract_text_numbers(text: str) -> list[float]:
     """Extracts candidate float numbers from narrative text."""
     # Match numbers like 0.85, 12.3, 145, 0.001, 1,234.56, -0.45, 95%
+    # Word boundary / non-alphanumeric check guards against hyphenated words (e.g. COVID-19, IL-6)
     clean_text = text.replace(",", "")
-    matches = re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", clean_text)
+    matches = re.findall(
+        r"(?<!\w)(?<![a-zA-Z]-)(?:[-+]?\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?",
+        clean_text,
+    )
     nums = []
     for m in matches:
         try:
@@ -172,10 +181,17 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
         for m in matches:
             phi_violations.append(f"{label}: '{m}'")
 
-    # Also scan table cells
+    # Also scan table cells and headers
     for block in doc.blocks:
         if isinstance(block, TableBlock):
             for col in block.df.columns:
+                col_str = str(col)
+                for pattern, label in PHI_PATTERNS:
+                    matches = pattern.findall(col_str)
+                    for m in matches:
+                        phi_violations.append(
+                            f"{label} in Table '{block.caption}' header: '{m}'"
+                        )
                 for val in block.df[col]:
                     val_str = str(val)
                     for pattern, label in PHI_PATTERNS:
@@ -210,7 +226,17 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
     results_keys_str = " ".join(doc.results_dict.keys()).lower()
     is_causal = any(
         k in results_keys_str
-        for k in ["psm", "propensity", "love_plot", "hazard_ratio", "cox", "or_table"]
+        for k in [
+            "psm",
+            "propensity",
+            "love_plot",
+            "hazard_ratio",
+            "cox",
+            "or_table",
+            "odds_ratio",
+            "logistic",
+            "regression",
+        ]
     )
 
     has_causal_caveat = True
@@ -223,7 +249,7 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
                 "unmeasured confounding",
                 "e-value",
                 "residual confounding",
-                "observational",
+                "confound",
                 "causal inference assumption",
             ]
         )

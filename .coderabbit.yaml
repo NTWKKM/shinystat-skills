@@ -12,6 +12,16 @@ reviews:
   review_status: false
   collapse_walkthrough: false
   path_filters:
+    # Allow only canonical source, packaging, tests, shinystat skill, and root docs
+    - "src/**"
+    - "packaging/**"
+    - "tests/**"
+    - "skills/shinystat/**"
+    - "*.md"
+    - "*.toml"
+    - "*.yaml"
+    - "*.yml"
+
     # Exclude platform mirror directories (.agent, .agents, .claude, .cursor)
     - "!.agent/**"
     - "!**/.agent/**"

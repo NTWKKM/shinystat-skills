@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import scipy.stats as stats
 
+
 def calculate_smd(treated: np.ndarray, control: np.ndarray) -> float:
     """Calculate Austin (2009) Standardized Mean Difference for continuous variables."""
     t = np.asarray(treated, dtype=float)
@@ -29,6 +30,7 @@ def calculate_smd(treated: np.ndarray, control: np.ndarray) -> float:
         return 0.0 if mean_t == mean_c else np.nan
     return float((mean_t - mean_c) / pooled_sd)
 
+
 def calculate_binary_smd(p0: float, p1: float) -> float:
     """Calculate Austin (2009) Standardized Mean Difference for binary proportions."""
     if np.isnan(p0) or np.isnan(p1):
@@ -38,21 +40,24 @@ def calculate_binary_smd(p0: float, p1: float) -> float:
         return 0.0 if p0 == p1 else np.nan
     return float((p1 - p0) / sd_bin)
 
+
 def generate_table_one(
     df: pd.DataFrame,
     strata: str,
     continuous_vars: list[str],
     categorical_vars: list[str],
-    nonnormal_vars: list[str] | None = None
+    nonnormal_vars: list[str] | None = None,
 ) -> pd.DataFrame:
     """Build stratified Table 1 with parametric/non-parametric tests and SMD."""
     nonnormal = set(nonnormal_vars or [])
     clean_df = df.dropna(subset=[strata]).copy()
     groups = sorted(clean_df[strata].unique())
     rows = []
-    
+
     # Unified group column mapping to prevent count vs measurement column divergence
-    col_labels = {g: f"{strata}={g} (N = {int(np.sum(clean_df[strata] == g))})" for g in groups}
+    col_labels = {
+        g: f"{strata}={g} (N = {int(np.sum(clean_df[strata] == g))})" for g in groups
+    }
 
     # 1. Total counts header
     total_counts = {"Characteristic": f"Overall (N = {len(clean_df)})"}
@@ -65,8 +70,11 @@ def generate_table_one(
     # 2. Continuous variables
     for var in continuous_vars:
         row = {"Characteristic": var}
-        group_vals = [clean_df.loc[clean_df[strata] == g, var].dropna().to_numpy(dtype=float) for g in groups]
-        
+        group_vals = [
+            clean_df.loc[clean_df[strata] == g, var].dropna().to_numpy(dtype=float)
+            for g in groups
+        ]
+
         if var in nonnormal:
             for g, vals in zip(groups, group_vals):
                 if len(vals) > 0:
@@ -76,7 +84,11 @@ def generate_table_one(
                 else:
                     row[col_labels[g]] = "-"
             try:
-                pval = stats.kruskal(*group_vals).pvalue if len(groups) > 1 and all(len(v) for v in group_vals) else np.nan
+                pval = (
+                    stats.kruskal(*group_vals).pvalue
+                    if len(groups) > 1 and all(len(v) for v in group_vals)
+                    else np.nan
+                )
             except Exception:
                 pval = np.nan
         else:
@@ -88,11 +100,19 @@ def generate_table_one(
                 else:
                     row[col_labels[g]] = "-"
             try:
-                pval = stats.f_oneway(*group_vals).pvalue if len(groups) > 1 and all(len(v) for v in group_vals) else np.nan
+                pval = (
+                    stats.f_oneway(*group_vals).pvalue
+                    if len(groups) > 1 and all(len(v) for v in group_vals)
+                    else np.nan
+                )
             except Exception:
                 pval = np.nan
-                
-        row["P-value"] = f"{pval:.3f}" if (not np.isnan(pval) and pval >= 0.001) else ("<0.001" if not np.isnan(pval) else "")
+
+        row["P-value"] = (
+            f"{pval:.3f}"
+            if (not np.isnan(pval) and pval >= 0.001)
+            else ("<0.001" if not np.isnan(pval) else "")
+        )
         if len(groups) == 2 and len(group_vals[0]) > 0 and len(group_vals[1]) > 0:
             smd_val = calculate_smd(group_vals[1], group_vals[0])
             row["SMD"] = f"{smd_val:.2f}" if not np.isnan(smd_val) else "-"
@@ -104,12 +124,14 @@ def generate_table_one(
     for var in categorical_vars:
         var_clean = clean_df.dropna(subset=[var])
         missing_cnt = len(clean_df) - len(var_clean)
-        header_text = f"**{var}**" + (f" (Missing: {missing_cnt})" if missing_cnt > 0 else "")
+        header_text = f"**{var}**" + (
+            f" (Missing: {missing_cnt})" if missing_cnt > 0 else ""
+        )
         rows.append({"Characteristic": header_text, "P-value": "", "SMD": ""})
-        
+
         categories = sorted(var_clean[var].unique())
         contingency = pd.crosstab(var_clean[var], var_clean[strata])
-        
+
         # P-value calculation with Fisher fallback for 2x2 with small expected counts
         pval = np.nan
         if contingency.size > 0:
@@ -121,7 +143,11 @@ def generate_table_one(
             except Exception:
                 pval = np.nan
 
-        p_str = f"{pval:.3f}" if (not np.isnan(pval) and pval >= 0.001) else ("<0.001" if not np.isnan(pval) else "")
+        p_str = (
+            f"{pval:.3f}"
+            if (not np.isnan(pval) and pval >= 0.001)
+            else ("<0.001" if not np.isnan(pval) else "")
+        )
 
         for idx, cat in enumerate(categories):
             row = {"Characteristic": f"  {cat}"}
@@ -131,7 +157,7 @@ def generate_table_one(
                 pct = (cnt / len(sub_g) * 100.0) if len(sub_g) > 0 else np.nan
                 row[col_labels[g]] = f"{cnt} ({pct:.1f}%)" if not np.isnan(pct) else "-"
             row["P-value"] = p_str if idx == 0 else ""
-            
+
             if len(groups) == 2:
                 g0_sub = var_clean[var_clean[strata] == groups[0]]
                 g1_sub = var_clean[var_clean[strata] == groups[1]]
@@ -160,6 +186,7 @@ import numpy as np
 import pandas as pd
 import scipy.stats as stats
 
+
 def calculate_ci_wilson_score(k: int, n: int, ci: float = 0.95) -> tuple[float, float]:
     """Compute asymmetric Wilson score confidence interval for binomial proportion."""
     if n <= 0:
@@ -170,13 +197,19 @@ def calculate_ci_wilson_score(k: int, n: int, ci: float = 0.95) -> tuple[float, 
     denom = 1.0 + (z**2) / n
     center = p + (z**2) / (2.0 * n)
     half_width = z * np.sqrt((p * (1.0 - p) + (z**2) / (4.0 * n)) / n)
-    return (float(max(0.0, (center - half_width) / denom)), float(min(1.0, (center + half_width) / denom)))
+    return (
+        float(max(0.0, (center - half_width) / denom)),
+        float(min(1.0, (center + half_width) / denom)),
+    )
+
 
 def calculate_2x2_metrics(tp: int, fp: int, fn: int, tn: int, ci: float = 0.95) -> dict:
     """Calculate sensitivity, specificity, PPV, NPV, LR+, LR-, and DOR with complete 95% CIs."""
     for count_val, name in [(tp, "tp"), (fp, "fp"), (fn, "fn"), (tn, "tn")]:
         if int(count_val) < 0:
-            raise ValueError(f"Contingency cell count '{name}' must be non-negative (>= 0).")
+            raise ValueError(
+                f"Contingency cell count '{name}' must be non-negative (>= 0)."
+            )
     tp, fp, fn, tn = int(tp), int(fp), int(fn), int(tn)
     if tp + fp + fn + tn == 0:
         raise ValueError("Total sample size in 2x2 contingency table must be > 0.")
@@ -199,17 +232,30 @@ def calculate_2x2_metrics(tp: int, fp: int, fn: int, tn: int, ci: float = 0.95) 
 
     # Likelihood Ratios with log-scale CIs (Simel et al., 1995 / Altman 2000)
     lr_pos = sens_a / (1.0 - spec_a) if (1.0 - spec_a) > 0 else np.nan
-    se_log_lr_pos = np.sqrt(1.0 / tp_a - 1.0 / (tp_a + fn_a) + 1.0 / fp_a - 1.0 / (fp_a + tn_a))
-    lr_pos_ci = (float(np.exp(np.log(lr_pos) - z * se_log_lr_pos)), float(np.exp(np.log(lr_pos) + z * se_log_lr_pos)))
+    se_log_lr_pos = np.sqrt(
+        1.0 / tp_a - 1.0 / (tp_a + fn_a) + 1.0 / fp_a - 1.0 / (fp_a + tn_a)
+    )
+    lr_pos_ci = (
+        float(np.exp(np.log(lr_pos) - z * se_log_lr_pos)),
+        float(np.exp(np.log(lr_pos) + z * se_log_lr_pos)),
+    )
 
     lr_neg = (1.0 - sens_a) / spec_a if spec_a > 0 else np.nan
-    se_log_lr_neg = np.sqrt(1.0 / fn_a - 1.0 / (tp_a + fn_a) + 1.0 / tn_a - 1.0 / (fp_a + tn_a))
-    lr_neg_ci = (float(np.exp(np.log(lr_neg) - z * se_log_lr_neg)), float(np.exp(np.log(lr_neg) + z * se_log_lr_neg)))
+    se_log_lr_neg = np.sqrt(
+        1.0 / fn_a - 1.0 / (tp_a + fn_a) + 1.0 / tn_a - 1.0 / (fp_a + tn_a)
+    )
+    lr_neg_ci = (
+        float(np.exp(np.log(lr_neg) - z * se_log_lr_neg)),
+        float(np.exp(np.log(lr_neg) + z * se_log_lr_neg)),
+    )
 
     # Diagnostic Odds Ratio (DOR) with Woolf log-scale CI
     dor = (tp_a * tn_a) / (fp_a * fn_a) if (fp_a * fn_a) > 0 else np.nan
     se_log_dor = np.sqrt(1.0 / tp_a + 1.0 / fp_a + 1.0 / fn_a + 1.0 / tn_a)
-    dor_ci = (float(np.exp(np.log(dor) - z * se_log_dor)), float(np.exp(np.log(dor) + z * se_log_dor)))
+    dor_ci = (
+        float(np.exp(np.log(dor) - z * se_log_dor)),
+        float(np.exp(np.log(dor) + z * se_log_dor)),
+    )
 
     return {
         "Sensitivity": (float(sens), calculate_ci_wilson_score(tp, n_pos, ci)),
@@ -238,6 +284,7 @@ import numpy as np
 import scipy.stats as stats
 from sklearn.metrics import roc_curve
 
+
 def _delong_placements(y_true: np.ndarray, y_score: np.ndarray):
     """Compute positive (v10) and negative (v01) placement values for DeLong test."""
     pos_scores = y_score[y_true == 1]
@@ -250,16 +297,23 @@ def _delong_placements(y_true: np.ndarray, y_score: np.ndarray):
     auc = float(v10.mean())
     return v10, v01, auc
 
-def auc_ci_delong(y_true, y_score, direction: str = "high", alpha: float = 0.05) -> dict:
+
+def auc_ci_delong(
+    y_true, y_score, direction: str = "high", alpha: float = 0.05
+) -> dict:
     """Compute empirical AUC and DeLong analytical 95% confidence interval with directionality."""
     y_raw = np.asarray(y_true, dtype=float)
     s_raw = np.asarray(y_score, dtype=float)
     if len(y_raw) != len(s_raw):
-        raise ValueError(f"Length mismatch: y_true ({len(y_raw)}) and y_score ({len(s_raw)}) must have identical lengths.")
+        raise ValueError(
+            f"Length mismatch: y_true ({len(y_raw)}) and y_score ({len(s_raw)}) must have identical lengths."
+        )
     valid = ~(np.isnan(y_raw) | np.isnan(s_raw))
     y_valid = y_raw[valid]
     if not np.all(np.isin(y_valid, [0, 1])):
-        raise ValueError("Binary outcome y_true must contain strictly binary values (0 and 1).")
+        raise ValueError(
+            "Binary outcome y_true must contain strictly binary values (0 and 1)."
+        )
     y_t = y_valid.astype(int)
     y_s = s_raw[valid]
     if direction == "low":
@@ -293,6 +347,8 @@ def auc_ci_delong(y_true, y_score, direction: str = "high", alpha: float = 0.05)
         "youden_j": float(youden_j[best_idx]),
         "n_pos": n_pos,
         "n_neg": n_neg,
+        "fpr": fpr,
+        "tpr": tpr,
         "roc_curve": {
             "fpr": fpr,
             "tpr": tpr,
@@ -306,17 +362,22 @@ def auc_ci_delong(y_true, y_score, direction: str = "high", alpha: float = 0.05)
         },
     }
 
+
 def delong_paired_test(y_true, score1, score2, alpha: float = 0.05) -> dict:
     """Paired DeLong comparative test between two correlated ROC curves on the same cohort."""
     y_raw = np.asarray(y_true, dtype=float)
     s1_raw = np.asarray(score1, dtype=float)
     s2_raw = np.asarray(score2, dtype=float)
     if len(y_raw) != len(s1_raw) or len(y_raw) != len(s2_raw):
-        raise ValueError(f"Length mismatch: y_true ({len(y_raw)}), score1 ({len(s1_raw)}), and score2 ({len(s2_raw)}) must have identical lengths.")
+        raise ValueError(
+            f"Length mismatch: y_true ({len(y_raw)}), score1 ({len(s1_raw)}), and score2 ({len(s2_raw)}) must have identical lengths."
+        )
     valid = ~(np.isnan(y_raw) | np.isnan(s1_raw) | np.isnan(s2_raw))
     y_valid = y_raw[valid]
     if not np.all(np.isin(y_valid, [0, 1])):
-        raise ValueError("Binary outcome y_true must contain strictly binary values (0 and 1).")
+        raise ValueError(
+            "Binary outcome y_true must contain strictly binary values (0 and 1)."
+        )
     y_t = y_valid.astype(int)
     s1 = s1_raw[valid]
     s2 = s2_raw[valid]
@@ -330,7 +391,9 @@ def delong_paired_test(y_true, score1, score2, alpha: float = 0.05) -> dict:
 
     var1 = (np.var(v10_1, ddof=1) / n_pos) + (np.var(v01_1, ddof=1) / n_neg)
     var2 = (np.var(v10_2, ddof=1) / n_pos) + (np.var(v01_2, ddof=1) / n_neg)
-    cov12 = (np.cov(v10_1, v10_2, ddof=1)[0, 1] / n_pos) + (np.cov(v01_1, v01_2, ddof=1)[0, 1] / n_neg)
+    cov12 = (np.cov(v10_1, v10_2, ddof=1)[0, 1] / n_pos) + (
+        np.cov(v01_1, v01_2, ddof=1)[0, 1] / n_neg
+    )
 
     diff = auc1 - auc2
     var_diff = max(var1 + var2 - 2.0 * cov12, 1e-12)
@@ -365,16 +428,21 @@ import statsmodels.api as sm
 from scipy.special import logit
 from statsmodels.nonparametric.smoothers_lowess import lowess
 
+
 def evaluate_calibration(y_true, y_pred) -> dict:
     """Compute Brier Score, Calibration Slope/Intercept, and Austin & Steyerberg (2019) ICI."""
     y_raw = np.asarray(y_true, dtype=float)
     p_raw = np.asarray(y_pred, dtype=float)
     if len(y_raw) != len(p_raw):
-        raise ValueError(f"Length mismatch: y_true ({len(y_raw)}) and y_pred ({len(p_raw)}) must have identical lengths.")
+        raise ValueError(
+            f"Length mismatch: y_true ({len(y_raw)}) and y_pred ({len(p_raw)}) must have identical lengths."
+        )
     valid = ~(np.isnan(y_raw) | np.isnan(p_raw))
     y_valid = y_raw[valid]
     if not np.all(np.isin(y_valid, [0, 1])):
-        raise ValueError("Binary outcome y_true must contain strictly binary values (0 and 1).")
+        raise ValueError(
+            "Binary outcome y_true must contain strictly binary values (0 and 1)."
+        )
     p_valid = p_raw[valid]
     if (p_valid < 0.0).any() or (p_valid > 1.0).any():
         raise ValueError("Predicted probabilities y_pred must be in the range [0, 1].")
@@ -384,7 +452,9 @@ def evaluate_calibration(y_true, y_pred) -> dict:
     # 1. Brier score
     brier = float(np.mean((y_t - y_p) ** 2))
     prev = float(np.mean(y_t))
-    scaled_brier = 1.0 - (brier / (prev * (1.0 - prev))) if (0.0 < prev < 1.0) else np.nan
+    scaled_brier = (
+        1.0 - (brier / (prev * (1.0 - prev))) if (0.0 < prev < 1.0) else np.nan
+    )
 
     # 2. Calibration slope & intercept via logistic recalibration
     log_odds = logit(y_p)
@@ -410,10 +480,13 @@ def evaluate_calibration(y_true, y_pred) -> dict:
     # 4. Decile calibration bins for plotting
     n_bins = 10
     quantiles = np.linspace(0, 100, n_bins + 1)
-    bin_edges = np.percentile(y_p, quantiles)
-    bin_edges[-1] += 1e-5
+    bin_edges = np.unique(np.percentile(y_p, quantiles))
+    if len(bin_edges) < 2:
+        bin_edges = np.array([float(np.min(y_p)) - 1e-5, float(np.max(y_p)) + 1e-5])
+    else:
+        bin_edges[-1] += 1e-5
     p_means, o_rates, b_counts, ci_l_list, ci_u_list = [], [], [], [], []
-    for b in range(n_bins):
+    for b in range(len(bin_edges) - 1):
         mask = (y_p >= bin_edges[b]) & (y_p < bin_edges[b + 1])
         cnt = int(np.sum(mask))
         if cnt > 0:
@@ -457,9 +530,10 @@ def evaluate_calibration(y_true, y_pred) -> dict:
         },
     }
 
+
 def calculate_dca(y_true, y_pred, thresholds: np.ndarray | None = None) -> pd.DataFrame:
     """Calculate Vickers & Elkin (2006) Clinical Net Benefit across decision thresholds.
-    
+
     Validation & Performance Note:
     If predicted scores fall outside [0, 1], an in-sample logistic recalibration is fitted.
     Evaluating net benefit on the same dataset used for recalibration reflects apparent
@@ -468,11 +542,15 @@ def calculate_dca(y_true, y_pred, thresholds: np.ndarray | None = None) -> pd.Da
     y_raw = np.asarray(y_true, dtype=float)
     p_raw = np.asarray(y_pred, dtype=float)
     if len(y_raw) != len(p_raw):
-        raise ValueError(f"Length mismatch: y_true ({len(y_raw)}) and y_pred ({len(p_raw)}) must have identical lengths.")
+        raise ValueError(
+            f"Length mismatch: y_true ({len(y_raw)}) and y_pred ({len(p_raw)}) must have identical lengths."
+        )
     valid = ~(np.isnan(y_raw) | np.isnan(p_raw))
     y_valid = y_raw[valid]
     if not np.all(np.isin(y_valid, [0, 1])):
-        raise ValueError("Binary outcome y_true must contain strictly binary values (0 and 1).")
+        raise ValueError(
+            "Binary outcome y_true must contain strictly binary values (0 and 1)."
+        )
     y_t = y_valid.astype(int)
     y_p = p_raw[valid]
 
@@ -497,8 +575,12 @@ def calculate_dca(y_true, y_pred, thresholds: np.ndarray | None = None) -> pd.Da
         fp = np.sum((y_p >= pt) & (y_t == 0))
         nb_model = (tp / n) - (fp / n) * weight
         nb_all = prevalence - (1.0 - prevalence) * weight
-        records.append({"threshold": pt, "net_benefit": float(nb_model), "strategy": "Model"})
-        records.append({"threshold": pt, "net_benefit": float(nb_all), "strategy": "Treat All"})
+        records.append(
+            {"threshold": pt, "net_benefit": float(nb_model), "strategy": "Model"}
+        )
+        records.append(
+            {"threshold": pt, "net_benefit": float(nb_all), "strategy": "Treat All"}
+        )
         records.append({"threshold": pt, "net_benefit": 0.0, "strategy": "Treat None"})
 
     res_df = pd.DataFrame(records)
@@ -524,18 +606,23 @@ import numpy as np
 import pandas as pd
 import scipy.stats as stats
 
+
 def calculate_bland_altman(m1, m2, ci: float = 0.95) -> dict:
     """Compute Bland-Altman mean difference and 95% Limits of Agreement with 1999 large-sample CIs."""
     v1 = np.asarray(m1, dtype=float)
     v2 = np.asarray(m2, dtype=float)
     if len(v1) != len(v2):
-        raise ValueError(f"Length mismatch: m1 ({len(v1)}) and m2 ({len(v2)}) must have identical lengths.")
+        raise ValueError(
+            f"Length mismatch: m1 ({len(v1)}) and m2 ({len(v2)}) must have identical lengths."
+        )
     valid = ~(np.isnan(v1) | np.isnan(v2))
     diffs = v1[valid] - v2[valid]
     means = (v1[valid] + v2[valid]) / 2.0
     n = len(diffs)
     if n < 2:
-        raise ValueError("Bland-Altman difference analysis requires at least 2 valid paired measurements.")
+        raise ValueError(
+            "Bland-Altman difference analysis requires at least 2 valid paired measurements."
+        )
 
     mean_diff = float(np.mean(diffs))
     sd_diff = float(np.std(diffs, ddof=1))
@@ -564,17 +651,29 @@ def calculate_bland_altman(m1, m2, ci: float = 0.95) -> dict:
             "mean_diff": mean_diff,
             "loa_lower": lower_loa,
             "loa_upper": upper_loa,
-            "ci_mean_diff": (float(mean_diff - t_crit * se_mean), float(mean_diff + t_crit * se_mean)),
-            "ci_loa_lower": (float(lower_loa - t_crit * se_loa), float(lower_loa + t_crit * se_loa)),
-            "ci_loa_upper": (float(upper_loa - t_crit * se_loa), float(upper_loa + t_crit * se_loa)),
+            "ci_mean_diff": (
+                float(mean_diff - t_crit * se_mean),
+                float(mean_diff + t_crit * se_mean),
+            ),
+            "ci_loa_lower": (
+                float(lower_loa - t_crit * se_loa),
+                float(lower_loa + t_crit * se_loa),
+            ),
+            "ci_loa_upper": (
+                float(upper_loa - t_crit * se_loa),
+                float(upper_loa + t_crit * se_loa),
+            ),
         },
     }
+
 
 def calculate_icc_matrix(values: np.ndarray, alpha: float = 0.05) -> pd.DataFrame:
     """Compute all 6 Shrout & Fleiss (1979) ICC variants with exact F-distribution 95% CIs."""
     mat = np.asarray(values, dtype=float)
     if np.isnan(mat).any():
-        raise ValueError("ICC matrix contains missing values. Impute or subset complete cases.")
+        raise ValueError(
+            "ICC matrix contains missing values. Impute or subset complete cases."
+        )
     n, k = mat.shape
     if n < 2 or k < 2:
         raise ValueError("ICC requires at least 2 targets and 2 raters.")
@@ -582,17 +681,27 @@ def calculate_icc_matrix(values: np.ndarray, alpha: float = 0.05) -> pd.DataFram
     grand_mean = np.mean(mat)
     # Check all-constant matrix: target variance is zero, reliability undefined
     if np.all(mat == grand_mean):
-        return pd.DataFrame([
-            {"Type": t, "Description": d, "ICC": np.nan, "CI_lower": np.nan, "CI_upper": np.nan, "F": np.nan, "pval": np.nan}
-            for t, d in [
-                ("ICC1", "One-way random (single)"),
-                ("ICC2", "Two-way random agreement"),
-                ("ICC3", "Two-way mixed consistency"),
-                ("ICC1k", "One-way random (average)"),
-                ("ICC2k", "Two-way random agreement (avg)"),
-                ("ICC3k", "Two-way mixed consistency (avg)"),
+        return pd.DataFrame(
+            [
+                {
+                    "Type": t,
+                    "Description": d,
+                    "ICC": np.nan,
+                    "CI_lower": np.nan,
+                    "CI_upper": np.nan,
+                    "F": np.nan,
+                    "pval": np.nan,
+                }
+                for t, d in [
+                    ("ICC1", "One-way random (single)"),
+                    ("ICC2", "Two-way random agreement"),
+                    ("ICC3", "Two-way mixed consistency"),
+                    ("ICC1k", "One-way random (average)"),
+                    ("ICC2k", "Two-way random agreement (avg)"),
+                    ("ICC3k", "Two-way mixed consistency (avg)"),
+                ]
             ]
-        ])
+        )
 
     row_means = np.mean(mat, axis=1)
     col_means = np.mean(mat, axis=0)
@@ -619,16 +728,28 @@ def calculate_icc_matrix(values: np.ndarray, alpha: float = 0.05) -> pd.DataFram
         f_obs_1 = np.inf
         p_1 = 0.0
     else:
-        icc1 = (MSB - MSW) / (MSB + (k - 1) * MSW) if (MSB + (k - 1) * MSW) != 0 else np.nan
+        icc1 = (
+            (MSB - MSW) / (MSB + (k - 1) * MSW)
+            if (MSB + (k - 1) * MSW) != 0
+            else np.nan
+        )
         icc1k = (MSB - MSW) / MSB if MSB != 0 else np.nan
         f_obs_1 = MSB / MSW if MSW > 0 else np.nan
-        p_1 = float(stats.f.sf(f_obs_1, df_B, df_W)) if not np.isnan(f_obs_1) else np.nan
+        p_1 = (
+            float(stats.f.sf(f_obs_1, df_B, df_W)) if not np.isnan(f_obs_1) else np.nan
+        )
         f1_l = stats.f.ppf(1.0 - alpha / 2.0, df_B, df_W)
         f1_u = stats.f.ppf(1.0 - alpha / 2.0, df_W, df_B)
         fl1 = f_obs_1 / f1_l if (not np.isnan(f_obs_1) and f1_l > 0) else np.nan
         fu1 = f_obs_1 * f1_u if not np.isnan(f_obs_1) else np.nan
-        ci_icc1 = ((fl1 - 1.0) / (fl1 + k - 1.0) if not np.isnan(fl1) else np.nan, (fu1 - 1.0) / (fu1 + k - 1.0) if not np.isnan(fu1) else np.nan)
-        ci_icc1k = (1.0 - 1.0 / fl1 if (not np.isnan(fl1) and fl1 > 0) else np.nan, 1.0 - 1.0 / fu1 if (not np.isnan(fu1) and fu1 > 0) else np.nan)
+        ci_icc1 = (
+            (fl1 - 1.0) / (fl1 + k - 1.0) if not np.isnan(fl1) else np.nan,
+            (fu1 - 1.0) / (fu1 + k - 1.0) if not np.isnan(fu1) else np.nan,
+        )
+        ci_icc1k = (
+            1.0 - 1.0 / fl1 if (not np.isnan(fl1) and fl1 > 0) else np.nan,
+            1.0 - 1.0 / fu1 if (not np.isnan(fu1) and fu1 > 0) else np.nan,
+        )
 
     # 2. Model 3 (Consistency)
     if MSE == 0 and MSB > 0:
@@ -643,13 +764,23 @@ def calculate_icc_matrix(values: np.ndarray, alpha: float = 0.05) -> pd.DataFram
         icc3 = (MSB - MSE) / denom_icc3 if denom_icc3 != 0 else np.nan
         icc3k = (MSB - MSE) / MSB if MSB != 0 else np.nan
         f_obs_23 = MSB / MSE if MSE > 0 else np.nan
-        p_23 = float(stats.f.sf(f_obs_23, df_B, df_E)) if not np.isnan(f_obs_23) else np.nan
+        p_23 = (
+            float(stats.f.sf(f_obs_23, df_B, df_E))
+            if not np.isnan(f_obs_23)
+            else np.nan
+        )
         f3_l = stats.f.ppf(1.0 - alpha / 2.0, df_B, df_E)
         f3_u = stats.f.ppf(1.0 - alpha / 2.0, df_E, df_B)
         fl3 = f_obs_23 / f3_l if (not np.isnan(f_obs_23) and f3_l > 0) else np.nan
         fu3 = f_obs_23 * f3_u if not np.isnan(f_obs_23) else np.nan
-        ci_icc3 = ((fl3 - 1.0) / (fl3 + k - 1.0) if not np.isnan(fl3) else np.nan, (fu3 - 1.0) / (fu3 + k - 1.0) if not np.isnan(fu3) else np.nan)
-        ci_icc3k = (1.0 - 1.0 / fl3 if (not np.isnan(fl3) and fl3 > 0) else np.nan, 1.0 - 1.0 / fu3 if (not np.isnan(fu3) and fu3 > 0) else np.nan)
+        ci_icc3 = (
+            (fl3 - 1.0) / (fl3 + k - 1.0) if not np.isnan(fl3) else np.nan,
+            (fu3 - 1.0) / (fu3 + k - 1.0) if not np.isnan(fu3) else np.nan,
+        )
+        ci_icc3k = (
+            1.0 - 1.0 / fl3 if (not np.isnan(fl3) and fl3 > 0) else np.nan,
+            1.0 - 1.0 / fu3 if (not np.isnan(fu3) and fu3 > 0) else np.nan,
+        )
 
     # 3. Model 2 (Absolute Agreement)
     if MSE == 0 and MSJ == 0 and MSB > 0:
@@ -674,17 +805,69 @@ def calculate_icc_matrix(values: np.ndarray, alpha: float = 0.05) -> pd.DataFram
         denom_U2 = k * MSJ + (k * n - k - n) * MSE + n * f2_l * MSB
         U2 = n * (f2_l * MSB - MSE) / denom_U2 if denom_U2 != 0 else np.nan
         ci_icc2 = (L2, U2)
-        ci_icc2k = ((k * L2) / (1.0 + (k - 1) * L2) if (1.0 + (k - 1) * L2) != 0 else np.nan,
-                    (k * U2) / (1.0 + (k - 1) * U2) if (1.0 + (k - 1) * U2) != 0 else np.nan)
+        ci_icc2k = (
+            (k * L2) / (1.0 + (k - 1) * L2) if (1.0 + (k - 1) * L2) != 0 else np.nan,
+            (k * U2) / (1.0 + (k - 1) * U2) if (1.0 + (k - 1) * U2) != 0 else np.nan,
+        )
 
-    return pd.DataFrame([
-        {"Type": "ICC1", "Description": "One-way random (single)", "ICC": icc1, "CI_lower": ci_icc1[0], "CI_upper": ci_icc1[1], "F": f_obs_1, "pval": p_1},
-        {"Type": "ICC2", "Description": "Two-way random agreement", "ICC": icc2, "CI_lower": ci_icc2[0], "CI_upper": ci_icc2[1], "F": f_obs_23, "pval": p_23},
-        {"Type": "ICC3", "Description": "Two-way mixed consistency", "ICC": icc3, "CI_lower": ci_icc3[0], "CI_upper": ci_icc3[1], "F": f_obs_23, "pval": p_23},
-        {"Type": "ICC1k", "Description": "One-way random (average)", "ICC": icc1k, "CI_lower": ci_icc1k[0], "CI_upper": ci_icc1k[1], "F": f_obs_1, "pval": p_1},
-        {"Type": "ICC2k", "Description": "Two-way random agreement (avg)", "ICC": icc2k, "CI_lower": ci_icc2k[0], "CI_upper": ci_icc2k[1], "F": f_obs_23, "pval": p_23},
-        {"Type": "ICC3k", "Description": "Two-way mixed consistency (avg)", "ICC": icc3k, "CI_lower": ci_icc3k[0], "CI_upper": ci_icc3k[1], "F": f_obs_23, "pval": p_23},
-    ])
+    return pd.DataFrame(
+        [
+            {
+                "Type": "ICC1",
+                "Description": "One-way random (single)",
+                "ICC": icc1,
+                "CI_lower": ci_icc1[0],
+                "CI_upper": ci_icc1[1],
+                "F": f_obs_1,
+                "pval": p_1,
+            },
+            {
+                "Type": "ICC2",
+                "Description": "Two-way random agreement",
+                "ICC": icc2,
+                "CI_lower": ci_icc2[0],
+                "CI_upper": ci_icc2[1],
+                "F": f_obs_23,
+                "pval": p_23,
+            },
+            {
+                "Type": "ICC3",
+                "Description": "Two-way mixed consistency",
+                "ICC": icc3,
+                "CI_lower": ci_icc3[0],
+                "CI_upper": ci_icc3[1],
+                "F": f_obs_23,
+                "pval": p_23,
+            },
+            {
+                "Type": "ICC1k",
+                "Description": "One-way random (average)",
+                "ICC": icc1k,
+                "CI_lower": ci_icc1k[0],
+                "CI_upper": ci_icc1k[1],
+                "F": f_obs_1,
+                "pval": p_1,
+            },
+            {
+                "Type": "ICC2k",
+                "Description": "Two-way random agreement (avg)",
+                "ICC": icc2k,
+                "CI_lower": ci_icc2k[0],
+                "CI_upper": ci_icc2k[1],
+                "F": f_obs_23,
+                "pval": p_23,
+            },
+            {
+                "Type": "ICC3k",
+                "Description": "Two-way mixed consistency (avg)",
+                "ICC": icc3k,
+                "CI_lower": ci_icc3k[0],
+                "CI_upper": ci_icc3k[1],
+                "F": f_obs_23,
+                "pval": p_23,
+            },
+        ]
+    )
 ```
 
 ---
@@ -699,13 +882,15 @@ import pandas as pd
 import statsmodels.api as sm
 from scipy.special import logit
 
+
 def match_propensity_scores(
     df: pd.DataFrame,
     treatment_col: str,
     confounders: list[str],
-    caliper_sd: float = 0.2
+    caliper_sd: float = 0.2,
 ) -> dict:
     """1:1 Nearest-Neighbor PSM with caliper, returning pair IDs, retention audit, and pre/post SMD balance."""
+
     # Self-contained Austin (2009) SMD helper to guarantee standalone execution
     def _calc_smd_local(t_arr, c_arr):
         t = np.asarray(t_arr, dtype=float)
@@ -723,14 +908,18 @@ def match_propensity_scores(
         return float((mean_t - mean_c) / pooled_sd)
 
     n_initial = len(df)
-    clean = df.dropna(subset=[treatment_col] + confounders).copy().reset_index(drop=True)
+    clean = (
+        df.dropna(subset=[treatment_col] + confounders).copy().reset_index(drop=True)
+    )
     n_analyzed = len(clean)
     n_excluded = n_initial - n_analyzed
 
     # Validate treatment column strictly binary
     treatment_vals = clean[treatment_col].to_numpy()
     if not np.all(np.isin(treatment_vals, [0, 1])):
-        raise ValueError(f"Treatment column '{treatment_col}' must contain strictly binary values (0 and 1).")
+        raise ValueError(
+            f"Treatment column '{treatment_col}' must contain strictly binary values (0 and 1)."
+        )
     y = treatment_vals.astype(int)
 
     # Handle categorical confounders via dummy encoding
@@ -761,7 +950,7 @@ def match_propensity_scores(
         min_diff = diffs.min()
         if min_diff <= caliper:
             best_match_idx = diffs.idxmin()
-            
+
             t_entry = t_row.to_dict()
             t_entry["pair_id"] = pair_counter
             matched_records.append(t_entry)
@@ -776,7 +965,9 @@ def match_propensity_scores(
     matched_df = pd.DataFrame(matched_records)
     if len(matched_df) > 0:
         matched_clean = matched_df.reset_index(drop=True)
-        matched_X = pd.get_dummies(matched_clean[confounders], drop_first=True, dtype=float)
+        matched_X = pd.get_dummies(
+            matched_clean[confounders], drop_first=True, dtype=float
+        )
     else:
         matched_X = pd.DataFrame(columns=X_raw.columns)
 
@@ -794,18 +985,26 @@ def match_propensity_scores(
         else:
             smd_post = np.nan
 
-        balance_rows.append({
-            "Variable": var,
-            "Pre-Match SMD": smd_pre,
-            "Post-Match SMD": smd_post,
-            "Balanced (<0.10)": abs(smd_post) < 0.10 if not np.isnan(smd_post) else False
-        })
+        balance_rows.append(
+            {
+                "Variable": var,
+                "Pre-Match SMD": smd_pre,
+                "Post-Match SMD": smd_post,
+                "Balanced (<0.10)": abs(smd_post) < 0.10
+                if not np.isnan(smd_post)
+                else False,
+            }
+        )
 
     bal_df = pd.DataFrame(balance_rows)
     love_plot_data = {
         "covariates": list(bal_df["Variable"]),
-        "smd_raw": [float(x) if not np.isnan(x) else np.nan for x in bal_df["Pre-Match SMD"]],
-        "smd_matched": [float(x) if not np.isnan(x) else np.nan for x in bal_df["Post-Match SMD"]],
+        "smd_raw": [
+            float(x) if not np.isnan(x) else np.nan for x in bal_df["Pre-Match SMD"]
+        ],
+        "smd_matched": [
+            float(x) if not np.isnan(x) else np.nan for x in bal_df["Post-Match SMD"]
+        ],
         "threshold": 0.10,
     }
 
@@ -819,7 +1018,9 @@ def match_propensity_scores(
             "n_initial": n_initial,
             "n_excluded": n_excluded,
             "n_analyzed": n_analyzed,
-            "exclusion_reasons": f"Missing values in {[treatment_col] + confounders}" if n_excluded > 0 else "None",
+            "exclusion_reasons": f"Missing values in {[treatment_col] + confounders}"
+            if n_excluded > 0
+            else "None",
         },
     }
 ```
@@ -835,6 +1036,7 @@ import numpy as np
 import scipy.stats as stats
 import scipy.optimize as optimize
 
+
 def _firth_penalized_loglik(beta: np.ndarray, X: np.ndarray, y: np.ndarray) -> float:
     eta = np.clip(X @ beta, -30, 30)
     pi = 1.0 / (1.0 + np.exp(-eta))
@@ -843,20 +1045,24 @@ def _firth_penalized_loglik(beta: np.ndarray, X: np.ndarray, y: np.ndarray) -> f
     sign, logdet = np.linalg.slogdet(I)
     if sign <= 0:
         return -np.inf
-    ll = np.sum(y * np.log(np.clip(pi, 1e-15, 1.0)) + (1.0 - y) * np.log(np.clip(1.0 - pi, 1e-15, 1.0)))
+    ll = np.sum(
+        y * np.log(np.clip(pi, 1e-15, 1.0))
+        + (1.0 - y) * np.log(np.clip(1.0 - pi, 1e-15, 1.0))
+    )
     return float(ll + 0.5 * logdet)
+
 
 def fit_firth_logistic(
     X: np.ndarray,
     y: np.ndarray,
     fit_intercept: bool = True,
     max_iter: int = 100,
-    tol: float = 1e-6
+    tol: float = 1e-6,
 ) -> dict:
     """Firth penalized logistic regression with Newton-Raphson step-halving and Profile Likelihood CIs."""
     X_arr = np.asarray(X, dtype=float)
     y_arr = np.asarray(y, dtype=float).ravel()
-    
+
     if not np.all(np.isin(y_arr, [0, 1])):
         raise ValueError("Binary outcome y must contain strictly 0 and 1.")
 
@@ -866,7 +1072,9 @@ def fit_firth_logistic(
     n, p = X_arr.shape
     rank = np.linalg.matrix_rank(X_arr)
     if rank < p:
-        raise ValueError(f"Design matrix is rank-deficient (rank {rank} < {p} parameters). Collinear features must be removed.")
+        raise ValueError(
+            f"Design matrix is rank-deficient (rank {rank} < {p} parameters). Collinear features must be removed."
+        )
 
     beta = np.zeros(p)
     current_pll = _firth_penalized_loglik(beta, X_arr, y_arr)
@@ -877,7 +1085,7 @@ def fit_firth_logistic(
         eta = np.clip(X_arr @ beta, -30, 30)
         pi = 1.0 / (1.0 + np.exp(-eta))
         W = pi * (1.0 - pi)
-        
+
         I = (X_arr.T * W) @ X_arr
         try:
             I_inv = np.linalg.inv(I)
@@ -930,15 +1138,23 @@ def fit_firth_logistic(
 
         for j in range(p):
             other_idx = [idx for idx in range(p) if idx != j]
+
             def profile_obj(b_j):
                 if len(other_idx) == 0:
-                    return _firth_penalized_loglik(np.array([b_j]), X_arr, y_arr) - target_pll
+                    return (
+                        _firth_penalized_loglik(np.array([b_j]), X_arr, y_arr)
+                        - target_pll
+                    )
+
                 def nuisance_loss(nuis):
                     b_full = np.zeros(p)
                     b_full[j] = b_j
                     b_full[other_idx] = nuis
                     return -_firth_penalized_loglik(b_full, X_arr, y_arr)
-                res = optimize.minimize(nuisance_loss, beta[other_idx], method="Nelder-Mead")
+
+                res = optimize.minimize(
+                    nuisance_loss, beta[other_idx], method="Nelder-Mead"
+                )
                 if not res.success:
                     return np.nan
                 return -res.fun - target_pll
@@ -971,15 +1187,19 @@ def fit_firth_logistic(
                 ci_method[j] = "wald_fallback"
 
     forest_items = []
-    for j in range(p):
-        v_name = f"Covariate_{j}" if not fit_intercept or j > 0 else "Intercept"
-        forest_items.append({
-            "term": v_name,
-            "estimate": float(np.exp(beta[j])),
-            "ci_lower": float(np.exp(ci_lower[j])),
-            "ci_upper": float(np.exp(ci_upper[j])),
-            "scale": "OR",
-        })
+    start_j = 1 if fit_intercept else 0
+    for j in range(start_j, p):
+        cov_idx = (j - 1) if fit_intercept else j
+        v_name = f"Covariate_{cov_idx}"
+        forest_items.append(
+            {
+                "term": v_name,
+                "estimate": float(np.exp(beta[j])),
+                "ci_lower": float(np.exp(ci_lower[j])),
+                "ci_upper": float(np.exp(ci_upper[j])),
+                "scale": "OR",
+            }
+        )
 
     return {
         "coefficients": beta,
@@ -1005,9 +1225,12 @@ import numpy as np
 import pandas as pd
 import scipy.stats as stats
 
-def littles_mcar_test(df: pd.DataFrame, variables: list[str], max_iter: int = 100, tol: float = 1e-5) -> dict:
+
+def littles_mcar_test(
+    df: pd.DataFrame, variables: list[str], max_iter: int = 100, tol: float = 1e-5
+) -> dict:
     """Perform Roderick Little's (1988) MCAR test via pattern-grouped EM ML estimation.
-    
+
     Statistical & Regularization Notes:
     - Tests the null hypothesis H0: Missing Completely at Random (MCAR). A non-significant
       result does NOT establish MAR or rule out MNAR.
@@ -1032,11 +1255,15 @@ def littles_mcar_test(df: pd.DataFrame, variables: list[str], max_iter: int = 10
 
     # Validate that data is not completely missing
     if nan_mask.all():
-        raise ValueError("Dataset is completely missing (100% NaN); Little's MCAR test cannot be computed.")
+        raise ValueError(
+            "Dataset is completely missing (100% NaN); Little's MCAR test cannot be computed."
+        )
 
     for j, col_name in enumerate(variables):
         if nan_mask[:, j].all():
-            raise ValueError(f"Variable '{col_name}' has 0 observed values (100% missing); MCAR cannot be tested.")
+            raise ValueError(
+                f"Variable '{col_name}' has 0 observed values (100% missing); MCAR cannot be tested."
+            )
 
     # Drop rows that are completely missing across all tested variables
     row_all_nan = nan_mask.all(axis=1)
@@ -1047,7 +1274,9 @@ def littles_mcar_test(df: pd.DataFrame, variables: list[str], max_iter: int = 10
         N = len(data)
 
     if N == 0:
-        raise ValueError("No rows with observed values remain; Little's MCAR test cannot be computed.")
+        raise ValueError(
+            "No rows with observed values remain; Little's MCAR test cannot be computed."
+        )
 
     # Group into unique missingness patterns using boolean indicator tuples
     obs_mask = ~nan_mask
@@ -1064,13 +1293,15 @@ def littles_mcar_test(df: pd.DataFrame, variables: list[str], max_iter: int = 10
         p_s = len(O_s)
         n_s = len(row_indices)
         total_p_s += p_s
-        parsed_patterns.append({
-            "indices": np.array(row_indices, dtype=int),
-            "O_s": O_s,
-            "M_s": M_s,
-            "p_s": p_s,
-            "n_s": n_s,
-        })
+        parsed_patterns.append(
+            {
+                "indices": np.array(row_indices, dtype=int),
+                "O_s": O_s,
+                "M_s": M_s,
+                "p_s": p_s,
+                "n_s": n_s,
+            }
+        )
 
     df_stat = total_p_s - P
     if df_stat <= 0:
@@ -1083,7 +1314,7 @@ def littles_mcar_test(df: pd.DataFrame, variables: list[str], max_iter: int = 10
             "converged": False,
             "n_iterations": 0,
             "n_excluded_rows": n_excluded_rows,
-            "note": "Untestable: degrees of freedom <= 0 (insufficient overlap across missingness patterns)."
+            "note": "Untestable: degrees of freedom <= 0 (insufficient overlap across missingness patterns).",
         }
 
     # EM Algorithm initialization
@@ -1116,7 +1347,9 @@ def littles_mcar_test(df: pd.DataFrame, variables: list[str], max_iter: int = 10
                 Sigma_MO = Sigma[np.ix_(M_s, O_s)]
                 Sigma_MM = Sigma[np.ix_(M_s, M_s)]
                 try:
-                    W = np.linalg.solve(Sigma_OO + np.eye(len(O_s)) * scale_ridge, Sigma_MO.T).T
+                    W = np.linalg.solve(
+                        Sigma_OO + np.eye(len(O_s)) * scale_ridge, Sigma_MO.T
+                    ).T
                 except np.linalg.LinAlgError:
                     W = Sigma_MO @ np.linalg.pinv(Sigma_OO)
                 C_MM = 0.5 * (Sigma_MM - W @ Sigma_MO.T + (Sigma_MM - W @ Sigma_MO.T).T)
@@ -1152,11 +1385,13 @@ def littles_mcar_test(df: pd.DataFrame, variables: list[str], max_iter: int = 10
         d2 += n_s * float(diff.T @ inv_Sigma_OO @ diff)
 
     p_val = float(stats.chi2.sf(d2, df=df_stat))
-    missing_summary = pd.DataFrame({
-        "Variable": variables,
-        "N_Missing": [int(np.sum(np.isnan(df[v]))) for v in variables],
-        "Pct_Missing": [float(np.mean(np.isnan(df[v])) * 100.0) for v in variables],
-    })
+    missing_summary = pd.DataFrame(
+        {
+            "Variable": variables,
+            "N_Missing": [int(np.sum(np.isnan(df[v]))) for v in variables],
+            "Pct_Missing": [float(np.mean(np.isnan(df[v])) * 100.0) for v in variables],
+        }
+    )
     return {
         "chi2": float(d2),
         "df": int(df_stat),
@@ -1179,12 +1414,13 @@ Calculates the minimum strength of association on the risk ratio scale that an u
 ```python
 import numpy as np
 
+
 def calculate_e_value(
     estimate: float,
     lower: float | None = None,
     upper: float | None = None,
     estimate_type: str = "RR",
-    rare_outcome: bool = False
+    rare_outcome: bool = False,
 ) -> dict:
     """Calculate VanderWeele & Ding (2017) E-value for RR, OR, or HR with prevalence branching."""
     est = float(estimate)
@@ -1197,23 +1433,34 @@ def calculate_e_value(
     if up is not None and up <= 0.0:
         raise ValueError("upper limit must be strictly positive (> 0) on ratio scale.")
     if low is not None and up is not None and low > up:
-        raise ValueError(f"lower confidence limit ({low}) cannot exceed upper confidence limit ({up}).")
+        raise ValueError(
+            f"lower confidence limit ({low}) cannot exceed upper confidence limit ({up})."
+        )
 
     # Conversion to Risk Ratio (RR) scale
     if estimate_type == "OR":
         if not rare_outcome:
             # Common outcome approximation per Ding & VanderWeele (2016)
             est = np.sqrt(est)
-            if low is not None and low > 0: low = np.sqrt(low)
-            if up is not None and up > 0: up = np.sqrt(up)
+            if low is not None and low > 0:
+                low = np.sqrt(low)
+            if up is not None and up > 0:
+                up = np.sqrt(up)
     elif estimate_type == "HR":
         if not rare_outcome:
             # VanderWeele & Ding (2017) HR conversion for common outcome
             def hr_to_rr(h):
-                return (1.0 - 0.5**np.sqrt(h)) / (1.0 - 0.5**np.sqrt(1.0 / h)) if h != 1.0 else 1.0
+                return (
+                    (1.0 - 0.5 ** np.sqrt(h)) / (1.0 - 0.5 ** np.sqrt(1.0 / h))
+                    if h != 1.0
+                    else 1.0
+                )
+
             est = hr_to_rr(est)
-            if low is not None and low > 0: low = hr_to_rr(low)
-            if up is not None and up > 0: up = hr_to_rr(up)
+            if low is not None and low > 0:
+                low = hr_to_rr(low)
+            if up is not None and up > 0:
+                up = hr_to_rr(up)
 
     rr_star = est if est >= 1.0 else (1.0 / est)
     e_val_point = rr_star + np.sqrt(rr_star * (rr_star - 1.0))
@@ -1243,10 +1490,9 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 
+
 def fit_logistic_regression_table(
-    df: pd.DataFrame,
-    outcome: str,
-    covariates: list[str]
+    df: pd.DataFrame, outcome: str, covariates: list[str]
 ) -> pd.DataFrame:
     """Generate publication-ready Logistic Regression table with Crude & Adjusted ORs."""
     n_initial = len(df)
@@ -1256,45 +1502,53 @@ def fit_logistic_regression_table(
 
     outcome_vals = clean[outcome].to_numpy()
     if not np.all(np.isin(outcome_vals, [0, 1])):
-        raise ValueError(f"Outcome column '{outcome}' must contain strictly binary values (0 and 1).")
+        raise ValueError(
+            f"Outcome column '{outcome}' must contain strictly binary values (0 and 1)."
+        )
     y = outcome_vals.astype(int)
-    
+
     # 1. Multivariable model
     X_multi = sm.add_constant(clean[covariates].astype(float))
     fit_multi = sm.Logit(y, X_multi).fit(disp=False)
-    
+
     rows = []
     for var in covariates:
         # Univariable model (Crude OR)
         X_uni = sm.add_constant(clean[[var]].astype(float))
         fit_uni = sm.Logit(y, X_uni).fit(disp=False)
-        
+
         crude_b = fit_uni.params[var]
         crude_ci = fit_uni.conf_int().loc[var]
         crude_p = fit_uni.pvalues[var]
         crude_str = f"{np.exp(crude_b):.2f} ({np.exp(crude_ci[0]):.2f}–{np.exp(crude_ci[1]):.2f})"
-        
+
         # Multivariable (Adjusted OR)
         adj_b = fit_multi.params[var]
         adj_ci = fit_multi.conf_int().loc[var]
         adj_p = fit_multi.pvalues[var]
-        adj_str = f"{np.exp(adj_b):.2f} ({np.exp(adj_ci[0]):.2f}–{np.exp(adj_ci[1]):.2f})"
-        
+        adj_str = (
+            f"{np.exp(adj_b):.2f} ({np.exp(adj_ci[0]):.2f}–{np.exp(adj_ci[1]):.2f})"
+        )
+
         p_val_str = f"{adj_p:.3f}" if adj_p >= 0.001 else "<0.001"
-        
-        rows.append({
-            "Variable": var,
-            "Crude OR (95% CI)": crude_str,
-            "Adjusted OR (95% CI)": adj_str,
-            "P-value": p_val_str
-        })
-        
+
+        rows.append(
+            {
+                "Variable": var,
+                "Crude OR (95% CI)": crude_str,
+                "Adjusted OR (95% CI)": adj_str,
+                "P-value": p_val_str,
+            }
+        )
+
     res_df = pd.DataFrame(rows)
     res_df.attrs["retention_audit"] = {
         "n_initial": n_initial,
         "n_excluded": n_excluded,
         "n_analyzed": n_analyzed,
-        "exclusion_reasons": f"Missing values in {[outcome] + covariates}" if n_excluded > 0 else "None",
+        "exclusion_reasons": f"Missing values in {[outcome] + covariates}"
+        if n_excluded > 0
+        else "None",
     }
     return res_df
 ```
@@ -1309,18 +1563,23 @@ Computes Kaplan-Meier survival estimates with median survival times, Log-Rank hy
 import numpy as np
 import pandas as pd
 from lifelines import KaplanMeierFitter, CoxPHFitter
-from lifelines.statistics import logrank_test, multivariate_logrank_test, proportional_hazard_test
+from lifelines.statistics import (
+    logrank_test,
+    multivariate_logrank_test,
+    proportional_hazard_test,
+)
+
 
 def fit_survival_analysis_suite(
     df: pd.DataFrame,
     duration_col: str,
     event_col: str,
     strata_col: str | None = None,
-    covariates: list[str] | None = None
+    covariates: list[str] | None = None,
 ) -> dict:
     """Run Kaplan-Meier, Log-Rank, and Cox PH modeling with per-covariate Schoenfeld test."""
     n_initial = len(df)
-    
+
     # 1. Unadjusted Kaplan-Meier cohort: subset duration, event, and strata (preserves KM cohort)
     km_cols = [duration_col, event_col] + ([strata_col] if strata_col else [])
     clean_km = df.dropna(subset=km_cols).copy()
@@ -1328,10 +1587,14 @@ def fit_survival_analysis_suite(
     # Validate event indicator strictly binary and duration non-negative
     ev_km = clean_km[event_col].to_numpy()
     if not np.all(np.isin(ev_km, [0, 1])):
-        raise ValueError(f"Event indicator '{event_col}' must contain strictly binary values (0 = Censored, 1 = Event).")
+        raise ValueError(
+            f"Event indicator '{event_col}' must contain strictly binary values (0 = Censored, 1 = Event)."
+        )
     dur_km = clean_km[duration_col].to_numpy()
     if (dur_km < 0).any():
-        raise ValueError(f"Duration column '{duration_col}' must contain non-negative values (>= 0).")
+        raise ValueError(
+            f"Duration column '{duration_col}' must contain non-negative values (>= 0)."
+        )
 
     # Kaplan-Meier curve & median survival
     km_results = {}
@@ -1352,12 +1615,16 @@ def fit_survival_analysis_suite(
                 "ci_lower": np.asarray(ci_df.iloc[:, 0]),
                 "ci_upper": np.asarray(ci_df.iloc[:, 1]),
                 "censored_times": cens_t,
-                "censored_survival": np.asarray(kmf.survival_function_at_times(cens_t)) if len(cens_t) > 0 else np.array([]),
+                "censored_survival": np.asarray(kmf.survival_function_at_times(cens_t))
+                if len(cens_t) > 0
+                else np.array([]),
             }
-        
+
         # Risk table at milestone intervals
         max_t = float(clean_km[duration_col].max())
         milestones = np.linspace(0, max_t, 5).round(1)
+        if len(milestones) > 0 and milestones[-1] > max_t:
+            milestones[-1] = float(np.floor(max_t * 10) / 10)
         r_rows = []
         for g in groups:
             sub = clean_km[clean_km[strata_col] == g]
@@ -1373,11 +1640,13 @@ def fit_survival_analysis_suite(
                 clean_km.loc[clean_km[strata_col] == groups[0], duration_col],
                 clean_km.loc[clean_km[strata_col] == groups[1], duration_col],
                 clean_km.loc[clean_km[strata_col] == groups[0], event_col],
-                clean_km.loc[clean_km[strata_col] == groups[1], event_col]
+                clean_km.loc[clean_km[strata_col] == groups[1], event_col],
             )
             km_results["Log-Rank P-value"] = float(lr_res.p_value)
         elif len(groups) > 2:
-            lr_res = multivariate_logrank_test(clean_km[duration_col], clean_km[strata_col], clean_km[event_col])
+            lr_res = multivariate_logrank_test(
+                clean_km[duration_col], clean_km[strata_col], clean_km[event_col]
+            )
             km_results["Multivariate Log-Rank P-value"] = float(lr_res.p_value)
     else:
         kmf = KaplanMeierFitter()
@@ -1391,7 +1660,9 @@ def fit_survival_analysis_suite(
             "ci_lower": np.asarray(ci_df.iloc[:, 0]),
             "ci_upper": np.asarray(ci_df.iloc[:, 1]),
             "censored_times": cens_t,
-            "censored_survival": np.asarray(kmf.survival_function_at_times(cens_t)) if len(cens_t) > 0 else np.array([]),
+            "censored_survival": np.asarray(kmf.survival_function_at_times(cens_t))
+            if len(cens_t) > 0
+            else np.array([]),
         }
 
     # 2. Cox Proportional Hazards model on complete-covariate cohort
@@ -1405,12 +1676,14 @@ def fit_survival_analysis_suite(
         n_analyzed_cox = len(clean_cox)
         ev_cox = clean_cox[event_col].to_numpy()
         if not np.all(np.isin(ev_cox, [0, 1])):
-            raise ValueError(f"Event indicator '{event_col}' must contain strictly binary values.")
+            raise ValueError(
+                f"Event indicator '{event_col}' must contain strictly binary values."
+            )
 
         cph = CoxPHFitter()
         cox_data = clean_cox[cox_cols]
         cph.fit(cox_data, duration_col=duration_col, event_col=event_col)
-        
+
         summary = cph.summary
         rows = []
         for var in covariates:
@@ -1418,30 +1691,44 @@ def fit_survival_analysis_suite(
             ci_l = float(summary.loc[var, "exp(coef) lower 95%"])
             ci_u = float(summary.loc[var, "exp(coef) upper 95%"])
             p_val = float(summary.loc[var, "p"])
-            rows.append({
-                "Covariate": var,
-                "Hazard Ratio (95% CI)": f"{hr:.2f} ({ci_l:.2f}–{ci_u:.2f})",
-                "P-value": f"{p_val:.3f}" if p_val >= 0.001 else "<0.001"
-            })
-            forest_items.append({
-                "term": var,
-                "estimate": hr,
-                "ci_lower": ci_l,
-                "ci_upper": ci_u,
-                "p_value": p_val,
-                "scale": "HR",
-            })
+            rows.append(
+                {
+                    "Covariate": var,
+                    "Hazard Ratio (95% CI)": f"{hr:.2f} ({ci_l:.2f}–{ci_u:.2f})",
+                    "P-value": f"{p_val:.3f}" if p_val >= 0.001 else "<0.001",
+                }
+            )
+            forest_items.append(
+                {
+                    "term": var,
+                    "estimate": hr,
+                    "ci_lower": ci_l,
+                    "ci_upper": ci_u,
+                    "p_value": p_val,
+                    "scale": "HR",
+                }
+            )
         cox_table = pd.DataFrame(rows)
 
         # Proportional hazards test per covariate
         try:
             prop_test = proportional_hazard_test(cph, cox_data, time_transform="rank")
-            schoenfeld_summary["p_values"] = {k: float(v) for k, v in prop_test.summary["p"].items()}
-            schoenfeld_summary["test_statistics"] = {k: float(v) for k, v in prop_test.summary["test_statistic"].items()}
+            schoenfeld_summary["p_values"] = {
+                k: float(v) for k, v in prop_test.summary["p"].items()
+            }
+            schoenfeld_summary["test_statistics"] = {
+                k: float(v) for k, v in prop_test.summary["test_statistic"].items()
+            }
             passed = bool((prop_test.summary["p"] > 0.05).all())
             schoenfeld_summary["no_ph_violation_detected"] = passed
-            schoenfeld_summary["PH_Assumptions_Passed"] = passed  # backward compatibility
-            schoenfeld_summary["PH_Note"] = "No proportional hazards violation detected (p > 0.05)." if passed else "Potential PH assumption violation detected (p <= 0.05)."
+            schoenfeld_summary["PH_Assumptions_Passed"] = (
+                passed  # backward compatibility
+            )
+            schoenfeld_summary["PH_Note"] = (
+                "No proportional hazards violation detected (p > 0.05)."
+                if passed
+                else "Potential PH assumption violation detected (p <= 0.05)."
+            )
         except Exception as e:
             schoenfeld_summary["PH_Note"] = str(e)
 
@@ -1452,8 +1739,18 @@ def fit_survival_analysis_suite(
         "cox_table": cox_table,
         "forest_data": forest_items,
         "schoenfeld_diagnostics": schoenfeld_summary,
-        "retention_km": {"n_initial": n_initial, "n_analyzed": len(clean_km), "n_excluded": n_initial - len(clean_km)},
-        "retention_cox": {"n_initial": n_initial, "n_analyzed": n_analyzed_cox, "n_excluded": n_initial - n_analyzed_cox} if covariates else None,
+        "retention_km": {
+            "n_initial": n_initial,
+            "n_analyzed": len(clean_km),
+            "n_excluded": n_initial - len(clean_km),
+        },
+        "retention_cox": {
+            "n_initial": n_initial,
+            "n_analyzed": n_analyzed_cox,
+            "n_excluded": n_initial - n_analyzed_cox,
+        }
+        if covariates
+        else None,
     }
 ```
 
@@ -1468,6 +1765,7 @@ import numpy as np
 import pandas as pd
 import scipy.stats as stats
 
+
 def impute_mice_datasets(
     df: pd.DataFrame,
     features_to_impute: list[str],
@@ -1478,10 +1776,10 @@ def impute_mice_datasets(
     random_state: int = 42,
     min_value: float | dict[str, float] | None = None,
     max_value: float | dict[str, float] | None = None,
-    target_types: dict[str, str] | None = None
+    target_types: dict[str, str] | None = None,
 ) -> list[pd.DataFrame]:
     """Generate M stochastic imputed datasets for valid inferential analysis under MAR.
-    
+
     Clinical Governance Invariants:
     1. Never impute the primary outcome variable (its original values remain untouched).
     2. Primary outcome and additional covariates MUST be included as predictors in the
@@ -1506,20 +1804,24 @@ def impute_mice_datasets(
             f"of type {type(m).__name__}."
         )
 
-    if (
-        not isinstance(max_iter, int)
-        or isinstance(max_iter, bool)
-        or max_iter < 1
-    ):
+    if not isinstance(max_iter, int) or isinstance(max_iter, bool) or max_iter < 1:
         raise ValueError(
             f"max_iter must be an integer >= 1; got {max_iter!r} "
             f"of type {type(max_iter).__name__}."
         )
 
     if outcome_col and outcome_col in features_to_impute:
-        raise ValueError("Clinical governance invariant: Never impute the primary outcome variable!")
+        raise ValueError(
+            "Clinical governance invariant: Never impute the primary outcome variable!"
+        )
 
-    cols = list(dict.fromkeys(features_to_impute + (predictors or []) + ([outcome_col] if outcome_col else [])))
+    cols = list(
+        dict.fromkeys(
+            features_to_impute
+            + (predictors or [])
+            + ([outcome_col] if outcome_col else [])
+        )
+    )
     if len(cols) < 2:
         raise ValueError(
             "MICE requires >= 1 additional predictor (or outcome variable) to condition on; "
@@ -1529,19 +1831,30 @@ def impute_mice_datasets(
     # Validate that features_to_impute are strictly continuous
     for feat in features_to_impute:
         if df[feat].isna().all():
-            raise ValueError(f"Column '{feat}' has 0 observed values (100% missing) and cannot be imputed.")
-        if isinstance(df[feat].dtype, pd.CategoricalDtype) or df[feat].dtype.name == "category":
+            raise ValueError(
+                f"Column '{feat}' has 0 observed values (100% missing) and cannot be imputed."
+            )
+        if (
+            isinstance(df[feat].dtype, pd.CategoricalDtype)
+            or df[feat].dtype.name == "category"
+        ):
             raise ValueError(
                 f"Column '{feat}' is declared as categorical. "
                 "Recipe 12 implements Gaussian MICE for continuous variables. "
                 "Missing categorical targets require variable-type-specific imputation."
             )
-        if target_types and target_types.get(feat) in {"categorical", "ordinal", "binary"}:
+        if target_types and target_types.get(feat) in {
+            "categorical",
+            "ordinal",
+            "binary",
+        }:
             raise ValueError(
                 f"Column '{feat}' is declared as {target_types.get(feat)}. "
                 "Recipe 12 implements Gaussian MICE strictly for continuous targets."
             )
-        if pd.api.types.is_bool_dtype(df[feat]) or not pd.api.types.is_numeric_dtype(df[feat]):
+        if pd.api.types.is_bool_dtype(df[feat]) or not pd.api.types.is_numeric_dtype(
+            df[feat]
+        ):
             raise ValueError(
                 f"Column '{feat}' in features_to_impute is non-numeric ({df[feat].dtype}). "
                 "Recipe 12 implements Gaussian MICE for continuous variables. "
@@ -1556,7 +1869,9 @@ def impute_mice_datasets(
                 "Gaussian posterior draws produce fractional values and cannot enforce binary {0, 1} "
                 "or group membership. Restrict features_to_impute to continuous variables."
             )
-        if vals_set.issubset({1, 2, 3, 1.0, 2.0, 3.0}) or vals_set.issubset({0, 1, 2, 0.0, 1.0, 2.0}):
+        if vals_set.issubset({1, 2, 3, 1.0, 2.0, 3.0}) or vals_set.issubset(
+            {0, 1, 2, 0.0, 1.0, 2.0}
+        ):
             raise ValueError(
                 f"Column '{feat}' in features_to_impute has discrete integer category codes ({vals_set}). "
                 "Categorical and ordinal variables must not be imputed via Gaussian linear regression MICE; "
@@ -1566,8 +1881,12 @@ def impute_mice_datasets(
     # Validate conditioning columns, predictors, and outcome
     for c in cols:
         if df[c].isna().all():
-            raise ValueError(f"Column '{c}' has 0 observed values (100% missing) and cannot be conditioned upon.")
-        if pd.api.types.is_bool_dtype(df[c]) or not pd.api.types.is_numeric_dtype(df[c]):
+            raise ValueError(
+                f"Column '{c}' has 0 observed values (100% missing) and cannot be conditioned upon."
+            )
+        if pd.api.types.is_bool_dtype(df[c]) or not pd.api.types.is_numeric_dtype(
+            df[c]
+        ):
             raise ValueError(
                 f"Column '{c}' is non-numeric ({df[c].dtype}). "
                 "All features in MICE conditioning matrix must be numeric. "
@@ -1605,8 +1924,16 @@ def impute_mice_datasets(
 
     # Validate bound ordering
     for feat in features_to_impute:
-        low_val = min_value[feat] if isinstance(min_value, dict) and feat in min_value else (min_value if isinstance(min_value, (int, float)) else None)
-        high_val = max_value[feat] if isinstance(max_value, dict) and feat in max_value else (max_value if isinstance(max_value, (int, float)) else None)
+        low_val = (
+            min_value[feat]
+            if isinstance(min_value, dict) and feat in min_value
+            else (min_value if isinstance(min_value, (int, float)) else None)
+        )
+        high_val = (
+            max_value[feat]
+            if isinstance(max_value, dict) and feat in max_value
+            else (max_value if isinstance(max_value, (int, float)) else None)
+        )
         if low_val is not None and high_val is not None and low_val >= high_val:
             raise ValueError(
                 f"Invalid bound ordering for feature '{feat}': min_value ({low_val}) must be strictly less than max_value ({high_val})."
@@ -1632,9 +1959,13 @@ def impute_mice_datasets(
                 obs_mask = ~mis_mask
                 pred_cols = [c for c in cols if c != feat]
 
-                X_obs = np.column_stack([np.ones(obs_mask.sum()), clean.loc[obs_mask, pred_cols].values])
+                X_obs = np.column_stack(
+                    [np.ones(obs_mask.sum()), clean.loc[obs_mask, pred_cols].values]
+                )
                 y_obs = df.loc[obs_mask, feat].values
-                X_mis = np.column_stack([np.ones(mis_mask.sum()), clean.loc[mis_mask, pred_cols].values])
+                X_mis = np.column_stack(
+                    [np.ones(mis_mask.sum()), clean.loc[mis_mask, pred_cols].values]
+                )
 
                 n_obs, p = X_obs.shape
                 if n_obs <= p:
@@ -1666,10 +1997,14 @@ def impute_mice_datasets(
                 # 1. Parameter uncertainty: Draw sigma*^2 ~ Inv-Chi2(df_resid, s2)
                 g = rng.chisquare(df_resid)
                 if g <= 0.0 or not np.isfinite(g):
-                    raise RuntimeError(f"Numerical failure in chi-square posterior draw for feature '{feat}'.")
+                    raise RuntimeError(
+                        f"Numerical failure in chi-square posterior draw for feature '{feat}'."
+                    )
                 sigma_sq = (df_resid * s2) / g
                 if not np.isfinite(sigma_sq) or sigma_sq <= 0.0:
-                    raise RuntimeError(f"Non-finite or non-positive variance posterior draw for feature '{feat}'.")
+                    raise RuntimeError(
+                        f"Non-finite or non-positive variance posterior draw for feature '{feat}'."
+                    )
                 sigma = np.sqrt(sigma_sq)
 
                 # 2. Parameter uncertainty: Draw beta* ~ N(beta_hat, sigma^2 * (XtX)^-1)
@@ -1679,13 +2014,25 @@ def impute_mice_datasets(
 
                 # 3. Residual uncertainty: Draw y_mis* ~ N(X_mis @ beta*, sigma^2) with truncated normal support under bounds
                 mu = X_mis @ beta_star
-                low_val = min_value[feat] if isinstance(min_value, dict) and feat in min_value else (min_value if isinstance(min_value, (int, float)) else None)
-                high_val = max_value[feat] if isinstance(max_value, dict) and feat in max_value else (max_value if isinstance(max_value, (int, float)) else None)
+                low_val = (
+                    min_value[feat]
+                    if isinstance(min_value, dict) and feat in min_value
+                    else (min_value if isinstance(min_value, (int, float)) else None)
+                )
+                high_val = (
+                    max_value[feat]
+                    if isinstance(max_value, dict) and feat in max_value
+                    else (max_value if isinstance(max_value, (int, float)) else None)
+                )
 
                 if low_val is not None or high_val is not None:
                     a_param = (low_val - mu) / sigma if low_val is not None else -np.inf
-                    b_param = (high_val - mu) / sigma if high_val is not None else np.inf
-                    y_imp = stats.truncnorm.rvs(a=a_param, b=b_param, loc=mu, scale=sigma, random_state=rng)
+                    b_param = (
+                        (high_val - mu) / sigma if high_val is not None else np.inf
+                    )
+                    y_imp = stats.truncnorm.rvs(
+                        a=a_param, b=b_param, loc=mu, scale=sigma, random_state=rng
+                    )
                 else:
                     y_imp = mu + sigma * rng.normal(size=len(X_mis))
 
@@ -1698,15 +2045,16 @@ def impute_mice_datasets(
         datasets.append(clean)
     return datasets
 
+
 def pool_estimates_rubin(
     point_estimates: list[float],
     standard_errors: list[float],
     n_obs: int | None = None,
     k_params: int = 1,
-    alpha: float = 0.05
+    alpha: float = 0.05,
 ) -> dict:
     """Pool point estimates and standard errors across M imputations using Rubin's rules.
-    
+
     Clinical & Statistical Invariant:
     When pooling ratio effect measures (such as Odds Ratios or Hazard Ratios), pooling
     MUST be performed on the log scale (log OR, log HR) with log-scale standard errors,
@@ -1725,15 +2073,19 @@ def pool_estimates_rubin(
     ses = np.asarray(standard_errors, dtype=float)
 
     if not np.all(np.isfinite(theta)) or not np.all(np.isfinite(ses)):
-        raise ValueError("point_estimates and standard_errors must contain strictly finite values (no NaN or inf).")
+        raise ValueError(
+            "point_estimates and standard_errors must contain strictly finite values (no NaN or inf)."
+        )
 
     if (ses < 0.0).any():
         raise ValueError("standard_errors must be strictly non-negative (>= 0).")
 
     if n_obs is not None and n_obs <= k_params:
-        raise ValueError(f"n_obs ({n_obs}) must be strictly greater than k_params ({k_params}).")
+        raise ValueError(
+            f"n_obs ({n_obs}) must be strictly greater than k_params ({k_params})."
+        )
 
-    V = ses ** 2
+    V = ses**2
     theta_bar = float(np.mean(theta))
     W_bar = float(np.mean(V))
     B = float(np.var(theta, ddof=1))
@@ -1757,7 +2109,11 @@ def pool_estimates_rubin(
             df = float((df_old * df_obs) / (df_old + df_obs))
         else:
             df = float(df_old)
-        fmi = float((r + 2.0 / (df + 3.0)) / (r + 1.0)) if np.isfinite(df) else float(r / (r + 1.0))
+        fmi = (
+            float((r + 2.0 / (df + 3.0)) / (r + 1.0))
+            if np.isfinite(df)
+            else float(r / (r + 1.0))
+        )
     elif B == 0 and W_bar > 0:
         r = 0.0
         df = float(nu_com_adj) if nu_com_adj is not None else np.inf
@@ -1796,6 +2152,7 @@ def pool_estimates_rubin(
         "m_imputations": m,
     }
 
+
 def impute_mice_single(
     df: pd.DataFrame,
     features_to_impute: list[str],
@@ -1805,22 +2162,26 @@ def impute_mice_single(
     random_state: int = 42,
     min_value: float | dict[str, float] | None = None,
     max_value: float | dict[str, float] | None = None,
-    target_types: dict[str, str] | None = None
+    target_types: dict[str, str] | None = None,
 ) -> pd.DataFrame:
-    if (
-        not isinstance(max_iter, int)
-        or isinstance(max_iter, bool)
-        or max_iter < 1
-    ):
+    if not isinstance(max_iter, int) or isinstance(max_iter, bool) or max_iter < 1:
         raise ValueError(
             f"max_iter must be an integer >= 1; got {max_iter!r} "
             f"of type {type(max_iter).__name__}."
         )
 
     if outcome_col and outcome_col in features_to_impute:
-        raise ValueError("Clinical governance invariant: Never impute the primary outcome variable!")
+        raise ValueError(
+            "Clinical governance invariant: Never impute the primary outcome variable!"
+        )
 
-    cols = list(dict.fromkeys(features_to_impute + (predictors or []) + ([outcome_col] if outcome_col else [])))
+    cols = list(
+        dict.fromkeys(
+            features_to_impute
+            + (predictors or [])
+            + ([outcome_col] if outcome_col else [])
+        )
+    )
     if len(cols) < 2:
         raise ValueError(
             "MICE requires >= 1 additional predictor (or outcome variable) to condition on; "
@@ -1830,19 +2191,30 @@ def impute_mice_single(
     # Validate that features_to_impute are strictly continuous
     for feat in features_to_impute:
         if df[feat].isna().all():
-            raise ValueError(f"Column '{feat}' has 0 observed values (100% missing) and cannot be imputed.")
-        if isinstance(df[feat].dtype, pd.CategoricalDtype) or df[feat].dtype.name == "category":
+            raise ValueError(
+                f"Column '{feat}' has 0 observed values (100% missing) and cannot be imputed."
+            )
+        if (
+            isinstance(df[feat].dtype, pd.CategoricalDtype)
+            or df[feat].dtype.name == "category"
+        ):
             raise ValueError(
                 f"Column '{feat}' is declared as categorical. "
                 "Recipe 12 implements Gaussian MICE for continuous variables. "
                 "Missing categorical targets require variable-type-specific imputation."
             )
-        if target_types and target_types.get(feat) in {"categorical", "ordinal", "binary"}:
+        if target_types and target_types.get(feat) in {
+            "categorical",
+            "ordinal",
+            "binary",
+        }:
             raise ValueError(
                 f"Column '{feat}' is declared as {target_types.get(feat)}. "
                 "Recipe 12 implements Gaussian MICE strictly for continuous targets."
             )
-        if pd.api.types.is_bool_dtype(df[feat]) or not pd.api.types.is_numeric_dtype(df[feat]):
+        if pd.api.types.is_bool_dtype(df[feat]) or not pd.api.types.is_numeric_dtype(
+            df[feat]
+        ):
             raise ValueError(
                 f"Column '{feat}' in features_to_impute is non-numeric ({df[feat].dtype}). "
                 "Recipe 12 implements Gaussian MICE for continuous variables. "
@@ -1857,7 +2229,9 @@ def impute_mice_single(
                 "Gaussian posterior draws produce fractional values and cannot enforce binary {0, 1} "
                 "or group membership. Restrict features_to_impute to continuous variables."
             )
-        if vals_set.issubset({1, 2, 3, 1.0, 2.0, 3.0}) or vals_set.issubset({0, 1, 2, 0.0, 1.0, 2.0}):
+        if vals_set.issubset({1, 2, 3, 1.0, 2.0, 3.0}) or vals_set.issubset(
+            {0, 1, 2, 0.0, 1.0, 2.0}
+        ):
             raise ValueError(
                 f"Column '{feat}' in features_to_impute has discrete integer category codes ({vals_set}). "
                 "Categorical and ordinal variables must not be imputed via Gaussian linear regression MICE; "
@@ -1867,8 +2241,12 @@ def impute_mice_single(
     # Validate conditioning columns, predictors, and outcome
     for c in cols:
         if df[c].isna().all():
-            raise ValueError(f"Column '{c}' has 0 observed values (100% missing) and cannot be conditioned upon.")
-        if pd.api.types.is_bool_dtype(df[c]) or not pd.api.types.is_numeric_dtype(df[c]):
+            raise ValueError(
+                f"Column '{c}' has 0 observed values (100% missing) and cannot be conditioned upon."
+            )
+        if pd.api.types.is_bool_dtype(df[c]) or not pd.api.types.is_numeric_dtype(
+            df[c]
+        ):
             raise ValueError(
                 f"Column '{c}' is non-numeric ({df[c].dtype}). "
                 "All features in MICE conditioning matrix must be numeric. "
@@ -1906,8 +2284,16 @@ def impute_mice_single(
 
     # Validate bound ordering
     for feat in features_to_impute:
-        low_val = min_value[feat] if isinstance(min_value, dict) and feat in min_value else (min_value if isinstance(min_value, (int, float)) else None)
-        high_val = max_value[feat] if isinstance(max_value, dict) and feat in max_value else (max_value if isinstance(max_value, (int, float)) else None)
+        low_val = (
+            min_value[feat]
+            if isinstance(min_value, dict) and feat in min_value
+            else (min_value if isinstance(min_value, (int, float)) else None)
+        )
+        high_val = (
+            max_value[feat]
+            if isinstance(max_value, dict) and feat in max_value
+            else (max_value if isinstance(max_value, (int, float)) else None)
+        )
         if low_val is not None and high_val is not None and low_val >= high_val:
             raise ValueError(
                 f"Invalid bound ordering for feature '{feat}': min_value ({low_val}) must be strictly less than max_value ({high_val})."
@@ -1928,9 +2314,13 @@ def impute_mice_single(
             obs_mask = ~mis_mask
             pred_cols = [c for c in cols if c != feat]
 
-            X_obs = np.column_stack([np.ones(obs_mask.sum()), clean.loc[obs_mask, pred_cols].values])
+            X_obs = np.column_stack(
+                [np.ones(obs_mask.sum()), clean.loc[obs_mask, pred_cols].values]
+            )
             y_obs = df.loc[obs_mask, feat].values
-            X_mis = np.column_stack([np.ones(mis_mask.sum()), clean.loc[mis_mask, pred_cols].values])
+            X_mis = np.column_stack(
+                [np.ones(mis_mask.sum()), clean.loc[mis_mask, pred_cols].values]
+            )
 
             n_obs, p = X_obs.shape
             if n_obs <= p:
@@ -1960,8 +2350,16 @@ def impute_mice_single(
             # Deterministic prediction (posterior mean) for exploratory profiling
             y_imp = X_mis @ beta_hat
 
-            low_val = min_value[feat] if isinstance(min_value, dict) and feat in min_value else (min_value if isinstance(min_value, (int, float)) else None)
-            high_val = max_value[feat] if isinstance(max_value, dict) and feat in max_value else (max_value if isinstance(max_value, (int, float)) else None)
+            low_val = (
+                min_value[feat]
+                if isinstance(min_value, dict) and feat in min_value
+                else (min_value if isinstance(min_value, (int, float)) else None)
+            )
+            high_val = (
+                max_value[feat]
+                if isinstance(max_value, dict) and feat in max_value
+                else (max_value if isinstance(max_value, (int, float)) else None)
+            )
 
             if low_val is not None:
                 y_imp = np.maximum(y_imp, low_val)
@@ -1974,6 +2372,7 @@ def impute_mice_single(
         clean[outcome_col] = df[outcome_col]
 
     return clean
+
 
 # Backward-compatible alias for exploratory single imputation
 impute_mice = impute_mice_single
@@ -1989,11 +2388,12 @@ Renders any summary DataFrame into an ICMJE-compliant publication table with 3 h
 import html
 import pandas as pd
 
+
 def render_publication_table(
     df: pd.DataFrame,
     title: str = "Table 1. Cohort Characteristics",
     style: str = "nejm",
-    footnote: str | None = None
+    footnote: str | None = None,
 ) -> str:
     """Render pandas DataFrame into journal-compliant 3-rule publication HTML with escaped data."""
     border_color = "#000000" if style == "nejm" else "#333333"

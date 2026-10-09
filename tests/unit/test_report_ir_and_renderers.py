@@ -173,12 +173,59 @@ def test_render_pptx(sample_report_doc: ReportDocument, tmp_path: Path):
 
 
 def test_render_pdf(sample_report_doc: ReportDocument, tmp_path: Path):
-    """Verifies publication PDF rendering via Playwright."""
+    """Verifies publication PDF rendering via Playwright or soffice fallback."""
+    import importlib.util
+    import shutil
+
+    has_playwright = importlib.util.find_spec("playwright") is not None
+    has_soffice = bool(shutil.which("soffice"))
+
+    if not has_playwright and not has_soffice:
+        pytest.skip("Neither Playwright nor LibreOffice 'soffice' is available.")
+
     from medstat.reporting.renderers import render_pdf
 
     pdf_file = tmp_path / "report.pdf"
-    out_path = render_pdf(sample_report_doc, pdf_file)
+    try:
+        out_path = render_pdf(sample_report_doc, pdf_file)
+    except RuntimeError as e:
+        if "Playwright" in str(e) or "soffice" in str(e):
+            pytest.skip(f"PDF engine runtime unavailable: {e}")
+        raise
 
     assert Path(out_path).exists()
     assert Path(out_path).stat().st_size > 5000
     assert Path(out_path).read_bytes().startswith(b"%PDF")
+
+
+def test_renderers_missing_figure_raises_error(tmp_path: Path):
+    """Verifies that missing figure file raises FileNotFoundError consistently across renderers."""
+    from medstat.figures.base import FigureResult
+    from medstat.reporting.renderers import (
+        render_docx,
+        render_html,
+        render_markdown,
+        render_pptx,
+    )
+
+    missing_fig = FigureResult(
+        png_path=str(tmp_path / "non_existent_figure.png"),
+        alt_text="Missing figure",
+        caption="Missing figure caption",
+        source_df=pd.DataFrame({"x": [1]}),
+        csv_path=str(tmp_path / "dummy.csv"),
+    )
+    doc = ReportDocument(title="Test Missing Figure")
+    doc.add_figure(missing_fig)
+
+    with pytest.raises(FileNotFoundError):
+        render_markdown(doc, tmp_path / "test.md")
+
+    with pytest.raises(FileNotFoundError):
+        render_html(doc, tmp_path / "test.html")
+
+    with pytest.raises(FileNotFoundError):
+        render_docx(doc, tmp_path / "test.docx")
+
+    with pytest.raises(FileNotFoundError):
+        render_pptx(doc, tmp_path / "test.pptx")

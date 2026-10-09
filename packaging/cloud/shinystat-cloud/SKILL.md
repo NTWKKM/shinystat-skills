@@ -54,8 +54,9 @@ If requirements, outcome directions, or primary estimands are ambiguous or unsup
    - **Standard Confidence Intervals**: Wilson score CIs for proportions/2x2 diagnostics, DeLong analytical variance for AUC, exact F-distribution CIs for ICC, and profile likelihood CIs for penalized models.
 
 5. **Pillar 5: Reporting Integrity, Publication Figures & Multi-Format Documents**
-   - **Figure Generation**: Consult [figures.md](references/figures.md) for 300 DPI publication standards, colorblind palettes, and figure recipes (forest, KM, ROC, calibration, DCA, Bland-Altman, love plot, STROBE flow). All figure functions return `(png_path, alt_text, caption, source_df, csv_path)`.
-   - **Multi-Format Export**: Consult [report-builder.md](references/report-builder.md) for assembling Report IR into Word (`.docx`), PowerPoint (`.pptx`), HTML (`.html`), Markdown (`.md`), and PDF (`.pdf`).
+   - **Standalone Execution**: Generate publication figures and reports directly using standard libraries (`matplotlib`, `seaborn`) without importing `medstat`.
+   - **Figure Generation**: Consult [figures.md](references/figures.md) for 300 DPI publication standards, colorblind palettes, and standalone Matplotlib recipes (forest, KM, ROC, calibration, DCA, Bland-Altman, love plot, STROBE flow).
+   - **Multi-Format Export**: Consult [report-builder.md](references/report-builder.md) for standalone recipes to export reports to Word (`.docx`), PowerPoint (`.pptx`), HTML (`.html`), and Markdown (`.md`). When `python-docx` or `python-pptx` packages are unavailable in the sandbox, automatically fall back to self-contained HTML (`.html`) or clean GitHub-flavored Markdown (`.md`).
    - **Integrity Verification**: Strictly enforce numerical traceability to `results_dict`, Zero-PHI compliance, and observational causal/E-value caveats.
 
 ---

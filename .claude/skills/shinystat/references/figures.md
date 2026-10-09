@@ -21,11 +21,11 @@ Every plotting function returns a `FigureResult` dataclass:
 ```python
 @dataclass
 class FigureResult:
-    png_path: str         # Absolute or relative path to saved 300 DPI PNG
-    alt_text: str         # Accessibility description for web and markdown
-    caption: str          # Publication-ready figure caption with statistical notes
+    png_path: str  # Absolute or relative path to saved 300 DPI PNG
+    alt_text: str  # Accessibility description for web and markdown
+    caption: str  # Publication-ready figure caption with statistical notes
     source_df: pd.DataFrame  # Underlying numerical values plotted
-    csv_path: str         # Path to exported raw data CSV for auditability
+    csv_path: str  # Path to exported raw data CSV for auditability
 ```
 
 ---
@@ -41,7 +41,7 @@ from medstat.figures.forest import plot_forest
 
 res = plot_forest(
     model_df,  # columns: ['term', 'estimate', 'ci_lower', 'ci_upper', 'p_value']
-    estimate_type="OR",
+    scale="OR",
     title="Multivariable Predictors of 30-Day Mortality",
     out_path="figures/forest_mortality.png",
     target="docx",
@@ -56,8 +56,8 @@ Produces stratified survival curves with aligned Numbers at Risk table.
 from medstat.figures.survival import plot_kaplan_meier
 
 res = plot_kaplan_meier(
-    km_data,       # Dict[group_name -> {timeline, survival, ci_lower, ci_upper, censored_times}]
-    risk_table,    # DataFrame with columns: [Group, 0, 30, 90, 180, 365]
+    km_data,  # Dict[group_name -> {timeline, survival, ci_lower, ci_upper, censored_times}]
+    risk_table,  # DataFrame with columns: ['Group', 't=0.0', 't=30.0', 't=90.0', 't=180.0', 't=365.0']
     log_rank_p=0.038,
     title="Kaplan-Meier Survival by Treatment Arm",
     out_path="figures/km_survival.png",
@@ -76,12 +76,11 @@ res = plot_roc_curve(
     roc_data={
         "fpr": fpr_arr,
         "tpr": tpr_arr,
-        "thresholds": thresh_arr,
         "auc": 0.865,
         "ci_lower": 0.812,
         "ci_upper": 0.918,
         "optimal_point": {"cutoff": 5.0, "fpr": 0.15, "tpr": 0.75},
-        "model_name": "Biomarker Model",
+        "name": "Biomarker Model",
     },
     out_path="figures/roc_biomarker.png",
     target="docx",
@@ -96,13 +95,15 @@ Validates agreement between predicted risk probabilities and observed event freq
 from medstat.figures.calibration import plot_calibration
 
 res = plot_calibration(
-    calibration_data={
-        "mean_pred": mean_pred_bins,
-        "obs_freq": obs_freq_bins,
-        "bin_counts": counts,
-        "brier_score": 0.124,
-        "ici": 0.021,
+    calib_bins={
+        "pred_mean": pred_mean_arr,
+        "obs_rate": obs_rate_arr,
+        "counts": counts_arr,
+        "ci_lower": ci_lower_arr,
+        "ci_upper": ci_upper_arr,
     },
+    brier_score=0.124,
+    ici=0.021,
     out_path="figures/calibration.png",
     target="docx",
 )
@@ -116,7 +117,7 @@ Quantifies clinical net benefit across decision threshold probabilities.
 from medstat.figures.dca import plot_dca
 
 res = plot_dca(
-    dca_data=dca_results,  # thresholds, net_benefit_model, net_benefit_all, net_benefit_none
+    dca_data=dca_df,  # Long-form DataFrame with columns: ['strategy', 'threshold', 'net_benefit']
     out_path="figures/dca_net_benefit.png",
     target="docx",
 )
@@ -130,11 +131,18 @@ Assesses agreement between two continuous clinical measurement methods or device
 from medstat.figures.agreement import plot_bland_altman
 
 res = plot_bland_altman(
-    method_a=df["device_a"].values,
-    method_b=df["device_b"].values,
-    method_a_name="Device A (Non-invasive)",
-    method_b_name="Device B (Arterial Line)",
-    unit="mmHg",
+    ba_data={
+        "means": means_arr,
+        "diffs": diffs_arr,
+        "mean_diff": -0.85,
+        "loa_upper": 4.12,
+        "loa_lower": -5.82,
+        "ci_mean_diff": (-1.2, -0.5),
+        "ci_loa_upper": (3.5, 4.7),
+        "ci_loa_lower": (-6.4, -5.2),
+    },
+    units="mmHg",
+    title="Bland-Altman Agreement: Non-invasive vs Arterial Line",
     out_path="figures/bland_altman_bp.png",
     target="docx",
 )
@@ -148,7 +156,8 @@ Visualizes covariate balance before and after Propensity Score Matching (PSM).
 from medstat.figures.balance import plot_love
 
 res = plot_love(
-    love_plot_data,  # DataFrame: [Variable, SMD_Unmatched, SMD_Matched]
+    love_data=love_df,  # DataFrame with columns: ['Variable', 'Pre_Match_SMD', 'Post_Match_SMD']
+    threshold=0.10,
     out_path="figures/love_plot_psm.png",
     target="docx",
 )
@@ -162,14 +171,13 @@ Generates STROBE / CONSORT participant disposition flowcharts.
 from medstat.figures.retention import plot_retention_flow
 
 res = plot_retention_flow(
-    flow_data={
-        "assessed": 1250,
-        "excluded": {"Prior cardiac surgery": 120, "Missing key lab": 45},
-        "allocated_arm_a": 542,
-        "allocated_arm_b": 543,
-        "analyzed_arm_a": 540,
-        "analyzed_arm_b": 541,
+    retention_data={
+        "n_initial": 1250,
+        "n_excluded": 165,
+        "n_analyzed": 1085,
+        "exclusion_reasons": ["Prior cardiac surgery: 120", "Missing key lab: 45"],
     },
+    title="Participant Retention Flow Diagram (STROBE / CONSORT)",
     out_path="figures/strobe_retention_flow.png",
     target="docx",
 )

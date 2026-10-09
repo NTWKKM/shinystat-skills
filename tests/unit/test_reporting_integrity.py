@@ -67,8 +67,37 @@ def test_integrity_untraced_numbers():
     doc.add_paragraph("The observed rate was 87.42% with a hazard ratio of 4.98.")
 
     audit = verify_report_integrity(doc)
+    assert audit.passed is False
     assert len(audit.untraced_numbers) >= 2
     assert 87.42 in audit.untraced_numbers or 4.98 in audit.untraced_numbers
+
+
+def test_integrity_untraced_numbers_threshold_allowance():
+    """Verifies that an untraced rate <= 15% (or single structural number) passes audit."""
+    doc = ReportDocument(
+        title="Analysis Report",
+        results_dict={
+            "s1": 11.1,
+            "s2": 22.2,
+            "s3": 33.3,
+            "s4": 44.4,
+            "s5": 55.5,
+            "s6": 66.6,
+            "s7": 77.7,
+            "s8": 88.8,
+            "s9": 99.9,
+            "s10": 111.1,
+        },
+    )
+    # 10 known numbers + 1 untraced number (73.4) -> 1/11 = 9.1% <= 15%
+    doc.add_paragraph(
+        "Stats: 11.1, 22.2, 33.3, 44.4, 55.5, 66.6, 77.7, 88.8, 99.9, 111.1, with untraced marker 73.4."
+    )
+
+    audit = verify_report_integrity(doc)
+    assert audit.passed is True
+    assert len(audit.untraced_numbers) == 1
+    assert 73.4 in audit.untraced_numbers
 
 
 def test_integrity_causal_caveat_warning():

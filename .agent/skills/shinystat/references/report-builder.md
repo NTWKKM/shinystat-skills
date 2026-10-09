@@ -28,9 +28,18 @@ doc = ReportDocument(
 
 # Chained block builder
 doc.add_heading("Executive Summary", level=1)
-doc.add_paragraph(f"In this cohort of {results['sample_size']} patients, the biomarker achieved an AUC of {results['auc']:.3f}.")
-doc.add_callout("Observational study design requires cautious interpretation regarding unmeasured confounding.", level="warning")
-doc.add_table(table_df, caption="Table 1. Baseline Characteristics", footnote="Values expressed as Mean (SD) or N (%).")
+doc.add_paragraph(
+    f"In this cohort of {results['sample_size']} patients, the biomarker achieved an AUC of {results['auc']:.3f}."
+)
+doc.add_callout(
+    "Observational study design requires cautious interpretation regarding unmeasured confounding.",
+    level="warning",
+)
+doc.add_table(
+    table_df,
+    caption="Table 1. Baseline Characteristics",
+    footnote="Values expressed as Mean (SD) or N (%).",
+)
 doc.add_figure(fig_result)
 ```
 
@@ -43,7 +52,9 @@ Exports clean GitHub Flavored Markdown and copies linked high-resolution figures
 ```python
 from medstat.reporting.renderers import render_markdown
 
-md_path = render_markdown(doc, out_path="reports/ami_study.md", assets_dir_name="figures")
+md_path = render_markdown(
+    doc, out_path="reports/ami_study.md", assets_dir_name="figures"
+)
 ```
 
 ### Self-Contained HTML (`render_html`)
@@ -99,7 +110,7 @@ if not audit.passed:
 ```
 
 ### Enforced Invariants
-1. **Numerical Traceability**: Every number appearing in narrative paragraphs, headings, or callouts must trace directly back to `doc.results_dict` within $\pm 0.02$ or 1% relative error. Hallucinated numbers are flagged immediately.
-2. **Zero-PHI Compliance**: Strict regex scan for Hospital Numbers (`HN`), Thai 13-digit National IDs, phone numbers, clinician/patient names, and dates of birth.
+1. **Numerical Traceability**: Narrative numbers are verified against `doc.results_dict` within $\pm 0.02$ or 1% relative error (including percentage scale $\pm 0.05$). Common statistical and index constants (`IGNORED_NUMBERS`) are bypassed. An untraced rate of up to 15% (minimum 1 untraced value) is tolerated for non-statistical headings and structural annotations.
+2. **Zero-PHI Compliance**: Automated regex screening checks text, table cells, headers, and figure metadata for Hospital Numbers (`HN`), Thai 13-digit National IDs, phone numbers, dates of birth, and honorific-prefixed names (`Mr.`, `Mrs.`, `Ms.`, `Dr.`, `นาย`, `นาง`, `นพ.`, `พญ.`). A passing automated audit does not prove absolute zero PHI (names without honorifics are not detected); manual clinical review remains mandatory.
 3. **Observational Causal Inference & E-Value Caveats**: If observational regression, Cox survival, or PSM models are reported, narrative must explicitly address unmeasured confounding and E-values.
 4. **Retention Flow & Methodology**: Enforces presence of cohort participant flow details and statistical software/version citations.
