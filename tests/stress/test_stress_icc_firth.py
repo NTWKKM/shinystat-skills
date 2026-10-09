@@ -58,8 +58,14 @@ class TestICCSciPyParity:
     """Stress-test pure-SciPy ICC against Pingouin across standard & adversarial inputs."""
 
     @pytest.fixture(autouse=True)
-    def require_pingouin(self):
-        if pg is None:
+    def require_pingouin(self, request):
+        parity_tests = {
+            "test_icc_standard_parity",
+            "test_icc_missing_data_handling",
+            "test_icc_negative_correlation",
+            "test_icc_zero_between_target_variance",
+        }
+        if request.node.name in parity_tests and pg is None:
             pytest.skip("pingouin not installed (optional benchmark oracle)")
 
     @pytest.fixture

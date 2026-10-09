@@ -112,3 +112,25 @@ def test_integrity_causal_caveat_warning():
     audit = verify_report_integrity(doc)
     assert audit.has_causal_caveat is False
     assert any("unmeasured confounding" in w.lower() for w in audit.warnings)
+
+
+def test_integrity_displayed_precision_sub_one():
+    """Verifies that values <= 1 use displayed precision instead of 0.02 absolute tolerance."""
+    # results_dict has p_value = 0.02 (2-digit precision)
+    doc_spurious = ReportDocument(
+        title="Spurious P-value Test",
+        results_dict={"p_value": 0.02, "sample_size": 100},
+    )
+    # Text displays 0.004 (precision 0.001) - difference is 0.016 (< 0.02, but > 0.001)
+    doc_spurious.add_paragraph("The reported significance was p = 0.004.")
+    audit_spurious = verify_report_integrity(doc_spurious)
+    assert 0.004 in audit_spurious.untraced_numbers
+
+    # Conversely, when p_value is 0.0041 (within displayed precision 0.001 of 0.004)
+    doc_matched = ReportDocument(
+        title="Valid P-value Test",
+        results_dict={"p_value": 0.0041, "sample_size": 100},
+    )
+    doc_matched.add_paragraph("The reported significance was p = 0.004.")
+    audit_matched = verify_report_integrity(doc_matched)
+    assert 0.004 not in audit_matched.untraced_numbers

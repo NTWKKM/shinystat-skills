@@ -30,7 +30,8 @@ def _apply_three_rule_table_borders(table) -> None:
     Applies publication 3-rule borders (ICMJE/NEJM standards) using OpenXML:
     Top border: 1.5pt solid black
     Bottom border: 1.5pt solid black
-    Inside horizontal (header divider): 0.75pt solid black
+    Inside horizontal borders: Disabled (w:insideH set to none).
+    Header divider: Applied via cell bottom borders on row 0 (1.0pt solid black).
     Vertical / left / right borders: NONE.
     """
     tblPr = table._tbl.tblPr

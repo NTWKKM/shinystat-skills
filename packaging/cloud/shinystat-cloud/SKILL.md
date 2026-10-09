@@ -56,8 +56,8 @@ If requirements, outcome directions, or primary estimands are ambiguous or unsup
 5. **Pillar 5: Reporting Integrity, Publication Figures & Multi-Format Documents**
    - **Standalone Execution**: Generate publication figures and reports directly using standard libraries (`matplotlib`, `seaborn`) without importing `medstat`.
    - **Figure Generation**: Consult [figures.md](references/figures.md) for 300 DPI publication standards, colorblind palettes, and standalone Matplotlib recipes (forest, KM, ROC, calibration, DCA, Bland-Altman, love plot, STROBE flow).
-   - **Multi-Format Export**: Consult [report-builder.md](references/report-builder.md) for standalone recipes to export reports to Word (`.docx`), PowerPoint (`.pptx`), HTML (`.html`), and Markdown (`.md`). When `python-docx` or `python-pptx` packages are unavailable in the sandbox, automatically fall back to self-contained HTML (`.html`) or clean GitHub-flavored Markdown (`.md`).
-   - **Integrity Verification**: Strictly enforce numerical traceability to `results_dict`, Zero-PHI compliance, and observational causal/E-value caveats.
+   - **Multi-Format Export**: Consult [report-builder.md](references/report-builder.md) for standalone reporting recipes. Cloud report formats are generated conditionally based on user requirements and sandbox package availability (defaulting to self-contained HTML or clean GitHub-flavored Markdown; Word `.docx` when requested and `python-docx` is installed).
+   - **Integrity Verification**: Enforce standalone Zero-PHI screening across narrative text, table headers, and cell values, along with observational causal/E-value caveats via `verify_standalone_integrity`.
 
 ---
 

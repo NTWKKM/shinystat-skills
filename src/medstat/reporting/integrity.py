@@ -144,24 +144,27 @@ IGNORED_NUMBERS = {
 }
 
 
-def _extract_text_numbers(text: str) -> list[float]:
-    """Extracts candidate float numbers from narrative text."""
-    # Match numbers like 0.85, 12.3, 145, 0.001, 1,234.56, -0.45, 95%
-    # Word boundary / non-alphanumeric check guards against hyphenated words (e.g. COVID-19, IL-6)
+def _extract_text_tokens(text: str) -> list[tuple[float, str]]:
+    """Extracts candidate (float, raw_token) pairs from narrative text."""
     clean_text = text.replace(",", "")
     matches = re.findall(
         r"(?<!\w)(?<![a-zA-Z]-)(?:[-+]?\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?",
         clean_text,
     )
-    nums = []
+    tokens = []
     for m in matches:
         try:
             val = float(m)
             if val not in IGNORED_NUMBERS and -1e7 < val < 1e7:
-                nums.append(val)
+                tokens.append((val, m))
         except ValueError:
             continue
-    return nums
+    return tokens
+
+
+def _extract_text_numbers(text: str) -> list[float]:
+    """Extracts candidate float numbers from narrative text."""
+    return [val for val, _ in _extract_text_tokens(text)]
 
 
 def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
@@ -203,16 +206,27 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
 
     # 2. Numerical Traceability
     known_numbers = _flatten_numbers(doc.results_dict)
-    text_numbers = _extract_text_numbers(all_text)
+    text_tokens = _extract_text_tokens(all_text)
+    text_numbers = [val for val, _ in text_tokens]
 
     untraced: list[float] = []
-    for tn in text_numbers:
-        # Check against known numbers within +/- 0.02 or 1% relative error
+    for tn, token_str in text_tokens:
+        # Check against known numbers: for values <= 1, use token's displayed precision
+        if abs(tn) <= 1.0:
+            if "." in token_str:
+                dec_part = token_str.split(".")[1]
+                dec_digits = len(re.split(r"[eE]", dec_part)[0])
+                abs_tol = min(0.02, 10.0 ** (-dec_digits))
+            else:
+                abs_tol = 0.02
+        else:
+            abs_tol = 0.02
+
         matched = False
         for kn in known_numbers:
             abs_diff = abs(tn - kn)
             rel_diff = abs_diff / max(abs(kn), 1e-9)
-            if abs_diff <= 0.02 or rel_diff <= 0.01:
+            if abs_diff <= abs_tol or rel_diff <= 0.01:
                 matched = True
                 break
             # Also check percentage scale (e.g. 0.852 in results vs 85.2 in text)

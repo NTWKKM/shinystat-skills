@@ -244,6 +244,20 @@ def verify_standalone_integrity(
         for m in pat.findall(narrative_text):
             violations.append(f"{label}: '{m}'")
 
+    if table_dfs:
+        for df in table_dfs:
+            if df is not None and isinstance(df, pd.DataFrame):
+                for col in df.columns:
+                    col_str = str(col)
+                    for pat, label in phi_patterns:
+                        for m in pat.findall(col_str):
+                            violations.append(f"{label}: '{m}'")
+                    for val in df[col].dropna():
+                        val_str = str(val)
+                        for pat, label in phi_patterns:
+                            for m in pat.findall(val_str):
+                                violations.append(f"{label}: '{m}'")
+
     # 2. Observational Causal / E-value Caveat Check
     keys_str = " ".join(results_dict.keys()).lower()
     is_causal = any(
@@ -263,7 +277,7 @@ def verify_standalone_integrity(
         )
 
     return {
-        "passed": len(violations) == 0,
+        "passed": len(violations) == 0 and has_caveat,
         "phi_violations": violations,
         "has_causal_caveat": has_caveat,
     }
