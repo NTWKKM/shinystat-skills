@@ -2,7 +2,7 @@
 language: "en"
 early_access: false
 
-tone_instructions: "Review with high rigor for clinical safety, statistical accuracy, Python standards, and agent skills. Focus reviews strictly on canonical source files (src/**, packaging/**, tests/**, canonical skills/shinystat/**, and root documentation). Completely skip and ignore all mirrored directories (.agent/**, .agents/**, .claude/**, .cursor/**, and skills/**/scripts/medstat/**) as they are automated byte-identical mirrors of canonical code."
+tone_instructions: "Review with high rigor for clinical safety and statistical accuracy. Focus strictly on canonical files (src/**, packaging/**, tests/**, skills/shinystat/**). Completely skip and ignore all platform mirrors and bundled medstat copies."
 
 reviews:
   profile: "assertive"
