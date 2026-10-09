@@ -157,6 +157,7 @@ Computes clinical diagnostic performance metrics with asymmetric Wilson score in
 
 ```python
 import numpy as np
+import pandas as pd
 import scipy.stats as stats
 
 def calculate_ci_wilson_score(k: int, n: int, ci: float = 0.95) -> tuple[float, float]:
@@ -218,6 +219,11 @@ def calculate_2x2_metrics(tp: int, fp: int, fn: int, tn: int, ci: float = 0.95) 
         "LR_pos": (float(lr_pos), lr_pos_ci),
         "LR_neg": (float(lr_neg), lr_neg_ci),
         "DOR": (float(dor), dor_ci),
+        "contingency_matrix": [[tp, fn], [fp, tn]],
+        "confusion_table": pd.DataFrame(
+            {"Actual_Positive": [tp, fn], "Actual_Negative": [fp, tn]},
+            index=["Predicted_Positive", "Predicted_Negative"],
+        ),
     }
 ```
 
@@ -287,6 +293,17 @@ def auc_ci_delong(y_true, y_score, direction: str = "high", alpha: float = 0.05)
         "youden_j": float(youden_j[best_idx]),
         "n_pos": n_pos,
         "n_neg": n_neg,
+        "roc_curve": {
+            "fpr": fpr,
+            "tpr": tpr,
+            "thresholds": -thresholds if direction == "low" else thresholds,
+        },
+        "optimal_point": {
+            "fpr": float(fpr[best_idx]),
+            "tpr": float(tpr[best_idx]),
+            "cutoff": opt_thresh,
+            "youden_j": float(youden_j[best_idx]),
+        },
     }
 
 def delong_paired_test(y_true, score1, score2, alpha: float = 0.05) -> dict:
@@ -390,6 +407,34 @@ def evaluate_calibration(y_true, y_pred) -> dict:
     smooth_obs = np.clip(smooth_obs, 0.0, 1.0)
     abs_err = np.abs(y_p[order] - smooth_obs)
 
+    # 4. Decile calibration bins for plotting
+    n_bins = 10
+    quantiles = np.linspace(0, 100, n_bins + 1)
+    bin_edges = np.percentile(y_p, quantiles)
+    bin_edges[-1] += 1e-5
+    p_means, o_rates, b_counts, ci_l_list, ci_u_list = [], [], [], [], []
+    for b in range(n_bins):
+        mask = (y_p >= bin_edges[b]) & (y_p < bin_edges[b + 1])
+        cnt = int(np.sum(mask))
+        if cnt > 0:
+            pm = float(np.mean(y_p[mask]))
+            om = float(np.mean(y_t[mask]))
+            # Binomial Wilson score CI
+            k_ev = int(np.sum(y_t[mask]))
+            z_val = 1.96
+            denom = 1.0 + (z_val**2) / cnt
+            center = om + (z_val**2) / (2.0 * cnt)
+            hw = z_val * np.sqrt((om * (1.0 - om) + (z_val**2) / (4.0 * cnt)) / cnt)
+            ci_l = float(max(0.0, (center - hw) / denom))
+            ci_u = float(min(1.0, (center + hw) / denom))
+        else:
+            pm, om, ci_l, ci_u = np.nan, np.nan, np.nan, np.nan
+        p_means.append(pm)
+        o_rates.append(om)
+        b_counts.append(cnt)
+        ci_l_list.append(ci_l)
+        ci_u_list.append(ci_u)
+
     return {
         "brier_score": brier,
         "scaled_brier": float(scaled_brier),
@@ -399,6 +444,17 @@ def evaluate_calibration(y_true, y_pred) -> dict:
         "e50": float(np.median(abs_err)),
         "e90": float(np.percentile(abs_err, 90)),
         "emax": float(np.max(abs_err)),
+        "calibration_bins": {
+            "pred_mean": np.array(p_means),
+            "obs_rate": np.array(o_rates),
+            "counts": np.array(b_counts),
+            "ci_lower": np.array(ci_l_list),
+            "ci_upper": np.array(ci_u_list),
+        },
+        "calibration_curve": {
+            "pred_smooth": y_p[order],
+            "obs_smooth": smooth_obs,
+        },
     }
 
 def calculate_dca(y_true, y_pred, thresholds: np.ndarray | None = None) -> pd.DataFrame:
@@ -476,6 +532,7 @@ def calculate_bland_altman(m1, m2, ci: float = 0.95) -> dict:
         raise ValueError(f"Length mismatch: m1 ({len(v1)}) and m2 ({len(v2)}) must have identical lengths.")
     valid = ~(np.isnan(v1) | np.isnan(v2))
     diffs = v1[valid] - v2[valid]
+    means = (v1[valid] + v2[valid]) / 2.0
     n = len(diffs)
     if n < 2:
         raise ValueError("Bland-Altman difference analysis requires at least 2 valid paired measurements.")
@@ -501,6 +558,16 @@ def calculate_bland_altman(m1, m2, ci: float = 0.95) -> dict:
         "ci_upper_loa": (upper_loa - t_crit * se_loa, upper_loa + t_crit * se_loa),
         "lower_loa": lower_loa,
         "ci_lower_loa": (lower_loa - t_crit * se_loa, lower_loa + t_crit * se_loa),
+        "ba_points": {
+            "means": means,
+            "diffs": diffs,
+            "mean_diff": mean_diff,
+            "loa_lower": lower_loa,
+            "loa_upper": upper_loa,
+            "ci_mean_diff": (float(mean_diff - t_crit * se_mean), float(mean_diff + t_crit * se_mean)),
+            "ci_loa_lower": (float(lower_loa - t_crit * se_loa), float(lower_loa + t_crit * se_loa)),
+            "ci_loa_upper": (float(upper_loa - t_crit * se_loa), float(upper_loa + t_crit * se_loa)),
+        },
     }
 
 def calculate_icc_matrix(values: np.ndarray, alpha: float = 0.05) -> pd.DataFrame:
@@ -734,9 +801,18 @@ def match_propensity_scores(
             "Balanced (<0.10)": abs(smd_post) < 0.10 if not np.isnan(smd_post) else False
         })
 
+    bal_df = pd.DataFrame(balance_rows)
+    love_plot_data = {
+        "covariates": list(bal_df["Variable"]),
+        "smd_raw": [float(x) if not np.isnan(x) else np.nan for x in bal_df["Pre-Match SMD"]],
+        "smd_matched": [float(x) if not np.isnan(x) else np.nan for x in bal_df["Post-Match SMD"]],
+        "threshold": 0.10,
+    }
+
     return {
         "matched_df": matched_df,
-        "balance_df": pd.DataFrame(balance_rows),
+        "balance_df": bal_df,
+        "love_plot_data": love_plot_data,
         "n_matched_pairs": pair_counter - 1,
         "n_unmatched_treated": len(treated) - (pair_counter - 1),
         "retention_audit": {
@@ -894,6 +970,17 @@ def fit_firth_logistic(
                 ci_upper[j] = beta[j] + 1.96 * se[j]
                 ci_method[j] = "wald_fallback"
 
+    forest_items = []
+    for j in range(p):
+        v_name = f"Covariate_{j}" if not fit_intercept or j > 0 else "Intercept"
+        forest_items.append({
+            "term": v_name,
+            "estimate": float(np.exp(beta[j])),
+            "ci_lower": float(np.exp(ci_lower[j])),
+            "ci_upper": float(np.exp(ci_upper[j])),
+            "scale": "OR",
+        })
+
     return {
         "coefficients": beta,
         "standard_errors": se,
@@ -903,6 +990,7 @@ def fit_firth_logistic(
         "converged": converged,
         "ci_method": ci_method,
         "pll_history": pll_history,
+        "forest_data": forest_items,
     }
 ```
 
@@ -1064,6 +1152,11 @@ def littles_mcar_test(df: pd.DataFrame, variables: list[str], max_iter: int = 10
         d2 += n_s * float(diff.T @ inv_Sigma_OO @ diff)
 
     p_val = float(stats.chi2.sf(d2, df=df_stat))
+    missing_summary = pd.DataFrame({
+        "Variable": variables,
+        "N_Missing": [int(np.sum(np.isnan(df[v]))) for v in variables],
+        "Pct_Missing": [float(np.mean(np.isnan(df[v])) * 100.0) for v in variables],
+    })
     return {
         "chi2": float(d2),
         "df": int(df_stat),
@@ -1073,6 +1166,7 @@ def littles_mcar_test(df: pd.DataFrame, variables: list[str], max_iter: int = 10
         "converged": converged,
         "n_iterations": n_iterations,
         "n_excluded_rows": n_excluded_rows,
+        "missingness_summary": missing_summary,
     }
 ```
 
@@ -1241,6 +1335,8 @@ def fit_survival_analysis_suite(
 
     # Kaplan-Meier curve & median survival
     km_results = {}
+    km_curves = {}
+    risk_table = pd.DataFrame()
     if strata_col:
         groups = clean_km[strata_col].unique()
         for g in groups:
@@ -1248,7 +1344,29 @@ def fit_survival_analysis_suite(
             kmf = KaplanMeierFitter()
             kmf.fit(sub[duration_col], sub[event_col], label=str(g))
             km_results[f"Median Survival ({g})"] = float(kmf.median_survival_time_)
+            ci_df = kmf.confidence_interval_
+            cens_t = sub.loc[sub[event_col] == 0, duration_col].to_numpy()
+            km_curves[str(g)] = {
+                "timeline": np.asarray(kmf.timeline),
+                "survival": np.asarray(kmf.survival_function_[str(g)]),
+                "ci_lower": np.asarray(ci_df.iloc[:, 0]),
+                "ci_upper": np.asarray(ci_df.iloc[:, 1]),
+                "censored_times": cens_t,
+                "censored_survival": np.asarray(kmf.survival_function_at_times(cens_t)) if len(cens_t) > 0 else np.array([]),
+            }
         
+        # Risk table at milestone intervals
+        max_t = float(clean_km[duration_col].max())
+        milestones = np.linspace(0, max_t, 5).round(1)
+        r_rows = []
+        for g in groups:
+            sub = clean_km[clean_km[strata_col] == g]
+            row_dict = {"Group": str(g)}
+            for m in milestones:
+                row_dict[f"t={m}"] = int(np.sum(sub[duration_col] >= m))
+            r_rows.append(row_dict)
+        risk_table = pd.DataFrame(r_rows)
+
         # Log-rank test (2 groups or multivariate for >2 groups)
         if len(groups) == 2:
             lr_res = logrank_test(
@@ -1263,12 +1381,23 @@ def fit_survival_analysis_suite(
             km_results["Multivariate Log-Rank P-value"] = float(lr_res.p_value)
     else:
         kmf = KaplanMeierFitter()
-        kmf.fit(clean_km[duration_col], clean_km[event_col])
+        kmf.fit(clean_km[duration_col], clean_km[event_col], label="Overall")
         km_results["Overall Median Survival"] = float(kmf.median_survival_time_)
+        ci_df = kmf.confidence_interval_
+        cens_t = clean_km.loc[clean_km[event_col] == 0, duration_col].to_numpy()
+        km_curves["Overall"] = {
+            "timeline": np.asarray(kmf.timeline),
+            "survival": np.asarray(kmf.survival_function_["Overall"]),
+            "ci_lower": np.asarray(ci_df.iloc[:, 0]),
+            "ci_upper": np.asarray(ci_df.iloc[:, 1]),
+            "censored_times": cens_t,
+            "censored_survival": np.asarray(kmf.survival_function_at_times(cens_t)) if len(cens_t) > 0 else np.array([]),
+        }
 
     # 2. Cox Proportional Hazards model on complete-covariate cohort
     cox_table = pd.DataFrame()
     schoenfeld_summary = {}
+    forest_items = []
     n_analyzed_cox = 0
     if covariates:
         cox_cols = [duration_col, event_col] + covariates
@@ -1294,6 +1423,14 @@ def fit_survival_analysis_suite(
                 "Hazard Ratio (95% CI)": f"{hr:.2f} ({ci_l:.2f}–{ci_u:.2f})",
                 "P-value": f"{p_val:.3f}" if p_val >= 0.001 else "<0.001"
             })
+            forest_items.append({
+                "term": var,
+                "estimate": hr,
+                "ci_lower": ci_l,
+                "ci_upper": ci_u,
+                "p_value": p_val,
+                "scale": "HR",
+            })
         cox_table = pd.DataFrame(rows)
 
         # Proportional hazards test per covariate
@@ -1310,7 +1447,10 @@ def fit_survival_analysis_suite(
 
     return {
         "km_summary": km_results,
+        "km_curves": km_curves,
+        "risk_table": risk_table,
         "cox_table": cox_table,
+        "forest_data": forest_items,
         "schoenfeld_diagnostics": schoenfeld_summary,
         "retention_km": {"n_initial": n_initial, "n_analyzed": len(clean_km), "n_excluded": n_initial - len(clean_km)},
         "retention_cox": {"n_initial": n_initial, "n_analyzed": n_analyzed_cox, "n_excluded": n_initial - n_analyzed_cox} if covariates else None,

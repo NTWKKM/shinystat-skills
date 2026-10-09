@@ -2,9 +2,29 @@
 Publication Reporting, Table 1, and Narrative Generation Module.
 """
 
+from medstat.reporting.integrity import (
+    IntegrityReport,
+    verify_report_integrity,
+)
+from medstat.reporting.ir import (
+    Block,
+    CalloutBlock,
+    FigureBlock,
+    HeadingBlock,
+    ParagraphBlock,
+    ReportDocument,
+    TableBlock,
+)
 from medstat.reporting.narrative import (
     generate_methods_narrative,
     validate_calibration_metrics,
+)
+from medstat.reporting.renderers import (
+    render_docx,
+    render_html,
+    render_markdown,
+    render_pdf,
+    render_pptx,
 )
 from medstat.reporting.table1 import generate_table_one
 from medstat.reporting.tables import (
@@ -32,4 +52,18 @@ __all__ = [
     "render_ascii_table",
     "generate_methods_narrative",
     "validate_calibration_metrics",
+    "ReportDocument",
+    "Block",
+    "HeadingBlock",
+    "ParagraphBlock",
+    "TableBlock",
+    "FigureBlock",
+    "CalloutBlock",
+    "render_markdown",
+    "render_html",
+    "render_docx",
+    "render_pptx",
+    "render_pdf",
+    "verify_report_integrity",
+    "IntegrityReport",
 ]

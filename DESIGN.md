@@ -748,8 +748,51 @@ Comprehensive code review by CodeRabbit AI on GitHub PR #8 (`feat/cloud-skill-ha
 - **Status**: Accepted & Verified.
 - **Biostatistical Invariance**: Eliminates silent data coercion, improper inference with $df = \infty$, fractional dummy MICE draws, rank-deficient OLS regressions, point-mass boundary clipping, and unverified optimization in cloud sandbox environments.
 - **Proper Parameter Uncertainty**: MICE parameter draws preserve joint coefficient uncertainty across missing records, recovering empirical coverage in MAR benchmark scenarios.
-- **Self-Containment**: All 13 recipes execute standalone without cross-block state leakage or hidden dependencies.
+---
 
-[MEMORY_LEARN: In clinical cloud sandboxes, all inferential recipes must enforce strict mathematical invariants (finite binary {0,1} domain, matrix rank, Barnard-Rubin B=0 finite-sample limits, continuous-only Gaussian MICE targets, proper Bayesian parameter draws for nominal CI coverage, and score gradient convergence) with standalone execution self-containment.]
+## ADR 31: Publication Medical Figures, Report Intermediate Representation (IR), Multi-Format Renderers, and Pillar 5 Reporting Integrity
+
+### Context
+Users requested comprehensive document and visual presentation generation across multiple formats (Word `.docx`, PowerPoint `.pptx`, Markdown `.md`, self-contained `.html`, and `.pdf`) with publication-quality clinical figures. Prior to this implementation, the biostatistical pipeline concluded with printed text or static HTML strings (Recipe 13), lacking graphical plotting and structured multi-format document rendering.
+
+### Decision
+1. **Recipe Contract Refactoring with Backward Compatibility**:
+   - Extended the return dictionary contracts across all 13 recipes in `python-recipes.md` to include plot-ready keys (`roc_curve`, `optimal_point`, `km_curves`, `risk_table`, `calibration_curve`, `calibration_bins`, `ba_points`, `love_plot_data`, `forest_data`, `missingness_summary`).
+   - Baseline regression snapshot testing (`test_recipes_snapshot.py`) verified that all pre-existing return keys remained backward-compatible.
+2. **Clinical Figure Library (`medstat.figures`)**:
+   - Enforced 300 DPI publication standards, colorblind-safe palettes (Okabe-Ito / Tol), and Thai typography fallback chains (`Sarabun`, `Thonburi`, `Sukhumvit Set`, `Arial`).
+   - Implemented 10 clinical plot generators:
+     - `plot_forest`: OR/HR/RR with logarithmic scaling and reference lines at 1.0.
+     - `plot_kaplan_meier`: Survival curves with Hall-Wellner/log-log CIs, aligned risk tables, and log-rank p-values.
+     - `plot_roc_curve`: Empirical ROC curves with Youden's J optimal cutpoint, DeLong 95% CIs, and paired test overlay.
+     - `plot_calibration`: Decile bins, Wilson score CIs, LOESS curves, Brier score, and ICI.
+     - `plot_dca`: Decision Curve Analysis Net Benefit against Treat All and Treat None.
+     - `plot_bland_altman`: Pairwise difference vs average, 95% LoA, and Bland-Altman (1999) large-sample CIs.
+     - `plot_love`: Austin 2009 standardized mean difference covariate balance before/after PSM with 0.10 threshold.
+     - `plot_retention_flow`: Pure-Matplotlib STROBE / CONSORT participant retention flowchart.
+     - Diagnostic plots: Missingness heatmaps, Schoenfeld residuals, and MICE density overlays.
+   - Enforced `FigureResult(png_path, alt_text, caption, source_df, csv_path)` return contract with automatic CSV data export alongside every PNG for auditability.
+3. **Report Intermediate Representation (`medstat.reporting.ir`)**:
+   - Established format-agnostic `ReportDocument` as Single Source of Truth (SSOT).
+   - Composed of typed blocks (`HeadingBlock`, `ParagraphBlock`, `TableBlock`, `FigureBlock`, `CalloutBlock`) linked to `results_dict`.
+4. **Multi-Format Document Renderers (`medstat.reporting.renderers`)**:
+   - `render_markdown`: GitHub Flavored Markdown with linked asset figures directory.
+   - `render_html`: Standalone single-file HTML with embedded base64 images and ICMJE 3-rule CSS tables.
+   - `render_docx`: Native Microsoft Word `.docx` via `python-docx` with OpenXML `<w:tblBorders>` 3-rule borders and 6.5 in figures.
+   - `render_pptx`: Native PowerPoint 16:9 widescreen presentation via `python-pptx` (`13.333" x 7.5"`) with 1-figure-per-slide layout and structured takeaway cards.
+   - `render_pdf`: Headless Chromium PDF printing via Playwright (`page.pdf()`), with LibreOffice (`soffice`) fallback.
+5. **Pillar 5: Reporting Integrity (`medstat.reporting.integrity`)**:
+   - Numerical Traceability: Every narrative number is cross-checked against `results_dict` ($\pm 0.02$).
+   - Zero-PHI Enforcement: Deterministic regex scan suppressing Hospital Numbers (`HN`), Thai 13-digit National IDs, phone numbers, patient names, and dates of birth.
+   - Causal Invariants: Observational PSM and regression models must explicitly state unmeasured confounding and E-values.
+   - Retention and Methods: Enforces participant disposition accounting and statistical method disclosures.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Auditability**: Every figure exports its raw plotted data as CSV, and every document traces its narrative numbers to numerical model results.
+- **Multi-Format Delivery**: Clinicians and researchers can request Word reports, PowerPoint slide decks, standalone HTML summaries, or PDF manuscripts seamlessly.
+- **Full Test Suite Pass**: All 286 unit tests passing with zero regressions.
+
+[MEMORY_LEARN: Medical document generation must enforce single-source-of-truth Report IR where every narrative number is traced back to results_dict, figures return 300 DPI PNGs with exported CSV source data, and observational causal models strictly mandate unmeasured confounding/E-value caveats.]
 
 

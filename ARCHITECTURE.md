@@ -81,22 +81,51 @@ System architecture and structural specifications for `medstat-core` and the `me
 - **`icc.py`**: Pure SciPy/NumPy two-way ANOVA decomposition computing Shrout & Fleiss (1979) forms (ICC1, ICC2, ICC3, ICC1k, ICC2k, ICC3k) with exact F-distribution confidence intervals.
 - **`kappa.py`**: Cohen's Kappa (unweighted, linear, quadratic with non-null and null SEs) and Fleiss' generalized multi-rater Kappa for discrete categories.
 
+### `medstat.figures`
+- **`base.py`**: `FigureResult(png_path, alt_text, caption, source_df, csv_path)` contract and automated CSV source data export for auditability.
+- **`styles.py`**: Publication styling (300 DPI, Okabe-Ito/Tol colorblind palettes, Thai typography fallback chain: `Sarabun`, `Thonburi`, `Sukhumvit Set`, `Arial`).
+- **`forest.py`**: Forest plots for OR/HR/RR multivariable models and meta-analyses.
+- **`survival.py`**: Stratified Kaplan-Meier survival curves with aligned Numbers at Risk table and log-rank p-value.
+- **`roc.py`**: ROC curves with 45-degree chance diagonal, Youden optimal cutpoint, DeLong 95% CIs, and paired overlay.
+- **`calibration.py`**: Decile calibration plots with Wilson CIs, LOESS curves, Brier score, and ICI.
+- **`dca.py`**: Decision Curve Analysis with Net Benefit comparison against Treat All and Treat None.
+- **`agreement.py`**: Bland-Altman agreement plots with mean bias, 95% Limits of Agreement, and 1999 large-sample CIs.
+- **`balance.py`**: Austin 2009 Love plots for PSM covariate balance with 0.10 SMD threshold.
+- **`retention.py`**: Pure-Matplotlib STROBE / CONSORT participant retention flowcharts.
+- **`diagnostics.py`**: Missingness heatmaps, Schoenfeld proportional hazards residuals, and MICE density overlays.
+
 ### `medstat.reporting`
 - **`tables.py`**: Journal-compliant polymorphic HTML table rendering (NEJM, JAMA, APA 7) with strict border rules, no vertical dividers, and support for Table 1, Regression, Diagnostic accuracy, Bland-Altman, ICC, and Covariate balance.
 - **`narrative.py`**: Automated biomedical Methods and Results narrative generation.
 - **`checklists.py`**: Audited item checklists for STROBE, CONSORT, TRIPOD, STARD (diagnostic studies), and PRISMA (systematic reviews).
+- **`ir.py`**: Report Intermediate Representation (IR) acting as Single Source of Truth (`ReportDocument`, `Block`, `HeadingBlock`, `ParagraphBlock`, `TableBlock`, `FigureBlock`, `CalloutBlock`).
+- **`renderers/`**: Multi-format document renderers:
+  - `markdown.py`: GitHub Flavored Markdown + linked assets directory (`render_markdown`).
+  - `html.py`: Self-contained single-file HTML with embedded base64 figures and ICMJE 3-rule table styling (`render_html`).
+  - `docx.py`: Native Microsoft Word `.docx` with OpenXML `<w:tblBorders>` 3-rule borders and 6.5 in figures (`render_docx`).
+  - `pptx.py`: Native PowerPoint 16:9 widescreen presentation with 1 figure per slide layout and structured takeaway cards (`render_pptx`).
+  - `pdf.py`: High-fidelity PDF rendering via Playwright headless Chromium with LibreOffice fallback (`render_pdf`).
+- **`integrity.py`**: Pillar 5 Reporting Integrity audit (`verify_report_integrity`): numerical traceability to `results_dict` ($\pm 0.02$), Zero-PHI regex scan (HN, Thai citizen ID, phone, names), and observational causal inference / E-value caveat enforcement.
 
 ---
 
 ## 3. Data Flow & Contract Interfaces
 
 ```mermaid
-flowchart LR
+flowchart TD
     Data[Clinical Ingestion: CSV / XLSX / TSV / Parquet] --> Profile[medstat profile: Data Health & Design Inference]
-    Profile --> Clean[medstat.data.clean: Little's MCAR + Missing Strategy (Optional Outlier Action)]
+    Profile --> Clean[medstat.data.clean: Little's MCAR + Missing Strategy]
     Clean -->|Audited Cohort + Flow| Model[medstat.models / causal / diag / agreement]
-    Model -->|JSON Estimates Contract| Report[medstat.reporting: Polymorphic Renderer]
-    Report -->|HTML Table + Narrative + Checklist| Manuscript[Publication Draft]
+    Model -->|Results Dict + Source Data| Figures[medstat.figures: 300 DPI Medical Figures + CSV]
+    Model -->|Results Dict| IR[medstat.reporting.ir: ReportDocument SSOT]
+    Figures -->|FigureResult Blocks| IR
+    IR --> Integrity[medstat.reporting.integrity: Pillar 5 Audit]
+    Integrity --> Renderers[medstat.reporting.renderers]
+    Renderers --> MD[Markdown .md]
+    Renderers --> HTML[Self-contained HTML]
+    Renderers --> DOCX[Word .docx]
+    Renderers --> PPTX[PowerPoint .pptx]
+    Renderers --> PDF[Publication PDF]
 ```
 
-All subcommands emit structured JSON contracts allowing easy composition into pipelines, agent tools, or downstream rendering engines.
+All subcommands and renderers emit structured contracts allowing deterministic composition into pipelines, agent tools, and manuscript packages.

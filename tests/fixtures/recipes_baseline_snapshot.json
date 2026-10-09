@@ -1,0 +1,417 @@
+{
+  "recipe_1_table_one": [
+    {
+      "Characteristic": "Overall (N = 500)",
+      "treatment_arm=0 (N = 319)": "n = 319",
+      "treatment_arm=1 (N = 181)": "n = 181",
+      "P-value": "",
+      "SMD": ""
+    },
+    {
+      "Characteristic": "age",
+      "treatment_arm=0 (N = 319)": "61.3 (11.6)",
+      "treatment_arm=1 (N = 181)": "62.8 (11.2)",
+      "P-value": "0.138",
+      "SMD": "0.14"
+    },
+    {
+      "Characteristic": "bmi",
+      "treatment_arm=0 (N = 319)": "26.5 (4.7)",
+      "treatment_arm=1 (N = 181)": "26.8 (4.4)",
+      "P-value": "0.502",
+      "SMD": "0.06"
+    },
+    {
+      "Characteristic": "egfr",
+      "treatment_arm=0 (N = 319)": "70.5 (19.7)",
+      "treatment_arm=1 (N = 181)": "65.2 (20.1)",
+      "P-value": "0.004",
+      "SMD": "-0.27"
+    },
+    {
+      "Characteristic": "**sex**",
+      "treatment_arm=0 (N = 319)": "",
+      "treatment_arm=1 (N = 181)": "",
+      "P-value": "",
+      "SMD": ""
+    },
+    {
+      "Characteristic": "  0",
+      "treatment_arm=0 (N = 319)": "163 (51.1%)",
+      "treatment_arm=1 (N = 181)": "82 (45.3%)",
+      "P-value": "0.249",
+      "SMD": "-0.12"
+    },
+    {
+      "Characteristic": "  1",
+      "treatment_arm=0 (N = 319)": "156 (48.9%)",
+      "treatment_arm=1 (N = 181)": "99 (54.7%)",
+      "P-value": "",
+      "SMD": "0.12"
+    },
+    {
+      "Characteristic": "**hypertension**",
+      "treatment_arm=0 (N = 319)": "",
+      "treatment_arm=1 (N = 181)": "",
+      "P-value": "",
+      "SMD": ""
+    },
+    {
+      "Characteristic": "  0",
+      "treatment_arm=0 (N = 319)": "191 (59.9%)",
+      "treatment_arm=1 (N = 181)": "93 (51.4%)",
+      "P-value": "0.080",
+      "SMD": "-0.17"
+    },
+    {
+      "Characteristic": "  1",
+      "treatment_arm=0 (N = 319)": "128 (40.1%)",
+      "treatment_arm=1 (N = 181)": "88 (48.6%)",
+      "P-value": "",
+      "SMD": "0.17"
+    },
+    {
+      "Characteristic": "**diabetes**",
+      "treatment_arm=0 (N = 319)": "",
+      "treatment_arm=1 (N = 181)": "",
+      "P-value": "",
+      "SMD": ""
+    },
+    {
+      "Characteristic": "  0",
+      "treatment_arm=0 (N = 319)": "243 (76.2%)",
+      "treatment_arm=1 (N = 181)": "113 (62.4%)",
+      "P-value": "0.002",
+      "SMD": "-0.30"
+    },
+    {
+      "Characteristic": "  1",
+      "treatment_arm=0 (N = 319)": "76 (23.8%)",
+      "treatment_arm=1 (N = 181)": "68 (37.6%)",
+      "P-value": "",
+      "SMD": "0.30"
+    }
+  ],
+  "recipe_2_diagnostic_2x2": {
+    "Sensitivity": [
+      0.801587,
+      [
+        0.747982,
+        0.846136
+      ]
+    ],
+    "Specificity": [
+      0.991935,
+      [
+        0.971078,
+        0.997786
+      ]
+    ],
+    "PPV": [
+      0.990196,
+      [
+        0.964965,
+        0.997307
+      ]
+    ],
+    "NPV": [
+      0.831081,
+      [
+        0.784218,
+        0.86946
+      ]
+    ],
+    "LR_pos": [
+      99.396825,
+      [
+        24.964376,
+        395.753089
+      ]
+    ],
+    "LR_neg": [
+      0.200026,
+      [
+        0.156027,
+        0.256432
+      ]
+    ],
+    "DOR": [
+      496.92,
+      [
+        119.44781,
+        2067.258379
+      ]
+    ]
+  },
+  "recipe_3_roc_delong": {
+    "auc": 0.989447,
+    "se": 0.002919,
+    "ci_lower": 0.983727,
+    "ci_upper": 0.995168,
+    "optimal_threshold": 5.68,
+    "sensitivity": 0.968254,
+    "specificity": 0.931452,
+    "youden_j": 0.899706,
+    "n_pos": 252,
+    "n_neg": 248
+  },
+  "recipe_4_calibration": {
+    "brier_score": 0.183413,
+    "scaled_brier": 0.266299,
+    "calibration_intercept": -0.360566,
+    "calibration_slope": 4.135918,
+    "ici": 0.182556,
+    "e50": 0.17772,
+    "e90": 0.317477,
+    "emax": 0.356485
+  },
+  "recipe_4_dca_head": [
+    {
+      "threshold": 0.01,
+      "net_benefit": 0.498989898989899,
+      "strategy": "Model"
+    },
+    {
+      "threshold": 0.01,
+      "net_benefit": 0.498989898989899,
+      "strategy": "Treat All"
+    },
+    {
+      "threshold": 0.01,
+      "net_benefit": 0.0,
+      "strategy": "Treat None"
+    },
+    {
+      "threshold": 0.02,
+      "net_benefit": 0.49387755102040815,
+      "strategy": "Model"
+    },
+    {
+      "threshold": 0.02,
+      "net_benefit": 0.49387755102040815,
+      "strategy": "Treat All"
+    }
+  ],
+  "recipe_5_bland_altman": {
+    "n_pairs": 500,
+    "mean_diff": -2.2804,
+    "ci_mean_diff": [
+      -2.863615,
+      -1.697185
+    ],
+    "sd_diff": 6.637597,
+    "upper_loa": 10.729051,
+    "ci_upper_loa": [
+      9.731672,
+      11.72643
+    ],
+    "lower_loa": -15.289851,
+    "ci_lower_loa": [
+      -16.28723,
+      -14.292472
+    ]
+  },
+  "recipe_5_icc": [
+    {
+      "Type": "ICC1",
+      "Description": "One-way random (single)",
+      "ICC": 0.8525849335302805,
+      "CI_lower": 0.8267408377697625,
+      "CI_upper": 0.874839977956425,
+      "F": 12.567134268537071,
+      "pval": 2.826952434644413e-143
+    },
+    {
+      "Type": "ICC2",
+      "Description": "Two-way random agreement",
+      "ICC": 0.8525640268043916,
+      "CI_lower": 0.8266978749306636,
+      "CI_upper": 0.8748336439403496,
+      "F": 12.54300344027522,
+      "pval": 7.24578719862689e-143
+    },
+    {
+      "Type": "ICC3",
+      "Description": "Two-way mixed consistency",
+      "ICC": 0.8523222704018335,
+      "CI_lower": 0.8264212418957149,
+      "CI_upper": 0.8746237151364205,
+      "F": 12.54300344027522,
+      "pval": 7.24578719862689e-143
+    },
+    {
+      "Type": "ICC1k",
+      "Description": "One-way random (average)",
+      "ICC": 0.9204273640567692,
+      "CI_lower": 0.9051539448574617,
+      "CI_upper": 0.9332422908007331,
+      "F": 12.567134268537071,
+      "pval": 2.826952434644413e-143
+    },
+    {
+      "Type": "ICC2k",
+      "Description": "Two-way random agreement (avg)",
+      "ICC": 0.920415180764397,
+      "CI_lower": 0.9051281947344935,
+      "CI_upper": 0.9332386868220545,
+      "F": 12.54300344027522,
+      "pval": 7.24578719862689e-143
+    },
+    {
+      "Type": "ICC3k",
+      "Description": "Two-way mixed consistency (avg)",
+      "ICC": 0.9202742784244936,
+      "CI_lower": 0.9049623634884355,
+      "CI_upper": 0.9331192260872174,
+      "F": 12.54300344027522,
+      "pval": 7.24578719862689e-143
+    }
+  ],
+  "recipe_6_psm_summary": {
+    "n_matched": 344,
+    "balance_df": [
+      {
+        "Variable": "age",
+        "Pre-Match SMD": 0.1391819606602095,
+        "Post-Match SMD": 0.028851954363733858,
+        "Balanced (<0.10)": true
+      },
+      {
+        "Variable": "bmi",
+        "Pre-Match SMD": 0.06312182797323185,
+        "Post-Match SMD": -0.03069668152865791,
+        "Balanced (<0.10)": true
+      },
+      {
+        "Variable": "egfr",
+        "Pre-Match SMD": -0.265066846516752,
+        "Post-Match SMD": -0.030729113002364746,
+        "Balanced (<0.10)": true
+      },
+      {
+        "Variable": "hypertension",
+        "Pre-Match SMD": 0.171208222282681,
+        "Post-Match SMD": 0.05821678096546448,
+        "Balanced (<0.10)": true
+      },
+      {
+        "Variable": "diabetes",
+        "Pre-Match SMD": 0.30068282587553596,
+        "Post-Match SMD": -0.0362917822615469,
+        "Balanced (<0.10)": true
+      }
+    ]
+  },
+  "recipe_7_firth": {
+    "coefficients": [
+      -4.283507,
+      0.035186,
+      -0.001541,
+      -0.76744
+    ],
+    "standard_errors": [
+      0.904808,
+      0.013609,
+      0.351947,
+      0.367451
+    ],
+    "odds_ratios": [
+      0.013794,
+      1.035812,
+      0.99846,
+      0.4642
+    ],
+    "ci_lower": [
+      0.002181,
+      1.008574,
+      0.483609,
+      0.214946
+    ],
+    "ci_upper": [
+      0.078282,
+      1.064372,
+      1.949816,
+      0.925777
+    ],
+    "converged": 1,
+    "ci_method": [
+      "profile",
+      "profile",
+      "profile",
+      "profile"
+    ],
+    "pll_history": [
+      -336.014002,
+      -150.505016,
+      -138.392937,
+      -137.478596,
+      -137.463231,
+      -137.463219,
+      -137.463219,
+      -137.463219
+    ]
+  },
+  "recipe_8_mcar": {
+    "chi2": 2.357431,
+    "df": 8,
+    "p_value": 0.968048,
+    "mcar_rejected": 0,
+    "n_patterns": 4,
+    "converged": 1,
+    "n_iterations": 8,
+    "n_excluded_rows": 0
+  },
+  "recipe_9_e_value": {
+    "e_value_point": 3.103994,
+    "e_value_ci": 1.689898,
+    "scale_note": "Approximated as RR (common outcome: transformed)"
+  },
+  "recipe_10_logistic_table": [
+    {
+      "Variable": "age",
+      "Crude OR (95% CI)": "1.03 (1.01\u20131.06)",
+      "Adjusted OR (95% CI)": "1.04 (1.01\u20131.06)",
+      "P-value": "0.010"
+    },
+    {
+      "Variable": "sex",
+      "Crude OR (95% CI)": "1.11 (0.60\u20132.05)",
+      "Adjusted OR (95% CI)": "1.16 (0.62\u20132.16)",
+      "P-value": "0.648"
+    },
+    {
+      "Variable": "diabetes",
+      "Crude OR (95% CI)": "0.89 (0.45\u20131.78)",
+      "Adjusted OR (95% CI)": "0.98 (0.49\u20131.99)",
+      "P-value": "0.965"
+    },
+    {
+      "Variable": "treatment_arm",
+      "Crude OR (95% CI)": "0.47 (0.23\u20130.98)",
+      "Adjusted OR (95% CI)": "0.44 (0.21\u20130.93)",
+      "P-value": "0.031"
+    }
+  ],
+  "recipe_11_survival": {
+    "km_summary": {
+      "Median Survival (0)": Infinity,
+      "Median Survival (1)": Infinity,
+      "Log-Rank P-value": 0.571615
+    },
+    "cox_table": [
+      {
+        "Covariate": "age",
+        "Hazard Ratio (95% CI)": "1.04 (1.02\u20131.06)",
+        "P-value": "<0.001"
+      },
+      {
+        "Covariate": "diabetes",
+        "Hazard Ratio (95% CI)": "1.78 (1.20\u20132.64)",
+        "P-value": "0.004"
+      }
+    ],
+    "schoenfeld_no_violation": true
+  },
+  "recipe_12_mice_n_missing_after": 0,
+  "recipe_13_html_rendered": true
+}
