@@ -2,6 +2,9 @@
 
 `medstat.reporting` provides an end-to-end publishing pipeline that transforms raw biostatistical outputs into publication-grade documents (Markdown, self-contained HTML, Word `.docx`, PowerPoint `.pptx`, and PDF).
 
+> [!IMPORTANT]
+> **Default Output Format**: When the user does not specify an output format, **always default to self-contained HTML (`render_html`, `.html`)** with embedded base64 figures and responsive ICMJE/NEJM/JAMA table styling.
+
 ---
 
 ## 1. Document Architecture (Report IR)

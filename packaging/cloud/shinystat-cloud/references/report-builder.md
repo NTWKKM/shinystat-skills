@@ -2,16 +2,19 @@
 
 In cloud sandboxes (e.g. Claude Web Artifacts), `medstat` is not installed as an external package. This reference provides self-contained, pure-Python reporting recipes that assemble biostatistical findings into publication-grade documents (Markdown, self-contained HTML, Word `.docx`, and PowerPoint `.pptx`) with zero custom dependencies.
 
+> [!IMPORTANT]
+> **Default Output Format**: If the user does not specify an output format, **always default to Self-Contained HTML (`.html`)** with embedded base64 figures and ICMJE 3-rule CSS styling (`generate_html_report`).
+
 ---
 
 ## 1. Cloud Report Generation Architecture
 
-1. **Primary Formats (Zero Extra Dependencies)**:
+1. **Default & Primary Formats (Zero Extra Dependencies)**:
+   - **Self-Contained HTML (`.html`)**: **Default deliverable format** when unspecified. Always available; embeds plots via base64 data URIs and applies ICMJE 3-rule CSS styling.
    - **Markdown (`.md`)**: Always available; formats tables via `pandas.DataFrame.to_markdown()` and links figure assets.
-   - **Self-Contained HTML (`.html`)**: Always available; embeds plots via base64 data URIs and applies ICMJE 3-rule CSS styling.
 2. **Office Document Fallbacks (`python-docx` / `python-pptx`)**:
-   - If `docx` or `pptx` packages are installed in the sandbox, use the standalone snippets below.
-   - If either package is missing (`ImportError`), automatically fall back to generating **Self-Contained HTML** or **Markdown**.
+   - If `docx` or `pptx` packages are installed in the sandbox, use the standalone snippets below upon explicit user request.
+   - If either package is missing (`ImportError`), automatically fall back to generating **Self-Contained HTML**.
 
 ---
 

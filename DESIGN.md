@@ -795,4 +795,32 @@ Users requested comprehensive document and visual presentation generation across
 
 [MEMORY_LEARN: Medical document generation must enforce single-source-of-truth Report IR where every narrative number is traced back to results_dict, figures return 300 DPI PNGs with exported CSV source data, and observational causal models strictly mandate unmeasured confounding/E-value caveats.]
 
+---
+
+## ADR 32: Standalone HTML as the Default Deliverable Format Across Main and Cloud Skills
+
+### Context
+Previously, Grilling Gate Trigger 5 stated a default assumption of `docx` report when user preference was omitted. However, Word document generation requires additional local/cloud dependencies (`python-docx`), which may be unavailable or unnecessary when users simply expect immediate, interactive, portable biostatistical reports in browser-compatible environments (Claude Web, Antigravity preview, Jupyter/sandboxes). The user explicitly requested standardizing the default output format to HTML whenever unspecified.
+
+### Decision
+1. **Canonical Main Skill (`skills/shinystat/SKILL.md`)**:
+   - Updated introductory Grilling Gate rule to explicitly exempt unspecified document formats from halting.
+   - Updated Pillar 5 to establish self-contained HTML (`.html`) as the default deliverable format.
+   - Updated Grilling Gate Trigger 5 and Completion Criteria: when output format is unspecified, the agent defaults to self-contained HTML (`.html` report + English + NEJM) without blocking execution.
+   - Updated `skills/shinystat/references/report-builder.md` with explicit callout on HTML default.
+2. **Dedicated Cloud Skill (`packaging/cloud/shinystat-cloud/SKILL.md`)**:
+   - Synchronized Pillar 5, Grilling Trigger 5, and Completion Criteria to guarantee self-contained HTML (`.html`) is always generated when unspecified.
+   - Updated `packaging/cloud/shinystat-cloud/references/report-builder.md` with explicit callout and primary format priority.
+3. **Multi-Agent Mirror Synchronization**:
+   - Synchronized canonical updates across `.agents/skills`, `.agent/skills`, `.claude/skills`, `.cursor/skills`, and global `~/.gemini/config/skills` via `install-skills.sh`.
+   - Re-packaged `/Users/ntwkkm/Desktop/shinystat-cloud.zip` via `package-cloud-skill.sh`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Immediate Portability**: Zero-friction deliverable inspection via web browser or artifact renderer without requiring Microsoft Office or `python-docx`.
+- **Mirror Parity**: 100% byte-identical integrity preserved across all workspace mirrors and verified by automated unit tests.
+
+[MEMORY_LEARN: Both canonical and cloud biostatistical skills must default to self-contained HTML reports with embedded figures when format is unspecified, bypassing unnecessary Grilling halts while keeping Office/PDF generation on-demand.]
+
+
 
