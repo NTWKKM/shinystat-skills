@@ -1598,11 +1598,13 @@ def test_cloud_report_builder_docx_fallback_and_integrity(tmp_path):
     content = rb_path.read_text(encoding="utf-8")
     blocks = re.findall(r"```python\n(.*?)\n```", content, re.DOTALL)
     ns = {}
-    for block in blocks:
+    errors = []
+    for idx, block in enumerate(blocks):
         try:
             exec(block, ns)
-        except Exception:
-            pass
+        except Exception as exc:
+            errors.append((idx, exc))
+    assert not errors, f"Failed executing blocks in report-builder.md: {errors}"
 
     import unittest.mock as mock
 

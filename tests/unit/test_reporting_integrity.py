@@ -189,3 +189,70 @@ def test_integrity_structural_context_exemption_vs_reported_statistics():
     assert 10.0 in audit_untraced.untraced_numbers
     # 95 was near 'CI', so exempted as structural constant
     assert 95.0 not in audit_untraced.untraced_numbers
+
+
+def test_integrity_years_context_and_structural_counters():
+    """
+    Verifies that:
+    1. Calendar years (2010-2035) require date context (e.g. 'in 2024') to be exempt;
+       cohort count like 'total 2024 participants' must NOT be exempt and flagged if untraced.
+    2. Structural counters require integer tokens (e.g. 'Table 1' vs 'Table 1.25').
+    3. Version identifiers support decimal tokens (e.g. 'Version 4.2', 'v.1').
+    4. NumPy arrays in results_dict are properly traversed and flattened.
+    """
+    import numpy as np
+
+    # 1. Year with and without date context
+    doc_year_ctx = ReportDocument(
+        title="Year Context",
+        results_dict={"n": 100},
+    )
+    doc_year_ctx.add_paragraph("The study was conducted in 2024.")
+    audit_year_ctx = verify_report_integrity(doc_year_ctx)
+    assert 2024.0 not in audit_year_ctx.untraced_numbers
+
+    doc_year_no_ctx = ReportDocument(
+        title="Year Count",
+        results_dict={"n": 100},
+    )
+    doc_year_no_ctx.add_paragraph("A total of 2024 participants were enrolled.")
+    audit_year_no_ctx = verify_report_integrity(doc_year_no_ctx)
+    assert 2024.0 in audit_year_no_ctx.untraced_numbers
+
+    # 2. Structural counters integer vs decimal
+    doc_table_int = ReportDocument(
+        title="Table Counter",
+        results_dict={"n": 100},
+    )
+    doc_table_int.add_paragraph(
+        "As presented in Table 1, baseline characteristics are balanced."
+    )
+    audit_table_int = verify_report_integrity(doc_table_int)
+    assert 1.0 not in audit_table_int.untraced_numbers
+
+    doc_table_dec = ReportDocument(
+        title="Table Decimal Non-Counter",
+        results_dict={"n": 100},
+    )
+    doc_table_dec.add_paragraph("Table 1.25 indicates odds ratio.")
+    audit_table_dec = verify_report_integrity(doc_table_dec)
+    assert 1.25 in audit_table_dec.untraced_numbers
+
+    # 3. Version with decimal
+    doc_version = ReportDocument(
+        title="Version",
+        results_dict={"n": 100},
+    )
+    doc_version.add_paragraph("Analyses performed with R Version 4.2.")
+    audit_version = verify_report_integrity(doc_version)
+    assert 4.2 not in audit_version.untraced_numbers
+
+    # 4. NumPy array in results_dict
+    doc_numpy = ReportDocument(
+        title="NumPy Array Traceability",
+        results_dict={"estimates": np.array([0.725, 0.835])},
+    )
+    doc_numpy.add_paragraph("Estimates were 0.725 and 0.835.")
+    audit_numpy = verify_report_integrity(doc_numpy)
+    assert 0.725 not in audit_numpy.untraced_numbers
+    assert 0.835 not in audit_numpy.untraced_numbers

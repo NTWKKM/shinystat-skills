@@ -297,7 +297,9 @@ def verify_standalone_integrity(
         if isinstance(d, dict):
             for v in d.values():
                 nums.extend(_flatten_nums(v))
-        elif isinstance(d, (list, tuple)):
+        elif hasattr(d, "tolist") and callable(d.tolist):
+            nums.extend(_flatten_nums(d.tolist()))
+        elif isinstance(d, (list, tuple, set)):
             for v in d:
                 nums.extend(_flatten_nums(v))
         elif isinstance(d, (int, float)) and not isinstance(d, bool):

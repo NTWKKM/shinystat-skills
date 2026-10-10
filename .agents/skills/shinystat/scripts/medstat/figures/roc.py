@@ -141,7 +141,7 @@ def plot_roc_curve(
     fig.tight_layout()
 
     if paired_roc_data is not None:
-        primary_name = str(roc_data.get("name", "Primary Model"))
+        primary_name = model_name
         paired_name = str(paired_roc_data.get("name", "Model 2"))
         paired_thresh = paired_roc_data.get("thresholds", np.full_like(fpr_2, np.nan))
         df_primary = pd.DataFrame(

@@ -176,6 +176,24 @@ def test_plot_roc_curve_paired(tmp_fig_dir):
     assert "Model" in df_csv.columns
     assert len(df_csv) == len(res.source_df)
 
+    # When names are omitted, fallback must consistently be Model 1 and Model 2
+    roc_no_name = {
+        "fpr": np.array([0.0, 0.5, 1.0]),
+        "tpr": np.array([0.0, 0.8, 1.0]),
+        "auc": 0.80,
+    }
+    paired_no_name = {
+        "fpr": np.array([0.0, 0.4, 1.0]),
+        "tpr": np.array([0.0, 0.7, 1.0]),
+        "auc": 0.75,
+    }
+    res_default = plot_roc_curve(
+        roc_no_name,
+        paired_roc_data=paired_no_name,
+        out_path=tmp_fig_dir / "test_roc_default_names.png",
+    )
+    assert set(res_default.source_df["Model"].unique()) == {"Model 1", "Model 2"}
+
 
 def test_plot_calibration(tmp_fig_dir):
     out_png = tmp_fig_dir / "test_calib.png"
@@ -317,3 +335,9 @@ def test_plot_diagnostics(tmp_fig_dir):
         obs, imp, var_name="CRP", out_path=tmp_fig_dir / "mice.png"
     )
     assert Path(res_mice.png_path).exists()
+    assert "Observed" in res_mice.source_df.columns
+    assert "Imputed Set 1" in res_mice.source_df.columns
+    assert "Imputed Set 2" in res_mice.source_df.columns
+    assert Path(res_mice.csv_path).exists()
+    df_csv = pd.read_csv(res_mice.csv_path)
+    assert "Imputed Set 1" in df_csv.columns

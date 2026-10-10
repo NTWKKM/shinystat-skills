@@ -43,6 +43,7 @@ def plot_dca(
     }
 
     max_nb = 0.05
+    min_nb = -0.05
     for strat in strategies:
         sub = df[df["strategy"] == strat].sort_values("threshold")
         cfg = style_map.get(
@@ -54,6 +55,9 @@ def plot_dca(
             strat_max = float(valid_strat_nb.max())
             if np.isfinite(strat_max):
                 max_nb = max(max_nb, strat_max)
+            strat_min = float(valid_strat_nb.min())
+            if np.isfinite(strat_min):
+                min_nb = min(min_nb, strat_min)
 
     # Treat None horizontal reference at 0
     ax.axhline(0.0, color=CLINICAL_PALETTE["primary"], ls=":", lw=0.8, alpha=0.5)
@@ -67,7 +71,7 @@ def plot_dca(
         x_min, x_max = 0.0, 1.0
 
     ax.set_xlim(x_min, x_max)
-    ax.set_ylim(-0.05, max_nb * 1.15)
+    ax.set_ylim(min_nb, max_nb * 1.15)
     ax.set_xlabel("Threshold Probability (pt)", labelpad=6)
     ax.set_ylabel("Net Benefit", labelpad=6)
     ax.set_title(title, loc="left", pad=10)

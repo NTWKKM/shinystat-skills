@@ -67,6 +67,8 @@ def _flatten_numbers(val: Any) -> list[float]:
     elif isinstance(val, (list, tuple, set)):
         for item in val:
             numbers.extend(_flatten_numbers(item))
+    elif hasattr(val, "tolist") and callable(val.tolist):
+        numbers.extend(_flatten_numbers(val.tolist()))
     elif isinstance(val, pd.DataFrame):
         for col in val.columns:
             for v in val[col]:
@@ -171,16 +173,25 @@ def _is_structural_context(
         ):
             return True
 
-    # 3. Calendar years (2010-2035)
+    # 3. Calendar years (2010-2035) when preceded by date-related context
     if 2010.0 <= val <= 2035.0 and "." not in raw_str:
-        return True
+        if re.search(
+            r"\b(?:in|year|years|during|between|period|from|dated|since|until)\b",
+            window_before,
+            re.IGNORECASE,
+        ):
+            return True
 
     # 4. Structural headings and table/figure/step counters (e.g., Table 1, Figure 2, Tier 1, Step 3, v.1)
-    if re.search(
-        r"\b(?:Table|Figure|Fig\.?|Tier|Phase|Stage|Grade|Step|Level|Version|v\.|Item|Section)\s*$",
+    is_version = re.search(r"\b(?:Version|v\.)\s*$", window_before, re.IGNORECASE)
+    is_counter = re.search(
+        r"\b(?:Table|Figure|Fig\.?|Tier|Phase|Stage|Grade|Step|Level|Item|Section)\s*$",
         window_before,
         re.IGNORECASE,
-    ):
+    )
+    if is_version:
+        return True
+    if is_counter and "." not in raw_str:
         return True
 
     # 5. Fixed percentage scale reference (e.g. "on a 0 to 100% scale", "normalized to 100%")
@@ -215,8 +226,8 @@ def _extract_text_tokens(text: str) -> list[TextToken]:
         has_pct = bool(pct_group and pct_group.strip() == "%")
         start = m.start()
         end = m.end()
-        window_before = clean_text[max(0, start - 30) : start]
-        window_after = clean_text[end : min(len(clean_text), end + 30)]
+        window_before = clean_text[max(0, start - 30) : start].split("\n")[-1]
+        window_after = clean_text[end : min(len(clean_text), end + 30)].split("\n")[0]
 
         is_structural = _is_structural_context(
             val, raw_num, window_before, window_after

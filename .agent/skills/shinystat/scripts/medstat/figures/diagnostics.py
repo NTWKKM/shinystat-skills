@@ -198,9 +198,11 @@ def plot_mice_diagnostics(
     else:
         imp_list = [imputed_vals]
 
+    cleaned_imputed: list[np.ndarray] = []
     for m_idx, imp in enumerate(imp_list):
         imp_clean = np.asarray(imp, dtype=float)
         imp_clean = imp_clean[~np.isnan(imp_clean)]
+        cleaned_imputed.append(imp_clean)
         if len(imp_clean) > 0:
             lbl = (
                 f"Imputed Set {m_idx + 1}"
@@ -224,7 +226,10 @@ def plot_mice_diagnostics(
 
     fig.tight_layout()
 
-    source_df = pd.DataFrame({"Observed": pd.Series(obs)})
+    source_data: dict[str, pd.Series] = {"Observed": pd.Series(obs)}
+    for m_idx, imp_clean in enumerate(cleaned_imputed):
+        source_data[f"Imputed Set {m_idx + 1}"] = pd.Series(imp_clean)
+    source_df = pd.DataFrame(source_data)
     png_path = save_publication_figure(fig, out_path, dpi=dpi)
     csv_path = export_source_data(source_df, png_path)
 
