@@ -56,23 +56,16 @@ medstat-core/
 │           ├── main.py         # Click group: clean, table1, model, diag, causal, meta, agreement, sample-size, report
 │           └── spec.py         # SAP Spec Engine: YAML/JSON analysis_plan.yaml validation & execution
 ├── skills/
-│   ├── medstat-clean/          # Missingness audit, explicit imputation, sample flow tracking
+│   ├── shinystat/              # Flagship autonomous biostatistical engine & decision core
 │   │   ├── SKILL.md
-│   │   └── references/
-│   ├── medstat-models/         # Table 1, GLM, Cox PH, Firth regression, RCS splines, E-values
-│   │   ├── SKILL.md
-│   │   └── references/
-│   ├── medstat-diagnostic/     # 2x2 accuracy, ROC with DeLong, DCA net benefit, calibration
-│   │   ├── SKILL.md
-│   │   └── references/
-│   ├── medstat-causal-meta/    # PSM balance, Love plots, pure-SciPy ICC, meta-analysis I^2
-│   │   ├── SKILL.md
-│   │   └── references/
-│   └── medstat-report/         # NEJM/JAMA/APA 7 tables, Methods narrative, STROBE/CONSORT audits
+│   │   ├── references/         # Archetype heuristics, figures, report builder
+│   │   └── scripts/            # Bundled medstat CLI & engine
+│   └── shinystat-cloud/        # Standalone recipes for cloud sandboxes & lightweight agents
 │       ├── SKILL.md
-│       └── references/
+│       └── references/         # Standalone Python recipes & reporting guides
 ├── scripts/
-│   └── install-skills.sh       # Multi-platform installer for Antigravity, Claude Code, Cursor
+│   ├── install-skills.sh       # Multi-platform installer for Antigravity, Claude Code, Cursor
+│   └── package-cloud-skill.sh  # Standalone ZIP packager for Claude Web
 └── tests/
     ├── conftest.py             # Pytest forwarding wrapper (Python 3.9 -> .venv Python 3.12)
     ├── fixtures/               # Synthetic clinical datasets for E2E workflows

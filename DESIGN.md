@@ -879,3 +879,35 @@ During the completion and hardening of PR #9 (`feat/multi-format-figures-reporti
 - **Verification**: 427/427 tests passing across unit and e2e test suites.
 
 [MEMORY_LEARN: In reporting integrity audits and presentation renderers: (1) scientific notation tokens (|val| <= 1.0) must derive effective precision by parsing mantissa decimal places minus exponent; (2) PowerPoint table builders in python-pptx divide width by column count, so 0-column DataFrames must be guarded with an early return; (3) observational reporting integrity audits must gate passed status on explicit causal/confounding caveats.]
+
+---
+
+## ADR 35: Dual-Skill Distribution (shinystat & shinystat-cloud) via skills.sh Ecosystem
+
+### Context
+Users across diverse agent runtimes (Claude Code, Cursor, Windsurf, Antigravity, and Claude Web) need simple, frictionless installation mechanisms. While `scripts/install-skills.sh` handles local environments and `scripts/package-cloud-skill.sh` creates ZIPs for Claude Web, the wider AI agent ecosystem has coalesced around the open, telemetry-indexed package manager `skills.sh` (`npx skills add <owner>/<repo>`).
+Previously, `skills/` housed only `skills/shinystat/`, while `shinystat-cloud` was sequestered in `packaging/cloud/`. As a result:
+1. `npx skills add NTWKKM/shinystat-skills` discovered only `shinystat`.
+2. Users in restricted cloud sandboxes or lightweight setups who only wanted the pure standalone Python recipes had no direct way to install `shinystat-cloud` via the `skills` CLI.
+
+### Decision
+1. **Dual-Skill Canonical Layout**:
+   - Promote `shinystat-cloud` into `skills/shinystat-cloud/` alongside `skills/shinystat/`.
+   - Maintain byte-identical synchronization across all 4 multi-agent platform mirrors (`.agent/skills/`, `.agents/skills/`, `.claude/skills/`, `.cursor/skills/`).
+2. **skills.sh Telemetry Discovery**:
+   - With both skills in `skills/`, `npx skills add NTWKKM/shinystat-skills` discovers both `shinystat` and `shinystat-cloud`.
+   - Users can install selectively:
+     - `npx skills add NTWKKM/shinystat-skills --skill shinystat --yes` (flagship engine)
+     - `npx skills add NTWKKM/shinystat-skills --skill shinystat-cloud --yes` (standalone recipes)
+     - Interactive multi-select prompt when no `--skill` flag is provided.
+3. **Automated Parity & Validation**:
+   - Update `tests/unit/test_shinystat_skill.py` with `test_shinystat_cloud_canonical_skill_exists_and_valid()` validating YAML frontmatter, character limits (< 1024), and reference document existence.
+   - Enforce multi-agent mirror parity across both skills in continuous testing.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Ecosystem Ergonomics**: Enables 1-line installation across any modern coding agent.
+- **Verification**: Byte-for-byte parity verified across 4 agent mirrors; tests passing in unit suite.
+
+[MEMORY_LEARN: Structuring multiple atomic skills under canonical `skills/<skill-name>/` enables `skills.sh` to auto-discover individual skills, allowing selective installation via `--skill <name>` while maintaining multi-platform mirror synchronization.]
+

@@ -1,6 +1,9 @@
 # shinystat / medstat-core: Headless Biostatistical Engine & Autonomous Agent Skill
 
-`medstat-core` is a pure headless Python biostatistical calculation engine and CLI tool paired with the unified `shinystat` autonomous decision-making agent skill, decoupled from interactive UI frameworks and licensed under the permissive **Apache-2.0** license.
+[![skills.sh](https://img.shields.io/badge/skills.sh-shinystat-black?logo=vercel&logoColor=white)](https://skills.sh/NTWKKM/shinystat-skills/shinystat)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
+`medstat-core` is a pure headless Python biostatistical calculation engine and CLI tool paired with the unified `shinystat` and `shinystat-cloud` autonomous decision-making agent skills, decoupled from interactive UI frameworks and licensed under the permissive **Apache-2.0** license.
 
 ---
 
@@ -24,11 +27,14 @@ shinystat-skills/
 ├── ARCHITECTURE.md             # System architecture & structural diary
 ├── CONTEXT.md                  # Domain vocabulary & naming diary
 ├── DESIGN.md                   # Architectural Decision Records (ADRs 1–25)
-├── skills/                     # Canonical shinystat Agent Skill
-│   └── shinystat/
-│       ├── SKILL.md            # Autonomous decision core (4 pillars + Grilling Gate)
-│       └── references/
-│           └── decision-heuristics.md  # Archetype-to-model reference manual
+├── skills/                     # Canonical Agent Skills
+│   ├── shinystat/              # Flagship autonomous biostatistical engine
+│   │   ├── SKILL.md            # Autonomous decision core (5 pillars + Grilling Gate)
+│   │   ├── references/         # Archetype heuristics, figures, report builder
+│   │   └── scripts/            # Bundled medstat CLI & engine
+│   └── shinystat-cloud/        # Standalone recipes for cloud sandboxes & lightweight agents
+│       ├── SKILL.md            # Autonomous decision core (Cloud sandbox edition)
+│       └── references/         # Standalone Python recipes & reporting guides
 ├── .agent/skills/              # Antigravity Workspace mirror
 ├── .agents/skills/             # Antigravity / Cursor mirror
 ├── .claude/skills/             # Claude Code mirror
@@ -112,15 +118,39 @@ If requirements, outcome directions, missingness strategies, or statistical assu
 Following the open `SKILL.md` standard with progressive disclosure:
 
 ```text
-skills/shinystat/
-├── SKILL.md                          # Autonomous decision core (4 pillars + Grilling Gate)
-└── references/
-    └── decision-heuristics.md        # Archetype-to-model selection & diagnostic reference
+skills/
+├── shinystat/
+│   ├── SKILL.md                          # Autonomous decision core (5 pillars + Grilling Gate)
+│   ├── references/                       # Archetype heuristics, figures, report builder
+│   └── scripts/                          # Bundled medstat CLI & engine
+└── shinystat-cloud/
+    ├── SKILL.md                          # Autonomous decision core (Cloud sandbox edition)
+    └── references/                       # Standalone Python recipes & reporting guides
 ```
 
 ### Installing Skills for Your AI Coding Agent
 
-You can install `shinystat` across all platforms using the provided installer script:
+#### 1. Instant 1-Line Install via skills.sh (Recommended)
+
+You can install `shinystat` or `shinystat-cloud` directly across all supported AI coding agents (**Claude Code**, **Cursor**, **Windsurf**, **Antigravity**) using the open [skills.sh](https://skills.sh) package manager:
+
+```bash
+# Interactive selection (pick shinystat, shinystat-cloud, or both)
+npx skills add NTWKKM/shinystat-skills
+
+# Install the flagship full-featured biostatistical engine
+npx skills add NTWKKM/shinystat-skills --skill shinystat --yes
+
+# Install the standalone cloud-recipe skill (lightweight / sandbox)
+npx skills add NTWKKM/shinystat-skills --skill shinystat-cloud --yes
+
+# Install globally across all agents on your machine (-g)
+npx skills add NTWKKM/shinystat-skills -g --yes
+```
+
+#### 2. Local Repository Installer Script
+
+You can also install skills across local environments using the provided installer script:
 
 ```bash
 # Automated install into all supported environments (Antigravity, Claude, Cursor)
