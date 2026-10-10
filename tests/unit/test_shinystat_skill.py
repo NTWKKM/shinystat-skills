@@ -47,6 +47,41 @@ def test_shinystat_canonical_skill_exists_and_valid():
     )
 
 
+def test_shinystat_cloud_canonical_skill_exists_and_valid():
+    """Verify skills/shinystat-cloud/SKILL.md exists, has valid YAML frontmatter and references."""
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    cloud_skill = repo_root / "skills" / "shinystat-cloud" / "SKILL.md"
+    assert cloud_skill.exists(), "skills/shinystat-cloud/SKILL.md not found"
+
+    content = cloud_skill.read_text(encoding="utf-8")
+    assert content.startswith("---"), (
+        "SKILL.md must start with YAML frontmatter delimiter"
+    )
+
+    parts = content.split("---", 2)
+    assert len(parts) >= 3, "Frontmatter must be delimited by ---"
+    frontmatter = yaml.safe_load(parts[1])
+
+    assert frontmatter.get("name") == "shinystat-cloud"
+    assert "description" in frontmatter
+    assert len(frontmatter["description"]) < 1024
+
+    # Body checks
+    body = parts[2]
+    assert "The 5 Decision Pillars" in body
+    assert "references/decision-heuristics.md" in body
+    assert "references/figures.md" in body
+    assert "references/python-recipes.md" in body
+    assert "references/report-builder.md" in body
+
+    # References existence check
+    ref_dir = cloud_skill.parent / "references"
+    assert (ref_dir / "decision-heuristics.md").exists()
+    assert (ref_dir / "figures.md").exists()
+    assert (ref_dir / "python-recipes.md").exists()
+    assert (ref_dir / "report-builder.md").exists()
+
+
 def test_shinystat_reference_manual_exists():
     """Verify skills/shinystat/references/decision-heuristics.md exists and contains archetype mappings."""
     repo_root = Path(__file__).resolve().parent.parent.parent
