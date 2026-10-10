@@ -47,10 +47,22 @@ def test_shinystat_canonical_skill_exists_and_valid():
     )
 
 
+def _is_valid_skill_file(path: Path) -> bool:
+    return (
+        path.is_file()
+        and path.name != ".DS_Store"
+        and not path.name.endswith(".pyc")
+        and "__pycache__" not in path.parts
+    )
+
+
 def test_shinystat_cloud_canonical_skill_exists_and_valid():
-    """Verify skills/shinystat-cloud/SKILL.md exists, has valid YAML frontmatter and references."""
+    """Verify skills/shinystat-cloud/SKILL.md exists, has valid YAML frontmatter, references, and matches packaging/cloud/shinystat-cloud."""
     repo_root = Path(__file__).resolve().parent.parent.parent
-    cloud_skill = repo_root / "skills" / "shinystat-cloud" / "SKILL.md"
+    canonical_cloud = repo_root / "skills" / "shinystat-cloud"
+    packaging_cloud = repo_root / "packaging" / "cloud" / "shinystat-cloud"
+
+    cloud_skill = canonical_cloud / "SKILL.md"
     assert cloud_skill.exists(), "skills/shinystat-cloud/SKILL.md not found"
 
     content = cloud_skill.read_text(encoding="utf-8")
@@ -81,6 +93,31 @@ def test_shinystat_cloud_canonical_skill_exists_and_valid():
     assert (ref_dir / "python-recipes.md").exists()
     assert (ref_dir / "report-builder.md").exists()
 
+    # Full tree and content parity with packaging/cloud/shinystat-cloud
+    assert packaging_cloud.exists(), "packaging/cloud/shinystat-cloud not found"
+    canonical_files = {
+        path.relative_to(canonical_cloud)
+        for path in canonical_cloud.rglob("*")
+        if _is_valid_skill_file(path)
+    }
+    packaging_files = {
+        path.relative_to(packaging_cloud)
+        for path in packaging_cloud.rglob("*")
+        if _is_valid_skill_file(path)
+    }
+    assert canonical_files == packaging_files, (
+        f"Tree mismatch between skills/shinystat-cloud and packaging/cloud/shinystat-cloud: "
+        f"missing={sorted(canonical_files - packaging_files)}, "
+        f"extra={sorted(packaging_files - canonical_files)}"
+    )
+
+    for rel_path in canonical_files:
+        canon_file = canonical_cloud / rel_path
+        pack_file = packaging_cloud / rel_path
+        assert pack_file.read_bytes() == canon_file.read_bytes(), (
+            f"Byte mismatch in {rel_path} between skills/shinystat-cloud and packaging/cloud/shinystat-cloud"
+        )
+
 
 def test_shinystat_reference_manual_exists():
     """Verify skills/shinystat/references/decision-heuristics.md exists and contains archetype mappings."""
@@ -105,14 +142,6 @@ def test_shinystat_multi_agent_mirrors_byte_identical():
         repo_root / ".claude" / "skills",
         repo_root / ".cursor" / "skills",
     ]
-
-    def _is_valid_skill_file(path: Path) -> bool:
-        return (
-            path.is_file()
-            and path.name != ".DS_Store"
-            and not path.name.endswith(".pyc")
-            and "__pycache__" not in path.parts
-        )
 
     canonical_files = {
         path.relative_to(canonical_dir)
