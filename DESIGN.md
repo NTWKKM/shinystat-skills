@@ -822,5 +822,35 @@ Previously, Grilling Gate Trigger 5 stated a default assumption of `docx` report
 
 [MEMORY_LEARN: Both canonical and cloud biostatistical skills must default to self-contained HTML reports with embedded figures when format is unspecified, bypassing unnecessary Grilling halts while keeping Office/PDF generation on-demand.]
 
+---
+
+## ADR 33: Hardening Numerical Traceability and Clinical Multi-Curve Auditability
+
+### Context
+During CodeRabbit automated and assertive review of PR #9 (`feat/multi-format-figures-reporting`), several edge-case data integrity concerns were identified:
+1. In `integrity.py`, allowing a 1% relative tolerance check for numbers $\le 1.0$ caused subtle mismatches (e.g., $0.860$ vs $0.865$) to pass silently. Additionally, dividing by 100 on sub-one tokens allowed small p-values (e.g., $p = 0.02$) to falsely match tiny numbers (e.g., $0.004$).
+2. Numeric tokens matching structural integers ($95$, $10$) were exempted before checking against `results_dict`, causing valid clinical metrics (e.g., $95\%$ sensitivity, $10$ events) to bypass traceability auditing.
+3. In `plot_roc_curve`, when paired ROC models were supplied, `source_df` only recorded the primary curve coordinates, omitting the paired comparator curve from `FigureResult.source_df` and the exported CSV.
+4. In standalone cloud environments without `python-docx`, the `generate_docx_report` fallback previously aliased directly to `generate_html_report`, writing HTML markup into `.docx` files.
+
+### Decision
+1. **Strict Precision Scaling**:
+   - For values with $|tn| \le 1.0$, enforce `abs_diff <= abs_tol` scaled strictly by displayed decimal precision ($\min(0.02, 10^{-\text{digits}})$). Disable the relative tolerance branch for $|tn| \le 1.0$.
+   - Restrict percentage-scale matching ($tn \approx kn \times 100$) strictly to tokens with explicit `%` markers or true percentage scales ($|tn| > 1.0$ and $|kn| \le 1.0$).
+2. **Result-First Verification**:
+   - Audit all extracted numbers against `doc.results_dict` first. Only evaluate structural context exemptions (e.g. `95% CI`, `Table 1`, `alpha = 0.05`) as a fallback for unmatched numbers.
+3. **Multi-Curve Source Data Parity**:
+   - Construct `source_df` in `plot_roc_curve` with concatenated primary and paired curve coordinates (`Model`, `False_Positive_Rate`, `True_Positive_Rate`, `Threshold`) before calling `export_source_data`.
+4. **Cloud Path Redirect**:
+   - In `packaging/cloud/shinystat-cloud/references/report-builder.md`, wrap the `ImportError` fallback to redirect explicit `.docx` extensions to `.html` before invoking `generate_html_report`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Robust Clinical Governance**: Eliminates false-positive number matching and ensures full auditability across primary and paired clinical models.
+- **Verification**: 421/421 tests passing across unit, e2e, and stress test suites.
+
+[MEMORY_LEARN: Auditing narrative clinical statistics requires displayed-precision tolerance gates for fractions, result-first matching before structural exemptions, and multi-curve source data export in comparative ROC curves.]
+
+
 
 
