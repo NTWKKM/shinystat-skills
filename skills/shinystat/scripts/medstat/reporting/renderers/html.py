@@ -25,7 +25,7 @@ def _encode_image_base64(img_path: str | Path) -> str:
     """Reads PNG file and returns data:image/png;base64 string."""
     p = Path(img_path).resolve()
     if not p.exists():
-        return ""
+        raise FileNotFoundError(f"Figure file not found: {p}")
     data = p.read_bytes()
     b64 = base64.b64encode(data).decode("utf-8")
     return f"data:image/png;base64,{b64}"

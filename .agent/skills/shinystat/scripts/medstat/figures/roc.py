@@ -140,13 +140,35 @@ def plot_roc_curve(
 
     fig.tight_layout()
 
-    source_df = pd.DataFrame(
-        {
-            "False_Positive_Rate": fpr,
-            "True_Positive_Rate": tpr,
-            "Threshold": roc_data.get("thresholds", np.full_like(fpr, np.nan)),
-        }
-    )
+    if paired_roc_data is not None:
+        primary_name = str(roc_data.get("name", "Primary Model"))
+        paired_name = str(paired_roc_data.get("name", "Model 2"))
+        paired_thresh = paired_roc_data.get("thresholds", np.full_like(fpr_2, np.nan))
+        df_primary = pd.DataFrame(
+            {
+                "Model": primary_name,
+                "False_Positive_Rate": fpr,
+                "True_Positive_Rate": tpr,
+                "Threshold": roc_data.get("thresholds", np.full_like(fpr, np.nan)),
+            }
+        )
+        df_paired = pd.DataFrame(
+            {
+                "Model": paired_name,
+                "False_Positive_Rate": fpr_2,
+                "True_Positive_Rate": tpr_2,
+                "Threshold": paired_thresh,
+            }
+        )
+        source_df = pd.concat([df_primary, df_paired], ignore_index=True)
+    else:
+        source_df = pd.DataFrame(
+            {
+                "False_Positive_Rate": fpr,
+                "True_Positive_Rate": tpr,
+                "Threshold": roc_data.get("thresholds", np.full_like(fpr, np.nan)),
+            }
+        )
     png_path = save_publication_figure(fig, out_path, dpi=dpi)
     csv_path = export_source_data(source_df, png_path)
 

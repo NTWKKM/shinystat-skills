@@ -112,4 +112,6 @@ class ReportDocument:
                     lines.append(b.footnote)
             elif isinstance(b, FigureBlock):
                 lines.append(b.figure.caption)
+                if b.figure.alt_text:
+                    lines.append(b.figure.alt_text)
         return "\n\n".join(lines)

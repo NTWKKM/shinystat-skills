@@ -134,3 +134,58 @@ def test_integrity_displayed_precision_sub_one():
     doc_matched.add_paragraph("The reported significance was p = 0.004.")
     audit_matched = verify_report_integrity(doc_matched)
     assert 0.004 not in audit_matched.untraced_numbers
+
+
+def test_integrity_precision_guards_against_spurious_relative_and_percentage_matches():
+    """
+    Verifies CodeRabbit review fixes:
+    1. AUC 0.860 in text must NOT match 0.865 in results via 1% relative check.
+    2. p = 0.02 in text must NOT match 0.004 in results via spurious percentage scaling.
+    """
+    # 1. 0.860 vs 0.865
+    doc_auc = ReportDocument(
+        title="AUC Precision Test",
+        results_dict={"auc": 0.865, "sample_size": 100},
+    )
+    doc_auc.add_paragraph("The model achieved an AUC of 0.860.")
+    audit_auc = verify_report_integrity(doc_auc)
+    assert 0.860 in audit_auc.untraced_numbers
+
+    # 2. p = 0.02 vs 0.004
+    doc_p = ReportDocument(
+        title="P-value Spurious Percentage Test",
+        results_dict={"p_value": 0.004, "sample_size": 100},
+    )
+    doc_p.add_paragraph("The difference was significant with p = 0.02.")
+    audit_p = verify_report_integrity(doc_p)
+    assert 0.02 in audit_p.untraced_numbers
+
+
+def test_integrity_structural_context_exemption_vs_reported_statistics():
+    """
+    Verifies that reported statistics (e.g. 95% sensitivity, 10 events) are checked for
+    traceability, while surrounding-context structural constants (e.g. 95% CI) are exempted.
+    """
+    # When statistics are reported and present in results_dict
+    doc_valid = ReportDocument(
+        title="Diagnostic Performance",
+        results_dict={"sensitivity": 0.95, "events": 10, "n": 100},
+    )
+    doc_valid.add_paragraph(
+        "There were 10 events observed. Sensitivity reached 95% (95% CI: 91% to 98%)."
+    )
+    audit_valid = verify_report_integrity(doc_valid)
+    # 10 and 95 (sensitivity) matched results_dict; 95 (from 95% CI) exempted as structural
+    assert 10.0 not in audit_valid.untraced_numbers
+    assert 95.0 not in audit_valid.untraced_numbers
+
+    # When reported statistic (10 events) is NOT in results_dict, it must be flagged
+    doc_untraced = ReportDocument(
+        title="Diagnostic Performance",
+        results_dict={"n": 100},
+    )
+    doc_untraced.add_paragraph("There were 10 events observed under 95% CI estimation.")
+    audit_untraced = verify_report_integrity(doc_untraced)
+    assert 10.0 in audit_untraced.untraced_numbers
+    # 95 was near 'CI', so exempted as structural constant
+    assert 95.0 not in audit_untraced.untraced_numbers

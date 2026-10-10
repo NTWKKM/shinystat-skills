@@ -128,7 +128,7 @@ def _add_figure_slide(
 
     fig_path = Path(block.figure.png_path)
     if not fig_path.exists():
-        return
+        raise FileNotFoundError(f"Figure file not found: {fig_path}")
 
     # Split layout: Figure on left (7.6 in), Callout / Description card on right (3.8 in)
     has_text_card = bool(block.figure.caption or block.figure.alt_text)
@@ -263,34 +263,44 @@ def _add_content_slide(
     prs: Presentation, title: str, paragraphs: list[str], callouts: list[str]
 ) -> None:
     """Creates a text and narrative slide with bullet points and callout boxes."""
-    blank_layout = prs.slide_layouts[6]
-    slide = prs.slides.add_slide(blank_layout)
+    chunk_size = 5
+    para_chunks = (
+        [paragraphs[i : i + chunk_size] for i in range(0, len(paragraphs), chunk_size)]
+        if paragraphs
+        else [[]]
+    )
 
-    _add_header_to_slide(slide, title, category_text="FINDINGS & METHODS")
+    for chunk_idx, chunk in enumerate(para_chunks):
+        blank_layout = prs.slide_layouts[6]
+        slide = prs.slides.add_slide(blank_layout)
 
-    # Main text box
-    tb = slide.shapes.add_textbox(Inches(0.8), Inches(1.6), Inches(11.7), Inches(3.8))
-    tf = tb.text_frame
-    tf.word_wrap = True
+        slide_title = f"{title} (cont.)" if chunk_idx > 0 else title
+        _add_header_to_slide(slide, slide_title, category_text="FINDINGS & METHODS")
 
-    for idx, p_text in enumerate(paragraphs):
-        p = tf.paragraphs[0] if idx == 0 else tf.add_paragraph()
-        p.text = f"•  {p_text}"
-        p.font.name = "Arial"
-        p.font.size = Pt(13)
-        p.font.color.rgb = COLOR_SECONDARY
-        p.space_after = Pt(10)
+        # Main text box
+        tb = slide.shapes.add_textbox(
+            Inches(0.8), Inches(1.6), Inches(11.7), Inches(3.8)
+        )
+        tf = tb.text_frame
+        tf.word_wrap = True
 
-    # Callouts
-    if callouts:
-        c_top = Inches(5.4)
-        for c_text in callouts:
+        for idx, p_text in enumerate(chunk):
+            p = tf.paragraphs[0] if idx == 0 else tf.add_paragraph()
+            p.text = f"•  {p_text}"
+            p.font.name = "Arial"
+            p.font.size = Pt(13)
+            p.font.color.rgb = COLOR_SECONDARY
+            p.space_after = Pt(10)
+
+        # Render all callouts on the final slide of this section
+        if chunk_idx == len(para_chunks) - 1 and callouts:
+            c_top = Inches(5.4)
             card = slide.shapes.add_shape(
                 MSO_SHAPE.ROUNDED_RECTANGLE,
                 Inches(0.8),
                 c_top,
                 Inches(11.7),
-                Inches(1.2),
+                Inches(1.5),
             )
             card.fill.solid()
             card.fill.fore_color.rgb = COLOR_BG_LIGHT
@@ -299,13 +309,15 @@ def _add_content_slide(
 
             ctf = card.text_frame
             ctf.word_wrap = True
-            cp = ctf.paragraphs[0]
-            cp.text = f"NOTE: {c_text}"
-            cp.font.name = "Arial"
-            cp.font.size = Pt(11)
-            cp.font.bold = True
-            cp.font.color.rgb = COLOR_PRIMARY
-            break  # Fit one main callout box on bottom
+            for c_idx, c_text in enumerate(callouts):
+                cp = ctf.paragraphs[0] if c_idx == 0 else ctf.add_paragraph()
+                cp.text = f"NOTE: {c_text}"
+                cp.font.name = "Arial"
+                cp.font.size = Pt(11)
+                cp.font.bold = True
+                cp.font.color.rgb = COLOR_PRIMARY
+                if c_idx < len(callouts) - 1:
+                    cp.space_after = Pt(4)
 
 
 def render_pptx(

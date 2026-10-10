@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, NamedTuple
 
 import pandas as pd
 
@@ -144,27 +144,97 @@ IGNORED_NUMBERS = {
 }
 
 
-def _extract_text_tokens(text: str) -> list[tuple[float, str]]:
-    """Extracts candidate (float, raw_token) pairs from narrative text."""
+class TextToken(NamedTuple):
+    val: float
+    raw_str: str
+    has_pct: bool
+    is_structural: bool
+
+
+def _is_structural_context(
+    val: float, raw_str: str, window_before: str, window_after: str
+) -> bool:
+    """Checks whether an unmatched numeric token is an uninformative structural constant."""
+    window = f"{window_before}{raw_str}{window_after}"
+
+    # 1. Confidence interval levels (e.g., 90%, 95%, 99% CI)
+    if val in (90.0, 95.0, 99.0):
+        if re.search(r"\b(?:CI|confidence|credible)\b", window, re.IGNORECASE):
+            return True
+
+    # 2. Alpha thresholds and p-value cutoffs (e.g., alpha = 0.05, p < 0.05, p < 0.001)
+    if val in (0.05, 0.01, 0.001, 0.005):
+        if re.search(
+            r"(?:alpha|significance|threshold|cutoff)\b|p\s*[<>=]",
+            window,
+            re.IGNORECASE,
+        ):
+            return True
+
+    # 3. Calendar years (2010-2035)
+    if 2010.0 <= val <= 2035.0 and "." not in raw_str:
+        return True
+
+    # 4. Structural headings and table/figure/step counters (e.g., Table 1, Figure 2, Tier 1, Step 3, v.1)
+    if re.search(
+        r"\b(?:Table|Figure|Fig\.?|Tier|Phase|Stage|Grade|Step|Level|Version|v\.|Item|Section)\s*$",
+        window_before,
+        re.IGNORECASE,
+    ):
+        return True
+
+    # 5. Fixed percentage scale reference (e.g. "on a 0 to 100% scale", "normalized to 100%")
+    if val in (0.0, 100.0) and re.search(
+        r"\b(?:scale|normalized|range|total)\b", window, re.IGNORECASE
+    ):
+        return True
+
+    return False
+
+
+def _extract_text_tokens(text: str) -> list[TextToken]:
+    """Extracts candidate TextToken objects from narrative text."""
     clean_text = text.replace(",", "")
-    matches = re.findall(
-        r"(?<!\w)(?<![a-zA-Z]-)(?:[-+]?\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?",
-        clean_text,
+    matches = list(
+        re.finditer(
+            r"(?<!\w)(?<![a-zA-Z]-)(?P<num>(?:[-+]?\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?)(?P<pct>\s*%)?",
+            clean_text,
+        )
     )
-    tokens = []
+    tokens: list[TextToken] = []
     for m in matches:
+        raw_num = m.group("num")
+        pct_group = m.group("pct")
         try:
-            val = float(m)
-            if val not in IGNORED_NUMBERS and -1e7 < val < 1e7:
-                tokens.append((val, m))
+            val = float(raw_num)
         except ValueError:
             continue
+        if not (-1e7 < val < 1e7):
+            continue
+
+        has_pct = bool(pct_group and pct_group.strip() == "%")
+        start = m.start()
+        end = m.end()
+        window_before = clean_text[max(0, start - 30) : start]
+        window_after = clean_text[end : min(len(clean_text), end + 30)]
+
+        is_structural = _is_structural_context(
+            val, raw_num, window_before, window_after
+        )
+        tokens.append(
+            TextToken(
+                val=val,
+                raw_str=raw_num,
+                has_pct=has_pct,
+                is_structural=is_structural,
+            )
+        )
     return tokens
 
 
 def _extract_text_numbers(text: str) -> list[float]:
     """Extracts candidate float numbers from narrative text."""
-    return [val for val, _ in _extract_text_tokens(text)]
+    return [token.val for token in _extract_text_tokens(text)]
 
 
 def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
@@ -207,15 +277,20 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
     # 2. Numerical Traceability
     known_numbers = _flatten_numbers(doc.results_dict)
     text_tokens = _extract_text_tokens(all_text)
-    text_numbers = [val for val, _ in text_tokens]
+    text_numbers = [token.val for token in text_tokens]
 
     untraced: list[float] = []
-    for tn, token_str in text_tokens:
+    for token in text_tokens:
+        tn = token.val
+        token_str = token.raw_str
+        has_pct = token.has_pct
+        is_structural = token.is_structural
+
         # Check against known numbers: for values <= 1, use token's displayed precision
         if abs(tn) <= 1.0:
             if "." in token_str:
                 dec_part = token_str.split(".")[1]
-                dec_digits = len(re.split(r"[eE]", dec_part)[0])
+                dec_digits = len(re.split(r"[eE%]", dec_part)[0])
                 abs_tol = min(0.02, 10.0 ** (-dec_digits))
             else:
                 abs_tol = 0.02
@@ -225,16 +300,31 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
         matched = False
         for kn in known_numbers:
             abs_diff = abs(tn - kn)
-            rel_diff = abs_diff / max(abs(kn), 1e-9)
-            if abs_diff <= abs_tol or rel_diff <= 0.01:
+            # Direct match branch:
+            # For values with abs(tn) <= 1, strictly enforce displayed precision abs_tol;
+            # Only allow 1% relative tolerance for larger values (|tn| > 1.0)
+            if abs_diff <= abs_tol:
                 matched = True
                 break
-            # Also check percentage scale (e.g. 0.852 in results vs 85.2 in text)
-            if abs(tn - kn * 100.0) <= 0.05 or abs(tn / 100.0 - kn) <= 0.005:
-                matched = True
-                break
+            if abs(tn) > 1.0 and abs(kn) > 1e-9:
+                rel_diff = abs_diff / abs(kn)
+                if rel_diff <= 0.01:
+                    matched = True
+                    break
+
+            # Percentage scale match branch (e.g. 85.2% in text vs 0.852 in results):
+            # Only trigger percentage-scale comparison if token explicitly has '%'
+            # OR if tn is on percentage scale (|tn| > 1.0 and |kn| <= 1.0)
+            if has_pct or (abs(tn) > 1.0 and abs(kn) <= 1.0):
+                pct_diff = abs(tn - kn * 100.0)
+                pct_tol = min(0.05, abs_tol * 100.0) if has_pct else 0.05
+                if pct_diff <= pct_tol:
+                    matched = True
+                    break
+
         if not matched:
-            untraced.append(tn)
+            if not is_structural:
+                untraced.append(tn)
 
     # 3. Observational Causal Inference & E-value Check
     results_keys_str = " ".join(doc.results_dict.keys()).lower()

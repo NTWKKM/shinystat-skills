@@ -140,6 +140,43 @@ def test_plot_roc_curve(tmp_fig_dir):
     assert "AUC" in res.caption
 
 
+def test_plot_roc_curve_paired(tmp_fig_dir):
+    """Verifies that paired_roc_data curves are fully exported into source_df and CSV."""
+    out_png = tmp_fig_dir / "test_roc_paired.png"
+    roc_data = {
+        "fpr": np.array([0.0, 0.1, 0.4, 1.0]),
+        "tpr": np.array([0.0, 0.6, 0.85, 1.0]),
+        "thresholds": np.array([5.0, 3.0, 1.0, 0.0]),
+        "auc": 0.82,
+        "name": "Model Primary",
+    }
+    paired_data = {
+        "fpr": np.array([0.0, 0.2, 0.5, 1.0]),
+        "tpr": np.array([0.0, 0.5, 0.75, 1.0]),
+        "thresholds": np.array([10.0, 6.0, 2.0, 0.0]),
+        "auc": 0.74,
+        "name": "Model Baseline",
+    }
+
+    res = plot_roc_curve(
+        roc_data,
+        paired_roc_data=paired_data,
+        paired_p_value=0.025,
+        title="Comparative ROC Analysis",
+        out_path=out_png,
+    )
+    assert Path(res.png_path).exists()
+    assert Path(res.csv_path).exists()
+    assert "Model" in res.source_df.columns
+    assert set(res.source_df["Model"].unique()) == {"Model Primary", "Model Baseline"}
+    assert len(res.source_df) == len(roc_data["fpr"]) + len(paired_data["fpr"])
+
+    # Verify CSV file on disk matches source_df
+    df_csv = pd.read_csv(res.csv_path)
+    assert "Model" in df_csv.columns
+    assert len(df_csv) == len(res.source_df)
+
+
 def test_plot_calibration(tmp_fig_dir):
     out_png = tmp_fig_dir / "test_calib.png"
     calib_bins = {

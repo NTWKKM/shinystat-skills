@@ -32,7 +32,7 @@ def render_markdown(
 
     lines: list[str] = [f"# {doc.title}\n"]
 
-    if doc.authors or doc.date:
+    if doc.authors or doc.date or doc.institution:
         meta_items = []
         if doc.authors:
             meta_items.append(f"**Authors:** {', '.join(doc.authors)}")
@@ -41,6 +41,8 @@ def render_markdown(
         if doc.institution:
             meta_items.append(f"**Affiliation:** {doc.institution}")
         lines.append(" | ".join(meta_items) + "\n\n---\n")
+
+    used_asset_names: set[str] = set()
 
     for block in doc.blocks:
         if isinstance(block, HeadingBlock):
@@ -60,12 +62,23 @@ def render_markdown(
             if block.footnote:
                 lines.append(f"*{block.footnote}*\n")
         elif isinstance(block, FigureBlock):
-            # Copy figure into assets directory
             fig_src = Path(block.figure.png_path)
-            fig_dest = assets_dir / fig_src.name
+            if not fig_src.exists():
+                raise FileNotFoundError(f"Figure file not found: {fig_src}")
+
+            base_name = fig_src.stem
+            suffix = fig_src.suffix
+            candidate_name = fig_src.name
+            counter = 2
+            while candidate_name in used_asset_names:
+                candidate_name = f"{base_name}_{counter}{suffix}"
+                counter += 1
+            used_asset_names.add(candidate_name)
+
+            fig_dest = assets_dir / candidate_name
             if fig_src.resolve() != fig_dest.resolve():
                 shutil.copy2(fig_src, fig_dest)
-            rel_path = f"{assets_dir_name}/{fig_src.name}"
+            rel_path = f"{assets_dir_name}/{candidate_name}"
 
             lines.append(f"\n![{block.figure.alt_text}]({rel_path})\n")
             lines.append(f"*{block.figure.caption}*\n")

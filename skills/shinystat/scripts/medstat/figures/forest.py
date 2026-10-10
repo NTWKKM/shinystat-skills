@@ -153,17 +153,20 @@ def plot_forest(
         )
         if "p_value" in df.columns:
             pval = df.loc[idx, "p_value"]
-            p_str = (
-                f"{pval:.3f}"
-                if (isinstance(pval, (int, float)) and pval >= 0.001)
-                else ("<0.001" if isinstance(pval, (int, float)) else str(pval))
-            )
+            if pd.isna(pval):
+                p_str = "—"
+            elif isinstance(pval, (int, float, np.number)):
+                val_f = float(pval)
+                p_str = f"{val_f:.3f}" if val_f >= 0.001 else "<0.001"
+            else:
+                p_str = str(pval)
             ax_text.text(0.85, y, p_str, va="center", ha="right", fontsize=9.5)
 
     fig.tight_layout()
 
+    rev_df = df.iloc[::-1].reset_index(drop=True)
     png_path = save_publication_figure(fig, out_path, dpi=dpi)
-    csv_path = export_source_data(df.iloc[::-1].reset_index(drop=True), png_path)
+    csv_path = export_source_data(rev_df, png_path)
 
     alt_text = f"Forest plot displaying {n_terms} effect estimates ({scale}) with 95% confidence intervals."
     caption = f"Figure. {title}. Squares represent point estimates ({scale}) with horizontal lines indicating 95% confidence intervals. The dashed vertical line denotes null effect ({ref_val})."
@@ -172,6 +175,6 @@ def plot_forest(
         png_path=png_path,
         alt_text=alt_text,
         caption=caption,
-        source_df=df,
+        source_df=rev_df,
         csv_path=csv_path,
     )

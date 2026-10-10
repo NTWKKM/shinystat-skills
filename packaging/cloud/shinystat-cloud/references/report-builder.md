@@ -190,7 +190,18 @@ try:
 
 except ImportError:
     # Automatic fallback when python-docx is unavailable
-    generate_docx_report = generate_html_report
+    def generate_docx_report(
+        title: str,
+        results: dict,
+        tables: dict[str, pd.DataFrame],
+        figure_paths: list[str] = None,
+        out_path: str = "report.docx",
+    ) -> str:
+        if Path(out_path).suffix.lower() == ".docx":
+            out_path = str(Path(out_path).with_suffix(".html"))
+        return generate_html_report(
+            title, results, tables, figure_paths, out_path=out_path
+        )
 ```
 
 ---
@@ -201,6 +212,7 @@ Before releasing any report, run the standalone verification routine:
 
 ```python
 import re
+from pathlib import Path
 import pandas as pd
 
 
@@ -279,9 +291,80 @@ def verify_standalone_integrity(
             ]
         )
 
+    # 3. Numerical Traceability Check
+    def _flatten_nums(d):
+        nums = []
+        if isinstance(d, dict):
+            for v in d.values():
+                nums.extend(_flatten_nums(v))
+        elif isinstance(d, (list, tuple)):
+            for v in d:
+                nums.extend(_flatten_nums(v))
+        elif isinstance(d, (int, float)) and not isinstance(d, bool):
+            nums.append(float(d))
+        return nums
+
+    known_nums = _flatten_nums(results_dict)
+    raw_matches = re.findall(
+        r"(?<!\w)(?<![a-zA-Z]-)(?:[-+]?\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?",
+        narrative_text.replace(",", ""),
+    )
+    ignored_structural = {
+        0.0,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        5.0,
+        10.0,
+        95.0,
+        99.0,
+        100.0,
+        0.05,
+        0.01,
+        0.001,
+        2024.0,
+        2025.0,
+        2026.0,
+    }
+    untraced_nums = []
+    for m in raw_matches:
+        try:
+            val = float(m)
+        except ValueError:
+            continue
+        if not (-1e7 < val < 1e7):
+            continue
+
+        if abs(val) <= 1.0:
+            dec_digits = len(m.split(".")[1]) if "." in m else 2
+            abs_tol = min(0.02, 10.0 ** (-dec_digits))
+        else:
+            abs_tol = 0.02
+
+        matched = False
+        for kn in known_nums:
+            if abs(val - kn) <= abs_tol:
+                matched = True
+                break
+            if abs(val) > 1.0 and abs(kn) > 1e-9 and abs(val - kn) / abs(kn) <= 0.01:
+                matched = True
+                break
+            if abs(val) > 1.0 and abs(kn) <= 1.0 and abs(val - kn * 100.0) <= 0.05:
+                matched = True
+                break
+
+        if not matched and val not in ignored_structural:
+            untraced_nums.append(val)
+
+    untraced_rate = len(untraced_nums) / max(len(raw_matches), 1)
+    traceability_passed = len(untraced_nums) <= 1 or untraced_rate <= 0.15
+
     return {
-        "passed": len(violations) == 0 and has_caveat,
+        "passed": len(violations) == 0 and has_caveat and traceability_passed,
         "phi_violations": violations,
         "has_causal_caveat": has_caveat,
+        "untraced_numbers": untraced_nums,
+        "traceability_passed": traceability_passed,
     }
 ```

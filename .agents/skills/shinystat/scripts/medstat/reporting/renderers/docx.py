@@ -30,7 +30,8 @@ def _apply_three_rule_table_borders(table) -> None:
     Applies publication 3-rule borders (ICMJE/NEJM standards) using OpenXML:
     Top border: 1.5pt solid black
     Bottom border: 1.5pt solid black
-    Inside horizontal (header divider): 0.75pt solid black
+    Inside horizontal borders: Disabled (w:insideH set to none).
+    Header divider: Applied via cell bottom borders on row 0 (1.0pt solid black).
     Vertical / left / right borders: NONE.
     """
     tblPr = table._tbl.tblPr
@@ -45,7 +46,7 @@ def _apply_three_rule_table_borders(table) -> None:
         f'  <w:left w:val="none"/>\n'
         f'  <w:bottom w:val="single" w:sz="12" w:space="0" w:color="000000"/>\n'
         f'  <w:right w:val="none"/>\n'
-        f'  <w:insideH w:val="single" w:sz="6" w:space="0" w:color="CCCCCC"/>\n'
+        f'  <w:insideH w:val="none"/>\n'
         f'  <w:insideV w:val="none"/>\n'
         f"</w:tblBorders>"
     )
@@ -195,20 +196,21 @@ def render_docx(
                 fn_p.paragraph_format.space_after = Pt(12)
         elif isinstance(block, FigureBlock):
             fig_path = Path(block.figure.png_path)
-            if fig_path.exists():
-                fig_p = document.add_paragraph()
-                fig_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                fig_p.paragraph_format.space_before = Pt(12)
-                fig_p.paragraph_format.space_after = Pt(4)
-                # Fit standard 6.5 inch width
-                document.add_picture(str(fig_path), width=Inches(6.5))
+            if not fig_path.exists():
+                raise FileNotFoundError(f"Figure file not found: {fig_path}")
+            fig_p = document.add_paragraph()
+            fig_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            fig_p.paragraph_format.space_before = Pt(12)
+            fig_p.paragraph_format.space_after = Pt(4)
+            # Fit standard 6.5 inch width
+            document.add_picture(str(fig_path), width=Inches(6.5))
 
-                # Caption
-                cap_p = document.add_paragraph()
-                cap_run = cap_p.add_run(block.figure.caption)
-                cap_run.font.name = "Arial"
-                cap_run.font.size = Pt(9.5)
-                cap_p.paragraph_format.space_after = Pt(14)
+            # Caption
+            cap_p = document.add_paragraph()
+            cap_run = cap_p.add_run(block.figure.caption)
+            cap_run.font.name = "Arial"
+            cap_run.font.size = Pt(9.5)
+            cap_p.paragraph_format.space_after = Pt(14)
 
     document.save(str(out_p))
     return str(out_p)
