@@ -114,6 +114,18 @@ PHI_PATTERNS = [
     ),
 ]
 
+_MONTHS_PATTERN = r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+_DATE_PREFIX_PATTERN = re.compile(
+    r"(?:"
+    r"\b(?:in|year|years|during|period|from|dated|since|until|between)(?:\s+(?:the\s+)?(?:calendar|fiscal|academic|study)?(?:\s*year)?)?(?:\s+"
+    + _MONTHS_PATTERN
+    + r")?"
+    r"|\b" + _MONTHS_PATTERN + r""
+    r"|\b(?:19\d{2}|20\d{2})\s*(?:-|–|/|\b(?:to|through|until|and)\b)"
+    r")\s*$",
+    re.IGNORECASE,
+)
+
 # Common non-data numbers to ignore during traceability check
 IGNORED_NUMBERS = {
     0.0,
@@ -173,13 +185,9 @@ def _is_structural_context(
         ):
             return True
 
-    # 3. Calendar years (2010-2035) when preceded by date-related context
+    # 3. Calendar years (2010-2035) when preceded immediately by date-related context
     if 2010.0 <= val <= 2035.0 and "." not in raw_str:
-        if re.search(
-            r"\b(?:in|year|years|during|between|period|from|dated|since|until)\b",
-            window_before,
-            re.IGNORECASE,
-        ):
+        if _DATE_PREFIX_PATTERN.search(window_before):
             return True
 
     # 4. Structural headings and table/figure/step counters (e.g., Table 1, Figure 2, Tier 1, Step 3, v.1)

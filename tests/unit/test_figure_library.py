@@ -252,6 +252,49 @@ def test_plot_dca(tmp_fig_dir):
     assert Path(res.csv_path).exists()
 
 
+def test_plot_dca_extreme_negative_treat_all_clipped(tmp_fig_dir, monkeypatch):
+    """
+    Verifies that when 'Treat All' falls far below negative max_nb, the lower y-axis
+    limit is bounded to -max_nb (clipping the extreme negative value) so that the
+    clinically relevant positive net benefit range is not compressed.
+    """
+    import matplotlib.axes
+
+    out_png = tmp_fig_dir / "test_dca_clipped.png"
+    dca_records = [
+        {"threshold": 0.10, "net_benefit": 0.20, "strategy": "Model"},
+        {"threshold": 0.50, "net_benefit": 0.05, "strategy": "Model"},
+        {"threshold": 0.10, "net_benefit": 0.15, "strategy": "Treat All"},
+        {
+            "threshold": 0.50,
+            "net_benefit": -0.80,
+            "strategy": "Treat All",
+        },  # Far below -max_nb (-0.20)
+        {"threshold": 0.10, "net_benefit": 0.0, "strategy": "Treat None"},
+        {"threshold": 0.50, "net_benefit": 0.0, "strategy": "Treat None"},
+    ]
+    dca_df = pd.DataFrame(dca_records)
+
+    captured_ylim = []
+    orig_set_ylim = matplotlib.axes.Axes.set_ylim
+
+    def mock_set_ylim(self, *args, **kwargs):
+        if len(args) == 2:
+            captured_ylim.append((args[0], args[1]))
+        elif "bottom" in kwargs and "top" in kwargs:
+            captured_ylim.append((kwargs["bottom"], kwargs["top"]))
+        return orig_set_ylim(self, *args, **kwargs)
+
+    monkeypatch.setattr(matplotlib.axes.Axes, "set_ylim", mock_set_ylim)
+
+    res = plot_dca(dca_df, title="Decision Curve Analysis Clipped", out_path=out_png)
+    assert Path(res.png_path).exists()
+    assert captured_ylim
+    lower_lim, upper_lim = captured_ylim[-1]
+    # max_nb is 0.20, so lower_lim must be clipped to -0.20 instead of dropping to -0.80
+    assert lower_lim == -0.20
+
+
 def test_plot_bland_altman(tmp_fig_dir):
     out_png = tmp_fig_dir / "test_ba.png"
     ba_data = {

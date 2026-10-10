@@ -256,3 +256,30 @@ def test_integrity_years_context_and_structural_counters():
     audit_numpy = verify_report_integrity(doc_numpy)
     assert 0.725 not in audit_numpy.untraced_numbers
     assert 0.835 not in audit_numpy.untraced_numbers
+
+    # 5. Cohort count with 'in' elsewhere in sentence must remain reportable
+    doc_events = ReportDocument(
+        title="Event Reporting",
+        results_dict={"n": 5000},
+    )
+    doc_events.add_paragraph("50 patients in the cohort, 2024 had events.")
+    audit_events = verify_report_integrity(doc_events)
+    assert 2024.0 in audit_events.untraced_numbers
+
+    # 6. 'and' without year range connector does not exempt counts
+    doc_and = ReportDocument(
+        title="Count Conjunction",
+        results_dict={"n": 100},
+    )
+    doc_and.add_paragraph("Cohort sizes were 30 and 2024.")
+    audit_and = verify_report_integrity(doc_and)
+    assert 2024.0 in audit_and.untraced_numbers
+
+    # 7. Date context immediately preceding year with optional month
+    doc_month = ReportDocument(
+        title="Month Year Context",
+        results_dict={"n": 100},
+    )
+    doc_month.add_paragraph("The cohort was recruited in October 2024.")
+    audit_month = verify_report_integrity(doc_month)
+    assert 2024.0 not in audit_month.untraced_numbers

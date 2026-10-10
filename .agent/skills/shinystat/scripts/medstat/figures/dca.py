@@ -71,7 +71,8 @@ def plot_dca(
         x_min, x_max = 0.0, 1.0
 
     ax.set_xlim(x_min, x_max)
-    ax.set_ylim(min_nb, max_nb * 1.15)
+    lower_nb = max(min_nb, -max_nb)
+    ax.set_ylim(lower_nb, max_nb * 1.15)
     ax.set_xlabel("Threshold Probability (pt)", labelpad=6)
     ax.set_ylabel("Net Benefit", labelpad=6)
     ax.set_title(title, loc="left", pad=10)
