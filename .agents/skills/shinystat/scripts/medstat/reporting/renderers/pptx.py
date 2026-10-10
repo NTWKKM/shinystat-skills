@@ -191,6 +191,9 @@ def _add_figure_slide(
 def _add_table_slide(prs: Presentation, block: TableBlock, section_title: str) -> None:
     """Creates dedicated slide(s) for TableBlock, continuing onto multiple slides if > 12 rows."""
     df = block.df
+    if len(df.columns) == 0:
+        return
+
     chunk_size = 12
     total_rows = len(df)
     n_chunks = (

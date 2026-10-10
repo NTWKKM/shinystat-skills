@@ -1668,3 +1668,18 @@ def test_cloud_report_builder_docx_fallback_and_integrity(tmp_path):
         results_dict={"n": 50},
     )
     assert 2024.0 in audit_year_event["untraced_numbers"]
+
+    # Test scientific notation precision:
+    # 1. 1.23e-4 in text must NOT match 0.005 in results_dict
+    audit_sci_bad = verify_fn(
+        "Genome-wide p-value was 1.23e-4.",
+        results_dict={"p_val": 0.005},
+    )
+    assert 1.23e-4 in audit_sci_bad["untraced_numbers"]
+
+    # 2. 1.23e-4 in text matches 1.23e-4 in results_dict
+    audit_sci_ok = verify_fn(
+        "Genome-wide p-value was 1.23e-4.",
+        results_dict={"p_val": 1.23e-4},
+    )
+    assert 1.23e-4 not in audit_sci_ok["untraced_numbers"]

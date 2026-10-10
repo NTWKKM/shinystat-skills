@@ -307,12 +307,22 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
 
         # Check against known numbers: for values <= 1, use token's displayed precision
         if abs(tn) <= 1.0:
-            if "." in token_str:
+            if re.search(r"[eE]", token_str):
+                parts = re.split(r"[eE]", token_str)
+                mantissa = parts[0]
+                try:
+                    exp_str = re.split(r"[%]", parts[1])[0]
+                    exp = int(exp_str)
+                except (IndexError, ValueError):
+                    exp = 0
+                mantissa_dec = len(mantissa.split(".")[1]) if "." in mantissa else 0
+                dec_digits = max(0, mantissa_dec - exp)
+            elif "." in token_str:
                 dec_part = token_str.split(".")[1]
-                dec_digits = len(re.split(r"[eE%]", dec_part)[0])
-                abs_tol = min(0.02, 10.0 ** (-dec_digits))
+                dec_digits = len(re.split(r"[%]", dec_part)[0])
             else:
-                abs_tol = 0.02
+                dec_digits = 2
+            abs_tol = min(0.02, 10.0 ** (-dec_digits))
         else:
             abs_tol = 0.02
 

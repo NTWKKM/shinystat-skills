@@ -289,3 +289,17 @@ def test_render_pptx_table_pagination(tmp_path: Path):
             assert len(tbl.rows) == 13  # 1 header + 12 data rows
         else:
             assert len(tbl.rows) == 2  # 1 header + 1 data row
+
+
+def test_render_pptx_empty_columns_table_skipped(tmp_path: Path):
+    """Verifies that a table with zero columns returns early without creating slides or raising errors."""
+    df_empty_cols = pd.DataFrame()
+    doc = ReportDocument(title="Empty Table Report")
+    doc.add_table(df_empty_cols, caption="Empty Columns Table")
+    pptx_file = tmp_path / "empty_table_presentation.pptx"
+    out_path = render_pptx(doc, pptx_file)
+
+    assert Path(out_path).exists()
+    prs = Presentation(str(out_path))
+    # Only Title slide was created; no table slide was added
+    assert len(prs.slides) == 1

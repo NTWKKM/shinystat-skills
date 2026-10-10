@@ -339,7 +339,17 @@ def verify_standalone_integrity(
             continue
 
         if abs(val) <= 1.0:
-            dec_digits = len(raw_str.split(".")[1]) if "." in raw_str else 2
+            if re.search(r"[eE]", raw_str):
+                parts = re.split(r"[eE]", raw_str)
+                mantissa = parts[0]
+                try:
+                    exp = int(parts[1])
+                except (IndexError, ValueError):
+                    exp = 0
+                mantissa_dec = len(mantissa.split(".")[1]) if "." in mantissa else 0
+                dec_digits = max(0, mantissa_dec - exp)
+            else:
+                dec_digits = len(raw_str.split(".")[1]) if "." in raw_str else 2
             abs_tol = min(0.02, 10.0 ** (-dec_digits))
         else:
             abs_tol = 0.02

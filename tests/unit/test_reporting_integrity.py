@@ -306,3 +306,24 @@ def test_integrity_causal_caveat_required_for_passed():
     audit_passed = verify_report_integrity(doc)
     assert audit_passed.has_causal_caveat is True
     assert audit_passed.passed is True
+
+
+def test_integrity_scientific_notation_precision():
+    """Verifies that scientific-notation numbers derive effective precision from mantissa and exponent."""
+    # 1.23e-4 (0.000123) should NOT match 0.005 even though both are <= 0.02
+    doc_sci_bad = ReportDocument(
+        title="Genomics Report",
+        results_dict={"p_value": 0.005},
+    )
+    doc_sci_bad.add_paragraph("Genome-wide significance reached 1.23e-4.")
+    audit_bad = verify_report_integrity(doc_sci_bad)
+    assert 1.23e-4 in audit_bad.untraced_numbers
+
+    # 1.23e-4 in text matches 1.23e-4 in results_dict
+    doc_sci_ok = ReportDocument(
+        title="Genomics Report",
+        results_dict={"p_value": 1.23e-4},
+    )
+    doc_sci_ok.add_paragraph("Genome-wide significance reached 1.23e-4.")
+    audit_ok = verify_report_integrity(doc_sci_ok)
+    assert 1.23e-4 not in audit_ok.untraced_numbers
