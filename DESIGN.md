@@ -851,6 +851,31 @@ During CodeRabbit automated and assertive review of PR #9 (`feat/multi-format-fi
 
 [MEMORY_LEARN: Auditing narrative clinical statistics requires displayed-precision tolerance gates for fractions, result-first matching before structural exemptions, and multi-curve source data export in comparative ROC curves.]
 
+---
 
+## ADR 34: Clinical Presentation Pagination, Scientific-Notation Precision, and Causal Caveat Enforcement
 
+### Context
+During the completion and hardening of PR #9 (`feat/multi-format-figures-reporting`), several presentation rendering and reporting integrity edge cases were surfaced:
+1. In `pptx.py`, tables exceeding 12 rows were truncated to the first 12 rows (`df.head(12)`), dropping clinical data in long demographic or multivariable regression tables. Furthermore, passing a 0-column DataFrame caused `ZeroDivisionError` in `python-pptx` (which computes `width // cols`).
+2. In `integrity.py` and cloud `report-builder.md`, numeric tokens in scientific notation ($|val| \le 1.0$, e.g. `1.23e-4`) previously derived `dec_digits` without considering the exponent, leading to an artificially wide tolerance (`0.01` instead of $10^{-6}$) and allowing false-positive matches against unrelated small probabilities.
+3. Observational and PSM reports lacking unmeasured confounding caveats only generated a warning; `passed` remained True, violating Pillar 5 safety gates.
+4. Kaplan-Meier captions formatted $p < 0.001$ as `"0.000"` instead of `"< 0.001"`, contradicting the on-figure annotation.
 
+### Decision
+1. **Multi-Slide PowerPoint Pagination**:
+   - Paginate tables with $> 12$ rows into continuation slides (`chunk_size = 12`) titled `"{base_title} (Part {chunk_idx + 1}/{n_chunks})"`, rendering full headers, alternating row fills, and footnotes showing row ranges (`Rows 1–12 of 25`).
+   - Guard `_add_table_slide` with `if len(df.columns) == 0: return` to prevent `ZeroDivisionError` on empty-column DataFrames.
+2. **Exponent-Aware Scientific Precision**:
+   - Parse mantissa decimal places and subtract the exponent (`max(0, mantissa_dec - exp)`) to derive the true effective precision for scientific notation tokens.
+3. **Causal Caveat Gating**:
+   - Enforce `and has_causal_caveat` in `verify_report_integrity`'s `passed` calculation, ensuring observational models lacking discussion of unmeasured confounding fail audit status.
+4. **KM Caption P-Value Formatting**:
+   - Format `log_rank_p < 0.001` as `"< 0.001"` in `plot_kaplan_meier` caption.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Clinical Data Integrity**: Long clinical tables are fully preserved across PowerPoint decks; scientific-notation significance thresholds are strictly audited.
+- **Verification**: 427/427 tests passing across unit and e2e test suites.
+
+[MEMORY_LEARN: In reporting integrity audits and presentation renderers: (1) scientific notation tokens (|val| <= 1.0) must derive effective precision by parsing mantissa decimal places minus exponent; (2) PowerPoint table builders in python-pptx divide width by column count, so 0-column DataFrames must be guarded with an early return; (3) observational reporting integrity audits must gate passed status on explicit causal/confounding caveats.]
