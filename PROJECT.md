@@ -146,12 +146,15 @@ def calculate_icc(
 class MissingStrategyRequiredError(Exception):
     """Raised when missing data is present without an explicit, clinically justified strategy."""
 
+
 def prepare_data_for_analysis(
     df: pd.DataFrame,
     required_cols: list[str],
     numeric_cols: list[str] | None = None,
-    handle_missing: str | None = None,  # Must be explicitly 'complete-case', 'mice', 'knn', or 'indicator'
-    missing_justification: str | None = None,  # Mandatory string if missing values present
+    handle_missing: str
+    | None = None,  # Must be explicitly 'complete-case', 'mice', 'knn', or 'indicator'
+    missing_justification: str
+    | None = None,  # Mandatory string if missing values present
     tracker: SampleFlowTracker | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]: ...
 ```
@@ -159,8 +162,12 @@ def prepare_data_for_analysis(
 ### 3. `medstat.data.retention` ↔ Clinical Reporting
 ```python
 class SampleFlowTracker:
-    def record_stage(self, stage_name: str, n_remaining: int, n_excluded: int, reason: str): ...
-    def get_flow_summary(self) -> dict[str, Any]: ...  # N_initial, N_excluded, N_analyzed, stages
+    def record_stage(
+        self, stage_name: str, n_remaining: int, n_excluded: int, reason: str
+    ): ...
+    def get_flow_summary(
+        self,
+    ) -> dict[str, Any]: ...  # N_initial, N_excluded, N_analyzed, stages
     def render_ascii_flow(self) -> str: ...
 ```
 

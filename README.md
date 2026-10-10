@@ -351,11 +351,13 @@ medstat --help
 import pandas as pd
 from medstat.agreement.icc import calculate_icc
 
-df = pd.DataFrame({
-    "Subject": [1, 2, 3, 4, 5, 1, 2, 3, 4, 5],
-    "Rater": ["A", "A", "A", "A", "A", "B", "B", "B", "B", "B"],
-    "Score": [9, 6, 8, 7, 10, 8, 7, 7, 6, 9],
-})
+df = pd.DataFrame(
+    {
+        "Subject": [1, 2, 3, 4, 5, 1, 2, 3, 4, 5],
+        "Rater": ["A", "A", "A", "A", "A", "B", "B", "B", "B", "B"],
+        "Score": [9, 6, 8, 7, 10, 8, 7, 7, 6, 9],
+    }
+)
 
 # Calculate all 6 ICC variants with 95% CIs via pure SciPy
 icc_table = calculate_icc(df, targets="Subject", raters="Rater", ratings="Score")

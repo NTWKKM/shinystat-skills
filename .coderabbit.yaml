@@ -2,7 +2,7 @@
 language: "en"
 early_access: false
 
-tone_instructions: "Review with high rigor for clinical safety, statistical accuracy, Python standards, and agent skills."
+tone_instructions: "Review with high rigor for clinical safety and statistical accuracy. Focus strictly on canonical files (src/**, packaging/**, tests/**, skills/shinystat/**). Completely skip and ignore all platform mirrors and bundled medstat copies."
 
 reviews:
   profile: "assertive"
@@ -12,17 +12,48 @@ reviews:
   review_status: false
   collapse_walkthrough: false
   path_filters:
-    - "!uv.lock"
-    - "!**/*.csv"
+    # Allow only canonical source, packaging, tests, shinystat skill, and root docs
+    - "src/**"
+    - "packaging/**"
+    - "tests/**"
+    - "skills/shinystat/**"
+    - "/*.md"
+    - "/*.toml"
+    - "/*.yaml"
+    - "/*.yml"
+
+    # Exclude platform mirror directories (.agent, .agents, .claude, .cursor)
     - "!.agent/**"
+    - "!**/.agent/**"
     - "!.agents/**"
+    - "!**/.agents/**"
     - "!.claude/**"
+    - "!**/.claude/**"
     - "!.cursor/**"
+    - "!**/.cursor/**"
+    - "!**/.skills_backups/**"
+
+    # Exclude bundled/mirrored medstat package inside skills directory
     - "!**/scripts/medstat/**"
     - "!skills/**/scripts/medstat/**"
+
+    # Exclude lockfiles, large data files, image assets, and binary archives
+    - "!uv.lock"
+    - "!**/*.lock"
+    - "!**/*.csv"
+    - "!**/*.png"
+    - "!**/*.jpg"
+    - "!**/*.jpeg"
+    - "!**/*.svg"
+    - "!**/*.zip"
+    - "!tests/fixtures/recipes_baseline_snapshot.json"
   path_instructions:
+    - path: "src/**"
+      instructions: "Review core biostatistical algorithms, figure library, and reporting renderers for numerical stability, mathematical rigor, zero-PHI compliance, and clinical safety."
     - path: "packaging/cloud/**"
-      instructions: "Review biostatistical algorithms and Python recipes for mathematical rigor, numerical stability, NaN edge-case handling, and clinical safety."
+      instructions: "Review biostatistical algorithms and Python recipes for mathematical rigor, numerical stability, NaN edge-case handling, and cloud sandbox self-containment."
+    - path: "skills/shinystat/**"
+      instructions: "Review canonical agent skill definitions, decision heuristics, and reference documentation for clarity, completeness, and clinical decision trees."
     - path: "tests/**"
       instructions: "Review unit tests for assertion coverage, numerical tolerance, and statistical invariant verification."
   auto_review:

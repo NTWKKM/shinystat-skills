@@ -1590,3 +1590,96 @@ def test_table_one_column_mapping_and_html_escaping(recipes):
     assert "&lt;Title &amp; Header&gt;" in html_out
     assert "&lt;Footnote &amp; Note&gt;" in html_out
     assert "&lt;b&gt;high&lt;/b&gt;" in html_out
+
+
+def test_cloud_report_builder_docx_fallback_and_integrity(tmp_path):
+    """Verifies that cloud report builder fallback redirects .docx to .html and tests standalone integrity."""
+    rb_path = CLOUD_DIR / "references" / "report-builder.md"
+    content = rb_path.read_text(encoding="utf-8")
+    blocks = re.findall(r"```python\n(.*?)\n```", content, re.DOTALL)
+    ns = {}
+    errors = []
+    for idx, block in enumerate(blocks):
+        try:
+            exec(block, ns)
+        except Exception as exc:
+            errors.append((idx, exc))
+    assert not errors, f"Failed executing blocks in report-builder.md: {errors}"
+
+    import unittest.mock as mock
+
+    # Verify fallback function redirects .docx when python-docx is absent
+    with mock.patch.dict("sys.modules", {"docx": None}):
+        ns_fallback = {
+            "generate_html_report": ns["generate_html_report"],
+            "Path": Path,
+            "pd": pd,
+        }
+        docx_block = [b for b in blocks if "generate_docx_report" in b][0]
+        exec(docx_block, ns_fallback)
+        gen_fallback = ns_fallback["generate_docx_report"]
+        out_file = str(tmp_path / "summary.docx")
+        actual_out = gen_fallback(
+            "Study Summary",
+            results={"n": 50, "date": "2026-10-10"},
+            tables={"Table 1": pd.DataFrame({"A": [1, 2]})},
+            out_path=out_file,
+        )
+        assert actual_out.endswith(".html")
+        assert Path(actual_out).exists()
+
+    # Verify verify_standalone_integrity
+    verify_fn = ns.get("verify_standalone_integrity")
+    assert callable(verify_fn)
+    audit = verify_fn(
+        "The model achieved an AUC of 0.852 in cohort of 50 patients.",
+        results_dict={"auc": 0.852, "n": 50},
+    )
+    assert audit["passed"] is True
+    assert audit["traceability_passed"] is True
+    assert len(audit["untraced_numbers"]) == 0
+
+    # Test context-aware 10.0 exemption:
+    # 1. Structural counter "Table 10" is exempt
+    audit_tbl10 = verify_fn(
+        "As shown in Table 10, patient characteristics were evaluated.",
+        results_dict={"n": 50},
+    )
+    assert 10.0 not in audit_tbl10["untraced_numbers"]
+
+    # 2. Statistic "10 events" when missing from results_dict is NOT exempt
+    audit_events10 = verify_fn(
+        "There were 10 events observed during follow-up.",
+        results_dict={"n": 50},
+    )
+    assert 10.0 in audit_events10["untraced_numbers"]
+
+    # Test context-aware year exemption:
+    # 1. Date context "in 2024" is exempt
+    audit_year_ok = verify_fn(
+        "The trial completed in 2024.",
+        results_dict={"n": 50},
+    )
+    assert 2024.0 not in audit_year_ok["untraced_numbers"]
+
+    # 2. Year without date context "50 patients in the cohort, 2024 had events" is NOT exempt
+    audit_year_event = verify_fn(
+        "50 patients in the cohort, 2024 had events.",
+        results_dict={"n": 50},
+    )
+    assert 2024.0 in audit_year_event["untraced_numbers"]
+
+    # Test scientific notation precision:
+    # 1. 1.23e-4 in text must NOT match 0.005 in results_dict
+    audit_sci_bad = verify_fn(
+        "Genome-wide p-value was 1.23e-4.",
+        results_dict={"p_val": 0.005},
+    )
+    assert 1.23e-4 in audit_sci_bad["untraced_numbers"]
+
+    # 2. 1.23e-4 in text matches 1.23e-4 in results_dict
+    audit_sci_ok = verify_fn(
+        "Genome-wide p-value was 1.23e-4.",
+        results_dict={"p_val": 1.23e-4},
+    )
+    assert 1.23e-4 not in audit_sci_ok["untraced_numbers"]

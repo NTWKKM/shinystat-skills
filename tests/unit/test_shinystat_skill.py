@@ -28,10 +28,12 @@ def test_shinystat_canonical_skill_exists_and_valid():
 
     # Body checks
     body = parts[2]
-    assert "The 4 Decision Pillars" in body
+    assert "The 5 Decision Pillars" in body
     assert "The Deterministic Grilling Gate" in body
     assert "Completion Criteria" in body
     assert "references/decision-heuristics.md" in body
+    assert "references/figures.md" in body
+    assert "references/report-builder.md" in body
     assert "scripts/medstat" in body
 
     # Bundled scripts checks

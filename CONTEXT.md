@@ -66,6 +66,19 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
   - `specificity: float`, `specificity_ci: tuple[float, float]`
   - `ppv: float`, `npv: float`
   - `lr_pos: float`, `lr_neg: float`, `dor: float`
+- **`FigureResult`**:
+  - `png_path: str` (path to 300 DPI exported image)
+  - `alt_text: str` (accessibility text for web/markdown)
+  - `caption: str` (publication caption with clinical/statistical notes)
+  - `source_df: pd.DataFrame` (exact plotted data coordinates)
+  - `csv_path: str` (audit trail data export)
+- **`ReportDocument` (Report IR)**:
+  - `title: str`, `authors: list[str]`, `date: str`, `institution: str`
+  - `blocks: list[Block]` (`HeadingBlock`, `ParagraphBlock`, `TableBlock`, `FigureBlock`, `CalloutBlock`)
+  - `results_dict: dict[str, Any]` (immutable source of truth for narrative numbers)
+- **`IntegrityReport`**:
+  - `passed: bool`, `untraced_numbers: list[float]`, `phi_violations: list[str]`
+  - `warnings: list[str]`, `has_methods: bool`, `has_retention_flow: bool`, `has_causal_caveat: bool`
 
 ---
 
@@ -79,3 +92,6 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
   - JAMA: $P = .04$, $P = .008$, $P < .001$ (no leading zero).
 - **Units**: Must be explicitly rendered on continuous clinical variables (`mg/dL`, `mmHg`, `mL/min/1.73m²`).
 - **Binary & Event Outcome Encoding**: Binary outcomes and survival event indicators must be strictly encoded as numeric `0` and `1` (`1 = Event`, `0 = Non-event`) across all CLI commands, YAML SAP specifications, and data cleaning pipelines. Text outcomes (`'Dead'`/`'Alive'`, `'Yes'`/`'No'`) are rejected to eliminate clinical event inversion.
+- **Figure Standards**: 300 DPI minimum resolution, colorblind-safe palettes (Okabe-Ito / Tol), Thai typography fallbacks (`Sarabun`, `Thonburi`, `Sukhumvit Set`), and 1 figure per slide in presentation outputs.
+- **Numerical Traceability**: All narrative numbers are audited against `results_dict` within $\pm 0.02$ absolute or 1% relative error, including percentage-scale matching ($\pm 0.05$ / $\pm 0.005$). Common statistical/structural constants (single-digit indices 0–10, $\alpha$-levels, 95% / 99% CI levels, standard 100% scale, calendar years) are bypassed. An untraced rate of up to 15% (minimum 1 untraced value) is tolerated for non-statistical headings and structural annotations.
+- **Zero-PHI Compliance**: Automated regex enforcement screens text, table cells, headers, and figure metadata for Hospital Numbers (`HN`), 13-digit Thai National IDs, phone numbers, dates of birth, and honorific-prefixed names (`Mr.`, `Mrs.`, `Ms.`, `Dr.`, `นาย`, `นาง`, `นพ.`, `พญ.`). Because arbitrary patient names without honorifics cannot be reliably detected by regex, automated passing does not prove absolute zero-PHI; manual de-identification review remains mandatory before external release.
