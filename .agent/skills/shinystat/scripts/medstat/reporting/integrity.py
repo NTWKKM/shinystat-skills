@@ -411,8 +411,12 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
             "Document lacks cohort retention / inclusion-exclusion flow details."
         )
 
-    passed = (len(phi_violations) == 0) and (
-        len(untraced) == 0 or len(untraced) <= max(1, int(len(text_numbers) * 0.15))
+    passed = (
+        (len(phi_violations) == 0)
+        and has_causal_caveat
+        and (
+            len(untraced) == 0 or len(untraced) <= max(1, int(len(text_numbers) * 0.15))
+        )
     )
 
     return IntegrityReport(

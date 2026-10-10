@@ -116,6 +116,18 @@ def test_plot_kaplan_meier(tmp_fig_dir):
     assert Path(res.png_path).stat().st_size > 15000
     assert Path(res.csv_path).exists()
     assert "Log-rank" in res.caption
+    assert "p-value: 0.042." in res.caption
+
+    # Verify p-value < 0.001 displays as '< 0.001' instead of '0.000'
+    out_png_p0 = tmp_fig_dir / "test_km_p0.png"
+    res_p0 = plot_kaplan_meier(
+        km_data,
+        risk_table=risk_table,
+        log_rank_p=0.0002,
+        title="Kaplan-Meier Highly Significant",
+        out_path=out_png_p0,
+    )
+    assert "Log-rank test p-value: < 0.001." in res_p0.caption
 
 
 def test_plot_roc_curve(tmp_fig_dir):

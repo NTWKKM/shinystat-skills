@@ -171,7 +171,8 @@ def plot_kaplan_meier(
     alt_text = f"Kaplan-Meier survival curves comparing {len(groups)} groups over time."
     caption = f"Figure. {title}. Step lines indicate cumulative survival probabilities with shaded 95% Greenwood confidence intervals. '+' markers denote censored observations."
     if log_rank_p is not None:
-        caption += f" Log-rank test p-value: {log_rank_p:.3f}."
+        p_str = f"{log_rank_p:.3f}" if log_rank_p >= 0.001 else "< 0.001"
+        caption += f" Log-rank test p-value: {p_str}."
 
     return FigureResult(
         png_path=png_path,

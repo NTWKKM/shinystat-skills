@@ -283,3 +283,26 @@ def test_integrity_years_context_and_structural_counters():
     doc_month.add_paragraph("The cohort was recruited in October 2024.")
     audit_month = verify_report_integrity(doc_month)
     assert 2024.0 not in audit_month.untraced_numbers
+
+
+def test_integrity_causal_caveat_required_for_passed():
+    """Verifies that an observational model missing causal confounding caveats fails audit passed status."""
+    doc = ReportDocument(
+        title="PSM Analysis Report",
+        results_dict={"psm_matched_n": 200, "odds_ratio": 1.75},
+    )
+    doc.add_paragraph("Methods: We performed matching.")
+    doc.add_paragraph("Results: Matched cohort had 200 patients with odds ratio 1.75.")
+    # No mention of confounding / e-value / residual confounding
+    audit = verify_report_integrity(doc)
+    assert audit.has_causal_caveat is False
+    assert audit.passed is False
+    assert any("Observational/PSM" in w for w in audit.warnings)
+
+    # Adding causal caveat passes
+    doc.add_paragraph(
+        "Sensitivity analysis with E-values was conducted to assess residual and unmeasured confounding."
+    )
+    audit_passed = verify_report_integrity(doc)
+    assert audit_passed.has_causal_caveat is True
+    assert audit_passed.passed is True

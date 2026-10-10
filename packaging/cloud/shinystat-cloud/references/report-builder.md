@@ -307,9 +307,12 @@ def verify_standalone_integrity(
         return nums
 
     known_nums = _flatten_nums(results_dict)
-    raw_matches = re.findall(
-        r"(?<!\w)(?<![a-zA-Z]-)(?:[-+]?\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?",
-        narrative_text.replace(",", ""),
+    clean_text = narrative_text.replace(",", "")
+    raw_matches = list(
+        re.finditer(
+            r"(?<!\w)(?<![a-zA-Z]-)(?:[-+]?\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?",
+            clean_text,
+        )
     )
     ignored_structural = {
         0.0,
@@ -318,28 +321,25 @@ def verify_standalone_integrity(
         3.0,
         4.0,
         5.0,
-        10.0,
         95.0,
         99.0,
         100.0,
         0.05,
         0.01,
         0.001,
-        2024.0,
-        2025.0,
-        2026.0,
     }
     untraced_nums = []
     for m in raw_matches:
+        raw_str = m.group(0)
         try:
-            val = float(m)
+            val = float(raw_str)
         except ValueError:
             continue
         if not (-1e7 < val < 1e7):
             continue
 
         if abs(val) <= 1.0:
-            dec_digits = len(m.split(".")[1]) if "." in m else 2
+            dec_digits = len(raw_str.split(".")[1]) if "." in raw_str else 2
             abs_tol = min(0.02, 10.0 ** (-dec_digits))
         else:
             abs_tol = 0.02
@@ -356,8 +356,32 @@ def verify_standalone_integrity(
                 matched = True
                 break
 
-        if not matched and val not in ignored_structural:
-            untraced_nums.append(val)
+        if not matched:
+            start = m.start()
+            window_before = clean_text[max(0, start - 30) : start].split("\n")[-1]
+            is_counter = bool(
+                re.search(
+                    r"\b(?:Table|Figure|Fig\.?|Tier|Phase|Stage|Grade|Step|Level|Item|Section)\s*$",
+                    window_before,
+                    re.IGNORECASE,
+                )
+            )
+            date_prefix_pattern = (
+                r"(?:"
+                r"\b(?:in|year|years|during|period|from|dated|since|until|between)(?:\s+(?:the\s+)?(?:calendar|fiscal|academic|study)?(?:\s*year)?)?(?:\s+"
+                r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?))?"
+                r"|\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+                r"|\b(?:19\d{2}|20\d{2})\s*(?:-|–|/|\b(?:to|through|until|and)\b)"
+                r")\s*$"
+            )
+            is_year = (
+                2010.0 <= val <= 2035.0
+                and "." not in raw_str
+                and bool(re.search(date_prefix_pattern, window_before, re.IGNORECASE))
+            )
+            is_structural_10 = val == 10.0 and is_counter
+            if not (val in ignored_structural or is_structural_10 or is_year):
+                untraced_nums.append(val)
 
     untraced_rate = len(untraced_nums) / max(len(raw_matches), 1)
     traceability_passed = len(untraced_nums) <= 1 or untraced_rate <= 0.15

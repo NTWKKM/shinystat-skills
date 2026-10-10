@@ -102,4 +102,4 @@ The biostatistical task is complete when:
 - [ ] Participant retention flow ($N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$) is fully accounted for.
 - [ ] Statistical estimates with 95% confidence intervals and standard reporting tables (NEJM/JAMA/APA) are generated and presented.
 - [ ] Publication-grade figures (300 DPI) and multi-format documents (defaulting to self-contained `.html` unless another format is requested) are rendered per user requirements.
-- [ ] Pillar 5 reporting integrity audit has passed with zero PHI, numerical traceability, and causal inference caveats.
+- [ ] Pillar 5 reporting integrity audit has passed with automated Zero-PHI regex scan, numerical traceability, causal inference caveats, and manual PHI review prior to external release.

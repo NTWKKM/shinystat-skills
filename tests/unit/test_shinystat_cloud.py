@@ -1638,3 +1638,33 @@ def test_cloud_report_builder_docx_fallback_and_integrity(tmp_path):
     assert audit["passed"] is True
     assert audit["traceability_passed"] is True
     assert len(audit["untraced_numbers"]) == 0
+
+    # Test context-aware 10.0 exemption:
+    # 1. Structural counter "Table 10" is exempt
+    audit_tbl10 = verify_fn(
+        "As shown in Table 10, patient characteristics were evaluated.",
+        results_dict={"n": 50},
+    )
+    assert 10.0 not in audit_tbl10["untraced_numbers"]
+
+    # 2. Statistic "10 events" when missing from results_dict is NOT exempt
+    audit_events10 = verify_fn(
+        "There were 10 events observed during follow-up.",
+        results_dict={"n": 50},
+    )
+    assert 10.0 in audit_events10["untraced_numbers"]
+
+    # Test context-aware year exemption:
+    # 1. Date context "in 2024" is exempt
+    audit_year_ok = verify_fn(
+        "The trial completed in 2024.",
+        results_dict={"n": 50},
+    )
+    assert 2024.0 not in audit_year_ok["untraced_numbers"]
+
+    # 2. Year without date context "50 patients in the cohort, 2024 had events" is NOT exempt
+    audit_year_event = verify_fn(
+        "50 patients in the cohort, 2024 had events.",
+        results_dict={"n": 50},
+    )
+    assert 2024.0 in audit_year_event["untraced_numbers"]

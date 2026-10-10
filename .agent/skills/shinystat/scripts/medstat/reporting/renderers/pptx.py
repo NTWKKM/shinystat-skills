@@ -189,74 +189,87 @@ def _add_figure_slide(
 
 
 def _add_table_slide(prs: Presentation, block: TableBlock, section_title: str) -> None:
-    """Creates a dedicated slide for TableBlock."""
-    blank_layout = prs.slide_layouts[6]
-    slide = prs.slides.add_slide(blank_layout)
-
-    title = section_title if section_title else block.caption
-    _add_header_to_slide(slide, title, category_text="STATISTICAL TABLE")
-
+    """Creates dedicated slide(s) for TableBlock, continuing onto multiple slides if > 12 rows."""
     df = block.df
-    # Limit table rows per slide for presentation readability (up to 12 rows)
-    display_df = df.head(12)
-    n_rows, n_cols = len(display_df) + 1, len(display_df.columns)
-
-    table_left = Inches(0.8)
-    table_top = Inches(1.6)
-    table_width = Inches(11.7)
-    table_height = Inches(min(4.8, 0.35 * n_rows + 0.4))
-
-    table_shape = slide.shapes.add_table(
-        n_rows, n_cols, table_left, table_top, table_width, table_height
+    chunk_size = 12
+    total_rows = len(df)
+    n_chunks = (
+        max(1, (total_rows + chunk_size - 1) // chunk_size) if total_rows > 0 else 1
     )
-    tbl = table_shape.table
+    base_title = section_title if section_title else block.caption
 
-    # Format Header Row
-    for c_idx, col_name in enumerate(display_df.columns):
-        cell = tbl.cell(0, c_idx)
-        cell.text = str(col_name)
-        cell.fill.solid()
-        cell.fill.fore_color.rgb = COLOR_PRIMARY
-        p = cell.text_frame.paragraphs[0]
-        p.alignment = PP_ALIGN.CENTER
-        p.font.name = "Arial"
-        p.font.size = Pt(10)
-        p.font.bold = True
-        p.font.color.rgb = COLOR_WHITE
+    for chunk_idx in range(n_chunks):
+        start_row = chunk_idx * chunk_size
+        end_row = min(start_row + chunk_size, total_rows)
+        chunk_df = df.iloc[start_row:end_row] if total_rows > 0 else df
 
-    # Format Data Rows
-    for r_idx, (_, row) in enumerate(display_df.iterrows()):
-        bg_color = COLOR_BG_LIGHT if r_idx % 2 == 1 else COLOR_WHITE
-        for c_idx, col_name in enumerate(display_df.columns):
-            cell = tbl.cell(r_idx + 1, c_idx)
-            val = str(row[col_name]) if pd.notna(row[col_name]) else ""
-            cell.text = val
-            cell.fill.solid()
-            cell.fill.fore_color.rgb = bg_color
-            p = cell.text_frame.paragraphs[0]
-            p.alignment = PP_ALIGN.LEFT if c_idx == 0 else PP_ALIGN.CENTER
-            p.font.name = "Arial"
-            p.font.size = Pt(9.5)
-            p.font.color.rgb = COLOR_SECONDARY
+        blank_layout = prs.slide_layouts[6]
+        slide = prs.slides.add_slide(blank_layout)
 
-    # Footnote
-    if block.footnote or len(df) > 12:
-        fn_box = slide.shapes.add_textbox(
-            Inches(0.8), Inches(6.6), Inches(11.7), Inches(0.6)
+        title = base_title
+        if n_chunks > 1:
+            title = f"{base_title} (Part {chunk_idx + 1}/{n_chunks})"
+        _add_header_to_slide(slide, title, category_text="STATISTICAL TABLE")
+
+        n_rows, n_cols = len(chunk_df) + 1, len(chunk_df.columns)
+
+        table_left = Inches(0.8)
+        table_top = Inches(1.6)
+        table_width = Inches(11.7)
+        table_height = Inches(min(4.8, 0.35 * n_rows + 0.4))
+
+        table_shape = slide.shapes.add_table(
+            n_rows, n_cols, table_left, table_top, table_width, table_height
         )
-        fn_tf = fn_box.text_frame
-        fn_tf.word_wrap = True
-        fn_p = fn_tf.paragraphs[0]
+        tbl = table_shape.table
+
+        # Format Header Row
+        for c_idx, col_name in enumerate(chunk_df.columns):
+            cell = tbl.cell(0, c_idx)
+            cell.text = str(col_name)
+            cell.fill.solid()
+            cell.fill.fore_color.rgb = COLOR_PRIMARY
+            p = cell.text_frame.paragraphs[0]
+            p.alignment = PP_ALIGN.CENTER
+            p.font.name = "Arial"
+            p.font.size = Pt(10)
+            p.font.bold = True
+            p.font.color.rgb = COLOR_WHITE
+
+        # Format Data Rows
+        for r_idx, (_, row) in enumerate(chunk_df.iterrows()):
+            bg_color = COLOR_BG_LIGHT if r_idx % 2 == 1 else COLOR_WHITE
+            for c_idx, col_name in enumerate(chunk_df.columns):
+                cell = tbl.cell(r_idx + 1, c_idx)
+                val = str(row[col_name]) if pd.notna(row[col_name]) else ""
+                cell.text = val
+                cell.fill.solid()
+                cell.fill.fore_color.rgb = bg_color
+                p = cell.text_frame.paragraphs[0]
+                p.alignment = PP_ALIGN.LEFT if c_idx == 0 else PP_ALIGN.CENTER
+                p.font.name = "Arial"
+                p.font.size = Pt(9.5)
+                p.font.color.rgb = COLOR_SECONDARY
+
+        # Footnote
         notes = []
         if block.footnote:
             notes.append(block.footnote)
-        if len(df) > 12:
-            notes.append(f"(Showing first 12 of {len(df)} rows)")
-        fn_p.text = "   |   ".join(notes)
-        fn_p.font.name = "Arial"
-        fn_p.font.size = Pt(9)
-        fn_p.font.italic = True
-        fn_p.font.color.rgb = COLOR_MUTED
+        if n_chunks > 1:
+            notes.append(f"Rows {start_row + 1}–{end_row} of {total_rows}")
+
+        if notes:
+            fn_box = slide.shapes.add_textbox(
+                Inches(0.8), Inches(6.6), Inches(11.7), Inches(0.6)
+            )
+            fn_tf = fn_box.text_frame
+            fn_tf.word_wrap = True
+            fn_p = fn_tf.paragraphs[0]
+            fn_p.text = "   |   ".join(notes)
+            fn_p.font.name = "Arial"
+            fn_p.font.size = Pt(9)
+            fn_p.font.italic = True
+            fn_p.font.color.rgb = COLOR_MUTED
 
 
 def _add_content_slide(

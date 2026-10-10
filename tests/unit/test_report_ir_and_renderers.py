@@ -229,3 +229,63 @@ def test_renderers_missing_figure_raises_error(tmp_path: Path):
 
     with pytest.raises(FileNotFoundError):
         render_pptx(doc, tmp_path / "test.pptx")
+
+
+def test_render_pptx_table_pagination(tmp_path: Path):
+    """Verifies that tables with more than 12 rows paginate across multiple slides."""
+    df_large = pd.DataFrame(
+        {
+            "Variable": [f"Covariate_{i + 1:02d}" for i in range(25)],
+            "Value": [round(10.0 + i * 1.5, 2) for i in range(25)],
+        }
+    )
+    doc = ReportDocument(title="Pagination Test Report")
+    doc.add_heading("Baseline Patient Demographics", level=1)
+    doc.add_table(df_large, caption="Baseline Patient Demographics")
+    pptx_file = tmp_path / "paginated_presentation.pptx"
+    out_path = render_pptx(doc, pptx_file)
+
+    assert Path(out_path).exists()
+    prs = Presentation(str(out_path))
+
+    # Expect: Title slide + 3 continuation table slides (12 + 12 + 1 rows)
+    assert len(prs.slides) == 4
+
+    # Verify slide titles and footnotes
+    expected_titles = [
+        "Baseline Patient Demographics (Part 1/3)",
+        "Baseline Patient Demographics (Part 2/3)",
+        "Baseline Patient Demographics (Part 3/3)",
+    ]
+    expected_notes = [
+        "Rows 1–12 of 25",
+        "Rows 13–24 of 25",
+        "Rows 25–25 of 25",
+    ]
+
+    for idx, slide in enumerate(list(prs.slides)[1:]):
+        # Header title
+        header_shapes = [
+            s
+            for s in slide.shapes
+            if s.has_text_frame and len(s.text_frame.paragraphs) >= 2
+        ]
+        assert len(header_shapes) >= 1
+        assert header_shapes[0].text_frame.paragraphs[1].text == expected_titles[idx]
+
+        # Footnote
+        note_shapes = [
+            s
+            for s in slide.shapes
+            if s.has_text_frame and expected_notes[idx] in s.text_frame.text
+        ]
+        assert len(note_shapes) >= 1
+
+        # Table rows: header + chunk data rows
+        table_shapes = [s for s in slide.shapes if s.has_table]
+        assert len(table_shapes) == 1
+        tbl = table_shapes[0].table
+        if idx == 0 or idx == 1:
+            assert len(tbl.rows) == 13  # 1 header + 12 data rows
+        else:
+            assert len(tbl.rows) == 2  # 1 header + 1 data row
