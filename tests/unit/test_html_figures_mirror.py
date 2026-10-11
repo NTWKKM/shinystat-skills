@@ -5,8 +5,10 @@ tests/unit/test_html_figures_mirror.py: Unit tests for Dual/Toggle HTML figures 
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -25,6 +27,7 @@ from medstat.figures.html import (
 )
 from medstat.reporting.ir import ReportDocument
 from medstat.reporting.renderers import render_html
+from medstat.reporting.renderers.html import _encode_csv_data_uri
 
 
 @pytest.fixture
@@ -358,8 +361,6 @@ def test_render_html_static_only_figure(tmp_path: Path):
 
 def test_render_html_escapes_less_than_in_plotly_json(tmp_path: Path):
     """Verifies render_html escapes '<' as '\\u003c' in embedded plotly_json script tags."""
-    import re
-
     fig_png = tmp_path / "roc_escape.png"
     roc_data = {
         "fpr": [0.0, 0.2, 1.0],
@@ -400,3 +401,39 @@ def test_render_html_escapes_less_than_in_plotly_json(tmp_path: Path):
         t for t in parsed["data"] if "Model <Alpha>" in t.get("name", "")
     )
     assert "</script>" in alpha_trace["name"]
+
+
+def test_encode_csv_data_uri_missing_file_emits_warning(tmp_path: Path):
+    """Verifies that _encode_csv_data_uri warns with the CSV path when the file is missing."""
+    missing_csv = tmp_path / "nonexistent_source.csv"
+    with pytest.warns(UserWarning, match=re.escape(str(missing_csv.resolve()))):
+        res = _encode_csv_data_uri(missing_csv)
+    assert res is None
+
+
+def test_render_html_unreadable_csv_emits_warning_and_omits_download(tmp_path: Path):
+    """Verifies render_html warns when CSV cannot be read, but still outputs report without CSV button."""
+    png_path = tmp_path / "test_warn_fig.png"
+    fig, ax = plt.subplots()
+    ax.plot([1, 2], [3, 4])
+    fig.savefig(png_path)
+    plt.close(fig)
+
+    missing_csv = tmp_path / "missing_data_audit.csv"
+    fig_res = FigureResult(
+        png_path=str(png_path),
+        alt_text="Audit Figure",
+        caption="Audit Caption",
+        source_df=pd.DataFrame({"x": [1]}),
+        csv_path=str(missing_csv),
+    )
+    doc = ReportDocument(title="Audit Report")
+    doc.add_figure(fig_res)
+
+    out_html = tmp_path / "audit_report.html"
+    with pytest.warns(UserWarning, match=re.escape(str(missing_csv.resolve()))):
+        render_html(doc, out_html)
+
+    content = out_html.read_text(encoding="utf-8")
+    assert "Download 300 DPI PNG" in content
+    assert "CSV Data" not in content

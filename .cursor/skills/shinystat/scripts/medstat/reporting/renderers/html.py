@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import html
 import urllib.parse
+import warnings
 from pathlib import Path
 
 import pandas as pd
@@ -39,12 +40,22 @@ def _encode_csv_data_uri(csv_path: str | Path | None) -> str | None:
         return None
     p = Path(csv_path).resolve()
     if not p.exists():
+        warnings.warn(
+            f"CSV source data file not found at '{p}'. Omitting CSV download from report.",
+            UserWarning,
+            stacklevel=2,
+        )
         return None
     try:
         content = p.read_text(encoding="utf-8")
         escaped = urllib.parse.quote(content)
         return f"data:text/csv;charset=utf-8,{escaped}"
-    except Exception:
+    except Exception as e:
+        warnings.warn(
+            f"Failed to read CSV source data from '{p}': {e}. Omitting CSV download from report.",
+            UserWarning,
+            stacklevel=2,
+        )
         return None
 
 
