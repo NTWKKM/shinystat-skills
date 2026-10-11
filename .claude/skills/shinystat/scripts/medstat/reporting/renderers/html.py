@@ -48,15 +48,15 @@ def _encode_csv_data_uri(csv_path: str | Path | None) -> str | None:
         return None
     try:
         content = p.read_text(encoding="utf-8")
-        escaped = urllib.parse.quote(content)
-        return f"data:text/csv;charset=utf-8,{escaped}"
-    except Exception as e:
+    except (OSError, UnicodeError) as e:
         warnings.warn(
             f"Failed to read CSV source data from '{p}': {e}. Omitting CSV download from report.",
             UserWarning,
             stacklevel=2,
         )
         return None
+    escaped = urllib.parse.quote(content)
+    return f"data:text/csv;charset=utf-8,{escaped}"
 
 
 def render_html(

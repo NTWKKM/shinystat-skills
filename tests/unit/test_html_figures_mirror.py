@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import re
+import urllib.parse
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -432,6 +433,34 @@ def test_encode_csv_data_uri_read_exception_emits_warning(
     ):
         res = _encode_csv_data_uri(existing_csv)
     assert res is None
+
+
+def test_encode_csv_data_uri_invalid_utf8_emits_warning(tmp_path: Path):
+    """Verifies that _encode_csv_data_uri catches UnicodeError on non-UTF-8 files and emits a warning."""
+    invalid_utf8_csv = tmp_path / "invalid_utf8.csv"
+    invalid_utf8_csv.write_bytes(b"\xff\xfe\x00\x01\x80\x81")
+
+    with pytest.warns(
+        UserWarning, match=r"Failed to read CSV source data from.*invalid_utf8\.csv"
+    ):
+        res = _encode_csv_data_uri(invalid_utf8_csv)
+    assert res is None
+
+
+def test_encode_csv_data_uri_unexpected_exception_propagates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Verifies that non-OSError/non-UnicodeError exceptions (e.g. URI construction errors) propagate."""
+    csv_file = tmp_path / "valid.csv"
+    csv_file.write_text("x,y\n1,2", encoding="utf-8")
+
+    def mock_quote(content):
+        raise TypeError("Unexpected URI construction failure")
+
+    monkeypatch.setattr(urllib.parse, "quote", mock_quote)
+
+    with pytest.raises(TypeError, match="Unexpected URI construction failure"):
+        _encode_csv_data_uri(csv_file)
 
 
 def test_render_html_missing_csv_emits_warning_and_omits_download(tmp_path: Path):
