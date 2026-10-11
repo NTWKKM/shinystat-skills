@@ -37,7 +37,7 @@ def plot_dual_bland_altman(
     lower_loa = float(ba_data["loa_lower"])
 
     if "ci_mean_diff" not in plot_dict:
-        plot_dict["ci_mean_diff"] = ba_data.get("ci_mean_diff", [mean_diff, mean_diff])
+        plot_dict["ci_mean_diff"] = [mean_diff, mean_diff]
     if "ci_upper_loa" not in plot_dict:
         plot_dict["ci_upper_loa"] = ba_data.get("ci_loa_upper", [upper_loa, upper_loa])
     if "ci_lower_loa" not in plot_dict:

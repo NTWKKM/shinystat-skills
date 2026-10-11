@@ -148,6 +148,14 @@ def test_plot_dual_calibration(tmp_fig_dir: Path):
     spec = json.loads(res.plotly_json)
     assert "Brier = 0.085" in spec["layout"]["title"]["text"]
 
+    decile_trace = next(
+        t for t in spec["data"] if t.get("name") == "Decile Bins (95% CI)"
+    )
+    assert "customdata" in decile_trace
+    assert decile_trace["customdata"][0] == [0.04, 0.14]
+    assert "%{customdata[0]:.3f}" in decile_trace["hovertemplate"]
+    assert "%{customdata[1]:.3f}" in decile_trace["hovertemplate"]
+
 
 def test_plot_dual_dca(tmp_fig_dir: Path):
     """Verifies plot_dual_dca produces Net Benefit curves."""
@@ -244,6 +252,25 @@ def test_plot_dual_love(tmp_fig_dir: Path):
     assert Path(res.png_path).exists()
     assert res.plotly_json is not None
 
+    # Verify custom threshold propagation
+    res_custom = plot_dual_love(
+        love_data=love_data,
+        threshold=0.15,
+        title="Custom Threshold Balance",
+        out_path=tmp_fig_dir / "dual_love_015.png",
+    )
+    spec_custom = json.loads(res_custom.plotly_json)
+    thresh_lines = [
+        s for s in spec_custom["layout"].get("shapes", []) if s.get("x0") == 0.15
+    ]
+    assert len(thresh_lines) == 1
+    thresh_anns = [
+        a
+        for a in spec_custom["layout"].get("annotations", [])
+        if "0.15" in a.get("text", "")
+    ]
+    assert len(thresh_anns) == 1
+
 
 def test_render_html_dual_toggle_view(tmp_path: Path):
     """Verifies render_html renders Dual Toggle UI, offline notice, and download buttons."""
@@ -282,6 +309,7 @@ def test_render_html_dual_toggle_view(tmp_path: Path):
     assert "offline-banner" in content
     assert "โหมดออฟไลน์ (Offline Mode)" in content
     assert "สลับไปดู Publication Figure (300 DPI)" in content
+    assert "switchFigView(id, 'static');" in content
 
     # Verify Print Media Styles
     assert "@media print" in content

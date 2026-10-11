@@ -78,6 +78,7 @@ def plot_dual_calibration(
         go.Scatter(
             x=p_means,
             y=o_rates,
+            customdata=np.column_stack([ci_low, ci_high]).tolist(),
             mode="markers",
             marker=dict(size=9, color="#0F172A", symbol="circle"),
             error_y=dict(
@@ -92,7 +93,7 @@ def plot_dual_calibration(
             hovertemplate=(
                 "Pred Mean: %{x:.3f}<br>"
                 "Obs Rate: %{y:.3f}<br>"
-                "95% CI: [%{error_y.arrayminus:.3f}, %{error_y.array:.3f}]<extra></extra>"
+                "95% CI: [%{customdata[0]:.3f}, %{customdata[1]:.3f}]<extra></extra>"
             ),
         )
     )

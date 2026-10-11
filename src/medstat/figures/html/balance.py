@@ -53,7 +53,18 @@ def plot_dual_love(
         }
     )
 
-    fig = create_love_plot(comp_df)
+    try:
+        fig = create_love_plot(comp_df, threshold=threshold)
+    except TypeError:
+        fig = create_love_plot(comp_df)
+        for shape in fig.layout.shapes:
+            if getattr(shape, "type", None) == "line" and shape.x0 == 0.10:
+                shape.x0 = threshold
+                shape.x1 = threshold
+        for ann in fig.layout.annotations:
+            if "Threshold" in getattr(ann, "text", ""):
+                ann.x = threshold
+                ann.text = f"Threshold ({threshold:.2f})"
     fig.update_layout(
         title=dict(text=title, font=dict(size=15, color="#0F172A")),
         margin=dict(l=120, r=40, t=50, b=50),
