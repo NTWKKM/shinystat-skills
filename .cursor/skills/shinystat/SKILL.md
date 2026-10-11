@@ -52,7 +52,7 @@ If requirements, outcome directions, or statistical assumptions are ambiguous or
    - **Report Intermediate Representation (IR)**: Single Source of Truth (`ReportDocument`). Narrative blocks, 3-rule tables, and figures assembled into an immutable intermediate representation before export.
    - **Publication Figures (300 DPI)**: High-resolution, colorblind-safe plots with Thai font fallbacks (`Sarabun`, `Thonburi`, `Sukhumvit Set`). Consult [figures.md](references/figures.md) for forest plots, KM curves, ROC, calibration, DCA, Bland-Altman, love plots, and STROBE retention flowcharts.
    - **Multi-Format Renderers & Default Deliverable**: Consult [report-builder.md](references/report-builder.md) for exporting:
-     - Self-contained HTML (`.html`): **Default deliverable format**. Embedded base64 images and responsive ICMJE table styling. If format is unspecified by the user, **always default to self-contained HTML (`.html`)**.
+     - Self-contained HTML (`.html`): **Default deliverable format**. Dual / Toggle View (interactive Plotly + publication 300 DPI base64 images with offline-first fallback) and responsive ICMJE table styling. If format is unspecified by the user, **always default to self-contained HTML (`.html`)**.
      - Word (`.docx`): OpenXML 3-rule table borders (`<w:tblBorders>`) and 6.5 in printable figures.
      - PowerPoint (`.pptx`): 16:9 widescreen slides (`13.333" x 7.5"`), 1 figure per slide with takeaway callout cards.
      - Markdown (`.md`): GitHub-flavored markdown with linked asset directory.

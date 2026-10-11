@@ -56,7 +56,7 @@ If requirements, outcome directions, or primary estimands are ambiguous or unsup
 5. **Pillar 5: Reporting Integrity, Publication Figures & Multi-Format Documents**
    - **Standalone Execution**: Generate publication figures and reports directly using standard libraries (`matplotlib`, `seaborn`) without importing `medstat`.
    - **Figure Generation**: Consult [figures.md](references/figures.md) for 300 DPI publication standards, colorblind palettes, and standalone Matplotlib recipes (forest, KM, ROC, calibration, DCA, Bland-Altman, love plot, STROBE flow).
-   - **Multi-Format Export & Default Deliverable**: Consult [report-builder.md](references/report-builder.md) for standalone reporting recipes. **If the user does not specify an output format, always default to self-contained HTML (`.html`)** with embedded figures and responsive publication styling. Other formats (Word `.docx` when `python-docx` is installed, PowerPoint `.pptx`, Markdown `.md`, PDF) are generated only when explicitly requested.
+   - **Multi-Format Export & Default Deliverable**: Consult [report-builder.md](references/report-builder.md) for standalone reporting recipes. **If the user does not specify an output format, always default to self-contained HTML (`.html`)** with embedded figures, dual interactive toggle view (Plotly + 300 DPI publication static with offline fallback), and responsive publication styling. Other formats (Word `.docx` when `python-docx` is installed, PowerPoint `.pptx`, Markdown `.md`, PDF) are generated only when explicitly requested.
    - **Integrity Verification**: Enforce standalone Zero-PHI screening across narrative text, table headers, and cell values, along with observational causal/E-value caveats via `verify_standalone_integrity`.
 
 ---

@@ -57,11 +57,14 @@ def generate_markdown_report(
     return str(out_p)
 ```
 
-### B. Self-Contained HTML Report with Embedded Figures
+### B. Self-Contained HTML Report with Dual / Toggle View
+
+Generates a standalone single-file HTML report with ICMJE 3-rule tables and **Dual / Toggle View** (interactive Plotly charts with instant toggle to 300 DPI publication figures, download buttons, and offline resilience):
 
 ```python
 import base64
 import html
+import json
 from pathlib import Path
 import pandas as pd
 
@@ -71,25 +74,41 @@ def generate_html_report(
     results: dict,
     tables: dict[str, pd.DataFrame],
     figure_paths: list[str] = None,
+    plotly_figs: list[any] = None,  # optional list of go.Figure matching figure_paths
     out_path: str = "report.html",
 ) -> str:
+    has_plotly = bool(plotly_figs)
     parts = [
         "<!DOCTYPE html><html><head><meta charset='utf-8'>",
         f"<title>{html.escape(title)}</title>",
+    ]
+    if has_plotly:
+        parts.append("<script src='https://cdn.plot.ly/plotly-2.35.2.min.js'></script>")
+
+    parts.extend([
         "<style>",
-        "  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1e293b; max-width: 900px; margin: 40px auto; padding: 0 20px; }",
-        "  h1 { font-size: 26px; border-bottom: 2px solid #0f172a; padding-bottom: 10px; }",
+        "  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1e293b; max-width: 920px; margin: 40px auto; padding: 0 20px; background: #fafafa; }",
+        "  .container { background: #fff; padding: 40px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }",
+        "  h1 { font-size: 26px; border-bottom: 2px solid #0f172a; padding-bottom: 10px; margin-top: 0; }",
         "  h2 { font-size: 20px; color: #0284c7; margin-top: 30px; }",
         "  table.pub-table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 14px; }",
         "  table.pub-table thead tr { border-top: 2px solid #0f172a; border-bottom: 1px solid #0f172a; }",
         "  table.pub-table tbody tr:last-child { border-bottom: 2px solid #0f172a; }",
         "  table.pub-table th, table.pub-table td { padding: 8px 12px; text-align: left; }",
-        "  .figure-container { text-align: center; margin: 25px 0; }",
-        "  .figure-container img { max-width: 100%; height: auto; border: 1px solid #e2e8f0; }",
+        "  .figure-card { margin: 30px 0; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; background: #fff; }",
+        "  .figure-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; flex-wrap: wrap; gap: 8px; }",
+        "  .fig-tabs { display: inline-flex; background: #e2e8f0; border-radius: 6px; padding: 2px; }",
+        "  .fig-btn { border: none; background: transparent; padding: 5px 12px; border-radius: 5px; font-size: 12.5px; cursor: pointer; color: #475569; }",
+        "  .fig-btn.active { background: #fff; color: #0f172a; font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,0.06); }",
+        "  .fig-actions a { padding: 4px 10px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px; text-decoration: none; color: #334155; background: #fff; }",
+        "  .figure-view { padding: 16px; text-align: center; }",
+        "  .figure-view img { max-width: 100%; height: auto; border-radius: 4px; }",
+        "  .offline-banner { margin: 12px; padding: 12px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; text-align: left; font-size: 13px; color: #92400e; }",
         "  .caption { font-size: 13px; color: #64748b; font-style: italic; margin-top: 6px; }",
-        "</style></head><body>",
+        "  @media print { .figure-toolbar { display: none !important; } .view-interactive { display: none !important; } .view-static { display: block !important; } }",
+        "</style></head><body><div class='container'>",
         f"<h1>{html.escape(title)}</h1>",
-    ]
+    ])
 
     # Narrative
     if "narrative" in results:
@@ -97,9 +116,7 @@ def generate_html_report(
 
     # Tables
     for caption, df in tables.items():
-        parts.append(
-            f"<div class='caption'><strong>{html.escape(caption)}</strong></div>"
-        )
+        parts.append(f"<div class='caption'><strong>{html.escape(caption)}</strong></div>")
         parts.append("<table class='pub-table'><thead><tr>")
         for col in df.columns:
             parts.append(f"<th>{html.escape(str(col))}</th>")
@@ -112,17 +129,96 @@ def generate_html_report(
             parts.append("</tr>")
         parts.append("</tbody></table>")
 
-    # Figures (Base64 embedded)
+    # Figures (Dual / Toggle View)
     if figure_paths:
-        for fig_p_str in figure_paths:
+        for idx, fig_p_str in enumerate(figure_paths):
             fp = Path(fig_p_str)
-            if fp.exists():
-                b64 = base64.b64encode(fp.read_bytes()).decode("utf-8")
-                parts.append("<div class='figure-container'>")
-                parts.append(f"<img src='data:image/png;base64,{b64}'>")
-                parts.append("</div>")
+            if not fp.exists():
+                continue
+            b64 = base64.b64encode(fp.read_bytes()).decode("utf-8")
+            plt_fig = plotly_figs[idx] if plotly_figs and idx < len(plotly_figs) else None
+            idx_str = str(idx + 1)
+            stem = fp.stem
 
-    parts.append("</body></html>")
+            parts.append(f"<div class='figure-card' id='fig-card-{idx_str}'>")
+            parts.append("<div class='figure-toolbar'>")
+            if plt_fig:
+                parts.append("<div class='fig-tabs'>")
+                parts.append(f"<button type='button' class='fig-btn active' id='tab-i-{idx_str}' onclick=\"switchFig('{idx_str}', 'i')\">Interactive (Plotly)</button>")
+                parts.append(f"<button type='button' class='fig-btn' id='tab-s-{idx_str}' onclick=\"switchFig('{idx_str}', 's')\">Publication 300 DPI</button>")
+                parts.append("</div>")
+            else:
+                parts.append("<span style='font-size:12.5px; font-weight:600;'>Publication Figure (300 DPI)</span>")
+            parts.append(f"<div class='fig-actions'><a href='data:image/png;base64,{b64}' download='{stem}.png'>Download 300 DPI PNG</a></div>")
+            parts.append("</div>")
+
+            if plt_fig:
+                plotly_json = plt_fig.to_json() if hasattr(plt_fig, 'to_json') else json.dumps(plt_fig)
+                parts.append(f"<div class='figure-view view-interactive' id='view-i-{idx_str}'>")
+                parts.append(f"<div id='plotly-div-{idx_str}' style='min-height:480px; width:100%;'></div>")
+                parts.append(f"<div id='offline-msg-{idx_str}' class='offline-banner' style='display:none;'>📡 โหมดออฟไลน์: ไม่สามารถโหลด Plotly CDN ได้ กรุณาสลับไปดูรูป 300 DPI <button onclick=\"switchFig('{idx_str}', 's')\" style='margin-left:8px; cursor:pointer;'>สลับไปดูรูป 300 DPI</button></div>")
+                parts.append("</div>")
+                parts.append(f"<div class='figure-view view-static' id='view-s-{idx_str}' style='display:none;'>")
+                parts.append(f"<img src='data:image/png;base64,{b64}' alt='{stem}'>")
+                parts.append("</div>")
+                parts.append(f"<script type='application/json' id='spec-{idx_str}'>{plotly_json}</script>")
+            else:
+                parts.append(f"<div class='figure-view view-static' id='view-s-{idx_str}'>")
+                parts.append(f"<img src='data:image/png;base64,{b64}' alt='{stem}'>")
+                parts.append("</div>")
+            parts.append("</div>")
+
+    if has_plotly:
+        parts.append("""
+<script>
+function switchFig(id, view) {
+  var vi = document.getElementById('view-i-' + id);
+  var vs = document.getElementById('view-s-' + id);
+  var ti = document.getElementById('tab-i-' + id);
+  var ts = document.getElementById('tab-s-' + id);
+  if (view === 'i') {
+    if (typeof Plotly === 'undefined') {
+      var msg = document.getElementById('offline-msg-' + id);
+      if (msg) msg.style.display = 'block';
+      return;
+    }
+    if (vi) vi.style.display = 'block';
+    if (vs) vs.style.display = 'none';
+    if (ti) ti.classList.add('active');
+    if (ts) ts.classList.remove('active');
+    var div = document.getElementById('plotly-div-' + id);
+    if (div && window.Plotly) Plotly.Plots.resize(div);
+  } else {
+    if (vi) vi.style.display = 'none';
+    if (vs) vs.style.display = 'block';
+    if (ti) ti.classList.remove('active');
+    if (ts) ts.classList.add('active');
+  }
+}
+document.addEventListener('DOMContentLoaded', function() {
+  if (typeof Plotly === 'undefined') {
+    document.querySelectorAll('.figure-card').forEach(function(c) {
+      var id = c.id.replace('fig-card-', '');
+      var msg = document.getElementById('offline-msg-' + id);
+      if (msg) msg.style.display = 'block';
+    });
+    return;
+  }
+  document.querySelectorAll('script[type=\"application/json\"][id^=\"spec-\"]').forEach(function(s) {
+    var id = s.id.replace('spec-', '');
+    var div = document.getElementById('plotly-div-' + id);
+    if (div) {
+      try {
+        var spec = JSON.parse(s.textContent);
+        Plotly.newPlot(div, spec.data || [], spec.layout || {}, {responsive: true, displaylogo: false});
+      } catch(e) { switchFig(id, 's'); }
+    }
+  });
+});
+</script>
+""")
+
+    parts.append("</div></body></html>")
     out_p = Path(out_path)
     out_p.parent.mkdir(parents=True, exist_ok=True)
     out_p.write_text("\n".join(parts), encoding="utf-8")

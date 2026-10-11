@@ -911,3 +911,40 @@ Previously, `skills/` housed only `skills/shinystat/`, while `shinystat-cloud` w
 
 [MEMORY_LEARN: Structuring multiple atomic skills under canonical `skills/<skill-name>/` enables `skills.sh` to auto-discover individual skills, allowing selective installation via `--skill <name>` while maintaining multi-platform mirror synchronization.]
 
+---
+
+## ADR 36: Dual / Toggle View (Plotly.js + 300 DPI Publication PNG) with Isolated HTML Figures Mirror and Offline Resilience
+
+### Context
+In medical and clinical research, HTML reports serve two distinct audiences:
+1. **Exploratory Clinicians & Researchers**: Desire interactive visualizations (Plotly.js) to hover over ROC curve thresholds to evaluate Sensitivity/Specificity at specific clinical cutoffs, zoom into Kaplan-Meier survival curves to inspect numbers at risk over specific timeframes, and inspect calibration deciles and DCA Net Benefit values.
+2. **Journal Submission & Peer Review**: Require strict 300 DPI static bitmap figures (Matplotlib) adhering to ICMJE/NEJM/JAMA typographical standards and layout invariants, along with downloadable CSV datasets for numerical auditability.
+
+Directly bundling Plotly.js into HTML files inflates report size by ~3.5–4 MB per report, while relying purely on external CDN can break in offline hospital intranets or strict cloud sandboxes (e.g. Claude Web Artifacts / iframe CSP). Furthermore, mutating existing `src/medstat/figures/*.py` core figure generators could inadvertently introduce regressions into Word, PowerPoint, PDF, and CLI workflows.
+
+### Decision
+1. **Isolated Mirror Folder Pattern (`src/medstat/figures/html/`)**:
+   - Preserves all baseline `src/medstat/figures/*.py` and stat calculation modules 100% untouched.
+   - Introduces `DualFigureResult` (subclass of `FigureResult` in `src/medstat/figures/html/base.py`) which holds both the 300 DPI Matplotlib PNG and the companion Plotly interactive specification (`plotly_json`, `plotly_fig`).
+   - Implements companion dual generators (`plot_dual_roc_curve`, `plot_dual_kaplan_meier`, `plot_dual_calibration`, `plot_dual_dca`, `plot_dual_bland_altman`, `plot_dual_forest`, `plot_dual_love`).
+2. **Dual / Toggle HTML Card (`render_html`)**:
+   - Generates a figure card with segmented pill toggle buttons: `[Interactive (Plotly)]` and `[Publication 300 DPI (Static)]`.
+   - Incorporates one-click direct download buttons for high-resolution 300 DPI PNG (`data:image/png;base64,...`) and raw source data CSV (`data:text/csv;charset=utf-8,...`).
+3. **Offline-First & Sandbox Resilience (AGENTS.md Invariant)**:
+   - Plotly.js CDN is injected only when interactive figures exist in the document.
+   - If the CDN is blocked or the client is offline (`typeof Plotly === 'undefined'`), the document displays an informational notice banner with an immediate button `[สลับไปดู Publication Figure (300 DPI)]` to smoothly toggle to the static 300 DPI image without script errors or broken blank canvases.
+   - Top tab buttons remain active and fully functional for manual switching.
+4. **Print Parity (`@media print`)**:
+   - When printing to paper or PDF (Cmd+P), CSS media queries hide the toolbar, suppress interactive canvas elements, and print the crisp 300 DPI publication image.
+5. **Skill Reference Alignment**:
+   - Synchronized `report-builder.md`, `figures.md`, `SKILL.md`, and `decision-heuristics.md` across both flagship `shinystat` and `shinystat-cloud` skills, maintaining 100% byte-identical mirror parity.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Safety**: Zero modifications to existing baseline `src/medstat/figures/` modules.
+- **User Experience**: Clinicians can explore data dynamically or export publication-ready assets seamlessly.
+- **Zero Drift**: Multi-agent mirror parity verified by automated unit tests.
+
+[MEMORY_LEARN: Dual / Toggle View in clinical HTML reporting pairs exploratory Plotly interactivity with 300 DPI publication static images, using an isolated mirror folder (`figures/html/`) to protect baseline modules while enforcing offline CDN fallback and @media print parity.]
+
+
