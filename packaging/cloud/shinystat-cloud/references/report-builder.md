@@ -765,19 +765,21 @@ def build_plotly_bland_altman_spec(
         except (TypeError, ValueError):
             continue
 
+    sample_mean_d = sum(diffs) / len(diffs) if diffs else None
     mean_diff = _clean_float(ba_data.get("mean_diff"))
-    if mean_diff is None and diffs:
-        mean_diff = sum(diffs) / len(diffs)
+    if mean_diff is None:
+        mean_diff = sample_mean_d
 
     loa_upper = _clean_float(ba_data.get("loa_upper"))
     loa_lower = _clean_float(ba_data.get("loa_lower"))
-    if (loa_upper is None or loa_lower is None) and len(diffs) >= 2 and mean_diff is not None:
-        variance = sum((d - mean_diff) ** 2 for d in diffs) / (len(diffs) - 1)
+    if (loa_upper is None or loa_lower is None) and len(diffs) >= 2 and sample_mean_d is not None:
+        variance = sum((d - sample_mean_d) ** 2 for d in diffs) / (len(diffs) - 1)
         sd = math.sqrt(variance)
+        bias_center = mean_diff if mean_diff is not None else sample_mean_d
         if loa_upper is None:
-            loa_upper = mean_diff + 1.96 * sd
+            loa_upper = bias_center + 1.96 * sd
         if loa_lower is None:
-            loa_lower = mean_diff - 1.96 * sd
+            loa_lower = bias_center - 1.96 * sd
 
     min_x = min(means) if means else 0.0
     max_x = max(means) if means else 1.0

@@ -1697,10 +1697,7 @@ def _extract_report_builder_namespace():
     blocks = re.findall(r"```python\n(.*?)\n```", content, re.DOTALL)
     ns = {}
     for block in blocks:
-        try:
-            exec(block, ns)
-        except Exception:
-            pass
+        exec(block, ns)
     return ns
 
 
@@ -1848,11 +1845,24 @@ def test_cloud_standalone_plotly_spec_generators(tmp_path):
         units="mmHg",
     )
     assert len(ba_spec_calc["data"]) == 5
-    assert any("Mean Bias" in t.get("name", "") for t in ba_spec_calc["data"])
+    bias_trace = next(
+        t for t in ba_spec_calc["data"] if "Mean Bias" in t.get("name", "")
+    )
+    upper_trace = next(
+        t for t in ba_spec_calc["data"] if "Upper LoA" in t.get("name", "")
+    )
+    lower_trace = next(
+        t for t in ba_spec_calc["data"] if "Lower LoA" in t.get("name", "")
+    )
+    assert pytest.approx(bias_trace["y"][0], abs=1e-3) == -0.125
+    assert pytest.approx(upper_trace["y"][0], abs=1e-3) == 1.4214
+    assert pytest.approx(lower_trace["y"][0], abs=1e-3) == -1.6714
 
     # Bland-Altman empty diffs omits bias/LoA without substituting zero
     ba_spec_empty = build_ba(ba_data={"means": [], "diffs": []})
     assert len(ba_spec_empty["data"]) == 2  # points + zero bias line only
+    assert not any("Mean Bias" in t.get("name", "") for t in ba_spec_empty["data"])
+    assert not any("Upper LoA" in t.get("name", "") for t in ba_spec_empty["data"])
 
     # 6. Forest Plot - verify categorical yaxis and log positivity filter
     build_forest = ns["build_plotly_forest_spec"]
@@ -1936,3 +1946,26 @@ def test_cloud_standalone_plotly_spec_generators(tmp_path):
     assert "Publication 300 DPI" in html_content
     assert "spec-1" in html_content
     assert "<script type='application/json' id='spec-1'>" in html_content
+    # Fallback to static figure when Plotly is unavailable or offline
+    assert "if (typeof Plotly === 'undefined')" in html_content
+    assert "switchFig(id, 's');" in html_content
+    assert "offline-msg-" in html_content
+
+    # Regression test: verify opening angle brackets are escaped in embedded JSON to prevent XSS / script breakouts
+    malicious_title = "</script><script>alert('xss')</script>"
+    xss_spec = {
+        "data": [{"type": "scatter", "x": [0, 1], "y": [0, 1]}],
+        "layout": {"title": {"text": malicious_title}},
+    }
+    xss_html = tmp_path / "xss_report.html"
+    res_xss_path = gen_html(
+        title="Security Test Report",
+        results={"narrative": "Validating JSON script escaping"},
+        tables={},
+        figure_paths=[str(fake_png)],
+        plotly_figs=[xss_spec],
+        out_path=str(xss_html),
+    )
+    xss_content = Path(res_xss_path).read_text(encoding="utf-8")
+    assert "\\u003c/script>\\u003cscript>" in xss_content
+    assert "</script><script>alert('xss')</script>" not in xss_content
