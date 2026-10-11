@@ -61,9 +61,20 @@ md_path = render_markdown(
 ```
 
 ### Self-Contained HTML (`render_html`)
-Produces a single, fully offline HTML file with embedded base64 images and ICMJE 3-rule table styling:
+Produces a single, fully offline-capable HTML file with embedded base64 images, ICMJE 3-rule table styling, and **Dual / Toggle View**:
+- **Exploratory View**: Plotly.js interactive charts (hover over ROC cutpoints, zoom Kaplan-Meier timelines, inspect calibration deciles) when using `medstat.figures.html.*`.
+- **Publication View**: Seamless segmented switch to 300 DPI Matplotlib figures formatted for journal submission (NEJM/JAMA).
+- **Direct Downloads**: One-click download buttons for high-resolution 300 DPI PNG and underlying CSV dataset.
+- **Offline & Sandbox Resilience**: Automatic fallback notice with manual toggle button if Plotly CDN is unreachable.
+- **Print Optimization**: `@media print` cleanly suppresses toggle chrome and prints high-resolution static images.
+
 ```python
+from medstat.figures.html import plot_dual_roc_curve
 from medstat.reporting.renderers import render_html
+
+# Generate dual figure (Matplotlib 300 DPI PNG + Plotly interactive)
+fig_res = plot_dual_roc_curve(roc_data, out_path="figures/roc.png")
+doc.add_figure(fig_res)
 
 html_path = render_html(doc, out_path="reports/ami_study.html")
 ```

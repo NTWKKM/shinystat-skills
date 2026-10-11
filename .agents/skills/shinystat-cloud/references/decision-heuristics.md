@@ -73,3 +73,4 @@ Identify Clinical Biomarker Mechanism
 - **JAMA Style**: Clean minimal dividers, $P$-values formatted without leading zero: $P = .04$ or $P < .001$.
 - **Precision Invariants**: Unrounded intermediate calculations (`float64`); OR/HR reported to 2 decimal places with 95% CIs; percentages reported to 1 decimal place; explicit units mandatory (`mg/dL`, `mL/min/1.73m²`).
 - **Reporting Checklists**: Consult EQUATOR standards: STROBE (observational cohorts), CONSORT (trials), TRIPOD (prediction models), STARD (diagnostic accuracy), or PRISMA (systematic reviews).
+- **Figures & Visualizations**: Consult [figures.md](figures.md) for 300 DPI publication plots and [report-builder.md](report-builder.md) for HTML Dual / Toggle View.

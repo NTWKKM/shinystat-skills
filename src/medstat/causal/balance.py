@@ -163,7 +163,10 @@ def compare_pre_post_balance(
     return pd.DataFrame(combined)
 
 
-def create_love_plot(balance_comparison_df: pd.DataFrame) -> go.Figure:
+def create_love_plot(
+    balance_comparison_df: pd.DataFrame,
+    threshold: float = 0.10,
+) -> go.Figure:
     """
     Generate an interactive Love Plot comparing Pre- vs Post-match absolute SMDs.
     """
@@ -193,12 +196,12 @@ def create_love_plot(balance_comparison_df: pd.DataFrame) -> go.Figure:
         )
     )
 
-    # Threshold line at SMD = 0.10
+    # Threshold line at SMD = threshold
     fig.add_vline(
-        x=0.10,
+        x=threshold,
         line_dash="dash",
         line_color=COLORS["warning"],
-        annotation_text="Threshold (0.10)",
+        annotation_text=f"Threshold ({threshold:.2f})",
         annotation_position="top right",
     )
 

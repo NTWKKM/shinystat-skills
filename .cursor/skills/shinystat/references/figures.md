@@ -185,3 +185,26 @@ res = plot_retention_flow(
 
 ### 9. Statistical Diagnostics (`plot_missingness_map`, `plot_schoenfeld_residuals`, `plot_mice_diagnostics`)
 Automates pre-modeling and post-modeling diagnostic validation plots.
+
+---
+
+## 3. Interactive HTML Figures (`medstat.figures.html`)
+
+For interactive HTML reports, use the mirror submodule `medstat.figures.html`. It generates a `DualFigureResult` (subclass of `FigureResult`) containing both a publication-standard 300 DPI Matplotlib figure and a Plotly interactive figure:
+
+- **`plot_dual_roc_curve(roc_data, ...)`**: Empirical ROC curve with interactive threshold/sensitivity/specificity tooltips and chance diagonal.
+- **`plot_dual_kaplan_meier(km_curves, risk_table, ...)`**: Step-function survival curves with 95% CI bands and hover tooltips.
+- **`plot_dual_calibration(calib_bins, ...)`**: Decile calibration points with 95% Wilson CI error bars and Brier/ICI annotations.
+- **`plot_dual_dca(dca_data, ...)`**: Vickers Decision Curve Analysis comparing model net benefit against Treat All and Treat None.
+- **`plot_dual_bland_altman(ba_data, ...)`**: Paired difference plot with mean bias, 95% Limits of Agreement, and confidence intervals.
+- **`plot_dual_forest(data, ...)`**: Forest plot with log-scale axis and interactive point estimates.
+- **`plot_dual_love(love_data, ...)`**: Austin 2009 Love plot comparing Pre- vs Post-match covariate balance relative to 0.10 SMD threshold.
+
+```python
+from medstat.figures.html import plot_dual_roc_curve, DualFigureResult
+
+dual_fig = plot_dual_roc_curve(roc_data, out_path="figures/roc_curve.png")
+# Pass directly to ReportDocument; render_html will automatically render the Dual / Toggle View
+doc.add_figure(dual_fig)
+```
+

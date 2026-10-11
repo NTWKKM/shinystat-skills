@@ -71,3 +71,4 @@ Identify Clinical Biomarker Mechanism
 - **JAMA Style**: Clean minimal dividers, $P$-values formatted without leading zero: $P = .04$ or $P < .001$.
 - **APA 7th Style**: Standard psychological and behavioral format with exact degrees of freedom.
 - **Reporting Checklists**: Consult STROBE (observational cohorts), CONSORT (trials), TRIPOD (prediction models), STARD (diagnostic accuracy), or PRISMA (systematic reviews).
+- **Figures & Visualizations**: Consult [figures.md](figures.md) for 300 DPI publication plots and [report-builder.md](report-builder.md) for HTML Dual / Toggle View (interactive Plotly + 300 DPI static).
