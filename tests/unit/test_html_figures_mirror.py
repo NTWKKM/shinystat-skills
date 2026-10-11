@@ -411,8 +411,31 @@ def test_encode_csv_data_uri_missing_file_emits_warning(tmp_path: Path):
     assert res is None
 
 
-def test_render_html_unreadable_csv_emits_warning_and_omits_download(tmp_path: Path):
-    """Verifies render_html warns when CSV cannot be read, but still outputs report without CSV button."""
+def test_encode_csv_data_uri_read_exception_emits_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Verifies that _encode_csv_data_uri warns with the CSV path when reading an existing file throws an exception."""
+    existing_csv = tmp_path / "error_file.csv"
+    existing_csv.write_text("data", encoding="utf-8")
+
+    orig_read_text = Path.read_text
+
+    def mock_read_text(self, *args, **kwargs):
+        if self.name == "error_file.csv":
+            raise PermissionError("Permission denied")
+        return orig_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", mock_read_text)
+
+    with pytest.warns(
+        UserWarning, match=r"Failed to read CSV source data from.*error_file\.csv"
+    ):
+        res = _encode_csv_data_uri(existing_csv)
+    assert res is None
+
+
+def test_render_html_missing_csv_emits_warning_and_omits_download(tmp_path: Path):
+    """Verifies render_html warns when CSV file is missing, but still outputs report without CSV button."""
     png_path = tmp_path / "test_warn_fig.png"
     fig, ax = plt.subplots()
     ax.plot([1, 2], [3, 4])
@@ -432,6 +455,49 @@ def test_render_html_unreadable_csv_emits_warning_and_omits_download(tmp_path: P
 
     out_html = tmp_path / "audit_report.html"
     with pytest.warns(UserWarning, match=re.escape(str(missing_csv.resolve()))):
+        render_html(doc, out_html)
+
+    content = out_html.read_text(encoding="utf-8")
+    assert "Download 300 DPI PNG" in content
+    assert "CSV Data" not in content
+
+
+def test_render_html_unreadable_csv_emits_warning_and_omits_download(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Verifies render_html warns when an existing CSV raises an exception on read, but still outputs report without CSV button."""
+    png_path = tmp_path / "test_read_err_fig.png"
+    fig, ax = plt.subplots()
+    ax.plot([1, 2], [3, 4])
+    fig.savefig(png_path)
+    plt.close(fig)
+
+    existing_csv = tmp_path / "unreadable_audit.csv"
+    existing_csv.write_text("x,y\n1,2", encoding="utf-8")
+
+    fig_res = FigureResult(
+        png_path=str(png_path),
+        alt_text="Audit Figure",
+        caption="Audit Caption",
+        source_df=pd.DataFrame({"x": [1]}),
+        csv_path=str(existing_csv),
+    )
+    doc = ReportDocument(title="Audit Report")
+    doc.add_figure(fig_res)
+
+    orig_read_text = Path.read_text
+
+    def mock_read_text(self, *args, **kwargs):
+        if self.name == "unreadable_audit.csv":
+            raise OSError("Simulated disk read I/O error")
+        return orig_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", mock_read_text)
+
+    out_html = tmp_path / "read_err_report.html"
+    with pytest.warns(
+        UserWarning, match=r"Failed to read CSV source data from.*unreadable_audit\.csv"
+    ):
         render_html(doc, out_html)
 
     content = out_html.read_text(encoding="utf-8")
