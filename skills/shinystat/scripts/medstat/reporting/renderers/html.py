@@ -431,7 +431,7 @@ def render_html(
                         '        <div class="figure-meta-badge">Journal Publication Standard &bull; 300 DPI Matplotlib</div>',
                         "      </div>",
                         f'      <script type="application/json" id="plotly-spec-{idx_str}">',
-                        plotly_json,
+                        plotly_json.replace("<", "\\u003c"),
                         "      </script>",
                     ]
                 )

@@ -354,3 +354,49 @@ def test_render_html_static_only_figure(tmp_path: Path):
     assert "Publication Figure (300 DPI)" in content
     assert "Interactive (Plotly)" not in content
     assert "Download 300 DPI PNG" in content
+
+
+def test_render_html_escapes_less_than_in_plotly_json(tmp_path: Path):
+    """Verifies render_html escapes '<' as '\\u003c' in embedded plotly_json script tags."""
+    import re
+
+    fig_png = tmp_path / "roc_escape.png"
+    roc_data = {
+        "fpr": [0.0, 0.2, 1.0],
+        "tpr": [0.0, 0.8, 1.0],
+        "auc": 0.88,
+        "name": "Model <Alpha> </script><script>alert(1)</script>",
+    }
+    dual_res = plot_dual_roc_curve(
+        roc_data=roc_data,
+        title="Cutoff < 0.05",
+        out_path=fig_png,
+    )
+
+    doc = ReportDocument(title="Test Escaping")
+    doc.add_figure(dual_res)
+
+    out_html = tmp_path / "report_escape.html"
+    render_html(doc, out_html)
+
+    content = out_html.read_text(encoding="utf-8")
+
+    match = re.search(
+        r'<script type="application/json" id="plotly-spec-1">\s*(.*?)\s*</script>',
+        content,
+        re.DOTALL,
+    )
+    assert match is not None, "Plotly spec script tag not found"
+    script_json = match.group(1)
+
+    # Verify no unescaped '<' exists inside the embedded JSON script element
+    assert "<" not in script_json
+    assert "\\u003c" in script_json
+
+    # Verify JSON parsing faithfully reproduces original string content
+    parsed = json.loads(script_json)
+    assert "Cutoff < 0.05" in parsed["layout"]["title"]["text"]
+    alpha_trace = next(
+        t for t in parsed["data"] if "Model <Alpha>" in t.get("name", "")
+    )
+    assert "</script>" in alpha_trace["name"]
