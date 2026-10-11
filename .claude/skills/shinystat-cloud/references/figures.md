@@ -188,23 +188,35 @@ Automates pre-modeling and post-modeling diagnostic validation plots.
 
 ---
 
-## 3. Interactive HTML Figures (`medstat.figures.html`)
+## 3. Standalone Interactive HTML Figures (Zero-Dependency Plotly Dicts)
 
-For interactive HTML reports, use the mirror submodule `medstat.figures.html`. It generates a `DualFigureResult` (subclass of `FigureResult`) containing both a publication-standard 300 DPI Matplotlib figure and a Plotly interactive figure:
+In cloud sandboxes (such as Claude Web Analysis Tool), `medstat` is not available as an external package. Instead of importing `medstat.figures.html`, use the standalone pure-Python Plotly spec generators provided in [report-builder.md](report-builder.md#b1-standalone-pure-python-plotly-spec-generators-zero-dependencies). They build native JSON-serializable dictionaries (`{"data": [...], "layout": {...}}`) with zero external dependencies and pass directly into `generate_html_report(..., plotly_figs=[spec])`:
 
-- **`plot_dual_roc_curve(roc_data, ...)`**: Empirical ROC curve with interactive threshold/sensitivity/specificity tooltips and chance diagonal.
-- **`plot_dual_kaplan_meier(km_curves, risk_table, ...)`**: Step-function survival curves with 95% CI bands and hover tooltips.
-- **`plot_dual_calibration(calib_bins, ...)`**: Decile calibration points with 95% Wilson CI error bars and Brier/ICI annotations.
-- **`plot_dual_dca(dca_data, ...)`**: Vickers Decision Curve Analysis comparing model net benefit against Treat All and Treat None.
-- **`plot_dual_bland_altman(ba_data, ...)`**: Paired difference plot with mean bias, 95% Limits of Agreement, and confidence intervals.
-- **`plot_dual_forest(data, ...)`**: Forest plot with log-scale axis and interactive point estimates.
-- **`plot_dual_love(love_data, ...)`**: Austin 2009 Love plot comparing Pre- vs Post-match covariate balance relative to 0.10 SMD threshold.
+- **`build_plotly_roc_spec(roc_data, ...)`**: Empirical ROC curve with interactive threshold/sensitivity/specificity hover tooltips, chance diagonal, and optimal cutoff markers.
+- **`build_plotly_km_spec(km_data, ...)`**: Step-function survival curves with 95% CI shaded ribbons and hover tooltips.
+- **`build_plotly_calibration_spec(calib_bins, ...)`**: Decile calibration points with 95% Wilson CI error bars and Brier/ICI annotations.
+- **`build_plotly_dca_spec(dca_data, ...)`**: Vickers Decision Curve Analysis comparing model net benefit against Treat All and Treat None.
+- **`build_plotly_bland_altman_spec(ba_data, ...)`**: Paired difference plot with mean bias, 95% Limits of Agreement, and zero reference line.
+- **`build_plotly_forest_spec(forest_data, ...)`**: Forest plot with log-scale axis, reference null line, and interactive point estimates with 95% CIs.
+- **`build_plotly_love_spec(love_data, ...)`**: Austin 2009 Love plot comparing Pre- vs Post-match covariate balance relative to 0.10 SMD threshold.
 
 ```python
-from medstat.figures.html import plot_dual_roc_curve, DualFigureResult
+# Standalone Dual-View workflow in Cloud Sandbox:
+# 1. Generate 300 DPI publication PNG via matplotlib
+plt.savefig("figures/roc_curve.png", dpi=300, bbox_inches="tight")
+plt.close()
 
-dual_fig = plot_dual_roc_curve(roc_data, out_path="figures/roc_curve.png")
-# Pass directly to ReportDocument; render_html will automatically render the Dual / Toggle View
-doc.add_figure(dual_fig)
+# 2. Build standalone Plotly spec dict (no plotly library required)
+roc_spec = build_plotly_roc_spec(roc_data, title="Biomarker Diagnostic Performance")
+
+# 3. Pass both to generate_html_report for seamless Dual / Toggle View
+html_report = generate_html_report(
+    title="Clinical Diagnostic Study",
+    results=results,
+    tables={"Table 1": table1_df},
+    figure_paths=["figures/roc_curve.png"],
+    plotly_figs=[roc_spec],
+    out_path="report.html",
+)
 ```
 
