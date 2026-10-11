@@ -13,6 +13,7 @@
 - **Pure Python Firth Penalized Models**: First-class support for penalized logistic and Cox proportional hazards regression via `firthmodels >= 0.8.2` with Profile Likelihood confidence intervals and penalized Likelihood Ratio Tests (LRT), resolving quasi-complete and complete separation in sparse clinical datasets.
 - **Restricted Cubic Splines (RCS)**: Non-linear relationship modeling and hazard ratio contrast curves via `patsy.cr` natural cubic splines.
 - **Audited Participant Sample Flow**: Explicit missing data handling (`complete-case`, `mice`, `knn`, `indicator`) tracking attrition flows ($N_{initial} \to N_{excluded} \to N_{analyzed}$) conforming to CONSORT, STROBE, and TRIPOD standards.
+- **Dual-Toggle HTML Reports & Publication Figures**: Single-file, zero-dependency self-contained HTML clinical reports featuring segmented toggle switches between interactive exploratory Plotly.js charts (hover tooltips, zoom, pan) and publication-grade 300 DPI Matplotlib PNGs (ICMJE/NEJM/APA styling). Includes offline CDN fallback resilience, print-media CSS parity (`@media print`), and direct one-click high-resolution PNG and raw source CSV data exports.
 - **Unified Click CLI & Adaptive Scripting**: Comprehensive subcommands (`clean`, `table1`, `model`, `diag`, `causal`, `meta`, `agreement`, `sample-size`, `report`) accepting Statistical Analysis Plans (`analysis_plan.yaml`), complemented by autonomous Python script adaptation for complex clinical datasets.
 
 ---
@@ -26,7 +27,7 @@ shinystat-skills/
 ├── README.md                   # Project documentation
 ├── ARCHITECTURE.md             # System architecture & structural diary
 ├── CONTEXT.md                  # Domain vocabulary & naming diary
-├── DESIGN.md                   # Architectural Decision Records (ADRs 1–25)
+├── DESIGN.md                   # Architectural Decision Records (ADRs 1–36)
 ├── skills/                     # Canonical Agent Skills
 │   ├── shinystat/              # Flagship autonomous biostatistical engine
 │   │   ├── SKILL.md            # Autonomous decision core (5 pillars + Grilling Gate)
@@ -47,6 +48,11 @@ shinystat-skills/
 │   ├── logging.py              # Headless structured logging & performance tracking
 │   ├── theme/
 │   │   └── palette.py          # Centralized clinical theme and palette constants
+│   ├── data/
+│   │   ├── loader.py           # Universal tabular ingestion (CSV, TSV, XLSX, Parquet)
+│   │   ├── clean.py            # Missingness audits, Little's MCAR & outlier handling
+│   │   ├── missing.py          # Complete-case, MICE, KNN, and indicator strategies
+│   │   └── retention.py        # Participant sample flow tracking (CONSORT/STROBE)
 │   ├── stats/
 │   │   ├── descriptive.py      # Parametric and non-parametric summary statistics
 │   │   ├── bivariate.py        # T-tests, Mann-Whitney, Chi-square, Fisher, ANOVA, Kruskal
@@ -77,11 +83,40 @@ shinystat-skills/
 │   │   └── kappa.py            # Cohen's and Fleiss' Kappa inter-rater agreement
 │   ├── power/
 │   │   └── sample_size.py      # Sample size & power calculations (means, proportions, survival)
+│   ├── figures/
+│   │   ├── base.py             # FigureResult contract and automatic CSV data export
+│   │   ├── styles.py           # 300 DPI publication styles & colorblind-safe palettes
+│   │   ├── forest.py           # Publication-grade forest plots (OR, RR, HR)
+│   │   ├── survival.py         # Kaplan-Meier curves with aligned risk tables
+│   │   ├── roc.py              # Empirical ROC curves with DeLong 95% CIs
+│   │   ├── calibration.py      # Decile calibration curves with Wilson score CIs
+│   │   ├── dca.py              # Decision Curve Analysis net benefit plots
+│   │   ├── agreement.py        # Bland-Altman agreement with 1999 large-sample CIs
+│   │   ├── balance.py          # Austin 2009 Love plots for PSM balance (0.10 SMD)
+│   │   ├── retention.py        # STROBE/CONSORT participant retention flowcharts
+│   │   ├── diagnostics.py      # Missingness heatmaps & Schoenfeld residual plots
+│   │   └── html/               # Dedicated mirror submodule for Dual / Toggle View
+│   │       ├── base.py         # DualFigureResult (Plotly JSON + 300 DPI Matplotlib PNG)
+│   │       ├── roc.py          # Interactive & static ROC curve generator
+│   │       ├── survival.py     # Interactive & static Kaplan-Meier generator
+│   │       ├── calibration.py  # Interactive & static calibration curve generator
+│   │       ├── dca.py          # Interactive & static DCA net benefit generator
+│   │       ├── agreement.py    # Interactive & static Bland-Altman generator
+│   │       ├── forest.py       # Interactive & static forest plot generator
+│   │       └── balance.py      # Interactive & static Love plot generator
 │   └── reporting/
+│       ├── ir.py               # Report Intermediate Representation (SSOT document tree)
+│       ├── integrity.py        # Reporting integrity audit (Pillar 5, numerical/Zero-PHI)
 │       ├── table1.py           # Baseline characteristics Table 1 with SMDs and auto-testing
 │       ├── tables.py           # APA 7, NEJM, JAMA HTML and text table formatters
 │       ├── narrative.py        # Automated Statistical Methods narrative generation
-│       └── checklists.py       # STROBE, CONSORT, TRIPOD, STARD, PRISMA audits
+│       ├── checklists.py       # STROBE, CONSORT, TRIPOD, STARD, PRISMA audits
+│       └── renderers/          # Multi-format report renderers
+│           ├── html.py         # Self-contained HTML with Dual-Toggle & print parity
+│           ├── docx.py         # Native Microsoft Word with 3-rule borders
+│           ├── pptx.py         # Native PowerPoint 16:9 widescreen presentation
+│           ├── pdf.py          # Publication PDF via Playwright headless Chromium
+│           └── markdown.py     # GitHub Flavored Markdown with linked assets
 └── tests/
     ├── conftest.py             # Pytest forwarding wrapper & shared fixtures
     ├── fixtures/               # Synthetic clinical datasets
@@ -407,6 +442,43 @@ y = pd.Series([0, 0, 1, 1, 1])
 res = fit_firth_logistic(y, X, ci_method="pl")
 print("Odds Ratios & Profile Likelihood 95% CIs:")
 print(res["summary_df"][["estimate", "odds_ratio", "ci_lower", "ci_upper", "p_value"]])
+```
+
+### Dual-Toggle HTML Visualizations (Plotly.js + 300 DPI Publication PNG)
+```python
+from medstat.figures.html import plot_dual_roc_curve
+
+# Generates both a 300 DPI publication PNG and an interactive Plotly figure specification
+dual_res = plot_dual_roc_curve(
+    y_true=[0, 0, 1, 1, 1],
+    y_score=[0.1, 0.4, 0.35, 0.8, 0.9],
+    title="Biomarker Diagnostic Performance (ROC)",
+    output_path="figures/roc_curve.png",
+)
+
+print(f"Publication PNG (300 DPI): {dual_res.png_path}")
+print(f"Audited Source CSV:        {dual_res.csv_path}")
+print(f"Interactive Plotly Figure: {dual_res.plotly_fig is not None}")
+```
+
+### Self-Contained Clinical Reporting with Dual-View Figures
+```python
+from medstat.reporting.ir import FigureBlock, HeadingBlock, ParagraphBlock, ReportDocument
+from medstat.reporting.renderers.html import render_html
+
+# Assemble document with DualFigureResult blocks
+doc = ReportDocument(
+    title="Clinical Diagnostic Study Report",
+    metadata={"authors": ["Clinical Research Team"], "study_design": "Diagnostic Accuracy"},
+    blocks=[
+        HeadingBlock(text="Biomarker Performance", level=2),
+        ParagraphBlock(text="Evaluation of diagnostic accuracy with empirical ROC and DeLong 95% CIs."),
+        FigureBlock(figure_res=dual_res, caption="Figure 1: Empirical ROC Curve with optimal Youden cutoff."),
+    ],
+)
+
+# Render single-file HTML with interactive/static tabs, CSV export, and print styles
+html_content = render_html(doc, output_path="reports/diagnostic_report.html")
 ```
 
 ---
