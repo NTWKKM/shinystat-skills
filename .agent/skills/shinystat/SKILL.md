@@ -71,8 +71,9 @@ Clarify genuine clinical ambiguities directly with the user before executing the
 ### Adaptive Inquiry & Pragmatic Defaults:
 - **Targeted Clarification**: Focus questions strictly on what is genuinely unclear for sound biostatistical modeling (e.g. primary outcome definition, event vs censored coding, abnormal direction of a biomarker, or study archetype).
 - **Pragmatic Missing Data Defaults**:
-  - If per-variable missingness or complete-case loss in non-primary variables is **$< 5\%$** and clinically uninformative: Proceed with complete-case analysis with documented sensitivity notes.
-  - If missingness is **$5\% - 40\%$**: Propose MICE (`medstat clean --impute mice`) with proper stochastic parameter draws to preserve between-imputation variance. Always report Complete-Case Analysis alongside MICE as benchmark sensitivity analysis.
+  - If actual complete-case cohort loss is **$< 5\%$** across the planned analysis model (and per-variable missingness in non-primary covariates is evaluated and verified low and clinically uninformative): Proceed with complete-case analysis with documented sensitivity notes.
+  - If missingness is **$5\% - 40\%$**: Propose MICE (`medstat clean --data <file.csv> --strategy mice --missing-justification "<rationale>"`) with proper stochastic parameter draws to preserve between-imputation variance. Always report Complete-Case Analysis alongside MICE as benchmark sensitivity analysis.
+  - If non-primary missingness exceeds **$> 40\%$** (and not established as MNAR): Trigger targeted clarification before proceeding to select between (a) excluding the covariate if auxiliary to protect cohort sample size, (b) high-$M$ MICE ($M \ge 40$, monitoring Fraction of Missing Information [FMI]) if clinically essential under plausible MAR, or (c) explicit missing-indicator / pattern-mixture sensitivity modeling.
   - Ask the user if the primary outcome itself has missing values without prespecified protocol disposition, or missingness is manifestly informative / MNAR.
 
 ### Key Situations to Clarify:

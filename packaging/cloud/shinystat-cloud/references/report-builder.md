@@ -765,9 +765,19 @@ def build_plotly_bland_altman_spec(
         except (TypeError, ValueError):
             continue
 
-    mean_diff = _clean_float(ba_data.get("mean_diff"), default=0.0)
-    loa_upper = _clean_float(ba_data.get("loa_upper"), default=0.0)
-    loa_lower = _clean_float(ba_data.get("loa_lower"), default=0.0)
+    mean_diff = _clean_float(ba_data.get("mean_diff"))
+    if mean_diff is None and diffs:
+        mean_diff = sum(diffs) / len(diffs)
+
+    loa_upper = _clean_float(ba_data.get("loa_upper"))
+    loa_lower = _clean_float(ba_data.get("loa_lower"))
+    if (loa_upper is None or loa_lower is None) and len(diffs) >= 2 and mean_diff is not None:
+        variance = sum((d - mean_diff) ** 2 for d in diffs) / (len(diffs) - 1)
+        sd = math.sqrt(variance)
+        if loa_upper is None:
+            loa_upper = mean_diff + 1.96 * sd
+        if loa_lower is None:
+            loa_lower = mean_diff - 1.96 * sd
 
     min_x = min(means) if means else 0.0
     max_x = max(means) if means else 1.0
@@ -797,7 +807,10 @@ def build_plotly_bland_altman_spec(
             "name": "Zero Bias (0.0)",
             "hoverinfo": "skip",
         },
-        {
+    ]
+
+    if mean_diff is not None:
+        traces.append({
             "type": "scatter",
             "x": x_range,
             "y": [mean_diff, mean_diff],
@@ -805,8 +818,9 @@ def build_plotly_bland_altman_spec(
             "line": {"color": "#0F172A", "width": 2.0},
             "name": f"Mean Bias: {mean_diff:.2f}{unit_str}",
             "hovertemplate": f"Mean Bias = {mean_diff:.2f}{unit_str}<extra></extra>",
-        },
-        {
+        })
+    if loa_upper is not None:
+        traces.append({
             "type": "scatter",
             "x": x_range,
             "y": [loa_upper, loa_upper],
@@ -814,8 +828,9 @@ def build_plotly_bland_altman_spec(
             "line": {"dash": "dash", "color": "#DC2626", "width": 1.5},
             "name": f"+1.96 SD (Upper LoA): {loa_upper:.2f}{unit_str}",
             "hovertemplate": f"Upper LoA = {loa_upper:.2f}{unit_str}<extra></extra>",
-        },
-        {
+        })
+    if loa_lower is not None:
+        traces.append({
             "type": "scatter",
             "x": x_range,
             "y": [loa_lower, loa_lower],
@@ -823,8 +838,7 @@ def build_plotly_bland_altman_spec(
             "line": {"dash": "dash", "color": "#DC2626", "width": 1.5},
             "name": f"-1.96 SD (Lower LoA): {loa_lower:.2f}{unit_str}",
             "hovertemplate": f"Lower LoA = {loa_lower:.2f}{unit_str}<extra></extra>",
-        },
-    ]
+        })
 
     layout = {
         "title": {"text": title, "x": 0.5, "xanchor": "center"},
@@ -859,6 +873,9 @@ def build_plotly_forest_spec(
     title: str = "Multivariable Effect Estimates (Forest Plot)",
 ) -> dict:
     """Builds a pure-dict Plotly specification for a clinical Forest plot."""
+    is_log = scale.upper() in ("OR", "HR", "RR")
+    null_val = 1.0 if is_log else 0.0
+
     terms, estimates, ci_lower, ci_upper, customdata = [], [], [], [], []
     for d in forest_data:
         try:
@@ -866,6 +883,8 @@ def build_plotly_forest_spec(
             l = float(d["ci_lower"])
             u = float(d["ci_upper"])
             if math.isfinite(e) and math.isfinite(l) and math.isfinite(u):
+                if is_log and (e <= 0 or l <= 0 or u <= 0):
+                    continue
                 terms.append(str(d.get("term", "")))
                 estimates.append(e)
                 ci_lower.append(l)
@@ -875,9 +894,6 @@ def build_plotly_forest_spec(
                 customdata.append([l, u, p_str])
         except (TypeError, ValueError, KeyError):
             continue
-
-    null_val = 1.0 if scale.upper() in ("OR", "HR", "RR") else 0.0
-    is_log = scale.upper() in ("OR", "HR", "RR")
 
     error_x_plus = [u - e for u, e in zip(ci_upper, estimates)]
     error_x_minus = [e - l for l, e in zip(ci_lower, estimates)]

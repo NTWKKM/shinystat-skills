@@ -1839,7 +1839,22 @@ def test_cloud_standalone_plotly_spec_generators(tmp_path):
     assert "mmHg" in json_ba
     assert "Mean Bias" in json_ba
 
-    # 6. Forest Plot - verify categorical yaxis
+    # Bland-Altman fallback computation from diffs when stats are omitted
+    ba_spec_calc = build_ba(
+        ba_data={
+            "means": [10.0, 15.0, 20.0, 25.0],
+            "diffs": [-0.5, 0.2, -1.0, 0.8],
+        },
+        units="mmHg",
+    )
+    assert len(ba_spec_calc["data"]) == 5
+    assert any("Mean Bias" in t.get("name", "") for t in ba_spec_calc["data"])
+
+    # Bland-Altman empty diffs omits bias/LoA without substituting zero
+    ba_spec_empty = build_ba(ba_data={"means": [], "diffs": []})
+    assert len(ba_spec_empty["data"]) == 2  # points + zero bias line only
+
+    # 6. Forest Plot - verify categorical yaxis and log positivity filter
     build_forest = ns["build_plotly_forest_spec"]
     forest_spec = build_forest(
         forest_data=[
@@ -1864,12 +1879,21 @@ def test_cloud_standalone_plotly_spec_generators(tmp_path):
                 "ci_upper": 3.15,
                 "p_value": 0.001,
             },
+            {
+                "term": "InvalidNegative",
+                "estimate": -0.5,
+                "ci_lower": -1.0,
+                "ci_upper": 0.5,
+            },
         ],
         scale="OR",
     )
     assert isinstance(forest_spec, dict)
     assert forest_spec["layout"]["xaxis"]["type"] == "log"
     assert forest_spec["layout"]["yaxis"]["type"] == "category"
+    # InvalidNegative must be filtered out because scale is OR (log)
+    assert "InvalidNegative" not in forest_spec["data"][1]["y"]
+    assert len(forest_spec["data"][1]["y"]) == 3
     json_forest = json.dumps(forest_spec)
     assert "Age >= 65" in json_forest
 
