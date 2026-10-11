@@ -1769,6 +1769,10 @@ def test_cloud_standalone_plotly_spec_generators(tmp_path):
     )  # 2 groups * (upper CI, lower ribbon, step line, censored)
     json_km = json.dumps(km_spec)
     assert "tonexty" in json_km
+    # Verify stepwise expansion of confidence ribbon vertices
+    ci_upper_trace = km_spec["data"][0]
+    assert ci_upper_trace["x"] == [0, 30, 30, 90, 90, 180, 180, 365, 365]
+    assert ci_upper_trace["y"] == [1.0, 1.0, 0.98, 0.98, 0.93, 0.93, 0.88, 0.88, 0.82]
 
     # 3. Calibration Curve
     build_calib = ns["build_plotly_calibration_spec"]
@@ -1787,20 +1791,33 @@ def test_cloud_standalone_plotly_spec_generators(tmp_path):
     assert "Perfect Calibration" in json_calib
     assert "Brier Score: 0.125" in json_calib
 
-    # 4. Decision Curve Analysis (DCA)
+    # 4. Decision Curve Analysis (DCA) - verify ascending threshold sorting and non-finite filtering
     build_dca = ns["build_plotly_dca_spec"]
     dca_spec = build_dca(
         dca_data=[
+            {
+                "strategy": "Model",
+                "threshold": 0.2,
+                "net_benefit": 0.10,
+            },  # Shuffled order
             {"strategy": "Model", "threshold": 0.1, "net_benefit": 0.15},
-            {"strategy": "Model", "threshold": 0.2, "net_benefit": 0.10},
-            {"strategy": "Treat All", "threshold": 0.1, "net_benefit": 0.12},
+            {
+                "strategy": "Model",
+                "threshold": float("nan"),
+                "net_benefit": 0.05,
+            },  # Non-finite ignored
             {"strategy": "Treat All", "threshold": 0.2, "net_benefit": 0.05},
-            {"strategy": "Treat None", "threshold": 0.1, "net_benefit": 0.0},
+            {"strategy": "Treat All", "threshold": 0.1, "net_benefit": 0.12},
             {"strategy": "Treat None", "threshold": 0.2, "net_benefit": 0.0},
+            {"strategy": "Treat None", "threshold": 0.1, "net_benefit": 0.0},
         ],
     )
     assert isinstance(dca_spec, dict)
     assert len(dca_spec["data"]) == 3
+    # Check that points are strictly sorted by threshold
+    model_trace = next(t for t in dca_spec["data"] if t["name"] == "Model")
+    assert model_trace["x"] == [0.1, 0.2]
+    assert model_trace["y"] == [0.15, 0.10]
     json_dca = json.dumps(dca_spec)
     assert "Treat All" in json_dca
 
@@ -1822,7 +1839,7 @@ def test_cloud_standalone_plotly_spec_generators(tmp_path):
     assert "mmHg" in json_ba
     assert "Mean Bias" in json_ba
 
-    # 6. Forest Plot
+    # 6. Forest Plot - verify categorical yaxis
     build_forest = ns["build_plotly_forest_spec"]
     forest_spec = build_forest(
         forest_data=[
@@ -1852,10 +1869,11 @@ def test_cloud_standalone_plotly_spec_generators(tmp_path):
     )
     assert isinstance(forest_spec, dict)
     assert forest_spec["layout"]["xaxis"]["type"] == "log"
+    assert forest_spec["layout"]["yaxis"]["type"] == "category"
     json_forest = json.dumps(forest_spec)
     assert "Age >= 65" in json_forest
 
-    # 7. Love Plot
+    # 7. Love Plot - verify categorical yaxis
     build_love = ns["build_plotly_love_spec"]
     love_spec = build_love(
         love_data=[
@@ -1867,6 +1885,7 @@ def test_cloud_standalone_plotly_spec_generators(tmp_path):
     )
     assert isinstance(love_spec, dict)
     assert len(love_spec["data"]) == 3  # threshold, pre-match, post-match
+    assert love_spec["layout"]["yaxis"]["type"] == "category"
     json_love = json.dumps(love_spec)
     assert "Threshold (0.10)" in json_love
 

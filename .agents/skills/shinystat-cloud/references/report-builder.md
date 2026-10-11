@@ -236,17 +236,39 @@ document.addEventListener('DOMContentLoaded', function() {
 In cloud sandboxes (such as Claude Web Analysis Tool), external packages like `medstat` or `plotly` are not available. The functions below construct 100% compliant Plotly JSON dictionaries (`{"data": [...], "layout": {...}}`) in pure Python using native data types (`dict`, `list`, `float`, `str`). Pass the resulting dictionary objects directly into `generate_html_report(..., plotly_figs=[...])` to enable full interactive exploration alongside 300 DPI publication figures.
 
 ```python
+import math
+
+
+def _clean_float(val, default=None):
+    """Safely converts val to finite float or returns default."""
+    if val is None:
+        return default
+    try:
+        f = float(val)
+        return f if math.isfinite(f) else default
+    except (TypeError, ValueError):
+        return default
+
+
 def build_plotly_roc_spec(
     roc_data: dict,
     paired_roc_data: dict = None,
     title: str = "Receiver Operating Characteristic (ROC) Curve",
 ) -> dict:
     """Builds a pure-dict Plotly specification for an empirical ROC curve with zero dependencies."""
-    fpr = [float(x) for x in roc_data["fpr"]]
-    tpr = [float(x) for x in roc_data["tpr"]]
-    auc = float(roc_data.get("auc", 0.5))
-    ci_l = float(roc_data["ci_lower"]) if roc_data.get("ci_lower") is not None else None
-    ci_u = float(roc_data["ci_upper"]) if roc_data.get("ci_upper") is not None else None
+    clean_pairs = []
+    for x, y in zip(roc_data.get("fpr", []), roc_data.get("tpr", [])):
+        try:
+            fx, fy = float(x), float(y)
+            if math.isfinite(fx) and math.isfinite(fy):
+                clean_pairs.append((fx, fy))
+        except (TypeError, ValueError):
+            continue
+    fpr = [p[0] for p in clean_pairs]
+    tpr = [p[1] for p in clean_pairs]
+    auc = _clean_float(roc_data.get("auc"), default=0.5)
+    ci_l = _clean_float(roc_data.get("ci_lower"))
+    ci_u = _clean_float(roc_data.get("ci_upper"))
     model_name = str(roc_data.get("name", "Model 1"))
 
     if ci_l is not None and ci_u is not None:
@@ -281,32 +303,41 @@ def build_plotly_roc_spec(
 
     opt_pt = roc_data.get("optimal_point")
     if opt_pt:
-        opt_fpr = float(opt_pt["fpr"])
-        opt_tpr = float(opt_pt["tpr"])
-        opt_cut = float(opt_pt.get("cutoff", 0.0))
-        opt_sens = float(roc_data.get("sensitivity", opt_tpr))
-        opt_spec = float(roc_data.get("specificity", 1.0 - opt_fpr))
-        traces.append({
-            "type": "scatter",
-            "x": [opt_fpr],
-            "y": [opt_tpr],
-            "mode": "markers",
-            "marker": {"size": 10, "color": "#DC2626", "symbol": "circle"},
-            "name": f"Optimal Cutpoint ({opt_cut:.2f})",
-            "hovertemplate": (
-                f"<b>Optimal Cutpoint: {opt_cut:.3f}</b><br>"
-                f"Sensitivity: {opt_sens:.1%}<br>"
-                f"Specificity: {opt_spec:.1%}<br>"
-                f"FPR: {opt_fpr:.3f}<extra></extra>"
-            ),
-        })
+        opt_fpr = _clean_float(opt_pt.get("fpr"))
+        opt_tpr = _clean_float(opt_pt.get("tpr"))
+        if opt_fpr is not None and opt_tpr is not None:
+            opt_cut = _clean_float(opt_pt.get("cutoff"), default=0.0)
+            opt_sens = _clean_float(roc_data.get("sensitivity"), default=opt_tpr)
+            opt_spec = _clean_float(roc_data.get("specificity"), default=1.0 - opt_fpr)
+            traces.append({
+                "type": "scatter",
+                "x": [opt_fpr],
+                "y": [opt_tpr],
+                "mode": "markers",
+                "marker": {"size": 10, "color": "#DC2626", "symbol": "circle"},
+                "name": f"Optimal Cutpoint ({opt_cut:.2f})",
+                "hovertemplate": (
+                    f"<b>Optimal Cutpoint: {opt_cut:.3f}</b><br>"
+                    f"Sensitivity: {opt_sens:.1%}<br>"
+                    f"Specificity: {opt_spec:.1%}<br>"
+                    f"FPR: {opt_fpr:.3f}<extra></extra>"
+                ),
+            })
 
     if paired_roc_data:
-        p_fpr = [float(x) for x in paired_roc_data["fpr"]]
-        p_tpr = [float(x) for x in paired_roc_data["tpr"]]
-        p_auc = float(paired_roc_data.get("auc", 0.5))
-        p_ci_l = float(paired_roc_data["ci_lower"]) if paired_roc_data.get("ci_lower") is not None else None
-        p_ci_u = float(paired_roc_data["ci_upper"]) if paired_roc_data.get("ci_upper") is not None else None
+        p_pairs = []
+        for x, y in zip(paired_roc_data.get("fpr", []), paired_roc_data.get("tpr", [])):
+            try:
+                fx, fy = float(x), float(y)
+                if math.isfinite(fx) and math.isfinite(fy):
+                    p_pairs.append((fx, fy))
+            except (TypeError, ValueError):
+                continue
+        p_fpr = [p[0] for p in p_pairs]
+        p_tpr = [p[1] for p in p_pairs]
+        p_auc = _clean_float(paired_roc_data.get("auc"), default=0.5)
+        p_ci_l = _clean_float(paired_roc_data.get("ci_lower"))
+        p_ci_u = _clean_float(paired_roc_data.get("ci_upper"))
         p_name = str(paired_roc_data.get("name", "Model 2"))
         if p_ci_l is not None and p_ci_u is not None:
             p_label = f"{p_name}: AUC = {p_auc:.3f} (95% CI, {p_ci_l:.3f}–{p_ci_u:.3f})"
@@ -368,16 +399,55 @@ def build_plotly_km_spec(
 
     for idx, (group_name, curve) in enumerate(km_data.items()):
         color = colors[idx % len(colors)]
-        timeline = [float(x) for x in curve["timeline"]]
-        survival = [float(x) for x in curve["survival"]]
-        ci_lower = [float(x) for x in curve["ci_lower"]] if "ci_lower" in curve and curve["ci_lower"] is not None else None
-        ci_upper = [float(x) for x in curve["ci_upper"]] if "ci_upper" in curve and curve["ci_upper"] is not None else None
+        raw_t = curve.get("timeline", [])
+        raw_s = curve.get("survival", [])
+        raw_cil = curve.get("ci_lower")
+        raw_ciu = curve.get("ci_upper")
 
-        if ci_lower and ci_upper:
+        timeline, survival, ci_lower, ci_upper = [], [], [], []
+        has_ci = (
+            raw_cil is not None
+            and raw_ciu is not None
+            and len(raw_cil) == len(raw_t)
+            and len(raw_ciu) == len(raw_t)
+        )
+
+        for i in range(len(raw_t)):
+            try:
+                t_val = float(raw_t[i])
+                s_val = float(raw_s[i])
+                if not (math.isfinite(t_val) and math.isfinite(s_val)):
+                    continue
+                if has_ci:
+                    cl = float(raw_cil[i])
+                    cu = float(raw_ciu[i])
+                    if not (math.isfinite(cl) and math.isfinite(cu)):
+                        continue
+                    ci_lower.append(cl)
+                    ci_upper.append(cu)
+                timeline.append(t_val)
+                survival.append(s_val)
+            except (TypeError, ValueError, IndexError):
+                continue
+
+        if has_ci and len(timeline) == len(ci_lower) == len(ci_upper) and timeline:
+            step_t = []
+            step_ci_u = []
+            step_ci_l = []
+            for i in range(len(timeline)):
+                if i == 0:
+                    step_t.append(timeline[0])
+                    step_ci_u.append(ci_upper[0])
+                    step_ci_l.append(ci_lower[0])
+                else:
+                    step_t.extend([timeline[i], timeline[i]])
+                    step_ci_u.extend([ci_upper[i - 1], ci_upper[i]])
+                    step_ci_l.extend([ci_lower[i - 1], ci_lower[i]])
+
             traces.append({
                 "type": "scatter",
-                "x": timeline,
-                "y": ci_upper,
+                "x": step_t,
+                "y": step_ci_u,
                 "mode": "lines",
                 "line": {"width": 0, "color": "rgba(0,0,0,0)"},
                 "showlegend": False,
@@ -386,8 +456,8 @@ def build_plotly_km_spec(
             r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
             traces.append({
                 "type": "scatter",
-                "x": timeline,
-                "y": ci_lower,
+                "x": step_t,
+                "y": step_ci_l,
                 "mode": "lines",
                 "line": {"width": 0, "color": "rgba(0,0,0,0)"},
                 "fill": "tonexty",
@@ -410,8 +480,12 @@ def build_plotly_km_spec(
             ),
         })
 
-        if "censored_times" in curve and curve["censored_times"]:
-            cens_times = [float(x) for x in curve["censored_times"]]
+        if "censored_times" in curve and curve["censored_times"] and timeline:
+            cens_times = [
+                float(x)
+                for x in curve["censored_times"]
+                if _clean_float(x) is not None
+            ]
             cens_surv = []
             for ct in cens_times:
                 s_val = survival[0]
@@ -422,16 +496,17 @@ def build_plotly_km_spec(
                         break
                 cens_surv.append(s_val)
 
-            traces.append({
-                "type": "scatter",
-                "x": cens_times,
-                "y": cens_surv,
-                "mode": "markers",
-                "marker": {"symbol": "cross", "size": 6, "color": color},
-                "name": f"{group_name} (Censored)",
-                "showlegend": False,
-                "hovertemplate": f"Censored at {x_label} %{{x:.1f}}<extra></extra>",
-            })
+            if cens_times:
+                traces.append({
+                    "type": "scatter",
+                    "x": cens_times,
+                    "y": cens_surv,
+                    "mode": "markers",
+                    "marker": {"symbol": "cross", "size": 6, "color": color},
+                    "name": f"{group_name} (Censored)",
+                    "showlegend": False,
+                    "hovertemplate": f"Censored at {x_label} %{{x:.1f}}<extra></extra>",
+                })
 
     layout = {
         "title": {"text": title, "x": 0.5, "xanchor": "center"},
@@ -468,10 +543,22 @@ def build_plotly_calibration_spec(
     ici: float = None,
 ) -> dict:
     """Builds a pure-dict Plotly specification for a decile calibration curve with Wilson 95% CIs."""
-    pred_mean = [float(x) for x in calib_bins["pred_mean"]]
-    obs_rate = [float(x) for x in calib_bins["obs_rate"]]
-    ci_low = [float(x) for x in calib_bins.get("ci_lower", obs_rate)]
-    ci_high = [float(x) for x in calib_bins.get("ci_upper", obs_rate)]
+    raw_pred = calib_bins.get("pred_mean", [])
+    raw_obs = calib_bins.get("obs_rate", [])
+    raw_cil = calib_bins.get("ci_lower", raw_obs)
+    raw_ciu = calib_bins.get("ci_upper", raw_obs)
+
+    pred_mean, obs_rate, ci_low, ci_high = [], [], [], []
+    for p, o, l, h in zip(raw_pred, raw_obs, raw_cil, raw_ciu):
+        try:
+            fp, fo, fl, fh = float(p), float(o), float(l), float(h)
+            if math.isfinite(fp) and math.isfinite(fo) and math.isfinite(fl) and math.isfinite(fh):
+                pred_mean.append(fp)
+                obs_rate.append(fo)
+                ci_low.append(fl)
+                ci_high.append(fh)
+        except (TypeError, ValueError):
+            continue
 
     error_y_plus = [h - o for h, o in zip(ci_high, obs_rate)]
     error_y_minus = [o - l for l, o in zip(ci_low, obs_rate)]
@@ -514,12 +601,14 @@ def build_plotly_calibration_spec(
         },
     ]
 
+    clean_brier = _clean_float(brier_score)
+    clean_ici = _clean_float(ici)
     annotations = []
     annot_text = []
-    if brier_score is not None:
-        annot_text.append(f"Brier Score: {brier_score:.3f}")
-    if ici is not None:
-        annot_text.append(f"ICI: {ici:.3f}")
+    if clean_brier is not None:
+        annot_text.append(f"Brier Score: {clean_brier:.3f}")
+    if clean_ici is not None:
+        annot_text.append(f"ICI: {clean_ici:.3f}")
     if annot_text:
         annotations.append({
             "text": "<br>".join(annot_text),
@@ -577,8 +666,8 @@ def build_plotly_dca_spec(
             strat = row.get("strategy", "Model")
             if strat not in strategies:
                 strategies[strat] = {"threshold": [], "net_benefit": []}
-            strategies[strat]["threshold"].append(float(row["threshold"]))
-            strategies[strat]["net_benefit"].append(float(row["net_benefit"]))
+            strategies[strat]["threshold"].append(row.get("threshold"))
+            strategies[strat]["net_benefit"].append(row.get("net_benefit"))
     else:
         strategies = {"Model": dca_data}
 
@@ -594,10 +683,22 @@ def build_plotly_dca_spec(
     model_idx = 0
 
     for strat_name, vals in strategies.items():
-        th = [float(x) for x in vals["threshold"]]
-        nb = [float(x) for x in vals["net_benefit"]]
-        key = strat_name.lower().strip()
+        # Pair threshold and net_benefit, filter finite values, and sort strictly by ascending threshold
+        pairs = []
+        raw_th = vals.get("threshold", [])
+        raw_nb = vals.get("net_benefit", [])
+        for x, y in zip(raw_th, raw_nb):
+            try:
+                fx, fy = float(x), float(y)
+                if math.isfinite(fx) and math.isfinite(fy):
+                    pairs.append((fx, fy))
+            except (TypeError, ValueError):
+                continue
+        pairs.sort(key=lambda p: p[0])
+        th = [p[0] for p in pairs]
+        nb = [p[1] for p in pairs]
 
+        key = str(strat_name).lower().strip()
         if key in color_map:
             col, dash_style, width = color_map[key]
         else:
@@ -611,32 +712,32 @@ def build_plotly_dca_spec(
             "x": th,
             "y": nb,
             "mode": "lines",
-            "line": {"color": col, "dash": dash_style, "width": width},
-            "name": strat_name,
+            "line": {"color": col, "width": width, "dash": dash_style},
+            "name": str(strat_name),
             "hovertemplate": (
                 f"<b>{strat_name}</b><br>"
-                "Threshold (pt): %{x:.2f}<br>"
-                "Net Benefit: %{y:.4f}<extra></extra>"
+                "Threshold Probability: %{x:.2f}<br>"
+                "Net Benefit: %{y:.3f}<extra></extra>"
             ),
         })
 
     layout = {
         "title": {"text": title, "x": 0.5, "xanchor": "center"},
         "xaxis": {
-            "title": {"text": "Threshold Probability (pt)"},
+            "title": {"text": "Threshold Probability (Pt)"},
+            "range": [-0.02, 1.02],
+            "dtick": 0.1,
             "gridcolor": "#F1F5F9",
-            "zeroline": False,
+            "zeroline": True,
         },
         "yaxis": {
             "title": {"text": "Net Benefit"},
             "gridcolor": "#F1F5F9",
             "zeroline": True,
-            "zerolinecolor": "#94A3B8",
-            "zerolinewidth": 1,
         },
         "template": "plotly_white",
         "legend": {
-            "x": 0.65,
+            "x": 0.75,
             "y": 0.95,
             "bgcolor": "rgba(255,255,255,0.9)",
             "bordercolor": "#E2E8F0",
@@ -654,11 +755,19 @@ def build_plotly_bland_altman_spec(
     title: str = "Bland-Altman Agreement Plot",
 ) -> dict:
     """Builds a pure-dict Plotly specification for a Bland-Altman agreement plot."""
-    means = [float(x) for x in ba_data["means"]]
-    diffs = [float(x) for x in ba_data["diffs"]]
-    mean_diff = float(ba_data["mean_diff"])
-    loa_upper = float(ba_data["loa_upper"])
-    loa_lower = float(ba_data["loa_lower"])
+    means, diffs = [], []
+    for m, d in zip(ba_data.get("means", []), ba_data.get("diffs", [])):
+        try:
+            fm, fd = float(m), float(d)
+            if math.isfinite(fm) and math.isfinite(fd):
+                means.append(fm)
+                diffs.append(fd)
+        except (TypeError, ValueError):
+            continue
+
+    mean_diff = _clean_float(ba_data.get("mean_diff"), default=0.0)
+    loa_upper = _clean_float(ba_data.get("loa_upper"), default=0.0)
+    loa_lower = _clean_float(ba_data.get("loa_lower"), default=0.0)
 
     min_x = min(means) if means else 0.0
     max_x = max(means) if means else 1.0
@@ -750,11 +859,22 @@ def build_plotly_forest_spec(
     title: str = "Multivariable Effect Estimates (Forest Plot)",
 ) -> dict:
     """Builds a pure-dict Plotly specification for a clinical Forest plot."""
-    terms = [str(d["term"]) for d in forest_data]
-    estimates = [float(d["estimate"]) for d in forest_data]
-    ci_lower = [float(d["ci_lower"]) for d in forest_data]
-    ci_upper = [float(d["ci_upper"]) for d in forest_data]
-    p_values = [d.get("p_value") for d in forest_data]
+    terms, estimates, ci_lower, ci_upper, customdata = [], [], [], [], []
+    for d in forest_data:
+        try:
+            e = float(d["estimate"])
+            l = float(d["ci_lower"])
+            u = float(d["ci_upper"])
+            if math.isfinite(e) and math.isfinite(l) and math.isfinite(u):
+                terms.append(str(d.get("term", "")))
+                estimates.append(e)
+                ci_lower.append(l)
+                ci_upper.append(u)
+                p = _clean_float(d.get("p_value"))
+                p_str = f"p = {p:.3f}" if p is not None else ""
+                customdata.append([l, u, p_str])
+        except (TypeError, ValueError, KeyError):
+            continue
 
     null_val = 1.0 if scale.upper() in ("OR", "HR", "RR") else 0.0
     is_log = scale.upper() in ("OR", "HR", "RR")
@@ -762,16 +882,11 @@ def build_plotly_forest_spec(
     error_x_plus = [u - e for u, e in zip(ci_upper, estimates)]
     error_x_minus = [e - l for l, e in zip(ci_lower, estimates)]
 
-    customdata = []
-    for l, u, p in zip(ci_lower, ci_upper, p_values):
-        p_str = f"p = {p:.3f}" if p is not None else ""
-        customdata.append([l, u, p_str])
-
     traces = [
         {
             "type": "scatter",
             "x": [null_val, null_val],
-            "y": [-0.5, len(terms) - 0.5],
+            "y": [-0.5, max(len(terms) - 0.5, 0.5)],
             "mode": "lines",
             "line": {"dash": "dash", "color": "#94A3B8", "width": 1.5},
             "name": f"Null Effect ({null_val})",
@@ -813,6 +928,7 @@ def build_plotly_forest_spec(
         },
         "yaxis": {
             "title": {"text": ""},
+            "type": "category",
             "autorange": "reversed",
             "gridcolor": "#F1F5F9",
         },
@@ -829,18 +945,27 @@ def build_plotly_love_spec(
     title: str = "Covariate Balance (Love Plot)",
 ) -> dict:
     """Builds a pure-dict Plotly specification for an Austin 2009 Love plot of Standardized Mean Differences."""
-    variables = [str(d["variable"]) for d in love_data]
-    pre_smds = [abs(float(d["pre_smd"])) for d in love_data]
-    post_smds = [abs(float(d["post_smd"])) for d in love_data]
+    clean_thresh = _clean_float(threshold, default=0.10)
+    variables, pre_smds, post_smds = [], [], []
+    for d in love_data:
+        try:
+            pre = abs(float(d["pre_smd"]))
+            post = abs(float(d["post_smd"]))
+            if math.isfinite(pre) and math.isfinite(post):
+                variables.append(str(d.get("variable", "")))
+                pre_smds.append(pre)
+                post_smds.append(post)
+        except (TypeError, ValueError, KeyError):
+            continue
 
     traces = [
         {
             "type": "scatter",
-            "x": [threshold, threshold],
-            "y": [-0.5, len(variables) - 0.5],
+            "x": [clean_thresh, clean_thresh],
+            "y": [-0.5, max(len(variables) - 0.5, 0.5)],
             "mode": "lines",
             "line": {"dash": "dash", "color": "#DC2626", "width": 1.5},
-            "name": f"Threshold ({threshold:.2f})",
+            "name": f"Threshold ({clean_thresh:.2f})",
             "hoverinfo": "skip",
         },
         {
@@ -863,7 +988,7 @@ def build_plotly_love_spec(
         },
     ]
 
-    max_smd = max(max(pre_smds, default=0.2), max(post_smds, default=0.2), threshold)
+    max_smd = max(max(pre_smds, default=0.2), max(post_smds, default=0.2), clean_thresh)
     layout = {
         "title": {"text": title, "x": 0.5, "xanchor": "center"},
         "xaxis": {
@@ -875,6 +1000,7 @@ def build_plotly_love_spec(
         },
         "yaxis": {
             "title": {"text": ""},
+            "type": "category",
             "autorange": "reversed",
             "gridcolor": "#F1F5F9",
         },
