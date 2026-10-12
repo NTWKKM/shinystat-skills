@@ -1683,3 +1683,289 @@ def test_cloud_report_builder_docx_fallback_and_integrity(tmp_path):
         results_dict={"p_val": 1.23e-4},
     )
     assert 1.23e-4 not in audit_sci_ok["untraced_numbers"]
+
+
+# -----------------------------------------------------------------------------
+# 8. Standalone Pure-Python Plotly Spec Generators (Zero Dependencies)
+# -----------------------------------------------------------------------------
+
+
+def _extract_report_builder_namespace():
+    """Extract and execute all Python code blocks from report-builder.md in an isolated namespace."""
+    rb_path = CLOUD_DIR / "references" / "report-builder.md"
+    content = rb_path.read_text(encoding="utf-8")
+    blocks = re.findall(r"```python\n(.*?)\n```", content, re.DOTALL)
+    ns = {}
+    for block in blocks:
+        exec(block, ns)
+    return ns
+
+
+def test_cloud_standalone_plotly_spec_generators(tmp_path):
+    """Verifies that all 7 standalone Plotly spec generators produce valid, JSON-serializable dictionaries."""
+    import json
+
+    ns = _extract_report_builder_namespace()
+
+    # 1. ROC Curve
+    build_roc = ns["build_plotly_roc_spec"]
+    roc_spec = build_roc(
+        roc_data={
+            "fpr": [0.0, 0.1, 0.3, 1.0],
+            "tpr": [0.0, 0.7, 0.9, 1.0],
+            "auc": 0.88,
+            "ci_lower": 0.81,
+            "ci_upper": 0.95,
+            "name": "Biomarker Model",
+            "optimal_point": {"fpr": 0.1, "tpr": 0.7, "cutoff": 3.5},
+            "sensitivity": 0.70,
+            "specificity": 0.90,
+        },
+        paired_roc_data={
+            "fpr": [0.0, 0.2, 0.5, 1.0],
+            "tpr": [0.0, 0.5, 0.8, 1.0],
+            "auc": 0.76,
+            "ci_lower": 0.68,
+            "ci_upper": 0.84,
+            "name": "Clinical Baseline",
+        },
+        title="Biomarker vs Baseline ROC",
+    )
+    assert isinstance(roc_spec, dict)
+    assert "data" in roc_spec and "layout" in roc_spec
+    assert len(roc_spec["data"]) == 4  # chance, primary, optimal, paired
+    json_roc = json.dumps(roc_spec)
+    assert "Biomarker Model" in json_roc
+    assert "Optimal Cutpoint" in json_roc
+
+    # 2. Kaplan-Meier Curve
+    build_km = ns["build_plotly_km_spec"]
+    km_spec = build_km(
+        km_data={
+            "Treatment": {
+                "timeline": [0, 30, 90, 180, 365],
+                "survival": [1.0, 0.95, 0.88, 0.82, 0.75],
+                "ci_lower": [1.0, 0.90, 0.82, 0.75, 0.67],
+                "ci_upper": [1.0, 0.98, 0.93, 0.88, 0.82],
+                "censored_times": [45, 120, 200],
+            },
+            "Control": {
+                "timeline": [0, 30, 90, 180, 365],
+                "survival": [1.0, 0.90, 0.78, 0.68, 0.58],
+                "ci_lower": [1.0, 0.84, 0.71, 0.60, 0.50],
+                "ci_upper": [1.0, 0.95, 0.84, 0.75, 0.66],
+                "censored_times": [60, 150],
+            },
+        },
+        title="Survival by Treatment Arm",
+        x_label="Time (Days)",
+    )
+    assert isinstance(km_spec, dict)
+    assert (
+        len(km_spec["data"]) >= 6
+    )  # 2 groups * (upper CI, lower ribbon, step line, censored)
+    json_km = json.dumps(km_spec)
+    assert "tonexty" in json_km
+    # Verify stepwise expansion of confidence ribbon vertices
+    ci_upper_trace = km_spec["data"][0]
+    assert ci_upper_trace["x"] == [0, 30, 30, 90, 90, 180, 180, 365, 365]
+    assert ci_upper_trace["y"] == [1.0, 1.0, 0.98, 0.98, 0.93, 0.93, 0.88, 0.88, 0.82]
+
+    # 3. Calibration Curve
+    build_calib = ns["build_plotly_calibration_spec"]
+    calib_spec = build_calib(
+        calib_bins={
+            "pred_mean": [0.05, 0.15, 0.25, 0.40, 0.60, 0.85],
+            "obs_rate": [0.04, 0.16, 0.22, 0.42, 0.58, 0.82],
+            "ci_lower": [0.01, 0.09, 0.14, 0.31, 0.46, 0.70],
+            "ci_upper": [0.10, 0.25, 0.32, 0.54, 0.70, 0.91],
+        },
+        brier_score=0.125,
+        ici=0.018,
+    )
+    assert isinstance(calib_spec, dict)
+    json_calib = json.dumps(calib_spec)
+    assert "Perfect Calibration" in json_calib
+    assert "Brier Score: 0.125" in json_calib
+
+    # 4. Decision Curve Analysis (DCA) - verify ascending threshold sorting and non-finite filtering
+    build_dca = ns["build_plotly_dca_spec"]
+    dca_spec = build_dca(
+        dca_data=[
+            {
+                "strategy": "Model",
+                "threshold": 0.2,
+                "net_benefit": 0.10,
+            },  # Shuffled order
+            {"strategy": "Model", "threshold": 0.1, "net_benefit": 0.15},
+            {
+                "strategy": "Model",
+                "threshold": float("nan"),
+                "net_benefit": 0.05,
+            },  # Non-finite ignored
+            {"strategy": "Treat All", "threshold": 0.2, "net_benefit": 0.05},
+            {"strategy": "Treat All", "threshold": 0.1, "net_benefit": 0.12},
+            {"strategy": "Treat None", "threshold": 0.2, "net_benefit": 0.0},
+            {"strategy": "Treat None", "threshold": 0.1, "net_benefit": 0.0},
+        ],
+    )
+    assert isinstance(dca_spec, dict)
+    assert len(dca_spec["data"]) == 3
+    # Check that points are strictly sorted by threshold
+    model_trace = next(t for t in dca_spec["data"] if t["name"] == "Model")
+    assert model_trace["x"] == [0.1, 0.2]
+    assert model_trace["y"] == [0.15, 0.10]
+    json_dca = json.dumps(dca_spec)
+    assert "Treat All" in json_dca
+
+    # 5. Bland-Altman Agreement
+    build_ba = ns["build_plotly_bland_altman_spec"]
+    ba_spec = build_ba(
+        ba_data={
+            "means": [10.0, 15.0, 20.0, 25.0],
+            "diffs": [-0.5, 0.2, -1.0, 0.8],
+            "mean_diff": -0.125,
+            "loa_upper": 1.62,
+            "loa_lower": -1.87,
+        },
+        units="mmHg",
+    )
+    assert isinstance(ba_spec, dict)
+    assert len(ba_spec["data"]) == 5  # points, zero, mean bias, upper LoA, lower LoA
+    json_ba = json.dumps(ba_spec)
+    assert "mmHg" in json_ba
+    assert "Mean Bias" in json_ba
+
+    # Bland-Altman fallback computation from diffs when stats are omitted
+    ba_spec_calc = build_ba(
+        ba_data={
+            "means": [10.0, 15.0, 20.0, 25.0],
+            "diffs": [-0.5, 0.2, -1.0, 0.8],
+        },
+        units="mmHg",
+    )
+    assert len(ba_spec_calc["data"]) == 5
+    bias_trace = next(
+        t for t in ba_spec_calc["data"] if "Mean Bias" in t.get("name", "")
+    )
+    upper_trace = next(
+        t for t in ba_spec_calc["data"] if "Upper LoA" in t.get("name", "")
+    )
+    lower_trace = next(
+        t for t in ba_spec_calc["data"] if "Lower LoA" in t.get("name", "")
+    )
+    assert pytest.approx(bias_trace["y"][0], abs=1e-3) == -0.125
+    assert pytest.approx(upper_trace["y"][0], abs=1e-3) == 1.4214
+    assert pytest.approx(lower_trace["y"][0], abs=1e-3) == -1.6714
+
+    # Bland-Altman empty diffs omits bias/LoA without substituting zero
+    ba_spec_empty = build_ba(ba_data={"means": [], "diffs": []})
+    assert len(ba_spec_empty["data"]) == 2  # points + zero bias line only
+    assert not any("Mean Bias" in t.get("name", "") for t in ba_spec_empty["data"])
+    assert not any("Upper LoA" in t.get("name", "") for t in ba_spec_empty["data"])
+
+    # 6. Forest Plot - verify categorical yaxis and log positivity filter
+    build_forest = ns["build_plotly_forest_spec"]
+    forest_spec = build_forest(
+        forest_data=[
+            {
+                "term": "Age >= 65",
+                "estimate": 1.85,
+                "ci_lower": 1.20,
+                "ci_upper": 2.85,
+                "p_value": 0.005,
+            },
+            {
+                "term": "Diabetes",
+                "estimate": 1.45,
+                "ci_lower": 0.95,
+                "ci_upper": 2.20,
+                "p_value": 0.082,
+            },
+            {
+                "term": "Hypertension",
+                "estimate": 2.10,
+                "ci_lower": 1.40,
+                "ci_upper": 3.15,
+                "p_value": 0.001,
+            },
+            {
+                "term": "InvalidNegative",
+                "estimate": -0.5,
+                "ci_lower": -1.0,
+                "ci_upper": 0.5,
+            },
+        ],
+        scale="OR",
+    )
+    assert isinstance(forest_spec, dict)
+    assert forest_spec["layout"]["xaxis"]["type"] == "log"
+    assert forest_spec["layout"]["yaxis"]["type"] == "category"
+    # InvalidNegative must be filtered out because scale is OR (log)
+    assert "InvalidNegative" not in forest_spec["data"][1]["y"]
+    assert len(forest_spec["data"][1]["y"]) == 3
+    json_forest = json.dumps(forest_spec)
+    assert "Age >= 65" in json_forest
+
+    # 7. Love Plot - verify categorical yaxis
+    build_love = ns["build_plotly_love_spec"]
+    love_spec = build_love(
+        love_data=[
+            {"variable": "Age", "pre_smd": 0.35, "post_smd": 0.04},
+            {"variable": "BMI", "pre_smd": 0.22, "post_smd": 0.02},
+            {"variable": "Female", "pre_smd": 0.18, "post_smd": 0.05},
+        ],
+        threshold=0.10,
+    )
+    assert isinstance(love_spec, dict)
+    assert len(love_spec["data"]) == 3  # threshold, pre-match, post-match
+    assert love_spec["layout"]["yaxis"]["type"] == "category"
+    json_love = json.dumps(love_spec)
+    assert "Threshold (0.10)" in json_love
+
+    # 8. Integration with generate_html_report
+    gen_html = ns["generate_html_report"]
+    fake_png = tmp_path / "test_fig.png"
+    fake_png.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+
+    out_html = tmp_path / "test_report.html"
+    res_path = gen_html(
+        title="Clinical Trial Report",
+        results={"narrative": "Results summary with p < 0.05"},
+        tables={"Baseline": pd.DataFrame({"Var": ["Age"], "Mean": [55.2]})},
+        figure_paths=[str(fake_png)],
+        plotly_figs=[roc_spec],
+        out_path=str(out_html),
+    )
+    assert Path(res_path).exists()
+    html_content = Path(res_path).read_text(encoding="utf-8")
+    assert "https://cdn.plot.ly/plotly-2.35.2.min.js" in html_content
+    assert "Interactive (Plotly)" in html_content
+    assert "Publication 300 DPI" in html_content
+    assert "spec-1" in html_content
+    assert "<script type='application/json' id='spec-1'>" in html_content
+    # Fallback to static figure when Plotly is unavailable or offline
+    assert "if (typeof Plotly === 'undefined')" in html_content
+    assert "switchFig(id, 's');" in html_content
+    assert "offline-msg-" in html_content
+
+    # Regression test: verify opening angle brackets are escaped in embedded JSON to prevent XSS / script breakouts
+    malicious_title = "</script><script>alert('xss')</script>"
+    xss_spec = {
+        "data": [{"type": "scatter", "x": [0, 1], "y": [0, 1]}],
+        "layout": {"title": {"text": malicious_title}},
+    }
+    xss_html = tmp_path / "xss_report.html"
+    res_xss_path = gen_html(
+        title="Security Test Report",
+        results={"narrative": "Validating JSON script escaping"},
+        tables={},
+        figure_paths=[str(fake_png)],
+        plotly_figs=[xss_spec],
+        out_path=str(xss_html),
+    )
+    xss_content = Path(res_xss_path).read_text(encoding="utf-8")
+    assert "\\u003c/script>\\u003cscript>" in xss_content
+    assert "</script><script>alert('xss')</script>" not in xss_content

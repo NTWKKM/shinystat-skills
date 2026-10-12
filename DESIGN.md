@@ -947,4 +947,33 @@ Directly bundling Plotly.js into HTML files inflates report size by ~3.5–4 MB 
 
 [MEMORY_LEARN: Dual / Toggle View in clinical HTML reporting pairs exploratory Plotly interactivity with 300 DPI publication static images, using an isolated mirror folder (`figures/html/`) to protect baseline modules while enforcing offline CDN fallback and @media print parity.]
 
+---
+
+## ADR 37: Adaptive Clinical Inquiry and Harmonized Default HTML Deliverables across Canonical and Cloud Skills
+
+### Context
+User testing in Claude Web and local agent runtimes revealed two behavioral variances:
+1. **Grilling Gate Suppression & Rigidity**: In previous revisions, rigid question templates (`❓ Q1`) paired with prohibition clauses (*"do NOT block execution with an unnecessary halt"*) inadvertently caused agents to either skip clarifying critical clinical ambiguities (due to action bias) or mechanically demand rigid questionnaire forms when intent was already unambiguous.
+2. **Deliverable Disconnect**: Agents in chat sandboxes often concluded statistical analysis by merely rendering conversational Markdown summaries in chat rather than generating and delivering the default self-contained HTML publication report (`.html`).
+3. **Skill Asymmetry**: Canonical `shinystat` retained legacy rigid gating and an outdated EPV hard stop, while `shinystat-cloud` evolved independently, creating cognitive drift across platforms.
+
+### Decision
+1. **Pruning & Positive Prompting (`/writing-for-agents`)**:
+   - Replaced contradictory *"halt immediately... without halting"* directives with direct positive framing: Clarify genuine ambiguities directly with the user before analyzing; proceed directly when context is clear.
+   - Removed rigid `❓ Q1 ... ➡️ ...` blocks in favor of flexible, domain-targeted inquiries (outcome definition, event/censoring codes, low-vs-high abnormal biomarker direction, study design archetype).
+   - Removed anti-halt phrasing that discouraged agents from asking when genuine doubt existed.
+2. **Explicit Deliverable Intent**:
+   - Standardized Pillar 5 guidance in both skills to explicitly state that the default deliverable is a self-contained HTML report (`.html`) per `references/report-builder.md`, rather than outputting only conversational Markdown text in chat.
+3. **100% Behavioral Parity**:
+   - Synchronized decision models across both canonical `shinystat` (local CLI/`medstat`) and `shinystat-cloud` (standalone Python recipes), maintaining 100% mirror parity across `.agent/`, `.agents/`, `.claude/`, `.cursor/`, and `packaging/cloud/`.
+   - Re-packaged `/Users/ntwkkm/Desktop/shinystat-cloud.zip`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Ergonomics**: Agents ask natural, targeted questions when needed and avoid redundant interruptions when intent is clear.
+- **Deliverable Consistency**: Users receive self-contained HTML reports with embedded figures and publication tables by default across all agent platforms.
+- **Verification**: 40/40 unit tests passing with zero regressions and clean git status.
+
+[MEMORY_LEARN: Framing clinical inquiry as adaptive, targeted clarification while explicitly anchoring default deliverables to self-contained HTML reports eliminates conversational truncations and questionnaire friction across both local and cloud AI agent runtimes.]
+
 
