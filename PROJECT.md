@@ -1,7 +1,7 @@
 # Project: medstat-core
 
 ## Architecture
-`medstat-core` is a pure headless Python biostatistical calculation engine and unified CLI tool with 5 self-contained Agent Skills, decoupled from `shiny-stat` and packaged for public GitHub release under Apache-2.0.
+`medstat-core` is a pure headless Python biostatistical calculation engine and unified CLI tool paired with the dual autonomous agent skills (`shinystat` and `shinystat-cloud`), decoupled from `shiny-stat` and packaged for public GitHub release under Apache-2.0.
 
 ```
 medstat-core/
@@ -94,7 +94,7 @@ Every feature from the Survey phase is enumerated here with its assigned milesto
 | 11 | Unified Click CLI Subcommands | Subcommands: `clean`, `table1`, `model`, `diag`, `causal`, `meta`, `agreement`, `sample-size`, `report` | M3 | Survey 2 |
 | 12 | SAP Spec Engine (analysis_plan.yaml) | YAML/JSON specification parser validating types, reference levels, interactions, splines, missingness | M3 | Survey 2 |
 | 13 | Self-Documenting Help Menus | Complete CLI `--help` for root and all subcommands returning exit code 0 | M3 | Survey 2 |
-| 14 | 5 Agent Skills Packaging | Author atomic skills under `skills/` adhering strictly to `writing-for-agents` | M4 | Survey 3 |
+| 14 | Dual Agent Skills Packaging | Author unified `shinystat` and `shinystat-cloud` skills under `skills/` adhering strictly to `writing-for-agents` | M4 | Survey 3 |
 | 15 | Localized Skill References | Portable `references/` directories per skill with zero broken relative paths | M4 | Survey 3 |
 | 16 | Multi-Platform Skill Installer | `scripts/install-skills.sh` supporting Antigravity, Claude Code, and Cursor environments | M4 | Survey 3 |
 | 17 | Ported Unit Regression Tests | Port all unit tests from `shiny-stat/tests/unit/` to `tests/unit/` with 100% pass rate | M5 | Survey 3 |
@@ -107,11 +107,11 @@ Every feature from the Survey phase is enumerated here with its assigned milesto
 
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| M1 | Core Engine Decoupling & Pure-Python ICC | `pyproject.toml`, LICENSE, `conftest.py`, `src/medstat/` core stats, models (Firth, RCS), diagnostic, causal, meta, agreement (pure SciPy ICC), power, theme, reporting | none | IN_PROGRESS |
-| M2 | Clinically Sound Data Cleaning & Audited Sample Flow | `medstat.data` (clean, missing, retention, quality), explicit missingness strategy enforcement, `SampleFlowTracker` | M1 | PLANNED |
-| M3 | Unified CLI & SAP Spec Engine | `medstat.cli` (`main.py`, `spec.py`), click subcommands, `analysis_plan.yaml` validator and execution engine | M1, M2 | PLANNED |
-| M4 | Five Self-Contained Agent Skills & Installer | `skills/` (5 skills with localized references, frontmatter < 1024 chars), `scripts/install-skills.sh` | M1, M2, M3 | PLANNED |
-| M5 | Test Suite, R Parity Benchmarks & E2E Workflows | Port unit tests to `tests/unit/`, R benchmark parity in `tests/benchmarks/`, 5 clinical workflow CLI E2E tests | M1, M2, M3, M4 | PLANNED |
+| M1 | Core Engine Decoupling & Pure-Python ICC | `pyproject.toml`, LICENSE, `conftest.py`, `src/medstat/` core stats, models (Firth, RCS), diagnostic, causal, meta, agreement (pure SciPy ICC), power, theme, reporting | none | COMPLETED |
+| M2 | Clinically Sound Data Cleaning & Audited Sample Flow | `medstat.data` (clean, missing, retention, quality), explicit missingness strategy enforcement, `SampleFlowTracker` | M1 | COMPLETED |
+| M3 | Unified CLI & SAP Spec Engine | `medstat.cli` (`main.py`, `spec.py`), click subcommands, `analysis_plan.yaml` validator and execution engine | M1, M2 | COMPLETED |
+| M4 | Dual Autonomous Agent Skills & Installer | `skills/` (`shinystat` and `shinystat-cloud` with localized references, frontmatter < 1024 chars), `scripts/install-skills.sh` | M1, M2, M3 | COMPLETED |
+| M5 | Test Suite, R Parity Benchmarks & E2E Workflows | Port unit tests to `tests/unit/`, R benchmark parity in `tests/benchmarks/`, 5 clinical workflow CLI E2E tests | M1, M2, M3, M4 | COMPLETED |
 
 ---
 
