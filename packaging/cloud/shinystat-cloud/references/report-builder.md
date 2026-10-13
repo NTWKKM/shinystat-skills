@@ -3,7 +3,7 @@
 In cloud sandboxes (e.g. Claude Web Artifacts), `medstat` is not installed as an external package. This reference provides self-contained, pure-Python reporting recipes that assemble biostatistical findings into publication-grade documents (Markdown, self-contained HTML, Word `.docx`, and PowerPoint `.pptx`) with zero custom dependencies.
 
 > [!IMPORTANT]
-> **Default Output Format**: If the user does not specify an output format, **always default to Self-Contained HTML (`.html`)** with embedded base64 figures and ICMJE 3-rule CSS styling (`generate_html_report`).
+> **Output Format Alignment Gate**: When the user prompt does not explicitly specify a deliverable format, **proactively ask the user upfront** before finalizing the deliverable, recommending **(Dual / Toggle View) Self-Contained HTML (`generate_html_report`, `.html`)** where interactive Plotly.js charts serve as the primary view, paired with a tab/button to switch to "Publication 300 DPI Figure (Static)" for journal submission and downloads.
 
 ---
 
@@ -145,10 +145,10 @@ def generate_html_report(
             if plt_fig:
                 parts.append("<div class='fig-tabs'>")
                 parts.append(f"<button type='button' class='fig-btn active' id='tab-i-{idx_str}' onclick=\"switchFig('{idx_str}', 'i')\">Interactive (Plotly)</button>")
-                parts.append(f"<button type='button' class='fig-btn' id='tab-s-{idx_str}' onclick=\"switchFig('{idx_str}', 's')\">Publication 300 DPI</button>")
+                parts.append(f"<button type='button' class='fig-btn' id='tab-s-{idx_str}' onclick=\"switchFig('{idx_str}', 's')\">Publication 300 DPI Figure (Static)</button>")
                 parts.append("</div>")
             else:
-                parts.append("<span style='font-size:12.5px; font-weight:600;'>Publication Figure (300 DPI)</span>")
+                parts.append("<span style='font-size:12.5px; font-weight:600;'>Publication 300 DPI Figure (Static)</span>")
             parts.append(f"<div class='fig-actions'><a href='data:image/png;base64,{b64}' download='{stem}.png'>Download 300 DPI PNG</a></div>")
             parts.append("</div>")
 

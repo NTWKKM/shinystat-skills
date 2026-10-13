@@ -976,4 +976,38 @@ User testing in Claude Web and local agent runtimes revealed two behavioral vari
 
 [MEMORY_LEARN: Framing clinical inquiry as adaptive, targeted clarification while explicitly anchoring default deliverables to self-contained HTML reports eliminates conversational truncations and questionnaire friction across both local and cloud AI agent runtimes.]
 
+---
+
+## ADR 38: Autonomous Biostatistical Authority, Output Format Alignment Gate & Dual / Toggle View HTML Recommendation Standard
+
+### Context
+User feedback and review under `/writing-for-agents` identified two operational challenges across both `shinystat` and `shinystat-cloud`:
+1. **Decision Hesitancy on Biostatistical Mechanics**: Agents exhibited timidity when handling routine biostatistical mechanics (e.g. asking the user whether to use parametric vs non-parametric tests, whether to apply Firth penalization for sparse data/separation, or asking about knot placement and table styling), blurring the line between statistical expertise and clinical intent.
+2. **Output Format Ambiguity**: When the user prompt did not specify a deliverable format, agents previously either defaulted quietly to HTML without user alignment or lapsed into rendering plain Markdown chat text, skipping the rich report-generation protocol.
+
+### Decision
+1. **Autonomous Biostatistical Authority**:
+   - Explicitly empower the agent as the **Lead Clinical Biostatistician** across both local and cloud skills.
+   - The agent exercises complete autonomy over statistical mechanics: distributional shape auditing (Mean [SD] vs Median [IQR]), non-parametric test routing, EPV diagnostics, Firth penalized likelihood execution for sparse data / separation, Schoenfeld assumption testing for Cox models, Restricted Cubic Spline modeling, GEE cluster adjustments, Little's MCAR testing, MICE execution, Youden's J cutpoint optimization, and VanderWeele E-value calculations.
+   - Clarify the Grilling Gate boundary: reserve user clarification strictly for irreducible clinical and protocol ambiguities (primary outcome definition, event direction/censoring coding, unlabelled biomarker abnormality direction, or proposal-data geometry mismatches).
+2. **Mandatory Output Format Alignment Gate (Ask Immediately if Unspecified)**:
+   - When the user prompt does not specify a deliverable format, the agent **must proactively ask the user upfront** before finalizing the deliverable.
+   - Present a structured menu recommending:
+     - **(Recommended) Interactive HTML Report with Dual / Toggle View**: In the same self-contained HTML document, interactive Plotly.js charts serve as the primary active view (hover tooltips, zooming, cutpoint inspection), paired with a tab/button to switch to **"Publication 300 DPI Figure (Static)"** for downloading and journal submission, complete with ICMJE 3-rule tables and structured Methods & Results narratives.
+     - **Manuscript Word Document (`.docx`)**: Formal Word report with 3-rule publication tables and 300 DPI figures.
+     - **Executive PowerPoint Presentation (`.pptx`)**: 16:9 widescreen slides (1 figure per slide layout with key takeaway cards).
+     - **Publication PDF (`.pdf`)** / **Markdown (`.md`)**.
+     - **Quick In-Chat Summary Only**: Concise executive narrative and tables directly in chat.
+3. **Dual / Toggle View Specification Alignment**:
+   - Aligned tab button labels across renderers and recipes: Tab 1 = `Interactive (Plotly)` (primary view), Tab 2 = `"Publication 300 DPI Figure (Static)"`.
+   - Maintained 100% byte-identical mirror parity across canonical `skills/`, all agent mirrors (`.agent/`, `.agents/`, `.claude/`, `.cursor/`), and `packaging/cloud/shinystat-cloud/`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Biostatistical Autonomy**: Agents act decisively on statistical decisions while respecting clinical boundaries.
+- **Reporting Protocol Precision**: Proactive output format alignment ensures users always get their intended format without silent assumptions, with the Dual / Toggle View HTML report as the primary recommendation.
+- **Parity & Tests**: 318/318 unit tests passing across the entire suite with zero drift.
+
+[MEMORY_LEARN: Empowering agents with Autonomous Biostatistical Authority over statistical mechanics while enforcing a mandatory Output Format Alignment Gate recommending Dual / Toggle View HTML reports guarantees decisive analytical execution and publication-grade deliverable fidelity.]
+
 
