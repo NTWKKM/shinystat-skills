@@ -10,7 +10,7 @@ In cloud sandboxes (e.g. Claude Web Artifacts), `medstat` is not installed as an
 ## 1. Cloud Report Generation Architecture
 
 1. **Default & Primary Formats (Zero Extra Dependencies)**:
-   - **Self-Contained HTML (`.html`)**: **Default deliverable format** when unspecified. Always available; embeds plots via base64 data URIs and applies ICMJE 3-rule CSS styling.
+   - **Self-Contained HTML (`.html`)**: **Recommended format at alignment gate**. When the user prompt omits a deliverable format, the agent must wait for the user's format selection at the Output Format Alignment Gate rather than silently falling back. Always available; embeds plots via base64 data URIs and applies ICMJE 3-rule CSS styling.
    - **Markdown (`.md`)**: Always available; formats tables via `pandas.DataFrame.to_markdown()` and links figure assets.
 2. **Office Document Fallbacks (`python-docx` / `python-pptx`)**:
    - If `docx` or `pptx` packages are installed in the sandbox, use the standalone snippets below upon explicit user request.

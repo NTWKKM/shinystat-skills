@@ -1001,12 +1001,19 @@ User feedback and review under `/writing-for-agents` identified two operational 
 3. **Dual / Toggle View Specification Alignment**:
    - Aligned tab button labels across renderers and recipes: Tab 1 = `Interactive (Plotly)` (primary view), Tab 2 = `"Publication 300 DPI Figure (Static)"`.
    - Maintained 100% byte-identical mirror parity across canonical `skills/`, all agent mirrors (`.agent/`, `.agents/`, `.claude/`, `.cursor/`), and `packaging/cloud/shinystat-cloud/`.
+4. **CodeRabbit Statistical Rigor & Format Gate Remediation**:
+   - *Estimand-Driven Test Selection*: Replaced skewness-only testing heuristics with estimand- and design-driven selection, explicitly noting that Mann-Whitney U tests stochastic shift rather than medians when group distribution shapes differ.
+   - *EPV vs Separation Boundary*: Decoupled low EPV finite-sample bias ($\text{EPV} < 10$, handled autonomously via Firth/penalized models) from monotone separation (which halts at the Grilling Gate for clinical confirmation between penalization and covariate reduction).
+   - *MAR Clinical Rationale & MNAR Sensitivity*: Required documenting clinical rationale supporting MAR before executing MICE, alongside mandatory complete-case benchmark reporting and explicit MNAR sensitivity requirements when plausible.
+   - *Qualified Dual-View HTML Rendering*: Clarified that Dual / Toggle View pairs interactive Plotly charts with static publication figures when Plotly specifications are supplied (`plotly_figs`), gracefully defaulting to publication static figures only when omitted.
+   - *Observational Causal E-Values*: Explicitly restricted VanderWeele E-value computation to observational causal/exposure-outcome settings.
+   - *Eliminated Format Gate Fallback Ambiguity*: Removed contradictory statements labelling HTML as an automatic 'default deliverable format when unspecified', ensuring the agent always waits for user format selection at the Output Format Alignment Gate.
 
 ### Consequences
 - **Status**: Accepted & Verified.
 - **Biostatistical Autonomy**: Agents act decisively on statistical decisions while respecting clinical boundaries.
 - **Reporting Protocol Precision**: Proactive output format alignment ensures users always get their intended format without silent assumptions, with the Dual / Toggle View HTML report as the primary recommendation.
-- **Parity & Tests**: 318/318 unit tests passing across the entire suite with zero drift.
+- **Parity & Tests**: 524/524 tests passing across the entire test suite with zero regressions or drift.
 
 [MEMORY_LEARN: Empowering agents with Autonomous Biostatistical Authority over statistical mechanics while enforcing a mandatory Output Format Alignment Gate recommending Dual / Toggle View HTML reports guarantees decisive analytical execution and publication-grade deliverable fidelity.]
 
