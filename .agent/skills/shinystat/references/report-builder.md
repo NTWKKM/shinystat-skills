@@ -61,9 +61,9 @@ md_path = render_markdown(
 ```
 
 ### Self-Contained HTML (`render_html`)
-Produces a single, fully offline-capable HTML file with embedded base64 images, ICMJE 3-rule table styling, and **Dual / Toggle View**:
-- **Primary Interactive View**: Plotly.js interactive charts (`Interactive (Plotly)`) as the default active view (hover over ROC cutpoints, zoom Kaplan-Meier timelines, inspect calibration deciles) when using `medstat.figures.html.*`.
-- **Publication Static View**: Seamless segmented switch to `"Publication 300 DPI Figure (Static)"` Matplotlib figures formatted for journal submission (NEJM/JAMA).
+Produces a single, fully offline-capable HTML file with embedded base64 images, ICMJE 3-rule table styling, and **Dual / Toggle View when a Plotly specification is supplied**:
+- **Primary Interactive View**: Plotly.js interactive charts (`Interactive (Plotly)`) as the default active view (hover over ROC cutpoints, zoom Kaplan-Meier timelines, inspect calibration deciles) when using `medstat.figures.html.*` with a supplied Plotly specification.
+- **Publication Static View**: Seamless segmented switch to `"Publication 300 DPI Figure (Static)"` Matplotlib figures formatted for journal submission (NEJM/JAMA). Without a Plotly specification, the report contains only this static view.
 - **Direct Downloads**: One-click download buttons for high-resolution 300 DPI PNG and underlying CSV dataset.
 - **Offline & Sandbox Resilience**: Automatic fallback notice with manual toggle button if Plotly CDN is unreachable.
 - **Print Optimization**: `@media print` cleanly suppresses toggle chrome and prints high-resolution static images.

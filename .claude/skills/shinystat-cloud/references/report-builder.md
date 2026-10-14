@@ -59,7 +59,7 @@ def generate_markdown_report(
 
 ### B. Self-Contained HTML Report with Dual / Toggle View
 
-Generates a standalone single-file HTML report with ICMJE 3-rule tables and **Dual / Toggle View** (interactive Plotly charts with instant toggle to 300 DPI publication figures, download buttons, and offline resilience):
+Generates a standalone single-file HTML report with ICMJE 3-rule tables and **Dual / Toggle View when a Plotly specification is supplied** (interactive Plotly charts with instant toggle to 300 DPI publication figures, download buttons, and offline resilience; without a Plotly specification, the report contains only the static publication view):
 
 ```python
 import base64
