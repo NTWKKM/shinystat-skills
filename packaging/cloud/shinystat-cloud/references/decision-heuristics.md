@@ -33,14 +33,14 @@ Calculate diagnostic EPV:
 ├── EPV ≥ 10 & No Separation ──▶ Standard Multivariable Logistic (Recipe 10) / Cox PH (Recipe 11)
 ├── Monotone Separation Detected ──▶ Halt at Grilling Gate for clinical confirmation:
 │   ├── Binary Logistic: (A) Firth penalized likelihood with profile likelihood CIs (Recipe 7), or (B) Remove/collapse separating covariate
-│   └── Cox Proportional Hazards (Monotone Likelihood): (A) Penalized Cox regression via lifelines (`CoxPHFitter(penalizer=0.1)`), or (B) Remove/collapse separating covariate
+│   └── Cox Proportional Hazards (Monotone Likelihood): (A) Penalized Cox regression via lifelines (`CoxPHFitter(penalizer=0.1)` in Recipe 11), or (B) Remove/collapse separating covariate
 └── Low EPV (< 10) without Separation
     ├── Binary Logistic:
     │   ├── Strategy 1 (Etiological Effect): Firth penalized logistic regression with profile likelihood CIs (Recipe 7)
     │   ├── Strategy 2 (Prediction Model): L2 Ridge penalization / shrinkage to prevent overfitting (Riley et al., 2019)
     │   └── Strategy 3: Domain-guided clinical composite score or univariable reporting with sparse-data disclaimer
     └── Cox Proportional Hazards:
-        ├── Strategy 1: L2-penalized Cox regression via lifelines (`CoxPHFitter(penalizer=0.1)`)
+        ├── Strategy 1: L2-penalized Cox regression via lifelines (`CoxPHFitter(penalizer=0.1)` in Recipe 11)
         ├── Strategy 2: Pre-specified clinical risk index / score reduction
         └── Strategy 3: Univariable survival analysis (Kaplan-Meier / univariable Cox) with sparse-data disclaimer
 ```
