@@ -31,7 +31,9 @@ Calculate diagnostic EPV:
 - Cox Proportional Hazards: EPV = Observed Failures / P_parameters
 
 ├── EPV ≥ 10 & No Separation ──▶ Standard Multivariable Logistic (Recipe 10) / Cox PH (Recipe 11)
-├── Monotone Separation Detected ──▶ Halt at Grilling Gate for clinical confirmation (choose Firth penalization vs covariate reduction)
+├── Monotone Separation Detected ──▶ Halt at Grilling Gate for clinical confirmation:
+│   ├── Binary Logistic: (A) Firth penalized likelihood with profile likelihood CIs (Recipe 7), or (B) Remove/collapse separating covariate
+│   └── Cox Proportional Hazards (Monotone Likelihood): (A) Penalized Cox regression via lifelines (`CoxPHFitter(penalizer=0.1)`), or (B) Remove/collapse separating covariate
 └── Low EPV (< 10) without Separation
     ├── Binary Logistic:
     │   ├── Strategy 1 (Etiological Effect): Firth penalized logistic regression with profile likelihood CIs (Recipe 7)

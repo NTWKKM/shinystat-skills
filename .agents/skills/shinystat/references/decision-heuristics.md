@@ -31,7 +31,9 @@ Calculate EPV (where P_parameters counts fitted degrees of freedom; e.g. k-1 for
 - Cox Proportional Hazards: EPV = Observed Failures / P_parameters (do not use censored subjects)
 
 ├── EPV ≥ 10 & No Separation ──▶ Proceed with standard GLM Logistic / Cox PH
-├── Monotone Separation Detected ──▶ Halt at Grilling Gate for clinical confirmation (choose Firth penalization vs covariate reduction)
+├── Monotone Separation Detected ──▶ Halt at Grilling Gate for clinical confirmation:
+│   ├── Binary Logistic: (A) Firth penalized likelihood (`fit_firth_logistic` in `medstat.models.firth`), or (B) Remove/collapse separating covariate
+│   └── Cox Proportional Hazards (Monotone Likelihood): (A) Firth penalized Cox (`fit_firth_cox` in `medstat.models.firth`), or (B) Remove/collapse separating covariate
 └── Low EPV (< 10) without Separation
     ├── Binary Logistic:
     │   ├── Strategy 1 (Etiological Effect): Firth penalized logistic regression (`fit_firth_logistic` in `medstat.models.firth`)

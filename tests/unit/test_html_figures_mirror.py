@@ -301,7 +301,7 @@ def test_render_html_dual_toggle_view(tmp_path: Path):
 
     # Verify Dual Toggle UI tabs
     assert "Interactive (Plotly)" in content
-    assert "Publication 300 DPI (Static)" in content
+    assert "Publication 300 DPI Figure (Static)" in content
     assert 'class="fig-tab-btn active"' in content
 
     # Verify Download Action Buttons
@@ -312,7 +312,7 @@ def test_render_html_dual_toggle_view(tmp_path: Path):
     # Verify Offline Resilience & Banner
     assert "offline-banner" in content
     assert "โหมดออฟไลน์ (Offline Mode)" in content
-    assert "สลับไปดู Publication Figure (300 DPI)" in content
+    assert "สลับไปดู Publication 300 DPI Figure (Static)" in content
     assert "switchFigView(id, 'static');" in content
 
     # Verify Print Media Styles
@@ -355,7 +355,7 @@ def test_render_html_static_only_figure(tmp_path: Path):
     assert "https://cdn.plot.ly/plotly-2.35.2.min.js" not in content
 
     # Verify static badge is present without interactive tab buttons
-    assert "Publication Figure (300 DPI)" in content
+    assert "Publication 300 DPI Figure (Static)" in content
     assert "Interactive (Plotly)" not in content
     assert "Download 300 DPI PNG" in content
 
