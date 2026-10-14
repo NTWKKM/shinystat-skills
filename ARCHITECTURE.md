@@ -93,7 +93,7 @@ System architecture and structural specifications for `medstat-core` and the `me
 - **`balance.py`**: Austin 2009 Love plots for PSM covariate balance with 0.10 SMD threshold.
 - **`retention.py`**: Pure-Matplotlib STROBE / CONSORT participant retention flowcharts.
 - **`diagnostics.py`**: Missingness heatmaps, Schoenfeld proportional hazards residuals, and MICE density overlays.
-- **`html/`**: Dedicated mirror submodule for Dual / Toggle View (`DualFigureResult`, `plot_dual_roc_curve`, `plot_dual_kaplan_meier`, `plot_dual_calibration`, `plot_dual_dca`, `plot_dual_bland_altman`, `plot_dual_forest`, `plot_dual_love`). Produces companion Plotly interactive visualizations alongside publication 300 DPI Matplotlib images.
+- **`html/`**: Dedicated mirror submodule for Dual / Toggle View (`DualFigureResult`, `plot_dual_roc_curve`, `plot_dual_kaplan_meier`, `plot_dual_calibration`, `plot_dual_dca`, `plot_dual_bland_altman`, `plot_dual_forest`, `plot_dual_love`). Produces companion Plotly interactive visualizations (primary view) alongside "Publication 300 DPI Figure (Static)" Matplotlib images with instant toggle switching and direct journal download links.
 
 ### `medstat.reporting`
 - **`tables.py`**: Journal-compliant polymorphic HTML table rendering (NEJM, JAMA, APA 7) with strict border rules, no vertical dividers, and support for Table 1, Regression, Diagnostic accuracy, Bland-Altman, ICC, and Covariate balance.
@@ -102,7 +102,7 @@ System architecture and structural specifications for `medstat-core` and the `me
 - **`ir.py`**: Report Intermediate Representation (IR) acting as Single Source of Truth (`ReportDocument`, `Block`, `HeadingBlock`, `ParagraphBlock`, `TableBlock`, `FigureBlock`, `CalloutBlock`).
 - **`renderers/`**: Multi-format document renderers:
   - `markdown.py`: GitHub Flavored Markdown + linked assets directory (`render_markdown`).
-  - `html.py`: Self-contained single-file HTML with embedded base64 figures, ICMJE 3-rule table styling, and Dual / Toggle View (`render_html`) with offline fallback and print parity.
+  - `html.py`: Self-contained single-file HTML with embedded base64 figures, ICMJE 3-rule table styling, Output Format Alignment Gate defaults, and Dual / Toggle View (`render_html`) placing Plotly interactive charts as the primary view with a toggle to "Publication 300 DPI Figure (Static)" for journal submission, offline fallback resilience, and print parity.
   - `docx.py`: Native Microsoft Word `.docx` with OpenXML `<w:tblBorders>` 3-rule borders and 6.5 in figures (`render_docx`).
   - `pptx.py`: Native PowerPoint 16:9 widescreen presentation with 1 figure per slide layout and structured takeaway cards (`render_pptx`).
   - `pdf.py`: High-fidelity PDF rendering via Playwright headless Chromium with LibreOffice fallback (`render_pdf`).

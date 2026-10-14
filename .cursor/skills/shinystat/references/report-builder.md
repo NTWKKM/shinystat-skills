@@ -3,7 +3,7 @@
 `medstat.reporting` provides an end-to-end publishing pipeline that transforms raw biostatistical outputs into publication-grade documents (Markdown, self-contained HTML, Word `.docx`, PowerPoint `.pptx`, and PDF).
 
 > [!IMPORTANT]
-> **Default Output Format**: When the user does not specify an output format, **always default to self-contained HTML (`render_html`, `.html`)** with embedded base64 figures and responsive ICMJE/NEJM/JAMA table styling.
+> **Output Format Alignment Gate**: When the user prompt does not explicitly specify a deliverable format, **proactively ask the user upfront** (via `ask_question` in Antigravity or direct prompt) to align on the deliverable format, recommending **(Dual / Toggle View) Interactive HTML Report (`render_html`, `.html`)** where interactive Plotly.js charts serve as the primary view, paired with a tab/button to switch to "Publication 300 DPI Figure (Static)" for journal submission and downloads.
 
 ---
 
@@ -61,9 +61,9 @@ md_path = render_markdown(
 ```
 
 ### Self-Contained HTML (`render_html`)
-Produces a single, fully offline-capable HTML file with embedded base64 images, ICMJE 3-rule table styling, and **Dual / Toggle View**:
-- **Exploratory View**: Plotly.js interactive charts (hover over ROC cutpoints, zoom Kaplan-Meier timelines, inspect calibration deciles) when using `medstat.figures.html.*`.
-- **Publication View**: Seamless segmented switch to 300 DPI Matplotlib figures formatted for journal submission (NEJM/JAMA).
+Produces a single, fully offline-capable HTML file with embedded base64 images, ICMJE 3-rule table styling, and **Dual / Toggle View when a Plotly specification is supplied**:
+- **Primary Interactive View**: Plotly.js interactive charts (`Interactive (Plotly)`) as the default active view (hover over ROC cutpoints, zoom Kaplan-Meier timelines, inspect calibration deciles) when using `medstat.figures.html.*` with a supplied Plotly specification.
+- **Publication Static View**: Seamless segmented switch to `"Publication 300 DPI Figure (Static)"` Matplotlib figures formatted for journal submission (NEJM/JAMA). Without a Plotly specification, the report contains only this static view.
 - **Direct Downloads**: One-click download buttons for high-resolution 300 DPI PNG and underlying CSV dataset.
 - **Offline & Sandbox Resilience**: Automatic fallback notice with manual toggle button if Plotly CDN is unreachable.
 - **Print Optimization**: `@media print` cleanly suppresses toggle chrome and prints high-resolution static images.

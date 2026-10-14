@@ -40,6 +40,10 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
 | **Zero-Variance SMD** | `smd_zero_variance` | Boundary condition in covariate balance: when pooled SD is 0 and group means differ, SMD is mathematically undefined and returns `np.nan` (rather than masking extreme imbalance as `0.0`), serialized as JSON `null`. |
 | **Distinct Study Count** | `distinct_studies` | Independent sample size threshold ($k_{\text{distinct}} \ge 10$) and uniqueness verification enforced before running Egger's linear regression test to prevent spurious validity from multi-effect studies. |
 | **Positional Boolean Masking** | `valid_mask` | Decoupling numpy design matrix slicing from pandas DataFrame index state via `.notna().to_numpy()` to prevent index misalignment across custom or non-standard indices. |
+| **Autonomous Authority** | `autonomous_authority` | Agent mandate to independently execute sound biostatistical mechanics (normality testing, model upgrading to Firth/splines/GEE, missing data handling, 95% CIs) without halting to ask trivial user permission. |
+| **Output Alignment Gate** | `output_alignment_gate` | Proactive inquiry protocol triggered when the user prompt omits a report format, prompting the user with options and recommending the Dual / Toggle View HTML report. |
+| **Dual / Toggle View** | `dual_toggle_view` | Publication architecture placing interactive Plotly.js charts as the primary active view, with a tab or toggle button to switch to "Publication 300 DPI Figure (Static)" for journal submission and downloads. |
+| **Publication 300 DPI Figure** | `pub_static_figure` | Journal-compliant 300 DPI static figure rendered via Matplotlib with colorblind-safe palettes and Thai typography fallback chain (`Sarabun`, `Thonburi`, `Sukhumvit Set`). |
 
 ---
 

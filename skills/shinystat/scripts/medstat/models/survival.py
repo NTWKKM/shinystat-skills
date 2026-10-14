@@ -118,6 +118,9 @@ def fit_cox_ph(
     if len(clean_df) < 5:
         raise ValueError("Cox PH requires at least 5 observations.")
 
+    if penalizer < 0:
+        raise ValueError("penalizer must be >= 0")
+
     cph = CoxPHFitter(penalizer=penalizer)
     cph.fit(clean_df, duration_col=duration_col, event_col=event_col)
 

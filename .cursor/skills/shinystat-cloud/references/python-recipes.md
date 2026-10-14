@@ -1576,6 +1576,7 @@ def fit_survival_analysis_suite(
     event_col: str,
     strata_col: str | None = None,
     covariates: list[str] | None = None,
+    penalizer: float = 0.0,
 ) -> dict:
     """Run Kaplan-Meier, Log-Rank, and Cox PH modeling with per-covariate Schoenfeld test."""
     n_initial = len(df)
@@ -1680,7 +1681,9 @@ def fit_survival_analysis_suite(
                 f"Event indicator '{event_col}' must contain strictly binary values."
             )
 
-        cph = CoxPHFitter()
+        if penalizer < 0:
+            raise ValueError("penalizer must be >= 0")
+        cph = CoxPHFitter(penalizer=penalizer)
         cox_data = clean_cox[cox_cols]
         cph.fit(cox_data, duration_col=duration_col, event_col=event_col)
 
@@ -1737,6 +1740,7 @@ def fit_survival_analysis_suite(
         "km_curves": km_curves,
         "risk_table": risk_table,
         "cox_table": cox_table,
+        "cox_penalizer": penalizer if covariates else None,
         "forest_data": forest_items,
         "schoenfeld_diagnostics": schoenfeld_summary,
         "retention_km": {
