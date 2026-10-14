@@ -385,6 +385,7 @@ def test_survival_analysis_suite_two_groups(recipes):
     assert "test_statistics" in res["schoenfeld_diagnostics"]
     assert "age" in res["schoenfeld_diagnostics"]["p_values"]
     assert isinstance(res["schoenfeld_diagnostics"]["PH_Assumptions_Passed"], bool)
+    assert res["cox_penalizer"] == 0.0
 
 
 def test_survival_analysis_suite_multivariate_logrank(recipes):
@@ -989,6 +990,43 @@ def test_survival_strict_binary_event_negative_duration_and_cohort_separation(re
         "Cox cohort must drop patient with missing Cox covariate"
     )
     assert "no_ph_violation_detected" in res["schoenfeld_diagnostics"]
+
+
+def test_survival_analysis_suite_penalizer_options(recipes):
+    fit_surv = recipes["fit_survival_analysis_suite"]
+    df = pd.DataFrame(
+        {
+            "time": [10.0, 20.0, 30.0, 40.0, 50.0],
+            "event": [1, 0, 1, 0, 1],
+            "age": [45.0, 55.0, 65.0, 75.0, 85.0],
+        }
+    )
+
+    # 1. Default penalizer=0.0
+    res_default = fit_surv(
+        df, duration_col="time", event_col="event", covariates=["age"]
+    )
+    assert res_default["cox_penalizer"] == 0.0
+
+    # 2. Explicit penalizer=0.1
+    res_pen = fit_surv(
+        df, duration_col="time", event_col="event", covariates=["age"], penalizer=0.1
+    )
+    assert res_pen["cox_penalizer"] == 0.1
+
+    # 3. Negative penalizer rejected
+    with pytest.raises(ValueError, match="penalizer must be >= 0"):
+        fit_surv(
+            df,
+            duration_col="time",
+            event_col="event",
+            covariates=["age"],
+            penalizer=-0.1,
+        )
+
+    # 4. No covariates returns cox_penalizer=None
+    res_no_cov = fit_surv(df, duration_col="time", event_col="event")
+    assert res_no_cov["cox_penalizer"] is None
 
 
 # -----------------------------------------------------------------------------
