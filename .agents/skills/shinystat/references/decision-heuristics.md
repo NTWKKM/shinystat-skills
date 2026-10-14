@@ -33,9 +33,10 @@ Calculate EPV (where P_parameters counts fitted degrees of freedom; e.g. k-1 for
 ├── EPV ≥ 10 ──▶ Proceed with standard GLM Logistic / Cox PH
 └── EPV < 10 or Separation detected
     ├── Binary Logistic:
-    │   ├── Strategy 1 (Preferred): Firth penalized logistic regression (`fit_firth_logistic` in `medstat.models.firth`)
-    │   ├── Strategy 2: Pre-specified variable reduction or domain-guided composite score
-    │   └── Strategy 3: Report univariable associations with explicit sparse-data disclaimer
+    │   ├── Strategy 1 (Etiological Effect): Firth penalized logistic regression (`fit_firth_logistic` in `medstat.models.firth`)
+    │   ├── Strategy 2 (Prediction Model): L2 Ridge penalization / shrinkage to prevent overfitting (Riley et al., 2019)
+    │   ├── Strategy 3: Pre-specified variable reduction or domain-guided composite score
+    │   └── Strategy 4: Report univariable associations with explicit sparse-data disclaimer
     └── Cox Proportional Hazards (Failures / Parameter < 10):
         ├── Strategy 1: Firth penalized Cox regression (`fit_firth_cox` in `medstat.models.firth`)
         ├── Strategy 2: Pre-specified covariate reduction (e.g. validated clinical risk score)
