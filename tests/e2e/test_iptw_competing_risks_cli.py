@@ -466,9 +466,35 @@ def test_cli_iptw_json_output_serialization_strips_model(
     assert out_json.exists()
     data = json.loads(out_json.read_text())
     assert "outcome_model" in data
-    # Verify 'model' object is stripped
+    # Verify 'model' object is stripped in file output
     assert "model" not in data["outcome_model"]
     assert "odds_ratio" in data["outcome_model"]
+
+    # 2. Stdout JSON branch (without --output)
+    res_stdout = runner.invoke(
+        cli,
+        [
+            "causal",
+            "iptw",
+            "--data",
+            str(sample_iptw_csv),
+            "--treatment",
+            "treatment",
+            "--covariates",
+            "age,bmi",
+            "--outcome",
+            "outcome_bin",
+            "--outcome-type",
+            "binary",
+        ],
+    )
+    assert res_stdout.exit_code == 0, f"Error: {res_stdout.output}"
+    stdout_data = json.loads(res_stdout.output)
+    assert "outcome_model" in stdout_data
+    # Verify 'model' object is stripped in stdout
+    assert "model" not in stdout_data["outcome_model"]
+    assert "odds_ratio" in stdout_data["outcome_model"]
+    assert stdout_data["outcome_model"]["odds_ratio"] > 0
 
 
 def test_cli_spec_yaml_iptw_binary_and_survival_scales(
@@ -530,6 +556,16 @@ reporting:
     res = json.loads(out_json.read_text())
     assert "iptw_bin" in res["models"]
     assert "iptw_surv" in res["models"]
+
+    # Explicit assertions verifying odds_ratio and hazard_ratio are positive
+    assert res["models"]["iptw_bin"]["odds_ratio"] > 0
+    assert res["models"]["iptw_surv"]["hazard_ratio"] > 0
+
+    # If estimates list is present, verify OR and HR entries
+    if "estimates" in res:
+        scales = [e.get("scale") for e in res["estimates"]]
+        assert "OR" in scales
+        assert "HR" in scales
 
     # Verify narrative for iptw_bin mentions "Weights were not truncated."
     bin_narrative = res["reports"]["iptw_bin"]["methods_narrative"]
