@@ -44,6 +44,13 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
 | **Output Alignment Gate** | `output_alignment_gate` | Proactive inquiry protocol triggered when the user prompt omits a report format, prompting the user with options and recommending the Dual / Toggle View HTML report. |
 | **Dual / Toggle View** | `dual_toggle_view` | Publication architecture placing interactive Plotly.js charts as the primary active view, with a tab or toggle button to switch to "Publication 300 DPI Figure (Static)" for journal submission and downloads. |
 | **Publication 300 DPI Figure** | `pub_static_figure` | Journal-compliant 300 DPI static figure rendered via Matplotlib with colorblind-safe palettes and Thai typography fallback chain (`Sarabun`, `Thonburi`, `Sukhumvit Set`). |
+| **Inverse Probability Weighting** | `iptw` | Propensity score weighting reweighting observational cohorts to create pseudo-populations where treatment assignment is independent of measured baseline covariates. |
+| **Propensity Estimands** | `ate_att_atc_ato` | Target causal estimands in IPTW: ATE (whole eligible population), ATT (treated population), ATC (control population), and ATO (Overlap Weights, emphasizing clinical equipoise). |
+| **Effective Sample Size** | `kish_neff` | Kish's effective sample size $N_{\text{eff}} = \frac{(\sum w_i)^2}{\sum w_i^2}$ evaluating statistical precision loss and variance inflation induced by unequal weighting. |
+| **Cumulative Incidence Function** | `cif_aalen_johansen` | Non-parametric event probability estimator under competing risks ($\text{CIF}_k(t) = \int_0^t \hat{S}(u^-) d\hat{\Lambda}_k(u)$), avoiding the systematic upward bias of $1 - \text{Kaplan-Meier}$. |
+| **Cause-Specific Hazard Ratio** | `cshr` | Cox model treating competing events as right-censored at failure time, estimating the instantaneous relative event rate among subjects currently event-free (etiological inference). |
+| **Fine-Gray Hazard Ratio** | `fine_gray_shr` | Subdistribution hazard model maintaining subjects experiencing competing events in the risk set with decaying IPCW weights, estimating overall cumulative incidence (prognostic inference). |
+| **Probability Conservation** | `cif_conservation` | Mandatory audit ensuring the sum of all cause-specific CIFs plus overall event-free survival probability equals unity ($\sum_k \text{CIF}_k(t) + \hat{S}(t) \approx 1.0$) across all follow-up horizons. |
 
 ---
 
@@ -65,6 +72,18 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
 - **`EstimateTable`**:
   - `estimates: list[Estimate]`
   - `meta: ModelMeta` (model type, outcome, sample flow counts)
+- **`IPTWResult`**:
+  - `df_weighted: pd.DataFrame` (cohort augmented with `propensity_score` and `weight`)
+  - `weights: np.ndarray`, `propensity_scores: np.ndarray`
+  - `effective_sample_size: float`, `effective_sample_size_treated: float`, `effective_sample_size_control: float`
+  - `diagnostics: dict[str, Any]` (estimand, stabilized, truncated, extreme weight flags, positivity violations)
+  - Supports tuple unpacking: `df_weighted, diagnostics = iptw_result`
+- **`CompetingRisksCIFResult`**:
+  - `cif_table: pd.DataFrame` (time, CIF, Greenwood lower/upper CIs, standard error per event type)
+  - `event_types: list[int]` (e.g. `[1, 2]`)
+  - `horizons: dict[float, dict[int, dict[str, float]]]` (CIF estimates and 95% CIs at requested landmark times)
+  - `overestimation_vs_km: dict[int, dict[float, float]]` (percentage point difference between Naive $1 - \text{KM}$ and Aalen-Johansen CIF)
+  - `conservation_audit: pd.DataFrame` (verifies $\sum \text{CIF}_k + \hat{S} \approx 1.0$)
 - **`DiagnosticResult`**:
   - `sensitivity: float`, `sensitivity_ci: tuple[float, float]`
   - `specificity: float`, `specificity_ci: tuple[float, float]`

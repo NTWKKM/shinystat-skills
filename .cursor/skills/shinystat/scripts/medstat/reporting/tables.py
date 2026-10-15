@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import numpy as np
+import pandas as pd
 
 
 @dataclass
@@ -583,33 +584,100 @@ def render_balance_table(
     bal_data: dict[str, Any],
     style: Literal["NEJM", "JAMA", "APA7"] = "NEJM",
 ) -> str:
-    """Render Austin 2009 Covariate Balance table (Pre/Post SMD) as a publication-grade HTML table."""
+    """Render Austin 2009 Covariate Balance table (Pre/Post/Weighted SMD) as a publication-grade HTML table."""
     covariates = bal_data.get("covariates", [])
     smd_pre = bal_data.get("smd_pre", bal_data.get("smd_raw", []))
     smd_post = bal_data.get(
         "smd_post", bal_data.get("smd_matched", bal_data.get("post_smd", []))
     )
+    smd_weighted = bal_data.get(
+        "smd_weighted",
+        bal_data.get("weighted_smd", bal_data.get("Post_Weight_SMD", [])),
+    )
+
+    has_weighted = len(smd_weighted) > 0
 
     records: list[dict[str, Any]] = []
     for idx, cov in enumerate(covariates):
         pre_val = smd_pre[idx] if idx < len(smd_pre) else None
         post_val = smd_post[idx] if idx < len(smd_post) else None
+        weight_val = smd_weighted[idx] if idx < len(smd_weighted) else None
+
         pre_valid = pre_val is not None and math.isfinite(pre_val)
         post_valid = post_val is not None and math.isfinite(post_val)
+        weight_valid = weight_val is not None and math.isfinite(weight_val)
+
         pre_str = f"{pre_val:.3f}" if pre_valid else "—"
         post_str = f"{post_val:.3f}" if post_valid else "—"
-        if post_valid:
-            status = "Balanced (SMD < 0.10)" if abs(post_val) < 0.10 else "Imbalanced"
+
+        eval_val = weight_val if weight_valid else post_val
+        if eval_val is not None and math.isfinite(eval_val):
+            status = "Balanced (SMD < 0.10)" if abs(eval_val) < 0.10 else "Imbalanced"
         else:
             status = "—"
+
+        rec = {
+            "Covariate": str(cov),
+            "Pre-Matching SMD": pre_str,
+        }
+        if not has_weighted or post_valid:
+            rec["Post-Matching SMD"] = post_str
+        if has_weighted:
+            rec["IPTW Weighted SMD"] = f"{weight_val:.3f}" if weight_valid else "—"
+        rec["Balance Status"] = status
+        records.append(rec)
+
+    note = "Standardized Mean Difference (SMD) evaluates covariate balance; SMD < 0.10 indicates negligible imbalance (Austin 2009)."
+    return render_records_table(title, records, style=style, note=note)
+
+
+def render_competing_risks_table(
+    title: str,
+    cr_data: dict[str, Any] | pd.DataFrame,
+    style: Literal["NEJM", "JAMA", "APA7"] = "NEJM",
+) -> str:
+    """
+    Render dual Cause-Specific HR vs Fine-Gray SHR table as a publication-grade HTML table.
+    """
+    if hasattr(cr_data, "comparison_table"):
+        df = cr_data.comparison_table
+    elif isinstance(cr_data, dict) and "comparison_table" in cr_data:
+        df = cr_data["comparison_table"]
+    elif isinstance(cr_data, pd.DataFrame):
+        df = cr_data
+    else:
+        raise ValueError("cr_data must contain comparison_table DataFrame.")
+
+    records: list[dict[str, Any]] = []
+    for _, row in df.iterrows():
+        cov = str(row["covariate"])
+        cs_ci = (
+            row.get("cs_95_ci")
+            or f"{row['cause_specific_hr']:.3f} ({row['cs_ci_lower']:.3f} to {row['cs_ci_upper']:.3f})"
+        )
+        cs_p = format_journal_p_value(row["cs_p_value"], style=style)
+        fg_ci = (
+            row.get("fg_95_ci")
+            or f"{row['fine_gray_shr']:.3f} ({row['fg_ci_lower']:.3f} to {row['fg_ci_upper']:.3f})"
+        )
+        fg_p = format_journal_p_value(row["fg_p_value"], style=style)
+
+        divergent = row.get("divergent", False)
+        status_note = "Divergent (Etiology ≠ Prognosis)" if divergent else "Concordant"
+
         records.append(
             {
-                "Covariate": str(cov),
-                "Pre-Matching SMD": pre_str,
-                "Post-Matching SMD": post_str,
-                "Balance Status": status,
+                "Covariate": cov,
+                "Cause-Specific HR (95% CI)": cs_ci,
+                "csHR P-value": cs_p,
+                "Fine-Gray SHR (95% CI)": fg_ci,
+                "SHR P-value": fg_p,
+                "Association Profile": status_note,
             }
         )
 
-    note = "Standardized Mean Difference (SMD) evaluates covariate balance; SMD < 0.10 indicates negligible imbalance (Austin 2009)."
+    note = (
+        "Cause-specific hazard ratios (csHR) estimate relative event rates among patients currently event-free (etiology). "
+        "Fine-Gray subdistribution hazard ratios (SHR) estimate relative effects on cumulative incidence over time (clinical prognosis)."
+    )
     return render_records_table(title, records, style=style, note=note)

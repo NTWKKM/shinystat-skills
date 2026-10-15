@@ -12,12 +12,13 @@ from medstat.figures.html.calibration import plot_dual_calibration
 from medstat.figures.html.dca import plot_dual_dca
 from medstat.figures.html.forest import plot_dual_forest
 from medstat.figures.html.roc import plot_dual_roc_curve
-from medstat.figures.html.survival import plot_dual_kaplan_meier
+from medstat.figures.html.survival import plot_dual_cif, plot_dual_kaplan_meier
 
 __all__ = [
     "DualFigureResult",
     "plot_dual_roc_curve",
     "plot_dual_kaplan_meier",
+    "plot_dual_cif",
     "plot_dual_calibration",
     "plot_dual_dca",
     "plot_dual_bland_altman",

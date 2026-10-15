@@ -26,7 +26,10 @@ from medstat.models.ordinal import (
 from medstat.models.sensitivity import bootstrap_confidence_interval, calculate_e_value
 from medstat.models.splines import fit_cox_rcs
 from medstat.models.survival import (
+    CompetingRisksCIFResult,
     compare_survival_curves,
+    fit_competing_risks_cif,
+    fit_competing_risks_regression,
     fit_cox_ph,
     fit_kaplan_meier,
 )
@@ -84,6 +87,9 @@ __all__ = [
     "fit_kaplan_meier",
     "compare_survival_curves",
     "fit_cox_ph",
+    "fit_competing_risks_cif",
+    "fit_competing_risks_regression",
+    "CompetingRisksCIFResult",
     "fit_cox_rcs",
     "fit_proportional_odds",
     "test_proportional_odds",

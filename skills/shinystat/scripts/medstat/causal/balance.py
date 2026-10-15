@@ -53,19 +53,34 @@ def calculate_smd(
 
     if weights_treated is not None:
         wt = np.asarray(weights_treated, dtype=float)[~np.isnan(t_arr)]
-        mean_t = np.average(t_valid, weights=wt)
-        var_t = np.average((t_valid - mean_t) ** 2, weights=wt)
+        sum_wt = float(np.sum(wt))
+        sum_wt2 = float(np.sum(wt**2))
+        mean_t = float(np.average(t_valid, weights=wt))
+        if sum_wt**2 > sum_wt2:
+            # Bessel-corrected weighted sample variance (Austin 2009 / Kish formula)
+            bessel_factor = (sum_wt**2) / (sum_wt**2 - sum_wt2)
+            raw_var = float(np.average((t_valid - mean_t) ** 2, weights=wt))
+            var_t = bessel_factor * raw_var
+        else:
+            var_t = 0.0
     else:
-        mean_t = np.mean(t_valid)
-        var_t = np.var(t_valid, ddof=1) if len(t_valid) > 1 else 0.0
+        mean_t = float(np.mean(t_valid))
+        var_t = float(np.var(t_valid, ddof=1)) if len(t_valid) > 1 else 0.0
 
     if weights_control is not None:
         wc = np.asarray(weights_control, dtype=float)[~np.isnan(c_arr)]
-        mean_c = np.average(c_valid, weights=wc)
-        var_c = np.average((c_valid - mean_c) ** 2, weights=wc)
+        sum_wc = float(np.sum(wc))
+        sum_wc2 = float(np.sum(wc**2))
+        mean_c = float(np.average(c_valid, weights=wc))
+        if sum_wc**2 > sum_wc2:
+            bessel_factor = (sum_wc**2) / (sum_wc**2 - sum_wc2)
+            raw_var = float(np.average((c_valid - mean_c) ** 2, weights=wc))
+            var_c = bessel_factor * raw_var
+        else:
+            var_c = 0.0
     else:
-        mean_c = np.mean(c_valid)
-        var_c = np.var(c_valid, ddof=1) if len(c_valid) > 1 else 0.0
+        mean_c = float(np.mean(c_valid))
+        var_c = float(np.var(c_valid, ddof=1)) if len(c_valid) > 1 else 0.0
 
     pooled_sd = np.sqrt((var_t + var_c) / 2.0)
     if pooled_sd == 0:
@@ -78,13 +93,18 @@ def check_balance(
     df: pd.DataFrame,
     treatment: str,
     covariates: list[str],
-    weights: pd.Series | None = None,
+    weights: pd.Series | np.ndarray | str | None = None,
 ) -> pd.DataFrame:
     """
     Calculate SMDs across multiple covariates in a cohort.
     """
     treated_mask = df[treatment] == 1
     control_mask = df[treatment] == 0
+
+    if isinstance(weights, str):
+        w_series = df[weights]
+    else:
+        w_series = weights
 
     results = []
     for cov in covariates:
@@ -94,8 +114,8 @@ def check_balance(
         smd = calculate_smd(
             df.loc[treated_mask, cov],
             df.loc[control_mask, cov],
-            weights_treated=weights[treated_mask] if weights is not None else None,
-            weights_control=weights[control_mask] if weights is not None else None,
+            weights_treated=w_series[treated_mask] if w_series is not None else None,
+            weights_control=w_series[control_mask] if w_series is not None else None,
         )
 
         is_finite = pd.notna(smd) and np.isfinite(smd)
@@ -111,6 +131,60 @@ def check_balance(
         )
 
     return pd.DataFrame(results)
+
+
+def compute_balance_table(
+    df: pd.DataFrame,
+    treatment: str,
+    covariates: list[str],
+    matched_df: pd.DataFrame | None = None,
+    weights_col: str | None = None,
+) -> pd.DataFrame:
+    """
+    Generate comprehensive covariate balance comparison table supporting unadjusted,
+    matched, and IPTW-weighted cohorts.
+    """
+    unadj = check_balance(df, treatment, covariates)
+    unadj_map = dict(zip(unadj["Covariate"], unadj["SMD"]))
+
+    matched_map = {}
+    if matched_df is not None:
+        matched_res = check_balance(matched_df, treatment, covariates)
+        matched_map = dict(zip(matched_res["Covariate"], matched_res["SMD"]))
+
+    weighted_map = {}
+    if weights_col is not None and weights_col in df.columns:
+        weighted_res = check_balance(df, treatment, covariates, weights=weights_col)
+        weighted_map = dict(zip(weighted_res["Covariate"], weighted_res["SMD"]))
+
+    rows = []
+    for cov in covariates:
+        u_smd = _normalize_smd(unadj_map.get(cov))
+        row = {
+            "Covariate": cov,
+            "Unadjusted_SMD": u_smd,
+            "Unadjusted_Abs_SMD": abs(u_smd) if np.isfinite(u_smd) else np.nan,
+        }
+        if matched_df is not None:
+            m_smd = _normalize_smd(matched_map.get(cov))
+            row["Matched_SMD"] = m_smd
+            row["Matched_Abs_SMD"] = abs(m_smd) if np.isfinite(m_smd) else np.nan
+        if weights_col is not None:
+            w_smd = _normalize_smd(weighted_map.get(cov))
+            row["Weighted_SMD"] = w_smd
+            row["Weighted_Abs_SMD"] = abs(w_smd) if np.isfinite(w_smd) else np.nan
+
+        eval_smd = (
+            row.get("Weighted_Abs_SMD")
+            or row.get("Matched_Abs_SMD")
+            or row["Unadjusted_Abs_SMD"]
+        )
+        row["Status"] = (
+            "Balanced" if (np.isfinite(eval_smd) and eval_smd < 0.10) else "Imbalanced"
+        )
+        rows.append(row)
+
+    return pd.DataFrame(rows)
 
 
 def _normalize_smd(val: Any) -> float:
@@ -168,33 +242,55 @@ def create_love_plot(
     threshold: float = 0.10,
 ) -> go.Figure:
     """
-    Generate an interactive Love Plot comparing Pre- vs Post-match absolute SMDs.
+    Generate an interactive Love Plot comparing Pre- vs Post-match or Weighted absolute SMDs.
     """
-    df = balance_comparison_df.sort_values(by="Pre_Abs_SMD", ascending=True)
+    sort_col = (
+        "Pre_Abs_SMD"
+        if "Pre_Abs_SMD" in balance_comparison_df.columns
+        else balance_comparison_df.columns[1]
+    )
+    df = balance_comparison_df.sort_values(by=sort_col, ascending=True)
 
     fig = go.Figure()
 
     # Pre-matching points
-    fig.add_trace(
-        go.Scatter(
-            x=df["Pre_Abs_SMD"],
-            y=df["Covariate"],
-            mode="markers",
-            marker=dict(color=COLORS["danger"], size=9, symbol="circle"),
-            name="Unadjusted (Pre-match)",
+    pre_col = "Pre_Abs_SMD" if "Pre_Abs_SMD" in df.columns else "Pre_SMD"
+    if pre_col in df.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=df[pre_col].abs(),
+                y=df["Covariate"],
+                mode="markers",
+                marker=dict(color=COLORS["danger"], size=9, symbol="circle"),
+                name="Unadjusted (Pre-match)",
+            )
         )
-    )
 
     # Post-matching points
-    fig.add_trace(
-        go.Scatter(
-            x=df["Post_Abs_SMD"],
-            y=df["Covariate"],
-            mode="markers",
-            marker=dict(color=COLORS["success"], size=9, symbol="diamond"),
-            name="Adjusted (Matched)",
+    post_col = "Post_Abs_SMD" if "Post_Abs_SMD" in df.columns else "Post_SMD"
+    if post_col in df.columns and df[post_col].notna().any():
+        fig.add_trace(
+            go.Scatter(
+                x=df[post_col].abs(),
+                y=df["Covariate"],
+                mode="markers",
+                marker=dict(color=COLORS["success"], size=9, symbol="diamond"),
+                name="Adjusted (Matched)",
+            )
         )
-    )
+
+    # Weighted points
+    w_col = "Weighted_Abs_SMD" if "Weighted_Abs_SMD" in df.columns else "Weighted_SMD"
+    if w_col in df.columns and df[w_col].notna().any():
+        fig.add_trace(
+            go.Scatter(
+                x=df[w_col].abs(),
+                y=df["Covariate"],
+                mode="markers",
+                marker=dict(color="#2563EB", size=9, symbol="square"),
+                name="Adjusted (IPTW Weighted)",
+            )
+        )
 
     # Threshold line at SMD = threshold
     fig.add_vline(

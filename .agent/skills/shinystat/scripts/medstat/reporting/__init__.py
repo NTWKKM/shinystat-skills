@@ -35,6 +35,8 @@ from medstat.reporting.tables import (
     format_journal_p_value,
     render_apa_table,
     render_ascii_table,
+    render_balance_table,
+    render_competing_risks_table,
     render_jama_table,
     render_nejm_table,
 )
@@ -50,6 +52,8 @@ __all__ = [
     "render_jama_table",
     "render_apa_table",
     "render_ascii_table",
+    "render_balance_table",
+    "render_competing_risks_table",
     "generate_methods_narrative",
     "validate_calibration_metrics",
     "ReportDocument",

@@ -82,3 +82,12 @@ markers = [
     "e2e: marks CLI end-to-end tests",
     "benchmark: marks numerical parity benchmark tests against R",
 ]
+filterwarnings = [
+    "error::FutureWarning:medstat.*",
+    "error::DeprecationWarning:medstat.*",
+    "ignore::statsmodels.tools.sm_exceptions.PerfectSeparationWarning",
+    "ignore::statsmodels.tools.sm_exceptions.ConvergenceWarning",
+    "ignore::lifelines.exceptions.ConvergenceWarning",
+    "ignore::RuntimeWarning:pingouin.*",
+    "ignore:Precision loss occurred in moment calculation:RuntimeWarning:scipy.*",
+]

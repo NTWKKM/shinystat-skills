@@ -15,6 +15,7 @@ SKILLS_SRC="${REPO_ROOT}/skills"
 TARGET="all"
 SCOPE="workspace"
 CUSTOM_DEST=""
+SYNC_ONLY=false
 
 print_usage() {
     cat <<EOF
@@ -28,11 +29,15 @@ Options:
   -s, --scope SCOPE      Installation scope: workspace, global
                          (Default: workspace)
   -d, --dest DIR         Custom destination directory (overrides target & scope)
+  --sync, --sync-only    Synchronize src/medstat (SSOT) -> skills/ and update workspace mirrors
   -h, --help             Show this help message and exit
 
 Examples:
   # Install into current workspace for all supported platforms
   ./scripts/install-skills.sh
+
+  # Synchronize src/medstat into skills/ and all workspace agent mirrors
+  ./scripts/install-skills.sh --sync
 
   # Install into Antigravity workspace (.agents/skills/)
   ./scripts/install-skills.sh --target antigravity --scope workspace
@@ -64,6 +69,10 @@ while [[ $# -gt 0 ]]; do
             SCOPE="global"
             shift
             ;;
+        --sync|--sync-only)
+            SYNC_ONLY=true
+            shift
+            ;;
         -d|--dest)
             CUSTOM_DEST="$2"
             shift 2
@@ -79,6 +88,22 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Synchronize src/medstat (Single Source of Truth) into skills/shinystat/scripts/medstat
+MEDSTAT_SRC="${REPO_ROOT}/src/medstat"
+MEDSTAT_BUNDLE="${SKILLS_SRC}/shinystat/scripts/medstat"
+
+if [[ -d "${MEDSTAT_SRC}" && -d "${MEDSTAT_BUNDLE}" ]]; then
+    echo "▶ Synchronizing src/medstat (SSOT) -> skills/shinystat/scripts/medstat..."
+    rsync -a --delete --exclude="__pycache__" --exclude="*.pyc" "${MEDSTAT_SRC}/" "${MEDSTAT_BUNDLE}/"
+fi
+
+# Synchronize skills/shinystat-cloud -> packaging/cloud/shinystat-cloud
+CLOUD_PKG="${REPO_ROOT}/packaging/cloud/shinystat-cloud"
+CLOUD_SKILL="${SKILLS_SRC}/shinystat-cloud"
+if [[ -d "${CLOUD_SKILL}" && -d "${CLOUD_PKG}" ]]; then
+    rsync -a --delete --exclude="__pycache__" --exclude="*.pyc" "${CLOUD_SKILL}/" "${CLOUD_PKG}/"
+fi
 
 if [[ ! -d "${SKILLS_SRC}" ]]; then
     echo "Error: Source skills directory not found at '${SKILLS_SRC}'" >&2
@@ -120,7 +145,7 @@ copy_skills() {
     for skill in "${SKILL_DIRS[@]}"; do
         local src_path="${SKILLS_SRC}/${skill}"
         local target_path="${dest_dir}/${skill}"
-        if [[ -d "${target_path}" ]]; then
+        if [[ -d "${target_path}" && "${SYNC_ONLY}" != true ]]; then
             local backup_path
             backup_path="${backup_dir}/${skill}.backup.$(date +%Y%m%d%H%M%S)"
             mkdir -p "${backup_dir}"
@@ -132,6 +157,33 @@ copy_skills() {
         echo "  ✓ Installed ${skill} -> ${target_path}"
     done
 }
+
+if [[ "${SYNC_ONLY}" == true ]]; then
+    echo ""
+    echo "▶ Synchronizing workspace agent mirrors..."
+    MIRRORS=(
+        "${REPO_ROOT}/.agents/skills|Antigravity (.agents)"
+        "${REPO_ROOT}/.agent/skills|Antigravity (.agent)"
+        "${REPO_ROOT}/.claude/skills|Claude Code (.claude)"
+        "${REPO_ROOT}/.cursor/skills|Cursor (.cursor)"
+    )
+    for entry in "${MIRRORS[@]}"; do
+        IFS="|" read -r dir_path label <<< "${entry}"
+        copy_skills "${dir_path}" "${label}"
+    done
+
+    # Synchronize packaging/cloud/shinystat-cloud for Claude Web packaging
+    rm -rf "${REPO_ROOT}/packaging/cloud/shinystat-cloud"
+    mkdir -p "${REPO_ROOT}/packaging/cloud"
+    cp -R "${REPO_ROOT}/skills/shinystat-cloud" "${REPO_ROOT}/packaging/cloud/shinystat-cloud"
+    echo "  ✓ Installed shinystat-cloud -> ${REPO_ROOT}/packaging/cloud/shinystat-cloud"
+
+    echo ""
+    echo "=========================================================="
+    echo "  ✓ Synchronization complete! All mirrors match src/medstat."
+    echo "=========================================================="
+    exit 0
+fi
 
 if [[ -n "${CUSTOM_DEST}" ]]; then
     copy_skills "${CUSTOM_DEST}" "Custom Destination"

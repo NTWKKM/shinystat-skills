@@ -5,7 +5,7 @@ src/medstat/figures/survival.py: Publication-grade Kaplan-Meier curves with alig
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -173,6 +173,131 @@ def plot_kaplan_meier(
     if log_rank_p is not None:
         p_str = f"{log_rank_p:.3f}" if log_rank_p >= 0.001 else "< 0.001"
         caption += f" Log-rank test p-value: {p_str}."
+
+    return FigureResult(
+        png_path=png_path,
+        alt_text=alt_text,
+        caption=caption,
+        source_df=source_df,
+        csv_path=csv_path,
+    )
+
+
+def plot_cif(
+    cif_data: Any,
+    primary_label: str = "Event of Interest",
+    competing_label: str = "Competing Event",
+    show_naive_km: bool = True,
+    time_unit: str = "Months",
+    title: str = "Cumulative Incidence Function Under Competing Risks",
+    out_path: str | Path = "figures/cif_plot.png",
+    target: Literal["docx", "pptx", "web"] = "docx",
+) -> FigureResult:
+    """
+    Renders publication-grade Cumulative Incidence Function (CIF) step curves
+    under competing risks with Greenwood 95% confidence intervals and Naive 1 - KM comparison.
+    """
+    w, h, dpi = set_clinical_figure_style(target)
+
+    # Extract DataFrame
+    if hasattr(cif_data, "cif_table"):
+        df = cif_data.cif_table.copy()
+    elif isinstance(cif_data, pd.DataFrame):
+        df = cif_data.copy()
+    elif isinstance(cif_data, dict) and "cif_table" in cif_data:
+        df = cif_data["cif_table"].copy()
+    else:
+        raise ValueError(
+            "cif_data must be a CompetingRisksCIFResult, DataFrame, or dict with 'cif_table'."
+        )
+
+    fig, ax = plt.subplots(figsize=(w, h))
+
+    t = df["time"].to_numpy(dtype=float)
+    cif1 = df["cif_primary"].to_numpy(dtype=float)
+    cif1_l = (
+        df["cif_primary_ci_lower"].to_numpy(dtype=float)
+        if "cif_primary_ci_lower" in df.columns
+        else cif1
+    )
+    cif1_u = (
+        df["cif_primary_ci_upper"].to_numpy(dtype=float)
+        if "cif_primary_ci_upper" in df.columns
+        else cif1
+    )
+
+    cif2 = df["cif_competing"].to_numpy(dtype=float)
+    cif2_l = (
+        df["cif_competing_ci_lower"].to_numpy(dtype=float)
+        if "cif_competing_ci_lower" in df.columns
+        else cif2
+    )
+    cif2_u = (
+        df["cif_competing_ci_upper"].to_numpy(dtype=float)
+        if "cif_competing_ci_upper" in df.columns
+        else cif2
+    )
+
+    color_primary = GROUP_COLORS[0]
+    color_competing = GROUP_COLORS[1]
+    color_naive = "#DC2626"
+
+    # Primary CIF
+    ax.step(
+        t,
+        cif1,
+        where="post",
+        color=color_primary,
+        lw=1.8,
+        label=f"CIF: {primary_label}",
+    )
+    ax.fill_between(t, cif1_l, cif1_u, step="post", alpha=0.15, color=color_primary)
+
+    # Competing CIF
+    ax.step(
+        t,
+        cif2,
+        where="post",
+        color=color_competing,
+        lw=1.8,
+        label=f"CIF: {competing_label}",
+    )
+    ax.fill_between(t, cif2_l, cif2_u, step="post", alpha=0.15, color=color_competing)
+
+    # Naive 1 - KM
+    if show_naive_km and "naive_1_minus_km" in df.columns:
+        naive = df["naive_1_minus_km"].to_numpy(dtype=float)
+        ax.step(
+            t,
+            naive,
+            where="post",
+            color=color_naive,
+            lw=1.5,
+            ls="--",
+            label="Naive 1 - KM (Ignoring Competing Risks)",
+        )
+
+    max_cif = float(max(np.nanmax(cif1), np.nanmax(cif2)))
+    if show_naive_km and "naive_1_minus_km" in df.columns:
+        max_cif = max(max_cif, float(np.nanmax(df["naive_1_minus_km"])))
+
+    ax.set_ylim(0.0, max(0.20, min(1.02, max_cif * 1.18)))
+    ax.set_xlim(0.0, float(np.nanmax(t) * 1.02))
+    ax.set_xlabel(f"Time ({time_unit})", labelpad=6)
+    ax.set_ylabel("Cumulative Incidence Probability", labelpad=6)
+    ax.set_title(title, loc="left", pad=12)
+    ax.legend(loc="upper left")
+
+    fig.tight_layout()
+
+    source_df = df.copy()
+    png_path = save_publication_figure(fig, out_path, dpi=dpi)
+    csv_path = export_source_data(source_df, png_path)
+
+    alt_text = f"Cumulative Incidence Function curve showing {primary_label} and {competing_label}."
+    caption = f"Figure. {title}. Cumulative incidence estimated via Aalen-Johansen method with 95% confidence interval bands."
+    if show_naive_km and "naive_1_minus_km" in df.columns:
+        caption += " Dashed line demonstrates the overestimation bias of naive 1 - Kaplan-Meier estimation."
 
     return FigureResult(
         png_path=png_path,

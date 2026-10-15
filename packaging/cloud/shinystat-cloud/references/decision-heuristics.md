@@ -13,9 +13,11 @@ Reference guide for the `shinystat-cloud` autonomous agent in cloud code-executi
 | **Type 2-Sparse: Separation** | Unbiased OR in rare events | Firth Penalized Logistic Regression | Profile likelihood CIs; resolves monotone separation | [Recipe 7: Firth Logistic Regression](python-recipes.md#7-firths-penalized-likelihood-logistic-regression) |
 | **Type 2b: Ordinal Scale** | Cumulative Odds Ratio | Cumulative Logit Proportional Odds | Brant test for parallel lines; OrderedModel fallback | `statsmodels.miscmodels.ordinal_model.OrderedModel` |
 | **Type 3: Survival / Time-to-Event** | Hazard Ratio (HR), Median survival | Kaplan-Meier, Log-Rank & Cox Proportional Hazards | Proportional hazards test (Schoenfeld residuals); L2 shrinkage | [Recipe 11: Survival Analysis Suite](python-recipes.md#11-survival-analysis-kaplan-meier-log-rank--cox-proportional-hazards) |
+| **Type 3b: Competing Risks Survival** | Subdistribution Hazard (SHR) & Cause-Specific HR (csHR) | Aalen-Johansen CIF & Fine-Gray Model (IPCW) | Competing risk probability conservation; Naive KM overestimation audit | [Recipe 15: Competing Risks Survival](python-recipes.md#15-competing-risks-survival-analysis-aalen-johansen-cif--fine-gray-model) |
 | **Type 4: Diagnostic Test Accuracy** | Sens, Spec, PPV, NPV, AUC, LRs | 2x2 Contingency Matrix & Empirical ROC | Wilson score CIs; Haldane correction; Single/Paired DeLong | [Recipe 2: 2x2 Diagnostics](python-recipes.md#2-2x2-diagnostic-accuracy-with-wilson-score--log-scale-95-cis) & [Recipe 3: ROC & DeLong](python-recipes.md#3-empirical-roc-optimal-cutoff--single--paired-delong-95-cis) |
 | **Type 4b: Clinical Utility & Calib** | Net Benefit, Model Calibration | Decision Curve Analysis (DCA) & Recalibration | Brier score; Calibration slope & intercept; Austin-Steyerberg ICI | [Recipe 4: Calibration & DCA](python-recipes.md#4-model-calibration--vickers-decision-curve-analysis-dca) |
-| **Type 5: Observational Causal** | Average Treatment Effect in Treated (ATT) | Propensity Score Matching (PSM, 1:1, Caliper 0.2 SD) | Austin (2009) balance (SMD < 0.10); Pair ID tracking; E-value | [Recipe 6: PSM & Balance](python-recipes.md#6-propensity-score-matching-psm-with-pair-ids--covariate-balance) & [Recipe 9: E-Value](python-recipes.md#9-vanderweele--ding-2017-sensitivity-e-value) |
+| **Type 5: Observational Causal (PSM)** | Average Treatment Effect in Treated (ATT) | Propensity Score Matching (PSM, 1:1, Caliper 0.2 SD) | Austin (2009) balance (SMD < 0.10); Pair ID tracking; E-value | [Recipe 6: PSM & Balance](python-recipes.md#6-propensity-score-matching-psm-with-pair-ids--covariate-balance) & [Recipe 9: E-Value](python-recipes.md#9-vanderweele--ding-2017-sensitivity-e-value) |
+| **Type 5b: Causal Weighting (IPTW)** | Population Effect (ATE, ATT, ATC, Overlap ATO) | Inverse Probability Treatment Weighting (IPTW) | Kish's Effective Sample Size ($N_{\text{eff}} \ge 0.5 \times N$), Positivity (PS 0.05–0.95), Robust SE | [Recipe 14: IPTW & Balance](python-recipes.md#14-inverse-probability-of-treatment-weighting-iptw--weighted-balance) |
 | **Type 6: Device / Rater Agreement** | Limits of Agreement, Reliability | Bland-Altman Difference Analysis & ICC (1–3k) | Bland-Altman 1999 large-sample CIs; Shrout-Fleiss exact F CIs | [Recipe 5: Bland-Altman & ICC](python-recipes.md#5-observer-agreement-bland-altman--shrout-fleiss-1979-icc) |
 | **Type 7: Systematic Meta-Analysis** | Pooled Effect (RR/OR/MD) | Inverse-Variance Fixed-Effects or DerSimonian-Laird | Condition on clinical variation; small $k < 5$ caution | Pure SciPy meta-analysis or `statsmodels` |
 | **Type 8: Clustered / Multi-Center** | Population-averaged effect | Generalized Estimating Equations (GEE) | Cluster Design Effect ($\text{DEFF}$); Robust sandwich SEs | `statsmodels.genmod.generalized_estimating_equations.GEE` |
@@ -66,6 +68,36 @@ Identify Clinical Biomarker Mechanism
 └── Prespecified vs Exploratory Cutpoint
     ├── Prespecified clinical threshold ──▶ Report nominal 2x2 metrics (Recipe 2)
     └── Data-driven cutpoint (Youden's J) ──▶ Report with anti-p-hacking disclosure (Recipe 3)
+```
+
+### D. Observational Causal Inference: PSM vs. IPTW vs. Overlap Weights
+```
+Evaluate Treatment Assignment & Causal Target
+├── Target Population
+│   ├── Target = Treated Population (ATT) ──▶ 1:1 Nearest-Neighbor PSM with caliper 0.2 SD (Recipe 6) OR IPTW (estimand='ATT', Recipe 14)
+│   ├── Target = Whole Target Population (ATE) ──▶ IPTW (estimand='ATE') with stabilized weights (Recipe 14)
+│   └── Significant Propensity Truncation / Lack of Overlap ──▶ Overlap Weights (estimand='ATO', Li et al. 2018, Recipe 14)
+├── Weight Stability & Positivity Audit
+│   ├── Positivity Alert (PS < 0.05 or > 0.95) ──▶ Trim extreme tails OR switch to Overlap Weights (ATO)
+│   ├── Extreme Weights (> 10.0) ──▶ Quantile Truncation (0.01, 0.99) OR Overlap Weights
+│   └── Kish's Effective Sample Size (Neff < 0.5 * N) ──▶ Warning for variance inflation; use robust SE (HC1)
+└── Balance Diagnostics: Austin (2009) Love Plot (absolute SMD < 0.10)
+```
+
+### E. Time-to-Event Analysis Under Competing Risks
+```
+Audit Event Types: Event of Interest vs. Competing Risks (e.g., CV death vs. non-CV death)
+├── Single Failure Type (No Competing Risks) ──▶ Standard Kaplan-Meier & Cox Proportional Hazards (Recipe 11)
+└── Multiple / Mutually Exclusive Failures
+    ├── Cumulative Event Incidence / Absolute Risk Prediction:
+    │   ├── DO NOT use Naive 1 - KM (violates independent censoring; overestimates true risk)
+    │   └── Use Aalen-Johansen Cumulative Incidence Function (CIF) (Recipe 15)
+    └── Multivariable Regression:
+        ├── Etiological / Biological Question ──▶ Cause-Specific Cox Model (csHR)
+        │   └── Censors competing events at failure time (measures rate in event-free patients)
+        └── Prognostic / Clinical Risk Stratification ──▶ Fine-Gray Subdistribution Hazard Model (SHR)
+            └── Uses IPCW counting process expansion (measures cumulative incidence effect)
+        └── Best Practice: Report both csHR and SHR side-by-side with clinical takeaway (Recipe 15)
 ```
 
 ---

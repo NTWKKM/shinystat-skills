@@ -12,11 +12,11 @@ reviews:
   review_status: false
   collapse_walkthrough: false
   path_filters:
-    # Allow only canonical source, packaging, tests, shinystat skill, and root docs
+    # Allow only canonical source, canonical skills, tests, docs, and root configs
     - "src/**"
-    - "packaging/**"
+    - "skills/**"
     - "tests/**"
-    - "skills/shinystat/**"
+    - "docs/**"
     - "/*.md"
     - "/*.toml"
     - "/*.yaml"
@@ -32,6 +32,10 @@ reviews:
     - "!.cursor/**"
     - "!**/.cursor/**"
     - "!**/.skills_backups/**"
+
+    # Exclude packaging mirrors (which duplicate canonical skills/shinystat-cloud)
+    - "!packaging/**"
+    - "!**/packaging/**"
 
     # Exclude bundled/mirrored medstat package inside skills directory
     - "!**/scripts/medstat/**"
@@ -50,7 +54,7 @@ reviews:
   path_instructions:
     - path: "src/**"
       instructions: "Review core biostatistical algorithms, figure library, and reporting renderers for numerical stability, mathematical rigor, zero-PHI compliance, and clinical safety."
-    - path: "packaging/cloud/**"
+    - path: "skills/shinystat-cloud/**"
       instructions: "Review biostatistical algorithms and Python recipes for mathematical rigor, numerical stability, NaN edge-case handling, and cloud sandbox self-containment."
     - path: "skills/shinystat/**"
       instructions: "Review canonical agent skill definitions, decision heuristics, and reference documentation for clarity, completeness, and clinical decision trees."

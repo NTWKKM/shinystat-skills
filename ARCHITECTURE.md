@@ -53,7 +53,7 @@ System architecture and structural specifications for `medstat-core` and the `me
 ### `medstat.models`
 - **`glm.py`**: OLS linear regression and standard binary logistic regression via `statsmodels`.
 - **`firth.py`**: Firth penalized logistic regression and penalized Cox proportional hazards via `firthmodels` with profile likelihood confidence intervals.
-- **`survival.py`**: Cox proportional hazards modeling via `lifelines` and Grambsch-Therneau Schoenfeld residual correlation tests.
+- **`survival.py`**: Cox proportional hazards modeling via `lifelines` and Grambsch-Therneau Schoenfeld residual correlation tests; Competing Risks survival analysis via non-parametric Aalen-Johansen Cumulative Incidence Functions (`fit_competing_risks_cif`, Greenwood 95% CIs, probability conservation audit, $1 - \text{KM}$ overestimation evaluation) and dual-model regression (`fit_competing_risks_regression`: Cause-Specific Cox for etiology and Fine-Gray subdistribution hazards via IPCW counting process expansion with robust sandwich variance).
 - **`splines.py`**: Restricted cubic splines (RCS) with flexible knot placement via pure-Python `rcs_lib.py` for both Cox proportional hazards and multivariable logistic regression.
 - **`sensitivity.py`**: VanderWeele & Ding E-value computation for point estimates and lower/upper confidence bounds.
 - **`ordinal.py`**: Proportional odds logistic regression via `OrderedModel`, Brant's Wald test (Brant 1990) for parallel lines assumption, positional boolean masking, and multinomial logistic fallback.
@@ -68,7 +68,8 @@ System architecture and structural specifications for `medstat-core` and the `me
 
 ### `medstat.causal`
 - **`psm.py`**: Propensity score estimation via logistic regression, 1:1 nearest neighbor matching with logit standard deviation caliper, and matched cohort extraction.
-- **`balance.py`**: Standardized Mean Difference (SMD) calculation for continuous and binary variables (with zero-variance safety returning `np.nan` on differing means), and Austin 2009 Love plot data generation.
+- **`iptw.py`**: Inverse Probability of Treatment Weighting (`compute_iptw_weights`, `fit_iptw_outcome_model`) supporting ATE, ATT, ATC, and Overlap Weights (ATO; Li et al., 2018), stabilized weights, winsorized quantile truncation, Kish's effective sample size ($N_{\text{eff}}$), positivity audits ($PS < 0.05$ or $> 0.95$), and robust Huber-White outcome models (WLS, Logistic GLM, Cox PH).
+- **`balance.py`**: Standardized Mean Difference (SMD) calculation for continuous and binary variables with Bessel-corrected weighted sample variance, multi-cohort balance tables (unadjusted, matched, weighted), and Austin 2009 Love plot data generation with multi-marker traces.
 - **`mediation.py`**: Pure-Python parametric causal mediation analysis (Baron-Kenny / Imai) with quasi-Bayesian Monte Carlo confidence intervals for Average Causal Mediation Effect (ACME) and Average Direct Effect (ADE).
 
 ### `medstat.meta`
@@ -85,18 +86,18 @@ System architecture and structural specifications for `medstat-core` and the `me
 - **`base.py`**: `FigureResult(png_path, alt_text, caption, source_df, csv_path)` contract and automated CSV source data export for auditability.
 - **`styles.py`**: Publication styling (300 DPI, Okabe-Ito/Tol colorblind palettes, Thai typography fallback chain: `Sarabun`, `Thonburi`, `Sukhumvit Set`, `Arial`).
 - **`forest.py`**: Forest plots for OR/HR/RR multivariable models and meta-analyses.
-- **`survival.py`**: Stratified Kaplan-Meier survival curves with aligned Numbers at Risk table and log-rank p-value.
+- **`survival.py`**: Stratified Kaplan-Meier survival curves with aligned Numbers at Risk table and log-rank p-value; Cumulative Incidence Function (`plot_cif`) step curves under competing risks with Greenwood 95% CIs and Naive $1 - \text{KM}$ overestimation overlay.
 - **`roc.py`**: ROC curves with 45-degree chance diagonal, Youden optimal cutpoint, DeLong 95% CIs, and paired overlay.
 - **`calibration.py`**: Decile calibration plots with Wilson CIs, LOESS curves, Brier score, and ICI.
 - **`dca.py`**: Decision Curve Analysis with Net Benefit comparison against Treat All and Treat None.
 - **`agreement.py`**: Bland-Altman agreement plots with mean bias, 95% Limits of Agreement, and 1999 large-sample CIs.
-- **`balance.py`**: Austin 2009 Love plots for PSM covariate balance with 0.10 SMD threshold.
+- **`balance.py`**: Austin 2009 Love plots for PSM and IPTW covariate balance with 0.10 SMD threshold.
 - **`retention.py`**: Pure-Matplotlib STROBE / CONSORT participant retention flowcharts.
 - **`diagnostics.py`**: Missingness heatmaps, Schoenfeld proportional hazards residuals, and MICE density overlays.
-- **`html/`**: Dedicated mirror submodule for Dual / Toggle View (`DualFigureResult`, `plot_dual_roc_curve`, `plot_dual_kaplan_meier`, `plot_dual_calibration`, `plot_dual_dca`, `plot_dual_bland_altman`, `plot_dual_forest`, `plot_dual_love`). Produces companion Plotly interactive visualizations (primary view) alongside "Publication 300 DPI Figure (Static)" Matplotlib images with instant toggle switching and direct journal download links.
+- **`html/`**: Dedicated mirror submodule for Dual / Toggle View (`DualFigureResult`, `plot_dual_roc_curve`, `plot_dual_kaplan_meier`, `plot_dual_cif`, `plot_dual_calibration`, `plot_dual_dca`, `plot_dual_bland_altman`, `plot_dual_forest`, `plot_dual_love`). Produces companion Plotly interactive visualizations (primary view) alongside "Publication 300 DPI Figure (Static)" Matplotlib images with instant toggle switching and direct journal download links.
 
 ### `medstat.reporting`
-- **`tables.py`**: Journal-compliant polymorphic HTML table rendering (NEJM, JAMA, APA 7) with strict border rules, no vertical dividers, and support for Table 1, Regression, Diagnostic accuracy, Bland-Altman, ICC, and Covariate balance.
+- **`tables.py`**: Journal-compliant polymorphic HTML table rendering (NEJM, JAMA, APA 7) with strict border rules, no vertical dividers, and support for Table 1, Regression, Diagnostic accuracy, Bland-Altman, ICC, Covariate balance (unadjusted, matched, weighted), and Competing Risks (`render_competing_risks_table`).
 - **`narrative.py`**: Automated biomedical Methods and Results narrative generation.
 - **`checklists.py`**: Audited item checklists for STROBE, CONSORT, TRIPOD, STARD (diagnostic studies), and PRISMA (systematic reviews).
 - **`ir.py`**: Report Intermediate Representation (IR) acting as Single Source of Truth (`ReportDocument`, `Block`, `HeadingBlock`, `ParagraphBlock`, `TableBlock`, `FigureBlock`, `CalloutBlock`).
@@ -130,3 +131,28 @@ flowchart TD
 ```
 
 All subcommands and renderers emit structured contracts allowing deterministic composition into pipelines, agent tools, and manuscript packages.
+
+---
+
+## 4. Multi-Agent Skill Mirror Parity & SSOT Seam
+
+```
+┌────────────────────────────────────────────────────────┐
+│               src/medstat/ (Package SSOT)               │
+└───────────────────────────┬────────────────────────────┘
+                            │ rsync / parity check
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│         skills/shinystat/scripts/medstat/ (Canonical)   │
+└───────────────────────────┬────────────────────────────┘
+                            │ automated mirror sync
+      ┌─────────────────────┼─────────────────────┐
+      ▼                     ▼                     ▼
+┌───────────┐         ┌───────────┐         ┌───────────┐
+│  .agent/  │         │  .agents/ │         │  .claude/ │ (.cursor/)
+└───────────┘         └───────────┘         └───────────┘
+```
+
+- **SSOT Integrity**: `src/medstat/` is the single source of truth for the biostatistical calculation engine.
+- **Automated Parity Gate**: `test_src_medstat_and_skills_bundled_medstat_byte_identical()` in `tests/unit/test_shinystat_skill.py` ensures 100% byte-for-byte fidelity across all 78 engine modules between `src/medstat/` and `skills/shinystat/scripts/medstat/`.
+- **Zero-Setup Mirrors**: Multi-agent workspace directories (`.agent/`, `.agents/`, `.claude/`, `.cursor/`) are maintained in lockstep via `./scripts/install-skills.sh --sync` to support instant out-of-the-box discovery without manual installation.

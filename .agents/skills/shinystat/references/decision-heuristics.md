@@ -13,9 +13,11 @@ Reference guide for the `shinystat` autonomous agent. Consult this manual during
 | **Type 2-Sparse: Separation** | Unbiased OR in rare events | Firth Penalized Logistic Regression | Profile likelihood CIs; resolves monotone separation | `medstat.models.firth` |
 | **Type 2b: Ordinal Scale** | Cumulative Odds Ratio | Cumulative Logit Proportional Odds | Brant's Wald test for parallel lines assumption | `medstat.models.ordinal` |
 | **Type 3: Survival / Time-to-Event** | Hazard Ratio (HR) | Cox Proportional Hazards | Proportional hazards test (Grambsch-Therneau / Schoenfeld) | `medstat.models.survival` |
+| **Type 3b: Competing Risks Survival** | Subdistribution Hazard (SHR) & Cause-Specific HR (csHR) | Aalen-Johansen CIF & Fine-Gray Model (IPCW) | Competing risk probability conservation; Naive KM overestimation audit | `medstat.models.survival` |
 | **Type 4: Diagnostic Test Accuracy** | Sensitivity, Specificity, PPV, NPV, AUC | 2x2 Contingency Matrix & Empirical ROC | Wilson score 95% CIs; DeLong test for paired AUC; Directionality | `medstat.diagnostic` |
 | **Type 4b: Clinical Utility & Calib** | Net Benefit, Model Calibration | Decision Curve Analysis (DCA) & Recalibration | Brier score, Calibration slope & intercept, Austin-Steyerberg ICI | `medstat.diagnostic.dca`, `medstat.diagnostic.calibration` |
-| **Type 5: Observational Causal** | Average Treatment Effect in Treated (ATT) | Propensity Score Matching (PSM, 1:1, Caliper 0.2 SD) | Austin (2009) Covariate Balance (absolute SMD < 0.10); VanderWeele E-value | `medstat.causal` |
+| **Type 5: Observational Causal (PSM)** | Average Treatment Effect in Treated (ATT) | Propensity Score Matching (PSM, 1:1, Caliper 0.2 SD) | Austin (2009) Covariate Balance (absolute SMD < 0.10); VanderWeele E-value | `medstat.causal` |
+| **Type 5b: Causal Weighting (IPTW)** | Population Effect (ATE, ATT, ATC, Overlap ATO) | Inverse Probability Treatment Weighting (IPTW) | Kish's Effective Sample Size ($N_{\text{eff}} \ge 0.5 \times N$), Positivity (PS 0.05–0.95), Robust SE | `medstat.causal.iptw` |
 | **Type 6: Device / Rater Agreement** | Limits of Agreement, Reliability | Bland-Altman Difference Analysis & ICC | Bland-Altman (1999) large-sample CIs; Shrout-Fleiss two-way ANOVA | `medstat.agreement` |
 | **Type 7: Systematic Meta-Analysis** | Pooled Effect (RR/OR/MD) | Fixed-Effects or DerSimonian-Laird Random-Effects | Condition on clinical variation; avoid DerSimonian-Laird inverse-variance for rare events (exact/Peto not supported in `medstat.meta`); small $k < 5$ caution | `medstat.meta` |
 | **Type 8: Clustered / Multi-Center** | Population-averaged or Cluster Effect | GEE with robust sandwich SE or MixedLM | Cluster Design Effect ($\text{DEFF} = 1 + (\bar{m}-1)\text{ICC}_{\text{cluster}}$) | `medstat.models.multilevel` |
@@ -65,6 +67,36 @@ Identify Clinical Biomarker Mechanism
 └── Prespecified vs Exploratory Cutpoint
     ├── Prespecified clinical threshold ──▶ Report nominal 2x2 metrics
     └── Data-driven cutpoint (Youden's J) ──▶ Report with anti-p-hacking disclosure and sensitivity analysis
+```
+
+### D. Observational Causal Inference: PSM vs. IPTW vs. Overlap Weights
+```
+Evaluate Treatment Assignment & Causal Target
+├── Target Population
+│   ├── Target = Treated Population (ATT) ──▶ 1:1 Nearest-Neighbor PSM with caliper 0.2 SD OR IPTW (estimand='ATT')
+│   ├── Target = Whole Target Population (ATE) ──▶ IPTW (estimand='ATE') with stabilized weights
+│   └── Significant Propensity Truncation / Lack of Overlap ──▶ Overlap Weights (estimand='ATO', Li et al. 2018)
+├── Weight Stability & Positivity Audit
+│   ├── Positivity Alert (PS < 0.05 or > 0.95) ──▶ Trim extreme tails OR switch to Overlap Weights (ATO)
+│   ├── Extreme Weights (> 10.0) ──▶ Quantile Truncation (0.01, 0.99) OR Overlap Weights
+│   └── Kish's Effective Sample Size (Neff < 0.5 * N) ──▶ Warning for variance inflation; use robust SE (HC1)
+└── Balance Diagnostics: Austin (2009) Love Plot (absolute SMD < 0.10)
+```
+
+### E. Time-to-Event Analysis Under Competing Risks
+```
+Audit Event Types: Event of Interest vs. Competing Risks (e.g., CV death vs. non-CV death)
+├── Single Failure Type (No Competing Risks) ──▶ Standard Kaplan-Meier & Cox Proportional Hazards
+└── Multiple / Mutually Exclusive Failures
+    ├── Cumulative Event Incidence / Absolute Risk Prediction:
+    │   ├── DO NOT use Naive 1 - KM (violates independent censoring; overestimates true risk)
+    │   └── Use Aalen-Johansen Cumulative Incidence Function (CIF) (`fit_competing_risks_cif`)
+    └── Multivariable Regression:
+        ├── Etiological / Biological Question ──▶ Cause-Specific Cox Model (csHR)
+        │   └── Censors competing events at failure time (measures rate in event-free patients)
+        └── Prognostic / Clinical Risk Stratification ──▶ Fine-Gray Subdistribution Hazard Model (SHR)
+            └── Uses IPCW counting process expansion (measures cumulative incidence effect)
+        └── Best Practice: Report both csHR and SHR side-by-side with clinical takeaway
 ```
 
 ---
