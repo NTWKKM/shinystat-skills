@@ -963,9 +963,17 @@ def format_time_dependent_roc_table(
 
         records.append(rec)
 
+    ci_method = td_roc_data.get("ci_method")
+    if ci_method == "bootstrap":
+        ci_str = "Confidence intervals (95%) calculated via bootstrap resampling."
+    elif ci_method == "hanley_mcneil":
+        ci_str = "Confidence intervals (95%) calculated via analytical IPCW approximation (Hanley-McNeil)."
+    else:
+        ci_str = "Confidence intervals (95%) calculated where risk sets allow."
+
     note = (
         "Time-dependent receiver operating characteristic curves and AUROC(t) estimated using the "
         "cumulative/dynamic inverse probability of censoring weighting (IPCW) estimator (Uno et al., 2007; Heagerty et al., 2000). "
-        "Confidence intervals (95%) calculated via bootstrap resampling."
+        f"{ci_str}"
     )
     return render_records_table(title, records, style=style, note=note)

@@ -219,9 +219,23 @@ def plot_dual_time_dependent_roc(
             res_h = results_by_horizon.get(t, results_by_horizon.get(str(t), {}))
             if not res_h:
                 continue
+            auc_val = float(res_h.get("auroc", 0.5))
+            if not np.isfinite(auc_val) or np.isnan(auc_val):
+                fig.add_trace(
+                    go.Scatter(
+                        x=[None],
+                        y=[None],
+                        mode="markers",
+                        marker=dict(size=0, opacity=0),
+                        showlegend=True,
+                        name=f"t = {t:g}: unavailable (insufficient events/at-risk)",
+                        hoverinfo="none",
+                    )
+                )
+                continue
+
             fpr = res_h.get("fpr", [0, 1])
             tpr = res_h.get("tpr", [0, 1])
-            auc_val = float(res_h.get("auroc", 0.5))
             ci_l = res_h.get("ci_lower")
             ci_u = res_h.get("ci_upper")
             color = palette[idx % len(palette)]
@@ -286,11 +300,16 @@ def plot_dual_time_dependent_roc(
 
     else:  # auroc_trajectory
         comp_dict = td_roc_data.get("comparison")
+        all_plotted_lowers: list[float] = []
+
         if comp_dict:
             h_vals = sorted(list(comp_dict.keys()), key=lambda x: float(x))
             x_vals = [float(x) for x in h_vals]
             old_aucs = [float(comp_dict[x]["auroc_old"]) for x in h_vals]
             new_aucs = [float(comp_dict[x]["auroc_new"]) for x in h_vals]
+
+            all_plotted_lowers.extend(old_aucs)
+            all_plotted_lowers.extend(new_aucs)
 
             fig.add_trace(
                 go.Scatter(
@@ -327,6 +346,9 @@ def plot_dual_time_dependent_roc(
                 for i, u in enumerate(traj.get("ci_upper", []))
             ]
 
+            all_plotted_lowers.extend(ci_l)
+            all_plotted_lowers.extend(y_vals)
+
             fig.add_trace(
                 go.Scatter(
                     x=x_vals + x_vals[::-1],
@@ -351,6 +373,12 @@ def plot_dual_time_dependent_roc(
                 )
             )
 
+        valid_lowers = [
+            float(v) for v in all_plotted_lowers if v is not None and np.isfinite(v)
+        ]
+        min_lower = float(np.nanmin(valid_lowers)) if valid_lowers else 0.45
+        y_min = max(0.0, min(0.45, min_lower - 0.02))
+
         fig.add_trace(
             go.Scatter(
                 x=[min(x_vals), max(x_vals)] if len(x_vals) > 0 else [0, 1],
@@ -374,7 +402,7 @@ def plot_dual_time_dependent_roc(
             ),
             yaxis=dict(
                 title="Cumulative/Dynamic AUROC",
-                range=[0.45, 1.02],
+                range=[y_min, 1.02],
                 showgrid=True,
                 gridcolor="#F1F5F9",
             ),

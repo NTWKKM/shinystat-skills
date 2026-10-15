@@ -838,7 +838,7 @@ class AnalysisPlan:
                 narrative = generate_reclassification_narrative(fit_res)
 
             elif mod_type in ("time_dependent_roc", "td_roc") or (
-                mod_type in ("diagnostic", "diag", "survival", "cox", "cox_ph")
+                mod_type in ("diagnostic", "diag")
                 and (
                     model_spec.options.get("time_dependent_roc")
                     or model_spec.options.get("time_horizons")

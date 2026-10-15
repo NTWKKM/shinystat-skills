@@ -1284,16 +1284,16 @@ def diag_cmd(
 
     # 1. Reclassification (NRI and IDI)
     if reclassification or (p_old and p_new):
-        y_reclass_col = gold_standard or event_col
-        if not y_reclass_col:
+        if not gold_standard:
             raise click.ClickException(
-                "Reclassification requires an outcome column via '--gold-standard' or '--event-col'."
+                "Binary reclassification (NRI/IDI) requires a fully ascertained binary outcome via '--gold-standard'. "
+                "Censored survival event indicators ('--event') are invalid for binary reclassification."
             )
         if not p_old or not p_new:
             raise click.ClickException(
                 "Reclassification requires both '--p-old' and '--p-new' columns."
             )
-        reclass_cols = [y_reclass_col, p_old, p_new]
+        reclass_cols = [gold_standard, p_old, p_new]
         validate_columns(df, reclass_cols, "diag reclassification")
         check_data_missingness(df, reclass_cols, "diag reclassification")
 
@@ -1309,12 +1309,16 @@ def diag_cmd(
                 )
 
         reclass_res = compute_reclassification_metrics(
-            y_true=df[y_reclass_col].values,
+            y_true=df[gold_standard].values,
             p_old=df[p_old].values,
             p_new=df[p_new].values,
             thresholds=thresh_list,
         )
-        diag_res["reclassification"] = reclass_res
+        reclass_clean = dict(reclass_res)
+        reclass_clean.pop("p_old", None)
+        reclass_clean.pop("p_new", None)
+        reclass_clean.pop("y_true", None)
+        diag_res["reclassification"] = reclass_clean
 
     # 2. Time-Dependent ROC
     if time_dependent_roc:
@@ -1513,13 +1517,14 @@ def diag_cmd(
                 "slope_and_intercept": slope_inter,
                 "ici": ici,
             }
+    sanitized_diag = _sanitize_for_json(diag_res)
     if output:
         Path(output).parent.mkdir(parents=True, exist_ok=True)
         with open(output, "w") as f:
-            json.dump(diag_res, f, indent=2, default=str)
+            json.dump(sanitized_diag, f, indent=2, default=str, allow_nan=False)
         click.echo(f"Diagnostic results saved to: {output}")
     else:
-        click.echo(json.dumps(diag_res, indent=2, default=str))
+        click.echo(json.dumps(sanitized_diag, indent=2, default=str, allow_nan=False))
 
 
 # ==============================================================================

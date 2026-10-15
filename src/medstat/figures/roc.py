@@ -227,13 +227,20 @@ def plot_time_dependent_roc(
             label="Chance (AUC = 0.500)",
         )
 
+        unavailable_horizons = []
         for idx, t in enumerate(horizons):
             res_h = results_by_horizon.get(t, results_by_horizon.get(str(t), {}))
             if not res_h:
                 continue
+            auc_val = float(res_h.get("auroc", 0.5))
+            if not np.isfinite(auc_val) or np.isnan(auc_val):
+                unavail_label = f"t = {t:g}: unavailable (insufficient events/at-risk)"
+                ax.plot([], [], " ", label=unavail_label)
+                unavailable_horizons.append(f"t = {t:g}")
+                continue
+
             fpr = np.asarray(res_h.get("fpr", [0, 1]), dtype=float)
             tpr = np.asarray(res_h.get("tpr", [0, 1]), dtype=float)
-            auc_val = float(res_h.get("auroc", 0.5))
             ci_l = res_h.get("ci_lower")
             ci_u = res_h.get("ci_upper")
             thresh = res_h.get("thresholds", [np.nan] * len(fpr))
@@ -272,11 +279,14 @@ def plot_time_dependent_roc(
         source_df = pd.DataFrame(source_rows)
         alt_text = f"Time-dependent ROC curves across horizons {horizons}."
         caption = f"Figure. {fig_title}. Cumulative/dynamic IPCW ROC curves across follow-up horizons with 95% confidence intervals."
+        if unavailable_horizons:
+            caption += f" Horizons with insufficient events/at-risk ({', '.join(unavailable_horizons)}) are omitted from curve plotting."
 
     else:  # auroc_trajectory
         fig_title = title or "Longitudinal Discrimination Trajectory (AUROC(t))"
         source_rows = []
         comp_dict = td_roc_data.get("comparison")
+        all_plotted_lowers: list[float] = []
 
         if comp_dict:
             # Dual model comparison trajectory
@@ -284,6 +294,9 @@ def plot_time_dependent_roc(
             x_vals = [float(x) for x in h_vals]
             old_aucs = [float(comp_dict[x]["auroc_old"]) for x in h_vals]
             new_aucs = [float(comp_dict[x]["auroc_new"]) for x in h_vals]
+
+            all_plotted_lowers.extend(old_aucs)
+            all_plotted_lowers.extend(new_aucs)
 
             ax.plot(
                 x_vals,
@@ -321,6 +334,9 @@ def plot_time_dependent_roc(
                 for i, u in enumerate(traj.get("ci_upper", []))
             ]
 
+            all_plotted_lowers.extend(ci_l)
+            all_plotted_lowers.extend(y_vals)
+
             ax.plot(
                 x_vals,
                 y_vals,
@@ -348,8 +364,14 @@ def plot_time_dependent_roc(
                     }
                 )
 
+        valid_lowers = [
+            float(v) for v in all_plotted_lowers if v is not None and np.isfinite(v)
+        ]
+        min_lower = float(np.nanmin(valid_lowers)) if valid_lowers else 0.45
+        y_min = max(0.0, min(0.45, min_lower - 0.02))
+
         ax.axhline(0.50, color="#94A3B8", ls=":", lw=1.2, label="Chance (0.50)")
-        ax.set_ylim(0.45, 1.02)
+        ax.set_ylim(y_min, 1.02)
         ax.set_xlabel("Follow-up Time Horizon", labelpad=6)
         ax.set_ylabel("Cumulative/Dynamic AUROC", labelpad=6)
         ax.set_title(fig_title, loc="left", pad=10)

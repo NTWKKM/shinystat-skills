@@ -912,9 +912,26 @@ def test_each_recipe_is_self_contained():
                 assert "nri_categorical" in res16
                 assert "idi" in res16
             elif idx == 17:
-                d = np.array([10.0, 20.0, 30.0, 40.0, 50.0, 60.0])
-                e = np.array([1, 0, 1, 0, 1, 0])
-                s = np.array([0.8, 0.2, 0.7, 0.3, 0.9, 0.1])
+                d = np.array(
+                    [
+                        10.0,
+                        20.0,
+                        30.0,
+                        40.0,
+                        50.0,
+                        60.0,
+                        70.0,
+                        80.0,
+                        90.0,
+                        100.0,
+                        110.0,
+                        120.0,
+                    ]
+                )
+                e = np.array([1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0])
+                s = np.array(
+                    [0.8, 0.2, 0.7, 0.3, 0.9, 0.1, 0.85, 0.15, 0.75, 0.25, 0.95, 0.05]
+                )
                 res17 = isolated_ns["compute_time_dependent_roc"](
                     d, e, s, time_horizons=[25.0, 45.0], n_bootstrap=0
                 )

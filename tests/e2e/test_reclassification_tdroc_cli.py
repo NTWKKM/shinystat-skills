@@ -131,6 +131,39 @@ def test_cli_diag_reclassification(sample_reclass_csv: Path, tmp_path: Path):
     assert "idi" in reclass
     assert reclass["nri_continuous"]["total"]["estimate"] > 0
     assert reclass["idi"]["estimate"] > 0
+    # Patient-level arrays must be stripped from serialized JSON output
+    assert "p_old" not in reclass
+    assert "p_new" not in reclass
+    assert "y_true" not in reclass
+
+
+def test_cli_diag_reclassification_requires_gold_standard(sample_reclass_csv: Path):
+    """Verify that reclassification strictly requires --gold-standard and rejects --event-col."""
+    runner = CliRunner()
+    res = runner.invoke(
+        cli,
+        [
+            "diag",
+            "--data",
+            str(sample_reclass_csv),
+            "--event-col",
+            "outcome",
+            "--p-old",
+            "pred_old",
+            "--p-new",
+            "pred_new",
+            "--reclassification",
+        ],
+    )
+    assert res.exit_code != 0
+    assert (
+        "Binary reclassification (NRI/IDI) requires a fully ascertained binary outcome via '--gold-standard'"
+        in res.output
+    )
+    assert (
+        "Censored survival event indicators ('--event') are invalid for binary reclassification"
+        in res.output
+    )
 
 
 def test_cli_diag_time_dependent_roc(sample_tdroc_csv: Path, tmp_path: Path):

@@ -128,7 +128,7 @@ def generate_methods_narrative(
     """
     norm_mtype = model_type.lower()
     if norm_mtype in ("diagnostic", "diag", "dta"):
-        diag_data = kwargs.get("diagnostic_data", {})
+        diag_data = kwargs.get("diagnostic_data") or kwargs.get("diag_data") or {}
         cutoff_val = cutoff
         if cutoff_val is None and isinstance(diag_data, dict):
             cutoff_val = diag_data.get("cutoff")
@@ -203,10 +203,20 @@ def generate_methods_narrative(
                 if time_horizons
                 else " across clinical follow-up horizons"
             )
+            td_obj = (
+                diag_data.get("time_dependent_roc", diag_data)
+                if isinstance(diag_data, dict)
+                else {}
+            )
+            ci_m = td_obj.get("ci_method") if isinstance(td_obj, dict) else None
+            if ci_m == "hanley_mcneil":
+                ci_str = "with 95% confidence intervals estimated via analytical IPCW approximation (Hanley-McNeil)."
+            else:
+                ci_str = "with 95% confidence intervals estimated via non-parametric bootstrap resampling."
             diag_parts.append(
                 f"Time-dependent ROC curves and longitudinal discrimination trajectories (AUROC(t)){h_str} were estimated using the "
                 "cumulative/dynamic inverse probability of censoring weighting (IPCW) estimator (Uno et al., 2007; Heagerty et al., 2000), "
-                "with 95% confidence intervals estimated via non-parametric bootstrap resampling."
+                f"{ci_str}"
             )
 
         if has_dca_eval:

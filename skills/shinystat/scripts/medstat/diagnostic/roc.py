@@ -639,7 +639,25 @@ def compare_diagnostic_models(
     - Categorical NRI with K x K contingency matrices (if thresholds provided)
     - Integrated Discrimination Improvement (IDI)
     """
-    y_t = (np.asarray(y_true) == pos_label).astype(int)
+    y_arr = (
+        pd.Series(y_true).to_numpy()
+        if isinstance(y_true, pd.Series)
+        else np.asarray(y_true)
+    )
+    if pd.isna(y_arr).any():
+        raise ValueError("y_true contains missing or NaN values.")
+
+    unique_vals = np.unique(y_arr)
+    if len(unique_vals) != 2:
+        raise ValueError(
+            f"compare_diagnostic_models requires a binary outcome with exactly 2 distinct classes. Found {len(unique_vals)}: {unique_vals.tolist()}"
+        )
+    if pos_label not in unique_vals:
+        raise ValueError(
+            f"pos_label '{pos_label}' not found in y_true distinct values: {unique_vals.tolist()}"
+        )
+
+    y_t = (y_arr == pos_label).astype(int)
     p_0 = np.asarray(p_old, dtype=float)
     p_1 = np.asarray(p_new, dtype=float)
 
@@ -668,6 +686,9 @@ def compare_diagnostic_models(
         n_bootstrap=n_bootstrap,
         random_state=random_state,
     )
+    reclass.pop("p_old", None)
+    reclass.pop("p_new", None)
+    reclass.pop("y_true", None)
 
     return {
         "model_old": {
@@ -699,6 +720,25 @@ def compare_diagnostic_models(
     }
 
 
+def _lookup_censoring_survival_left_limit(
+    kmf_censor: Any,
+    times: np.ndarray | pd.Series | list[float] | float,
+    clip_min: float = 1e-3,
+) -> np.ndarray | float:
+    """Evaluate left-limit censoring survival probability G_hat(t-) = P(C >= t).
+
+    Evaluates the survival probability strictly prior to t using
+    searchsorted(timeline, t, side="left") - 1 clamped to index 0 (where S(0) = 1.0).
+    """
+    timeline = np.asarray(kmf_censor.survival_function_.index, dtype=float)
+    vals = kmf_censor.survival_function_.iloc[:, 0].to_numpy(dtype=float)
+    is_scalar = np.isscalar(times)
+    t_arr = np.atleast_1d(np.asarray(times, dtype=float))
+    idx = np.clip(np.searchsorted(timeline, t_arr, side="left") - 1, 0, len(vals) - 1)
+    res = np.clip(vals[idx], clip_min, 1.0)
+    return float(res[0]) if is_scalar else res
+
+
 def _calculate_ipcw_roc_at_horizon(
     durations: np.ndarray,
     events: np.ndarray,
@@ -707,8 +747,9 @@ def _calculate_ipcw_roc_at_horizon(
     g_durations: np.ndarray,
     g_horizon: float,
     competing_event_code: int | None = None,
+    return_curve: bool = True,
 ) -> dict[str, Any]:
-    """Calculate cumulative/dynamic IPCW AUROC and ROC curve at a single follow-up horizon."""
+    """Calculate cumulative/dynamic IPCW AUROC and optional ROC curve at a single follow-up horizon."""
     t = float(horizon)
     cases_mask = (durations <= t) & (events == 1)
 
@@ -723,19 +764,25 @@ def _calculate_ipcw_roc_at_horizon(
     n_censored = int(np.sum((durations <= t) & (events == 0)))
 
     if n_cases < 1 or n_controls < 1:
-        return {
+        res_empty: dict[str, Any] = {
             "horizon": t,
             "n_cases": n_cases,
             "n_controls": n_controls,
             "n_censored": n_censored,
             "auroc": float("nan"),
-            "optimal_threshold": float("nan"),
-            "sensitivity": float("nan"),
-            "specificity": float("nan"),
-            "fpr": [0.0, 1.0],
-            "tpr": [0.0, 1.0],
-            "thresholds": [float("inf"), float("-inf")],
         }
+        if return_curve:
+            res_empty.update(
+                {
+                    "optimal_threshold": float("nan"),
+                    "sensitivity": float("nan"),
+                    "specificity": float("nan"),
+                    "fpr": [0.0, 1.0],
+                    "tpr": [0.0, 1.0],
+                    "thresholds": [float("inf"), float("-inf")],
+                }
+            )
+        return res_empty
 
     # IPCW weights
     w_cases = 1.0 / np.clip(g_durations[cases_mask], 1e-3, 1.0)
@@ -752,16 +799,27 @@ def _calculate_ipcw_roc_at_horizon(
     sc_cases = scores[cases_mask]
     sc_ctrl = scores[ctrl_mask]
 
-    # Weighted Concordance AUROC(t)
-    greater = np.greater.outer(sc_cases, sc_ctrl).astype(float)
-    equal = np.equal.outer(sc_cases, sc_ctrl).astype(float)
-    w_matrix = np.outer(w_cases, w_ctrl)
-    sum_w = float(np.sum(w_matrix))
-    auroc = (
-        float(np.sum((greater + 0.5 * equal) * w_matrix) / sum_w)
-        if sum_w > 0
-        else float("nan")
-    )
+    # O(N log N) Weighted Concordance AUROC(t) via sorting + np.searchsorted
+    sort_idx = np.argsort(sc_ctrl)
+    s0_sorted = sc_ctrl[sort_idx]
+    w0_sorted = w_ctrl[sort_idx]
+    cum_w0 = np.concatenate([[0.0], np.cumsum(w0_sorted)])
+
+    idx_lt = np.searchsorted(s0_sorted, sc_cases, side="left")
+    idx_gt = np.searchsorted(s0_sorted, sc_cases, side="right")
+    concordance = cum_w0[idx_lt] + 0.5 * (cum_w0[idx_gt] - cum_w0[idx_lt])
+    num = float(np.sum(w_cases * concordance))
+    sum_w = float(np.sum(w_cases) * cum_w0[-1])
+    auroc = float(num / sum_w) if sum_w > 0 else float("nan")
+
+    if not return_curve:
+        return {
+            "horizon": t,
+            "n_cases": n_cases,
+            "n_controls": n_controls,
+            "n_censored": n_censored,
+            "auroc": auroc,
+        }
 
     # Generate curve points across unique thresholds
     sum_w_cases = float(np.sum(w_cases))
@@ -885,11 +943,20 @@ def compute_time_dependent_roc(
     if (dur_arr < 0).any():
         raise ValueError("Time-dependent ROC durations must be non-negative (>= 0).")
 
+    unique_ev = set(np.unique(ev_arr))
     if competing_event_code is None:
-        unique_ev = set(np.unique(ev_arr))
         if not unique_ev.issubset({0, 1}):
             raise ValueError(
-                "Event indicator must contain binary values (0 = censored, 1 = event)."
+                f"Event indicator must contain binary values (0 = censored, 1 = event). Found: {sorted(list(unique_ev))}"
+            )
+    else:
+        if competing_event_code in (0, 1):
+            raise ValueError(
+                f"competing_event_code cannot be 0 or 1 (0 is censored, 1 is primary event). Received: {competing_event_code}"
+            )
+        if not unique_ev.issubset({0, 1, competing_event_code}):
+            raise ValueError(
+                f"Event indicator contains values outside {{0, 1, {competing_event_code}}}: {sorted(list(unique_ev))}"
             )
 
     n_obs = len(dur_arr)
@@ -913,20 +980,11 @@ def compute_time_dependent_roc(
     km_censor = KaplanMeierFitter()
     km_censor.fit(dur_arr, event_observed=censor_event)
 
-    g_durations = np.clip(
-        km_censor.survival_function_at_times(dur_arr).values.flatten(), 1e-3, 1.0
-    )
+    g_durations = _lookup_censoring_survival_left_limit(km_censor, dur_arr)
 
     results_by_horizon = {}
     comparison_by_horizon = {} if is_comparison else None
-
-    # Pre-calculate bootstrap resamples if requested
-    boot_indices = []
-    if n_bootstrap > 0:
-        rng = np.random.default_rng(random_state)
-        boot_indices = [
-            rng.choice(n_obs, size=n_obs, replace=True) for _ in range(n_bootstrap)
-        ]
+    non_sparse_horizons = []
 
     for h in sorted_horizons:
         g_h = max(float(km_censor.survival_function_at_times(h).iloc[0]), 1e-3)
@@ -939,6 +997,7 @@ def compute_time_dependent_roc(
             g_durations=g_durations,
             g_horizon=g_h,
             competing_event_code=competing_event_code,
+            return_curve=True,
         )
 
         n_cases = res_h["n_cases"]
@@ -960,55 +1019,48 @@ def compute_time_dependent_roc(
             res_h["ci_lower"] = float("nan")
             res_h["ci_upper"] = float("nan")
             res_h["se"] = float("nan")
+            res_h["ci_method"] = None
         else:
-            # Bootstrap CI estimation
-            if n_bootstrap > 0:
-                boot_aucs = []
-                for b_idx in boot_indices:
-                    d_b = dur_arr[b_idx]
-                    e_b = ev_arr[b_idx]
-                    s_b = s_arr[b_idx]
-                    km_b = KaplanMeierFitter()
-                    km_b.fit(d_b, event_observed=(e_b == 0).astype(int))
-                    g_dur_b = np.clip(
-                        km_b.survival_function_at_times(d_b).values.flatten(), 1e-3, 1.0
-                    )
-                    g_h_b = max(float(km_b.survival_function_at_times(h).iloc[0]), 1e-3)
-                    b_res = _calculate_ipcw_roc_at_horizon(
-                        d_b, e_b, s_b, h, g_dur_b, g_h_b, competing_event_code
-                    )
-                    if not np.isnan(b_res["auroc"]):
-                        boot_aucs.append(b_res["auroc"])
-
-                if len(boot_aucs) >= 10:
-                    res_h["ci_lower"] = float(np.percentile(boot_aucs, 2.5))
-                    res_h["ci_upper"] = float(np.percentile(boot_aucs, 97.5))
-                    res_h["se"] = float(np.std(boot_aucs, ddof=1))
-                else:
-                    res_h["ci_lower"] = float("nan")
-                    res_h["ci_upper"] = float("nan")
-                    res_h["se"] = float("nan")
-            else:
+            non_sparse_horizons.append(h)
+            if n_bootstrap == 0:
                 # Analytical Hanley-McNeil IPCW approximation
                 auc_val = res_h["auroc"]
-                q1 = auc_val / (2.0 - auc_val)
-                q2 = 2.0 * auc_val**2 / (1.0 + auc_val)
-                var_h = (
-                    auc_val * (1.0 - auc_val)
-                    + (n_cases - 1) * (q1 - auc_val**2)
-                    + (n_controls - 1) * (q2 - auc_val**2)
-                ) / (n_cases * n_controls)
-                se_h = float(np.sqrt(max(0.0, var_h)))
-                res_h["se"] = se_h
-                res_h["ci_lower"] = max(0.0, float(auc_val - 1.959963984540054 * se_h))
-                res_h["ci_upper"] = min(1.0, float(auc_val + 1.959963984540054 * se_h))
+                if np.isnan(auc_val) or n_cases < 1 or n_controls < 1:
+                    res_h["se"] = float("nan")
+                    res_h["ci_lower"] = float("nan")
+                    res_h["ci_upper"] = float("nan")
+                    res_h["ci_method"] = None
+                else:
+                    q1 = auc_val / (2.0 - auc_val)
+                    q2 = 2.0 * auc_val**2 / (1.0 + auc_val)
+                    var_h = (
+                        auc_val * (1.0 - auc_val)
+                        + (n_cases - 1) * (q1 - auc_val**2)
+                        + (n_controls - 1) * (q2 - auc_val**2)
+                    ) / (n_cases * n_controls)
+                    se_h = float(np.sqrt(max(0.0, var_h)))
+                    res_h["se"] = se_h
+                    res_h["ci_lower"] = max(
+                        0.0, float(auc_val - 1.959963984540054 * se_h)
+                    )
+                    res_h["ci_upper"] = min(
+                        1.0, float(auc_val + 1.959963984540054 * se_h)
+                    )
+                    res_h["ci_method"] = "hanley_mcneil"
 
         results_by_horizon[h] = res_h
 
         # Dual model comparison at horizon h
         if is_comparison and s_old is not None and s_new is not None:
             res_old_h = _calculate_ipcw_roc_at_horizon(
-                dur_arr, ev_arr, s_old, h, g_durations, g_h, competing_event_code
+                dur_arr,
+                ev_arr,
+                s_old,
+                h,
+                g_durations,
+                g_h,
+                competing_event_code,
+                return_curve=False,
             )
             res_new_h = res_h
 
@@ -1025,71 +1077,98 @@ def compute_time_dependent_roc(
                 "delta_auroc": delta_auc,
                 "n_cases": n_cases,
                 "n_controls": n_controls,
+                "ci_lower": float("nan"),
+                "ci_upper": float("nan"),
+                "se": float("nan"),
+                "p_value": float("nan"),
+                "ci_method": None,
             }
-
-            if is_sparse or np.isnan(delta_auc):
-                comp_entry["ci_lower"] = float("nan")
-                comp_entry["ci_upper"] = float("nan")
-                comp_entry["se"] = float("nan")
-                comp_entry["p_value"] = float("nan")
-            else:
-                if n_bootstrap > 0:
-                    boot_deltas = []
-                    for b_idx in boot_indices:
-                        d_b = dur_arr[b_idx]
-                        e_b = ev_arr[b_idx]
-                        km_b = KaplanMeierFitter()
-                        km_b.fit(d_b, event_observed=(e_b == 0).astype(int))
-                        g_dur_b = np.clip(
-                            km_b.survival_function_at_times(d_b).values.flatten(),
-                            1e-3,
-                            1.0,
-                        )
-                        g_h_b = max(
-                            float(km_b.survival_function_at_times(h).iloc[0]), 1e-3
-                        )
-                        b_old = _calculate_ipcw_roc_at_horizon(
-                            d_b,
-                            e_b,
-                            s_old[b_idx],
-                            h,
-                            g_dur_b,
-                            g_h_b,
-                            competing_event_code,
-                        )
-                        b_new = _calculate_ipcw_roc_at_horizon(
-                            d_b,
-                            e_b,
-                            s_new[b_idx],
-                            h,
-                            g_dur_b,
-                            g_h_b,
-                            competing_event_code,
-                        )
-                        if not (np.isnan(b_old["auroc"]) or np.isnan(b_new["auroc"])):
-                            boot_deltas.append(b_new["auroc"] - b_old["auroc"])
-
-                    if len(boot_deltas) >= 10:
-                        se_d = float(np.std(boot_deltas, ddof=1))
-                        comp_entry["se"] = se_d
-                        comp_entry["ci_lower"] = float(np.percentile(boot_deltas, 2.5))
-                        comp_entry["ci_upper"] = float(np.percentile(boot_deltas, 97.5))
-                        z_d = float(delta_auc / se_d) if se_d > 0.0 else 0.0
-                        comp_entry["p_value"] = float(
-                            2.0 * (1.0 - stats.norm.cdf(abs(z_d)))
-                        )
-                    else:
-                        comp_entry["ci_lower"] = float("nan")
-                        comp_entry["ci_upper"] = float("nan")
-                        comp_entry["se"] = float("nan")
-                        comp_entry["p_value"] = float("nan")
-                else:
-                    comp_entry["ci_lower"] = float("nan")
-                    comp_entry["ci_upper"] = float("nan")
-                    comp_entry["se"] = float("nan")
-                    comp_entry["p_value"] = float("nan")
-
             comparison_by_horizon[h] = comp_entry
+
+    # Bootstrap CI estimation (fit KM fitter ONCE per replicate across all horizons)
+    if n_bootstrap > 0 and len(non_sparse_horizons) > 0:
+        rng = np.random.default_rng(random_state)
+        boot_indices = [
+            rng.choice(n_obs, size=n_obs, replace=True) for _ in range(n_bootstrap)
+        ]
+        boot_aucs_by_h: dict[float, list[float]] = {h: [] for h in non_sparse_horizons}
+        boot_deltas_by_h: dict[float, list[float]] = {
+            h: [] for h in non_sparse_horizons
+        }
+
+        for b_idx in boot_indices:
+            d_b = dur_arr[b_idx]
+            e_b = ev_arr[b_idx]
+            s_b = s_arr[b_idx]
+            km_b = KaplanMeierFitter()
+            km_b.fit(d_b, event_observed=(e_b == 0).astype(int))
+            g_dur_b = _lookup_censoring_survival_left_limit(km_b, d_b)
+
+            for h in non_sparse_horizons:
+                g_h_b = max(float(km_b.survival_function_at_times(h).iloc[0]), 1e-3)
+                b_res = _calculate_ipcw_roc_at_horizon(
+                    d_b,
+                    e_b,
+                    s_b,
+                    h,
+                    g_dur_b,
+                    g_h_b,
+                    competing_event_code,
+                    return_curve=False,
+                )
+                if not np.isnan(b_res["auroc"]):
+                    boot_aucs_by_h[h].append(b_res["auroc"])
+
+                if is_comparison and s_old is not None and s_new is not None:
+                    b_old = _calculate_ipcw_roc_at_horizon(
+                        d_b,
+                        e_b,
+                        s_old[b_idx],
+                        h,
+                        g_dur_b,
+                        g_h_b,
+                        competing_event_code,
+                        return_curve=False,
+                    )
+                    if not (np.isnan(b_old["auroc"]) or np.isnan(b_res["auroc"])):
+                        boot_deltas_by_h[h].append(b_res["auroc"] - b_old["auroc"])
+
+        for h in non_sparse_horizons:
+            b_aucs = boot_aucs_by_h[h]
+            if len(b_aucs) >= 10:
+                results_by_horizon[h]["ci_lower"] = float(np.percentile(b_aucs, 2.5))
+                results_by_horizon[h]["ci_upper"] = float(np.percentile(b_aucs, 97.5))
+                results_by_horizon[h]["se"] = float(np.std(b_aucs, ddof=1))
+                results_by_horizon[h]["ci_method"] = "bootstrap"
+            else:
+                results_by_horizon[h]["ci_lower"] = float("nan")
+                results_by_horizon[h]["ci_upper"] = float("nan")
+                results_by_horizon[h]["se"] = float("nan")
+                results_by_horizon[h]["ci_method"] = None
+
+            if is_comparison and comparison_by_horizon is not None:
+                b_deltas = boot_deltas_by_h[h]
+                d_auc = comparison_by_horizon[h]["delta_auroc"]
+                if len(b_deltas) >= 10 and not np.isnan(d_auc):
+                    se_d = float(np.std(b_deltas, ddof=1))
+                    comparison_by_horizon[h]["se"] = se_d
+                    comparison_by_horizon[h]["ci_lower"] = float(
+                        np.percentile(b_deltas, 2.5)
+                    )
+                    comparison_by_horizon[h]["ci_upper"] = float(
+                        np.percentile(b_deltas, 97.5)
+                    )
+                    z_d = float(d_auc / se_d) if se_d > 0.0 else 0.0
+                    comparison_by_horizon[h]["p_value"] = float(
+                        2.0 * (1.0 - stats.norm.cdf(abs(z_d)))
+                    )
+                    comparison_by_horizon[h]["ci_method"] = "bootstrap"
+                else:
+                    comparison_by_horizon[h]["ci_lower"] = float("nan")
+                    comparison_by_horizon[h]["ci_upper"] = float("nan")
+                    comparison_by_horizon[h]["se"] = float("nan")
+                    comparison_by_horizon[h]["p_value"] = float("nan")
+                    comparison_by_horizon[h]["ci_method"] = None
 
     trajectory = {
         "horizons": sorted_horizons,
@@ -1102,6 +1181,7 @@ def compute_time_dependent_roc(
         "time_horizons": sorted_horizons,
         "results_by_horizon": results_by_horizon,
         "trajectory": trajectory,
+        "ci_method": "bootstrap" if n_bootstrap > 0 else "hanley_mcneil",
     }
     if is_comparison:
         out["comparison"] = comparison_by_horizon

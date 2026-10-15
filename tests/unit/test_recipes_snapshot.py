@@ -340,9 +340,9 @@ def test_capture_or_verify_baseline_snapshot():
     assert "idi" in r16_raw
 
     r17_raw = ns["compute_time_dependent_roc"](
-        [10.0, 20.0, 30.0, 40.0],
-        [1, 0, 1, 0],
-        [0.8, 0.2, 0.7, 0.3],
+        [10.0, 20.0, 30.0, 40.0] * 3,
+        [1, 0, 1, 0] * 3,
+        [0.8, 0.2, 0.7, 0.3] * 3,
         time_horizons=[25.0],
     )
     assert "trajectory" in r17_raw

@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from lifelines import KaplanMeierFitter
 
 from medstat.diagnostic.roc import (
+    _lookup_censoring_survival_left_limit,
     calculate_roc_curve,
     compare_diagnostic_models,
     compute_reclassification_metrics,
@@ -533,3 +535,169 @@ def test_reclassification_bootstrap_continuous_and_idi():
     assert idi["ci_lower_boot"] is not None
     assert idi["ci_upper_boot"] is not None
     assert idi["ci_lower_boot"] < idi["ci_upper_boot"]
+
+
+def test_time_dependent_roc_tied_censoring_left_limit():
+    """Verify that left-limit G_hat(T_i-) evaluates survival strictly prior to T_i.
+
+    When an event time coincides with a censoring time, right-continuous G(t) drops at t,
+    whereas left-limit G(t-) correctly reflects survival probability prior to the jump.
+    """
+    # KM fitted on censoring: durations [10, 10, 20], event_observed = [1, 0, 1] (censor at 10 and 20)
+    durations = np.array([10.0, 10.0, 20.0, 30.0])
+    # events: 0=censored, 1=death -> for censoring KM, event_observed is (events == 0)
+    km = KaplanMeierFitter().fit(durations, event_observed=[1, 0, 1, 0])
+
+    # At time 10.0, a censoring occurred. Right-continuous G(10) drops to 0.75.
+    g_right = float(km.survival_function_at_times(10.0).iloc[0])
+    # Left-limit strictly prior to 10.0 must be 1.0 (before any censoring occurred)
+    g_left = _lookup_censoring_survival_left_limit(km, 10.0)
+    assert g_left == 1.0
+    assert g_right < g_left
+
+
+def test_time_dependent_roc_strict_event_code_validation():
+    """Verify event code validation both with and without competing events."""
+    dur = np.array([10.0, 20.0, 30.0] * 4)
+    sc = np.array([0.5, 0.4, 0.6] * 4)
+
+    # 1. Without competing event code (default None): reject values not in {0, 1}
+    ev_invalid_neg = np.array([1, 0, -1] * 4)
+    with pytest.raises(ValueError, match="binary values"):
+        compute_time_dependent_roc(dur, ev_invalid_neg, sc, time_horizons=[15.0])
+
+    ev_invalid_two = np.array([1, 0, 2] * 4)
+    with pytest.raises(ValueError, match="binary values"):
+        compute_time_dependent_roc(dur, ev_invalid_two, sc, time_horizons=[15.0])
+
+    # 2. With competing event code: reject 0 or 1 as competing_event_code
+    ev_comp = np.array([1, 0, 2] * 4)
+    with pytest.raises(ValueError, match="competing_event_code cannot be 0 or 1"):
+        compute_time_dependent_roc(dur, ev_comp, sc, competing_event_code=0)
+
+    with pytest.raises(ValueError, match="competing_event_code cannot be 0 or 1"):
+        compute_time_dependent_roc(dur, ev_comp, sc, competing_event_code=1)
+
+    # 3. With competing_event_code=2: reject if any value outside {0, 1, 2} exists
+    ev_comp_bad = np.array([1, 0, 3] * 4)
+    with pytest.raises(ValueError, match=r"outside \{0, 1, 2\}"):
+        compute_time_dependent_roc(dur, ev_comp_bad, sc, competing_event_code=2)
+
+    # Valid competing event code execution
+    res_comp = compute_time_dependent_roc(
+        dur, ev_comp, sc, competing_event_code=2, time_horizons=[15.0]
+    )
+    assert 15.0 in res_comp["results_by_horizon"]
+
+
+def test_compare_diagnostic_models_strict_binary_validation():
+    """Verify compare_diagnostic_models rejects 3-class, missing/NaN, and invalid pos_label."""
+    p_old = np.array([0.2, 0.4, 0.6, 0.8])
+    p_new = np.array([0.3, 0.5, 0.7, 0.9])
+
+    # 3-class outcome
+    with pytest.raises(ValueError, match="exactly 2 distinct classes"):
+        compare_diagnostic_models([0, 1, 2, 1], p_old, p_new)
+
+    # 1-class outcome
+    with pytest.raises(ValueError, match="exactly 2 distinct classes"):
+        compare_diagnostic_models([1, 1, 1, 1], p_old, p_new)
+
+    # Missing / NaN in y_true
+    with pytest.raises(ValueError, match="missing or NaN"):
+        compare_diagnostic_models([0, 1, np.nan, 1], p_old, p_new)
+
+    # pos_label not present in outcome
+    with pytest.raises(ValueError, match="pos_label 'pos' not found"):
+        compare_diagnostic_models([0, 1, 0, 1], p_old, p_new, pos_label="pos")
+
+    # Output does not contain patient arrays
+    res = compare_diagnostic_models([0, 1, 0, 1], p_old, p_new)
+    assert "p_old" not in res["reclassification"]
+    assert "p_new" not in res["reclassification"]
+    assert "y_true" not in res["reclassification"]
+
+
+def test_time_dependent_roc_ci_method_reporting():
+    """Verify ci_method is correctly reported as 'bootstrap', 'hanley_mcneil', or None."""
+    dur = np.array([10.0, 20.0, 30.0, 40.0, 50.0] * 6)
+    ev = np.array([1, 0, 1, 0, 1] * 6)
+    sc = np.array([0.8, 0.2, 0.7, 0.3, 0.9] * 6)
+
+    # Analytical (n_bootstrap=0)
+    res_ana = compute_time_dependent_roc(
+        dur, ev, sc, time_horizons=[25.0, 100.0], n_bootstrap=0
+    )
+    assert res_ana["ci_method"] == "hanley_mcneil"
+    assert res_ana["results_by_horizon"][25.0]["ci_method"] == "hanley_mcneil"
+    # Beyond max follow-up (100.0 > 50.0) -> is_sparse -> ci_method is None
+    assert res_ana["results_by_horizon"][100.0]["ci_method"] is None
+
+    # Bootstrap (n_bootstrap > 0)
+    res_boot = compute_time_dependent_roc(
+        dur, ev, sc, time_horizons=[25.0], n_bootstrap=20, random_state=42
+    )
+    assert res_boot["ci_method"] == "bootstrap"
+    assert res_boot["results_by_horizon"][25.0]["ci_method"] == "bootstrap"
+
+    # Narrative checks
+    table_html = format_time_dependent_roc_table(res_ana)
+    assert "analytical IPCW approximation (Hanley-McNeil)" in table_html
+
+    table_boot = format_time_dependent_roc_table(res_boot)
+    assert "bootstrap resampling" in table_boot
+
+    narr_ana = generate_methods_narrative(
+        model_type="diagnostic",
+        has_td_roc=True,
+        diag_data=res_ana,
+    )
+    assert "analytical IPCW approximation (Hanley-McNeil)" in narr_ana
+
+    narr_boot = generate_methods_narrative(
+        model_type="diagnostic",
+        has_td_roc=True,
+        diag_data=res_boot,
+    )
+    assert "bootstrap resampling" in narr_boot
+
+
+def test_plot_time_dependent_roc_non_finite_horizon_and_dynamic_ylim(tmp_path):
+    """Verify non-finite horizon curves are skipped with unavailable notes, and y-axis is dynamic."""
+    dur = np.array([10.0, 20.0, 30.0, 40.0, 50.0] * 3)
+    ev = np.array([1, 0, 1, 0, 1] * 3)
+    sc = np.array([0.8, 0.2, 0.7, 0.3, 0.9] * 3)
+    td_data = compute_time_dependent_roc(
+        dur, ev, sc, time_horizons=[25.0, 100.0], n_bootstrap=0
+    )
+
+    # Make horizon 100 AUROC explicitly NaN to simulate insufficient events/at-risk
+    td_data["results_by_horizon"][100.0]["auroc"] = float("nan")
+
+    out_c = str(tmp_path / "curves_unavail.png")
+    fig_c = plot_time_dependent_roc(td_data, mode="curves", out_path=out_c)
+    assert "omitted from curve plotting" in fig_c.caption
+
+    # Dual Plotly version
+    out_dual = str(tmp_path / "dual_unavail.png")
+    dual_res = plot_dual_time_dependent_roc(td_data, mode="curves", out_path=out_dual)
+    trace_names = [t.name for t in dual_res.plotly_fig.data]
+    assert any(
+        "unavailable (insufficient events/at-risk)" in str(n) for n in trace_names
+    )
+
+    # Trajectory mode with low AUROC to verify dynamic y-axis scaling
+    td_low = dict(td_data)
+    td_low["trajectory"] = {
+        "horizons": [25.0],
+        "auroc": [0.35],
+        "ci_lower": [0.25],
+        "ci_upper": [0.45],
+    }
+    out_traj = str(tmp_path / "traj_low.png")
+    plot_time_dependent_roc(td_low, mode="auroc_trajectory", out_path=out_traj)
+    dual_traj = plot_dual_time_dependent_roc(
+        td_low, mode="auroc_trajectory", out_path=out_traj
+    )
+    y_range = dual_traj.plotly_fig.layout.yaxis.range
+    assert y_range[0] < 0.30

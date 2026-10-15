@@ -117,8 +117,8 @@ Evaluating Added Value of Updated Biomarker/Model over Baseline
 ```
 Evaluating Diagnostic / Prognostic Biomarkers Over Follow-up Time
 ├── Censoring Handling ──▶ Inverse Probability of Censoring Weighting (IPCW) via Kaplan-Meier on censoring distribution G(t) (Uno et al. 2007, Heagerty et al. 2000) (Recipe 17)
-├── Definition ──▶ Cumulative/Dynamic ROC: Cases = events prior to t; Controls = event-free beyond t
-├── Under Competing Risks ──▶ Patients experiencing competing events before t remain in the risk set as controls (cannot experience primary event)
+├── Definition ──▶ Cumulative/Dynamic ROC: Cases = primary events by t (T_i <= t, delta_i = 1); Controls = event-free beyond t (T_i > t)
+├── Under Competing Risks ──▶ When competing_event_code is provided, patients experiencing competing events by t (T_i <= t, delta_i = k_comp) are retained in the control set weighted by IPCW (Fine-Gray/Uno subdistribution definition); default mode (competing_event_code=None) requires strictly binary event coding {0, 1}
 ├── Horizon Selection ──▶ Clinically meaningful milestones (e.g., 30d, 90d, 1y, 3y, 5y); avoid horizons where remaining cases or controls < 5
 └── Reporting ──▶ AUROC(t) trajectory curve with 95% bootstrap CI band, optimal Youden cutpoint, sensitivity, specificity per milestone (Recipe 17)
 ```
