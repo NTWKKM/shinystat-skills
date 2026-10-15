@@ -243,13 +243,21 @@ def fit_competing_risks_cif(
         CompetingRisksCIFResult containing fitted models, step CIF table, horizon evaluations,
         probability conservation audit, and clinical alerts.
     """
+    if event_of_interest <= 0 or competing_event <= 0:
+        raise ValueError(
+            f"event_of_interest ({event_of_interest}) and competing_event ({competing_event}) must be positive integers (> 0); 0 is reserved for censoring."
+        )
     if event_of_interest == competing_event:
         raise ValueError(
             f"event_of_interest ({event_of_interest}) and competing_event ({competing_event}) must be distinct."
         )
 
     dur = np.asarray(durations, dtype=float)
-    evt_float = np.asarray(event_observed, dtype=float)
+    if isinstance(event_observed, pd.Series):
+        evt_series = event_observed
+    else:
+        evt_series = pd.Series(event_observed)
+    evt_float = pd.to_numeric(evt_series, errors="coerce").to_numpy(dtype=float)
 
     valid_mask = (
         np.isfinite(dur)
@@ -442,6 +450,10 @@ def fit_competing_risks_regression(
     Returns:
         dict containing model_cs, model_fg, side-by-side comparison_table, and interpretations.
     """
+    if event_of_interest <= 0 or competing_event <= 0:
+        raise ValueError(
+            f"event_of_interest ({event_of_interest}) and competing_event ({competing_event}) must be positive integers (> 0); 0 is reserved for censoring."
+        )
     if event_of_interest == competing_event:
         raise ValueError(
             f"event_of_interest ({event_of_interest}) and competing_event ({competing_event}) must be distinct."

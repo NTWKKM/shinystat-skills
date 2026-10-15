@@ -271,6 +271,13 @@ def test_att_atc_truncation_preserves_reference_group(
     t = res_att.df["treatment"].to_numpy()
     np.testing.assert_allclose(res_att.weights[t == 1], 1.0)
 
+    # Compare non-reference control group's final weights with raw weights clipped at quantiles
+    w_ctrl_raw = res_att.df.loc[t == 0, "iptw_weight_raw"].to_numpy()
+    lo_att, hi_att = np.quantile(w_ctrl_raw, (0.05, 0.95))
+    expected_ctrl = np.clip(w_ctrl_raw, lo_att, hi_att)
+    np.testing.assert_allclose(res_att.weights[t == 0], expected_ctrl)
+    assert np.any(res_att.weights[t == 0] != w_ctrl_raw)
+
     # ATC: controls (T=0) must stay exactly 1.0, only treated truncated
     res_atc = compute_iptw_weights(
         synthetic_cohort,
@@ -280,6 +287,13 @@ def test_att_atc_truncation_preserves_reference_group(
         truncation=(0.05, 0.95),
     )
     np.testing.assert_allclose(res_atc.weights[t == 0], 1.0)
+
+    # Compare non-reference treated group's final weights with raw weights clipped at quantiles
+    w_trt_raw = res_atc.df.loc[t == 1, "iptw_weight_raw"].to_numpy()
+    lo_atc, hi_atc = np.quantile(w_trt_raw, (0.05, 0.95))
+    expected_trt = np.clip(w_trt_raw, lo_atc, hi_atc)
+    np.testing.assert_allclose(res_atc.weights[t == 1], expected_trt)
+    assert np.any(res_atc.weights[t == 1] != w_trt_raw)
 
 
 def test_fit_iptw_outcome_model_invalid_weights_validation(

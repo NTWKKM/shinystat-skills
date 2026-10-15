@@ -179,21 +179,55 @@ def test_competing_risks_distinct_event_validation(
             competing_event=1,
         )
 
+    # 0 is reserved for censoring; rejecting zero or negative before recoding
+    with pytest.raises(ValueError, match="positive integers"):
+        fit_competing_risks_cif(
+            durations=df["time"],
+            event_observed=df["event"],
+            event_of_interest=0,
+            competing_event=2,
+        )
+
+    with pytest.raises(ValueError, match="positive integers"):
+        fit_competing_risks_regression(
+            df=df,
+            duration_col="time",
+            event_col="event",
+            covariates=["treatment"],
+            event_of_interest=1,
+            competing_event=0,
+        )
+
 
 def test_competing_risks_missing_event_handling(
     synthetic_competing_risks: pd.DataFrame,
 ):
     df = synthetic_competing_risks.copy()
-    # Insert NaN into event_observed; CIF should filter it out without crashing on int conversion
-    evt = df["event"].astype(float).copy()
-    evt.iloc[0] = np.nan
-    evt.iloc[1] = np.nan
 
-    res = fit_competing_risks_cif(
+    # Case 1: np.nan in float series
+    evt_nan = df["event"].astype(float).copy()
+    evt_nan.iloc[0] = np.nan
+    evt_nan.iloc[1] = np.nan
+
+    res_nan = fit_competing_risks_cif(
         durations=df["time"],
-        event_observed=evt,
+        event_observed=evt_nan,
         event_of_interest=1,
         competing_event=2,
     )
-    assert res.cif_table is not None
-    assert len(res.cif_table) > 0
+    assert res_nan.cif_table is not None
+    assert len(res_nan.cif_table) > 0
+
+    # Case 2: pd.NA in pandas nullable integer Series (dtype="Int64")
+    evt_pd_na = pd.Series(df["event"].values, dtype="Int64")
+    evt_pd_na.iloc[0] = pd.NA
+    evt_pd_na.iloc[1] = pd.NA
+
+    res_pd_na = fit_competing_risks_cif(
+        durations=df["time"],
+        event_observed=evt_pd_na,
+        event_of_interest=1,
+        competing_event=2,
+    )
+    assert res_pd_na.cif_table is not None
+    assert len(res_pd_na.cif_table) > 0
