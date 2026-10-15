@@ -79,6 +79,27 @@ def test_compute_iptw_weights_all_estimands(synthetic_cohort: pd.DataFrame):
         assert res.effective_sample_size["total"] > 0
         assert 0.0 <= res.propensity_scores.min() <= res.propensity_scores.max() <= 1.0
 
+        # Assert estimand-specific raw weight formulas (before truncation)
+        t = res.df["treatment"].to_numpy()
+        ps = res.propensity_scores.to_numpy()
+        w_raw = res.df["iptw_weight_raw"].to_numpy()
+
+        if estimand == "ATT":
+            np.testing.assert_allclose(w_raw[t == 1], 1.0)
+            np.testing.assert_allclose(w_raw[t == 0], (ps / (1.0 - ps))[t == 0])
+        elif estimand == "ATC":
+            np.testing.assert_allclose(w_raw[t == 0], 1.0)
+            np.testing.assert_allclose(w_raw[t == 1], ((1.0 - ps) / ps)[t == 1])
+        elif estimand == "ATO":
+            np.testing.assert_allclose(w_raw[t == 1], (1.0 - ps)[t == 1])
+            np.testing.assert_allclose(w_raw[t == 0], ps[t == 0])
+        elif estimand == "ATE":
+            p_t = float(np.mean(t))
+            np.testing.assert_allclose(w_raw[t == 1], (p_t / ps)[t == 1])
+            np.testing.assert_allclose(
+                w_raw[t == 0], ((1.0 - p_t) / (1.0 - ps))[t == 0]
+            )
+
 
 def test_stabilized_weights_mean_approx_one(synthetic_cohort: pd.DataFrame):
     res = compute_iptw_weights(
@@ -185,6 +206,10 @@ def test_fit_iptw_outcome_models(synthetic_cohort: pd.DataFrame):
     assert "ci_lower" in fit_cont
     assert "ci_upper" in fit_cont
     assert "p_value" in fit_cont
+
+    # Assert continuous-effect recovery: seeded fixture treatment effect is -5.0
+    assert fit_cont["coef"] == pytest.approx(-5.0, abs=1.5)
+    assert fit_cont["ci_lower"] < fit_cont["ci_upper"]
 
     # Binary Logistic GLM
     fit_bin = fit_iptw_outcome_model(

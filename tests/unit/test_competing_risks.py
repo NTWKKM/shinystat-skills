@@ -106,12 +106,16 @@ def test_fit_competing_risks_regression(synthetic_competing_risks: pd.DataFrame)
     assert "cs_p_value" in comp_df.columns
     assert "fg_p_value" in comp_df.columns
 
-    # Treatment hazard ratio should be positive
+    # Treatment hazard ratio should be positive and match reference values from deterministic cohort
     trt_row = comp_df[comp_df["covariate"] == "treatment"].iloc[0]
     assert trt_row["cause_specific_hr"] > 0
     assert trt_row["fine_gray_shr"] > 0
     assert trt_row["cs_ci_lower"] < trt_row["cs_ci_upper"]
     assert trt_row["fg_ci_lower"] < trt_row["fg_ci_upper"]
+
+    # Reference value assertions on deterministic fixture (np.random.seed(42), n=200)
+    assert trt_row["fine_gray_shr"] == pytest.approx(1.9883, abs=0.05)
+    assert trt_row["cause_specific_hr"] == pytest.approx(1.8725, abs=0.05)
 
 
 def test_plot_cif_and_dual_cif(tmp_path, synthetic_competing_risks: pd.DataFrame):
