@@ -189,6 +189,14 @@ def test_competing_risks_distinct_event_validation(
         )
 
     with pytest.raises(ValueError, match="positive integers"):
+        fit_competing_risks_cif(
+            durations=df["time"],
+            event_observed=df["event"],
+            event_of_interest=1,
+            competing_event=0,
+        )
+
+    with pytest.raises(ValueError, match="positive integers"):
         fit_competing_risks_regression(
             df=df,
             duration_col="time",
@@ -196,6 +204,16 @@ def test_competing_risks_distinct_event_validation(
             covariates=["treatment"],
             event_of_interest=1,
             competing_event=0,
+        )
+
+    with pytest.raises(ValueError, match="positive integers"):
+        fit_competing_risks_regression(
+            df=df,
+            duration_col="time",
+            event_col="event",
+            covariates=["treatment"],
+            event_of_interest=0,
+            competing_event=2,
         )
 
 
@@ -231,3 +249,14 @@ def test_competing_risks_missing_event_handling(
     )
     assert res_pd_na.cif_table is not None
     assert len(res_pd_na.cif_table) > 0
+
+    # Verify that missing event rows (indices 0 and 1) were filtered out
+    # by checking against a reference fit excluding those rows
+    ref = fit_competing_risks_cif(
+        durations=df["time"].iloc[2:],
+        event_observed=df["event"].iloc[2:],
+        event_of_interest=1,
+        competing_event=2,
+    )
+    pd.testing.assert_frame_equal(res_nan.cif_table, ref.cif_table, atol=1e-8)
+    pd.testing.assert_frame_equal(res_pd_na.cif_table, ref.cif_table, atol=1e-8)
