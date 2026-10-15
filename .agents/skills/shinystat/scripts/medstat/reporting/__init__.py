@@ -16,6 +16,8 @@ from medstat.reporting.ir import (
     TableBlock,
 )
 from medstat.reporting.narrative import (
+    generate_competing_risks_narrative,
+    generate_iptw_narrative,
     generate_methods_narrative,
     validate_calibration_metrics,
 )
@@ -55,6 +57,8 @@ __all__ = [
     "render_balance_table",
     "render_competing_risks_table",
     "generate_methods_narrative",
+    "generate_iptw_narrative",
+    "generate_competing_risks_narrative",
     "validate_calibration_metrics",
     "ReportDocument",
     "Block",

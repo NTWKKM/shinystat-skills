@@ -1,6 +1,6 @@
 ---
 name: shinystat
-description: Autonomous biostatistical intelligence for clinical data analysis, research adaptation, cohort management, adaptive Python scripting, publication figures (forest, KM, ROC, calibration, DCA, Bland-Altman, love plot), and multi-format document generation (docx, pptx, html, md, pdf). Excels at statistical decision-making, study design alignment, and dynamic code generation with mandatory grilling on ambiguity.
+description: Autonomous biostatistical intelligence for clinical data analysis, causal inference (PSM, IPTW with ATE/ATT/ATC/ATO overlap weights, stabilized weights, Kish ESS), survival analysis (Kaplan-Meier, Cox PH, Competing Risks with Aalen-Johansen CIF & Fine-Gray SHR), adaptive Python scripting, publication figures (forest, KM, CIF, ROC, calibration, DCA, Bland-Altman, 3-way love plot), and multi-format document generation (docx, pptx, html, md, pdf). Excels at statistical decision-making, study design alignment, and dynamic code generation with mandatory grilling on ambiguity.
 ---
 
 # Shinystat: Autonomous Biostatistical Decision Agent
@@ -37,7 +37,7 @@ Exercise decisive professional autonomy: determine data distributions, test assu
    - Evaluate Events Per Variable: for binary logistic, $\text{EPV}_{\text{binary}} = \frac{\min(N_{\text{events}}, N_{\text{non-events}})}{P_{\text{parameters}}}$; for Cox proportional hazards, calculate using observed failures, $\text{EPV}_{\text{Cox}} = \frac{N_{\text{failures}}}{P_{\text{parameters}}}$, where $P_{\text{parameters}}$ is the number of fitted predictor parameters (counting multi-level factors as $k-1$ and splines by their degrees of freedom, rather than once per named variable).
 
 2. **Pillar 2: Research & Estimand Triangulation (Autonomous Selection)**
-   - Align the statistical design with the research proposal (PICO/PECO) and clinical archetype (Cohort, Case-Control, RCT, Diagnostic Accuracy, Agreement, Clustered).
+   - Align the statistical design with the research proposal (PICO/PECO) and clinical archetype (Cohort, Case-Control, RCT, Diagnostic Accuracy, Agreement, Clustered, Causal Inference, Competing Risks).
    - Consult [decision-heuristics.md](references/decision-heuristics.md) for archetype-to-model selection rules. Autonomously choose the model family without asking user permission.
 
 3. **Pillar 3: Adaptive Python Scripting (Autonomous Biostatistical Authority)**
@@ -46,19 +46,21 @@ Exercise decisive professional autonomy: determine data distributions, test assu
    - **Autonomous Upgrades & Diagnostics**:
      - *Sparse Data Bias*: For binary logistic regression with $\text{EPV}_{\text{binary}} < 10$, branch by research estimand: for etiological effects without monotone separation, autonomously upgrade to Firth penalized logistic regression (`medstat.models.firth`) without asking permission to control finite-sample bias; when monotone separation is present, follow the Section 2 Grilling Gate; for prediction models, apply L2 penalization/shrinkage to control overfitting per [decision-heuristics.md](references/decision-heuristics.md). For Cox proportional hazards with $\text{EPV}_{\text{Cox}} < 10$, route to penalized Cox regression or clinical risk score reduction per [decision-heuristics.md](references/decision-heuristics.md).
      - *Proportional Hazards*: Autonomously test Grambsch-Therneau Schoenfeld residuals (`cox_ph.check_assumptions()`). If violated, autonomously apply stratification or time-varying covariates.
+     - *Competing Risks*: When competing events (e.g. non-cardiovascular death in cardiac studies) preclude the primary event, autonomously avoid Naive $1 - \text{Kaplan-Meier}$ overestimation bias by executing non-parametric Aalen-Johansen Cumulative Incidence Functions (`fit_competing_risks_cif`), dual Cause-Specific Cox models (etiological rate ratio), and Fine-Gray Subdistribution Hazard models (`fit_competing_risks_regression`) via IPCW counting process expansion.
+     - *Causal Inference & Weighting*: For observational comparative effectiveness, autonomously execute Inverse Probability of Treatment Weighting (`medstat.causal.iptw`) supporting ATE, ATT, ATC, and Overlap Weights (ATO; Li et al., 2018), stabilized weights, quantile truncation, Kish's Effective Sample Size ($N_{\text{eff}}$), Bessel-corrected weighted SMD, and Huber-White sandwich variance estimation.
      - *Non-Linearity*: Autonomously test continuous predictor linearity and model biomarker curves using Restricted Cubic Splines (RCS).
      - *Clustering*: When multi-center or clustered data is identified, autonomously calculate Design Effect ($\text{DEFF}$) and fit population-averaged GEE with robust sandwich standard errors or mixed models.
      - *Sensitivity*: Autonomously compute VanderWeele & Ding E-values for observational findings.
 
 4. **Pillar 4: Biostatistical Safety Invariants**
-   - **Strict Numeric 0/1 Encoding**: Binary endpoints and survival event indicators must be numeric `0` and `1` (`1 = Event`, `0 = Non-event / Censored`). Text labels (`"Yes"/"No"`, `"Dead"/"Alive"`) must be mapped explicitly.
+   - **Strict Numeric 0/1 Encoding**: Binary endpoints and survival event indicators must be numeric `0` and `1` (`1 = Event`, `0 = Non-event / Censored`). Text labels (`"Yes"/"No"`, `"Dead"/"Alive"`) must be mapped explicitly. Multi-state competing risk events must follow standard integer encoding (`0 = Censored, 1 = Event of Interest, 2+ = Competing Event`).
    - **Sample Retention Flow**: Always audit cohort retention ($N_{\text{initial}} \longrightarrow N_{\text{excluded}} \longrightarrow N_{\text{analyzed}}$) with documented exclusion rationale.
    - **Zero Silent Deletion**: Prohibit unexamined listwise deletion. Test missingness (Little's MCAR) and document imputation or complete-case justification. Never impute primary outcomes.
    - **Standard Confidence Intervals**: Wilson score CIs for proportions/2x2 diagnostics, DeLong variance for AUC, and non-null large-sample CIs for agreement metrics.
 
 5. **Pillar 5: Reporting Integrity & Multi-Format Documents**
    - **Report Intermediate Representation (IR)**: Single Source of Truth (`ReportDocument`). Narrative blocks, 3-rule tables, and figures assembled into an immutable intermediate representation before export.
-   - **Publication Figures (300 DPI)**: High-resolution, colorblind-safe plots with Thai font fallbacks (`Sarabun`, `Thonburi`, `Sukhumvit Set`). Consult [figures.md](references/figures.md) for forest plots, KM curves, ROC, calibration, DCA, Bland-Altman, love plots, and STROBE retention flowcharts.
+   - **Publication Figures (300 DPI)**: High-resolution, colorblind-safe plots with Thai font fallbacks (`Sarabun`, `Thonburi`, `Sukhumvit Set`). Consult [figures.md](references/figures.md) for forest plots, KM curves, CIF curves (`plot_cif`), ROC, calibration, DCA, Bland-Altman, 3-way love plots (`plot_love` with Unadjusted, Matched, and IPTW balance), and STROBE retention flowcharts.
    - **Output Format Alignment Gate & Multi-Format Renderers**: Consult [report-builder.md](references/report-builder.md):
      - **Interactive HTML (`.html`) (Recommended format at alignment gate)**: Dual / Toggle View featuring interactive Plotly.js charts as the primary view (`Interactive (Plotly)`) when Plotly specifications are supplied (`plotly_figs`), paired with a seamless tab or toggle button to switch to `"Publication 300 DPI Figure (Static)"` for downloading and journal submission (or static figure only when Plotly specs are omitted), with offline-first CDN resilience and print parity (`@media print`).
      - **Word Document (`.docx`)**: OpenXML 3-rule table borders (`<w:tblBorders>`) and 6.5 in printable figures.

@@ -11,6 +11,8 @@
 
 - **Pure Permissive Licensing (Apache-2.0)**: Replaced copyleft GPL dependencies (specifically `pingouin`) with native, pure-Python / NumPy / SciPy algorithms, including a full two-way ANOVA Intraclass Correlation Coefficient (ICC) implementation covering all 6 variants ($ICC(1,1), ICC(2,1), ICC(3,1), ICC(1,k), ICC(2,k), ICC(3,k)$) with exact F-tests and McGraw & Wong (1996) 95% confidence intervals.
 - **Pure Python Firth Penalized Models**: First-class support for penalized logistic and Cox proportional hazards regression via `firthmodels >= 0.8.2` with Profile Likelihood confidence intervals and penalized Likelihood Ratio Tests (LRT), resolving quasi-complete and complete separation in sparse clinical datasets.
+- **Causal Inference & Weighting (IPTW)**: Inverse Probability of Treatment Weighting supporting ATE, ATT, ATC, and Overlap Weights (ATO; Li et al., 2018), stabilized weights, quantile truncation, Kish's Effective Sample Size ($N_{\text{eff}}$), Huber-White robust sandwich SEs, and 3-way Love plots (`Unadjusted` vs `Matched` vs `IPTW`).
+- **Competing Risks Survival Analysis**: Non-parametric Aalen-Johansen Cumulative Incidence Functions (`fit_competing_risks_cif`, `plot_cif`, `plot_dual_cif`), dual Cause-Specific Cox models (etiology), Fine-Gray Subdistribution Hazard models (`fit_competing_risks_regression`) via IPCW counting process expansion (prognosis), and Naive $1 - \text{Kaplan-Meier}$ overestimation bias auditing.
 - **Restricted Cubic Splines (RCS)**: Non-linear relationship modeling and hazard ratio contrast curves via `patsy.cr` natural cubic splines.
 - **Audited Participant Sample Flow**: Explicit missing data handling (`complete-case`, `mice`, `knn`, `indicator`) tracking attrition flows ($N_{initial} \to N_{excluded} \to N_{analyzed}$) conforming to CONSORT, STROBE, and TRIPOD standards.
 - **Dual-Toggle HTML Reports & Publication Figures**: Single-file, zero-dependency self-contained HTML clinical reports featuring segmented toggle switches between interactive exploratory Plotly.js charts (hover tooltips, zoom, pan) and publication-grade 300 DPI Matplotlib PNGs (ICMJE/NEJM/APA styling). Includes offline CDN fallback resilience, print-media CSS parity (`@media print`), and direct one-click high-resolution PNG and raw source CSV data exports.
@@ -59,7 +61,7 @@ shinystat-skills/
 │   │   └── correlation.py      # Pearson, Spearman, Kendall correlation matrices & CIs
 │   ├── models/
 │   │   ├── glm.py              # Linear (OLS), Logistic, Poisson, Negative Binomial
-│   │   ├── survival.py         # Kaplan-Meier, Cox PH, Schoenfeld assumption tests
+│   │   ├── survival.py         # Kaplan-Meier, Cox PH, Competing Risks (CIF, Cause-Specific, Fine-Gray)
 │   │   ├── firth.py            # Firth penalized logistic & Cox with Profile Likelihood CIs
 │   │   ├── splines.py          # Restricted cubic splines (RCS) & HR contrast curves
 │   │   ├── ordinal.py          # Proportional odds cumulative logit & Brant test
@@ -71,8 +73,9 @@ shinystat-skills/
 │   │   ├── dca.py              # Decision Curve Analysis (net benefit across decision thresholds)
 │   │   └── calibration.py      # Calibration curves, Brier score, ICI, Hosmer-Lemeshow
 │   ├── causal/
-│   │   ├── psm.py              # Propensity score matching, caliper, nearest neighbor, IPW
-│   │   └── balance.py          # Standardized Mean Differences (SMD), Love plots
+│   │   ├── psm.py              # Propensity score matching, caliper, nearest neighbor
+│   │   ├── iptw.py             # Inverse Probability Weighting (ATE, ATT, ATC, ATO overlap weights)
+│   │   └── balance.py          # Standardized Mean Differences (SMD), 2-way and 3-way Love plots
 │   ├── meta/
 │   │   ├── models.py           # Fixed-effect, Random-effects (DerSimonian-Laird), I^2, Tau^2
 │   │   ├── forest.py           # Forest plot data generation
@@ -88,17 +91,19 @@ shinystat-skills/
 │   │   ├── styles.py           # 300 DPI publication styles & colorblind-safe palettes
 │   │   ├── forest.py           # Publication-grade forest plots (OR, RR, HR)
 │   │   ├── survival.py         # Kaplan-Meier curves with aligned risk tables
+│   │   ├── cif.py              # Cumulative Incidence Function (Aalen-Johansen CIF & Naive 1-KM)
 │   │   ├── roc.py              # Empirical ROC curves with DeLong 95% CIs
 │   │   ├── calibration.py      # Decile calibration curves with Wilson score CIs
 │   │   ├── dca.py              # Decision Curve Analysis net benefit plots
 │   │   ├── agreement.py        # Bland-Altman agreement with 1999 large-sample CIs
-│   │   ├── balance.py          # Austin 2009 Love plots for PSM balance (0.10 SMD)
+│   │   ├── balance.py          # Austin 2009 Love plots for PSM/IPTW balance (0.10 SMD)
 │   │   ├── retention.py        # STROBE/CONSORT participant retention flowcharts
 │   │   ├── diagnostics.py      # Missingness heatmaps & Schoenfeld residual plots
 │   │   └── html/               # Dedicated mirror submodule for Dual / Toggle View
 │   │       ├── base.py         # DualFigureResult (Plotly JSON + 300 DPI Matplotlib PNG)
 │   │       ├── roc.py          # Interactive & static ROC curve generator
 │   │       ├── survival.py     # Interactive & static Kaplan-Meier generator
+│   │       ├── cif.py          # Interactive & static CIF generator
 │   │       ├── calibration.py  # Interactive & static calibration curve generator
 │   │       ├── dca.py          # Interactive & static DCA net benefit generator
 │   │       ├── agreement.py    # Interactive & static Bland-Altman generator

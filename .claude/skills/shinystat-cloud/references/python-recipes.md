@@ -2723,7 +2723,7 @@ def fit_competing_risks_regression(
     fail_times = np.sort(clean.loc[clean[event_col] == event_of_interest, duration_col].unique())
 
     def _get_G(t: float) -> float:
-        idx = g_sf.index.searchsorted(t, side="right") - 1
+        idx = g_sf.index.searchsorted(t, side="left") - 1
         return max(float(g_sf.iloc[idx, 0]) if idx >= 0 else 1.0, 1e-4)
 
     exp_rows = []

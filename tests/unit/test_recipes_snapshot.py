@@ -180,6 +180,56 @@ def run_all_recipes(ns: dict[str, Any]) -> dict[str, Any]:
     r13_html = ns["render_publication_table"](sample_df, title="Table. Diagnostics")
     results["recipe_13_html_rendered"] = "<table" in r13_html
 
+    # Recipe 14: IPTW & Weighted Balance
+    r14_df, r14_diag = ns["compute_iptw"](
+        df=df,
+        treatment_col="treatment_arm",
+        covariates=["age", "bmi", "egfr"],
+        estimand="ATE",
+    )
+    r14_smd = ns["calculate_weighted_smd"](
+        r14_df.loc[r14_df["treatment_arm"] == 1, "age"].to_numpy(),
+        r14_df.loc[r14_df["treatment_arm"] == 0, "age"].to_numpy(),
+        r14_df.loc[r14_df["treatment_arm"] == 1, "iptw_weight"].to_numpy(),
+        r14_df.loc[r14_df["treatment_arm"] == 0, "iptw_weight"].to_numpy(),
+    )
+    r14_fit = ns["fit_weighted_outcome_model"](
+        r14_df,
+        outcome_col="mortality_30d",
+        treatment_col="treatment_arm",
+        weights_col="iptw_weight",
+        model_type="binary",
+    )
+    results["recipe_14_iptw"] = {
+        "n_eff": r14_diag["n_eff"],
+        "age_weighted_smd": round(float(r14_smd), 4),
+        "odds_ratio": round(float(r14_fit["odds_ratio"]), 4),
+    }
+
+    # Recipe 15: Competing Risks
+    cr_status = np.where(df["event_death"] == 1, 1, np.where(df["age"] > 70, 2, 0))
+    r15_cif = ns["fit_competing_risks_cif"](
+        durations=df["time_to_event"].to_numpy(),
+        event_observed=cr_status,
+        event_of_interest=1,
+        competing_event=2,
+        horizons=[30.0, 90.0, 180.0],
+    )
+    df_cr_reg = df.copy()
+    df_cr_reg["cr_status"] = cr_status
+    r15_reg = ns["fit_competing_risks_regression"](
+        df=df_cr_reg,
+        duration_col="time_to_event",
+        event_col="cr_status",
+        covariates=["treatment_arm", "diabetes"],
+        event_of_interest=1,
+        competing_event=2,
+    )
+    results["recipe_15_competing_risks"] = {
+        "cif_table_len": len(r15_cif["cif_table"]),
+        "regression_results": _serialize_val(r15_reg),
+    }
+
     return results
 
 
@@ -188,7 +238,7 @@ def test_capture_or_verify_baseline_snapshot():
     ns = extract_recipes_namespace()
     current_results = run_all_recipes(ns)
 
-    if not SNAPSHOT_PATH.exists():
+    if not SNAPSHOT_PATH.exists() or os.environ.get("UPDATE_RECIPES_SNAPSHOT") == "1":
         if os.environ.get("UPDATE_RECIPES_SNAPSHOT") == "1":
             SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
             SNAPSHOT_PATH.write_text(
