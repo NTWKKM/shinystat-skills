@@ -210,7 +210,7 @@ def generate_methods_narrative(
             )
             ci_m = td_obj.get("ci_method") if isinstance(td_obj, dict) else None
             if ci_m == "hanley_mcneil":
-                ci_str = "with 95% confidence intervals estimated via analytical IPCW approximation (Hanley-McNeil)."
+                ci_str = "with 95% confidence intervals estimated via unweighted Hanley-McNeil approximation."
             else:
                 ci_str = "with 95% confidence intervals estimated via non-parametric bootstrap resampling."
             diag_parts.append(

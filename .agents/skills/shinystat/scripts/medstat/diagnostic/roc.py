@@ -1047,6 +1047,17 @@ def compute_time_dependent_roc(
                         1.0, float(auc_val + 1.959963984540054 * se_h)
                     )
                     res_h["ci_method"] = "hanley_mcneil"
+                    if res_h.get("n_censored", 0) > 0:
+                        cens_msg = (
+                            f"Horizon t={h} has {res_h['n_censored']} censored observations before t. "
+                            "Hanley-McNeil confidence interval is an unweighted approximation that does not account for "
+                            "IPCW censoring weight uncertainty; n_bootstrap >= 200 is recommended when censoring is present."
+                        )
+                        res_h["warning"] = (
+                            f"{res_h['warning']}; {cens_msg}"
+                            if res_h.get("warning")
+                            else cens_msg
+                        )
 
         results_by_horizon[h] = res_h
 
@@ -1185,5 +1196,22 @@ def compute_time_dependent_roc(
     }
     if is_comparison:
         out["comparison"] = comparison_by_horizon
+
+    top_warnings = [
+        results_by_horizon[h]["warning"]
+        for h in sorted_horizons
+        if results_by_horizon[h].get("warning")
+    ]
+    if top_warnings:
+        out["warnings"] = top_warnings
+        if n_bootstrap == 0 and any(
+            results_by_horizon[h].get("n_censored", 0) > 0 for h in sorted_horizons
+        ):
+            out["warning"] = (
+                "Hanley-McNeil confidence interval is an unweighted approximation that does not account for "
+                "IPCW censoring weight uncertainty; n_bootstrap >= 200 is recommended when censoring is present."
+            )
+        else:
+            out["warning"] = top_warnings[0]
 
     return out

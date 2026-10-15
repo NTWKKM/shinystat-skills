@@ -107,7 +107,7 @@ Evaluating Added Value of Updated Biomarker/Model over Baseline
 │   ├── Continuous / Category-Free NRI ──▶ Primary metric when no established clinical thresholds exist (Pencina 2011)
 │   ├── Categorical NRI ──▶ Use strictly when established clinical risk tiers exist (e.g. low <10%, intermediate 10-20%, high >20%)
 │   ├── Separate Event & Non-Event Reporting ──▶ Mandatory per Kerr & Pepe (2014) to detect asymmetric reclassification
-│   └── Calibration Guard ──▶ Enforce well-calibrated probabilities in [0, 1] (poorly calibrated models produce spurious positive NRI)
+│   └── Calibration Guard ──▶ Enforce probability range validity (p_hat in [0, 1]); true model calibration requires separate evaluation (calibration plot, slope/intercept, Brier score), as poorly calibrated models produce spurious positive NRI/IDI values
 └── Integrated Discrimination Improvement (IDI)
     └── Difference in discrimination slopes (mean predicted risk difference between events and non-events)
 ```

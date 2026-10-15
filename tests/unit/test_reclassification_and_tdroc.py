@@ -640,9 +640,22 @@ def test_time_dependent_roc_ci_method_reporting():
     assert res_boot["ci_method"] == "bootstrap"
     assert res_boot["results_by_horizon"][25.0]["ci_method"] == "bootstrap"
 
+    # Censoring warning checks for n_bootstrap=0 with censored events before horizon
+    assert "n_censored" in res_ana["results_by_horizon"][25.0]
+    assert res_ana["results_by_horizon"][25.0]["n_censored"] > 0
+    assert (
+        "unweighted approximation that does not account for IPCW censoring weight uncertainty"
+        in res_ana["results_by_horizon"][25.0]["warning"]
+    )
+    assert (
+        "unweighted approximation that does not account for IPCW censoring weight uncertainty"
+        in res_ana["warning"]
+    )
+    assert "warnings" in res_ana and len(res_ana["warnings"]) > 0
+
     # Narrative checks
     table_html = format_time_dependent_roc_table(res_ana)
-    assert "analytical IPCW approximation (Hanley-McNeil)" in table_html
+    assert "unweighted Hanley-McNeil approximation" in table_html
 
     table_boot = format_time_dependent_roc_table(res_boot)
     assert "bootstrap resampling" in table_boot
@@ -652,7 +665,7 @@ def test_time_dependent_roc_ci_method_reporting():
         has_td_roc=True,
         diag_data=res_ana,
     )
-    assert "analytical IPCW approximation (Hanley-McNeil)" in narr_ana
+    assert "unweighted Hanley-McNeil approximation" in narr_ana
 
     narr_boot = generate_methods_narrative(
         model_type="diagnostic",

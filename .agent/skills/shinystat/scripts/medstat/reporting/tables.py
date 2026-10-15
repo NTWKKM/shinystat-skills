@@ -967,7 +967,7 @@ def format_time_dependent_roc_table(
     if ci_method == "bootstrap":
         ci_str = "Confidence intervals (95%) calculated via bootstrap resampling."
     elif ci_method == "hanley_mcneil":
-        ci_str = "Confidence intervals (95%) calculated via analytical IPCW approximation (Hanley-McNeil)."
+        ci_str = "Confidence intervals (95%) calculated via unweighted Hanley-McNeil approximation."
     else:
         ci_str = "Confidence intervals (95%) calculated where risk sets allow."
 
