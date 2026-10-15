@@ -574,3 +574,120 @@ reporting:
     # Verify narrative for iptw_surv mentions truncation
     surv_narrative = res["reports"]["iptw_surv"]["methods_narrative"]
     assert "Weights were truncated at pre-specified quantiles" in surv_narrative
+
+
+def test_cli_iptw_survival_invalid_duration_rejects(tmp_path: Path):
+    """Verify that causal iptw with survival outcome rejects non-numeric or negative duration."""
+    df_neg = pd.DataFrame(
+        {
+            "treatment": [0, 1, 0, 1, 0, 1],
+            "age": [50, 60, 55, 65, 52, 58],
+            "event": [0, 1, 0, 1, 0, 1],
+            "time": [10.0, -5.0, 12.0, 8.0, 15.0, 9.0],  # negative duration
+        }
+    )
+    csv_neg = tmp_path / "neg_dur.csv"
+    df_neg.to_csv(csv_neg, index=False)
+
+    runner = CliRunner()
+    res_neg = runner.invoke(
+        cli,
+        [
+            "causal",
+            "iptw",
+            "--data",
+            str(csv_neg),
+            "--treatment",
+            "treatment",
+            "--covariates",
+            "age",
+            "--outcome",
+            "event",
+            "--time",
+            "time",
+        ],
+    )
+    assert res_neg.exit_code != 0
+    assert "must contain non-negative numeric values" in res_neg.output
+
+    df_str = pd.DataFrame(
+        {
+            "treatment": [0, 1, 0, 1, 0, 1],
+            "age": [50, 60, 55, 65, 52, 58],
+            "event": [0, 1, 0, 1, 0, 1],
+            "time": ["10", "bad_time", "12", "8", "15", "9"],  # non-numeric duration
+        }
+    )
+    csv_str = tmp_path / "str_dur.csv"
+    df_str.to_csv(csv_str, index=False)
+
+    res_str = runner.invoke(
+        cli,
+        [
+            "causal",
+            "iptw",
+            "--data",
+            str(csv_str),
+            "--treatment",
+            "treatment",
+            "--covariates",
+            "age",
+            "--outcome",
+            "event",
+            "--time",
+            "time",
+        ],
+    )
+    assert res_str.exit_code != 0
+    assert "must contain non-negative numeric values" in res_str.output
+
+
+def test_cli_spec_yaml_iptw_survival_invalid_event_rejects(tmp_path: Path):
+    """Verify that YAML spec IPTW survival model rejects event columns with >2 levels or non-0/1 values."""
+    df_multi = pd.DataFrame(
+        {
+            "treatment": [0, 1, 0, 1, 0, 1, 0, 1],
+            "age": [50, 60, 55, 65, 52, 58, 62, 54],
+            "event_code": [0, 1, 2, 1, 0, 2, 1, 0],  # 3 levels: 0, 1, 2
+            "time": [10.0, 5.0, 12.0, 8.0, 15.0, 9.0, 11.0, 7.0],
+        }
+    )
+    csv_multi = tmp_path / "multi_event.csv"
+    df_multi.to_csv(csv_multi, index=False)
+
+    spec_content = f"""
+version: "1.0"
+metadata:
+  study_title: "Invalid Event Test"
+  reporting_guideline: "STROBE"
+data:
+  input_path: "{csv_multi}"
+variables:
+  - name: "treatment"
+    role: "exposure"
+  - name: "event_code"
+    role: "outcome"
+  - name: "age"
+    role: "covariate"
+models:
+  - name: "iptw_surv_bad"
+    type: "iptw"
+    outcome: "event_code"
+    exposure: "treatment"
+    time: "time"
+    covariates: ["age"]
+    options:
+      outcome_type: "survival"
+reporting:
+  style: "nejm"
+  format: "html"
+"""
+    spec_path = tmp_path / "invalid_event_sap.yaml"
+    spec_path.write_text(spec_content)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["model", "--spec", str(spec_path)])
+    assert result.exit_code != 0
+    assert "must contain only numeric 0 and 1 values" in (
+        result.output or str(result.exception)
+    )

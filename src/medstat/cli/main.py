@@ -1792,16 +1792,23 @@ def iptw_cmd(
                 raise click.ClickException(
                     f"Outcome column '{outcome}' for {eff_type} model must contain only numeric 0 and 1 values."
                 )
+            weighted_df[outcome] = pd.to_numeric(weighted_df[outcome], errors="coerce")
 
         if eff_type == "survival":
             if not time_col:
                 raise click.UsageError(
                     "--time is required when outcome-type is survival."
                 )
-            if time_col not in df.columns:
+            if time_col not in weighted_df.columns:
                 raise click.ClickException(
                     f"Duration column '{time_col}' not found in dataset."
                 )
+            t_vals = pd.to_numeric(weighted_df[time_col], errors="coerce")
+            if t_vals.isna().any() or (t_vals < 0).any():
+                raise click.ClickException(
+                    f"Duration column '{time_col}' must contain non-negative numeric values."
+                )
+            weighted_df[time_col] = t_vals
 
         outcome_res = fit_iptw_outcome_model(
             weighted_df,

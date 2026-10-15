@@ -200,7 +200,7 @@ Visualizes non-parametric Aalen-Johansen CIF curves alongside Naive $1 - \text{K
 from medstat.figures.survival import plot_cif
 
 res = plot_cif(
-    cif_table=cif_df,  # Columns: ['time', 'cif_primary', 'cif_competing', 'naive_1_minus_km']
+    cif_data=cif_df,  # Columns: ['time', 'cif_primary', 'cif_competing', 'naive_1_minus_km']
     title="Cumulative Incidence of Primary Event vs Competing Risks",
     out_path="figures/cif_curves.png",
     target="docx",
@@ -215,7 +215,7 @@ For interactive HTML reports, use the mirror submodule `medstat.figures.html`. I
 
 - **`plot_dual_roc_curve(roc_data, ...)`**: Empirical ROC curve with interactive threshold/sensitivity/specificity tooltips and chance diagonal.
 - **`plot_dual_kaplan_meier(km_curves, risk_table, ...)`**: Step-function survival curves with 95% CI bands and hover tooltips.
-- **`plot_dual_cif(cif_table, ...)`**: Non-parametric Cumulative Incidence Function (Aalen-Johansen) with Naive $1 - \text{KM}$ audit and interactive hover.
+- **`plot_dual_cif(cif_data, ...)`**: Non-parametric Cumulative Incidence Function (Aalen-Johansen) with Naive $1 - \text{KM}$ audit and interactive hover.
 - **`plot_dual_calibration(calib_bins, ...)`**: Decile calibration points with 95% Wilson CI error bars and Brier/ICI annotations.
 - **`plot_dual_dca(dca_data, ...)`**: Vickers Decision Curve Analysis comparing model net benefit against Treat All and Treat None.
 - **`plot_dual_bland_altman(ba_data, ...)`**: Paired difference plot with mean bias, 95% Limits of Agreement, and confidence intervals.

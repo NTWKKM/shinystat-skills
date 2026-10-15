@@ -200,7 +200,7 @@ Visualizes non-parametric Aalen-Johansen CIF curves alongside Naive $1 - \text{K
 from medstat.figures.survival import plot_cif
 
 res = plot_cif(
-    cif_table=cif_df,  # Columns: ['time', 'cif_primary', 'cif_competing', 'naive_1_minus_km']
+    cif_data=cif_df,  # Columns: ['time', 'cif_primary', 'cif_competing', 'naive_1_minus_km']
     title="Cumulative Incidence of Primary Event vs Competing Risks",
     out_path="figures/cif_curves.png",
     target="docx",

@@ -332,6 +332,22 @@ class AnalysisPlan:
                     else:
                         out_type = "continuous"
 
+                if out_type == "survival":
+                    evt_series = clean_df[model_spec.outcome].dropna()
+                    evt_vals = pd.to_numeric(evt_series, errors="coerce")
+                    unique_evt = set(evt_vals.dropna().unique())
+                    if (
+                        evt_vals.isna().any()
+                        or not unique_evt.issubset({0, 1, 0.0, 1.0})
+                        or len(unique_evt) > 2
+                    ):
+                        raise ValueError(
+                            f"Event column '{model_spec.outcome}' for survival IPTW outcome model must contain only numeric 0 and 1 values."
+                        )
+                    iptw_res.df[model_spec.outcome] = pd.to_numeric(
+                        iptw_res.df[model_spec.outcome], errors="coerce"
+                    )
+
                 fit_res = fit_iptw_outcome_model(
                     iptw_res.df,
                     outcome_col=model_spec.outcome,
