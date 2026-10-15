@@ -243,16 +243,22 @@ def fit_competing_risks_cif(
         CompetingRisksCIFResult containing fitted models, step CIF table, horizon evaluations,
         probability conservation audit, and clinical alerts.
     """
+    if event_of_interest == competing_event:
+        raise ValueError(
+            f"event_of_interest ({event_of_interest}) and competing_event ({competing_event}) must be distinct."
+        )
+
     dur = np.asarray(durations, dtype=float)
-    evt = np.asarray(event_observed, dtype=int)
+    evt_float = np.asarray(event_observed, dtype=float)
 
     valid_mask = (
         np.isfinite(dur)
         & (dur >= 0)
-        & np.isin(evt, [0, event_of_interest, competing_event])
+        & np.isfinite(evt_float)
+        & np.isin(evt_float, [0, event_of_interest, competing_event])
     )
     dur = dur[valid_mask]
-    evt = evt[valid_mask]
+    evt = evt_float[valid_mask].astype(int)
 
     if len(dur) < 5:
         raise ValueError(
@@ -436,6 +442,11 @@ def fit_competing_risks_regression(
     Returns:
         dict containing model_cs, model_fg, side-by-side comparison_table, and interpretations.
     """
+    if event_of_interest == competing_event:
+        raise ValueError(
+            f"event_of_interest ({event_of_interest}) and competing_event ({competing_event}) must be distinct."
+        )
+
     required_cols = [duration_col, event_col] + covariates
     clean_df = df[required_cols].dropna().copy()
     if len(clean_df) < 5:
@@ -471,7 +482,7 @@ def fit_competing_risks_regression(
     )
 
     def _get_G(t: float) -> float:
-        idx = g_sf.index.searchsorted(t, side="right") - 1
+        idx = g_sf.index.searchsorted(t, side="left") - 1
         val = float(g_sf.iloc[idx, 0]) if idx >= 0 else 1.0
         return max(val, 1e-4)
 

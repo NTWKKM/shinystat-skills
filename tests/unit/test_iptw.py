@@ -14,6 +14,7 @@ from medstat.causal.balance import calculate_smd, compute_balance_table
 from medstat.causal.iptw import compute_iptw_weights, fit_iptw_outcome_model
 from medstat.figures.balance import plot_love
 from medstat.figures.html.balance import plot_dual_love
+from medstat.reporting.tables import render_balance_table
 
 
 @pytest.fixture
@@ -254,3 +255,81 @@ def test_plot_love_with_weighted_smd(tmp_path, synthetic_cohort: pd.DataFrame):
 
     dual_res = plot_dual_love(bt, out_path=tmp_path / "love_dual.png")
     assert dual_res.plotly_fig is not None
+
+
+def test_att_atc_truncation_preserves_reference_group(
+    synthetic_cohort: pd.DataFrame,
+):
+    # ATT: treated (T=1) must stay exactly 1.0, only controls truncated
+    res_att = compute_iptw_weights(
+        synthetic_cohort,
+        treatment="treatment",
+        covariates=["age", "biomarker"],
+        estimand="ATT",
+        truncation=(0.05, 0.95),
+    )
+    t = res_att.df["treatment"].to_numpy()
+    np.testing.assert_allclose(res_att.weights[t == 1], 1.0)
+
+    # ATC: controls (T=0) must stay exactly 1.0, only treated truncated
+    res_atc = compute_iptw_weights(
+        synthetic_cohort,
+        treatment="treatment",
+        covariates=["age", "biomarker"],
+        estimand="ATC",
+        truncation=(0.05, 0.95),
+    )
+    np.testing.assert_allclose(res_atc.weights[t == 0], 1.0)
+
+
+def test_fit_iptw_outcome_model_invalid_weights_validation(
+    synthetic_cohort: pd.DataFrame,
+):
+    df = synthetic_cohort.copy()
+    # Non-positive weights
+    df["bad_weights"] = 1.0
+    df.loc[0, "bad_weights"] = -0.5
+    with pytest.raises(ValueError, match="bad_weights"):
+        fit_iptw_outcome_model(
+            df,
+            outcome_col="y_cont",
+            treatment_col="treatment",
+            weights_col="bad_weights",
+            model_type="continuous",
+        )
+
+    # Zero weights
+    df.loc[0, "bad_weights"] = 0.0
+    with pytest.raises(ValueError, match="bad_weights"):
+        fit_iptw_outcome_model(
+            df,
+            outcome_col="y_cont",
+            treatment_col="treatment",
+            weights_col="bad_weights",
+            model_type="continuous",
+        )
+
+
+def test_balance_table_status_exact_zero_smd():
+    df = pd.DataFrame(
+        {
+            "treatment": [1, 1, 0, 0],
+            "x": [10.0, 10.0, 10.0, 10.0],  # Perfectly balanced
+            "w": [1.0, 1.0, 1.0, 1.0],
+        }
+    )
+    bt = compute_balance_table(df, "treatment", ["x"], weights_col="w")
+    assert bt.loc[0, "Weighted_Abs_SMD"] == pytest.approx(0.0)
+    assert bt.loc[0, "Status"] == "Balanced"
+
+
+def test_render_balance_table_consistent_columns():
+    bal_data = {
+        "covariates": ["age", "bmi"],
+        "smd_pre": [0.25, 0.15],
+        "smd_post": [np.nan, 0.04],  # Row 0 has NaN post SMD, Row 1 is finite
+        "smd_weighted": [0.03, 0.02],
+    }
+    html = render_balance_table("Balance Table", bal_data)
+    assert "Post-Matching SMD" in html
+    assert "IPTW Weighted SMD" in html

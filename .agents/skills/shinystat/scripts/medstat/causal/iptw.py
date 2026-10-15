@@ -146,9 +146,32 @@ def compute_iptw_weights(
     # 3. Truncation / Trimming
     if trunc is not None and estimand_upper != "ATO":
         low_q, high_q = trunc
-        w_low = float(np.quantile(raw_weights, low_q))
-        w_high = float(np.quantile(raw_weights, high_q))
-        final_weights = np.clip(raw_weights, w_low, w_high)
+        if estimand_upper == "ATT":
+            # Reference group (T==1) remains 1.0; clip only non-reference control group (T==0)
+            ctrl_mask = T == 0
+            final_weights = raw_weights.copy()
+            if np.any(ctrl_mask):
+                w_low = float(np.quantile(raw_weights[ctrl_mask], low_q))
+                w_high = float(np.quantile(raw_weights[ctrl_mask], high_q))
+                final_weights[ctrl_mask] = np.clip(
+                    raw_weights[ctrl_mask], w_low, w_high
+                )
+            else:
+                w_low, w_high = float(np.min(raw_weights)), float(np.max(raw_weights))
+        elif estimand_upper == "ATC":
+            # Reference group (T==0) remains 1.0; clip only non-reference treated group (T==1)
+            trt_mask = T == 1
+            final_weights = raw_weights.copy()
+            if np.any(trt_mask):
+                w_low = float(np.quantile(raw_weights[trt_mask], low_q))
+                w_high = float(np.quantile(raw_weights[trt_mask], high_q))
+                final_weights[trt_mask] = np.clip(raw_weights[trt_mask], w_low, w_high)
+            else:
+                w_low, w_high = float(np.min(raw_weights)), float(np.max(raw_weights))
+        else:
+            w_low = float(np.quantile(raw_weights, low_q))
+            w_high = float(np.quantile(raw_weights, high_q))
+            final_weights = np.clip(raw_weights, w_low, w_high)
     else:
         final_weights = raw_weights.copy()
         w_low, w_high = float(np.min(raw_weights)), float(np.max(raw_weights))
@@ -317,6 +340,10 @@ def fit_iptw_outcome_model(
         raise ValueError("Insufficient data to fit IPTW outcome model.")
 
     weights = clean_df[weights_col].to_numpy(dtype=float)
+    if not np.all(np.isfinite(weights)) or np.any(weights <= 0):
+        raise ValueError(
+            f"All values in weights column '{weights_col}' must be finite and strictly positive (> 0)."
+        )
 
     if m_type == "continuous":
         Y = clean_df[outcome_col].to_numpy(dtype=float)

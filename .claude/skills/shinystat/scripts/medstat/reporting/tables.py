@@ -596,6 +596,9 @@ def render_balance_table(
     )
 
     has_weighted = len(smd_weighted) > 0
+    include_post_matching = (not has_weighted) or any(
+        (v is not None and math.isfinite(v)) for v in smd_post
+    )
 
     records: list[dict[str, Any]] = []
     for idx, cov in enumerate(covariates):
@@ -620,7 +623,7 @@ def render_balance_table(
             "Covariate": str(cov),
             "Pre-Matching SMD": pre_str,
         }
-        if not has_weighted or post_valid:
+        if include_post_matching:
             rec["Post-Matching SMD"] = post_str
         if has_weighted:
             rec["IPTW Weighted SMD"] = f"{weight_val:.3f}" if weight_valid else "—"

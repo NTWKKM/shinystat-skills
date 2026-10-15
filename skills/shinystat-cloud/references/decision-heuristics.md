@@ -90,7 +90,7 @@ Audit Event Types: Event of Interest vs. Competing Risks (e.g., CV death vs. non
 ├── Single Failure Type (No Competing Risks) ──▶ Standard Kaplan-Meier & Cox Proportional Hazards (Recipe 11)
 └── Multiple / Mutually Exclusive Failures
     ├── Cumulative Event Incidence / Absolute Risk Prediction:
-    │   ├── DO NOT use Naive 1 - KM (violates independent censoring; overestimates true risk)
+    │   ├── DO NOT use Naive 1 - KM (treats competing events as censoring, estimating risk in a hypothetical world without competing events rather than real-world cumulative incidence; overestimates true risk)
     │   └── Use Aalen-Johansen Cumulative Incidence Function (CIF) (Recipe 15)
     └── Multivariable Regression:
         ├── Etiological / Biological Question ──▶ Cause-Specific Cox Model (csHR)

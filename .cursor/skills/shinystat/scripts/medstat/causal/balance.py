@@ -174,11 +174,13 @@ def compute_balance_table(
             row["Weighted_SMD"] = w_smd
             row["Weighted_Abs_SMD"] = abs(w_smd) if np.isfinite(w_smd) else np.nan
 
-        eval_smd = (
-            row.get("Weighted_Abs_SMD")
-            or row.get("Matched_Abs_SMD")
-            or row["Unadjusted_Abs_SMD"]
-        )
+        if "Weighted_Abs_SMD" in row:
+            eval_smd = row["Weighted_Abs_SMD"]
+        elif "Matched_Abs_SMD" in row:
+            eval_smd = row["Matched_Abs_SMD"]
+        else:
+            eval_smd = row["Unadjusted_Abs_SMD"]
+
         row["Status"] = (
             "Balanced" if (np.isfinite(eval_smd) and eval_smd < 0.10) else "Imbalanced"
         )
