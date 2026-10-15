@@ -250,6 +250,26 @@ def generate_methods_narrative(
     elif "poisson" in norm_mtype:
         norm_mtype = "poisson"
 
+    # Check for specialized causal/competing risk models
+    if "iptw" in norm_mtype:
+        return generate_iptw_narrative(
+            exposure=exposure,
+            outcome=outcome,
+            covariates=covariates,
+            alpha=alpha,
+            software_name=software_name,
+            **kwargs,
+        )
+    if any(k in norm_mtype for k in ("competing", "cif", "fine_gray", "fine-gray")):
+        return generate_competing_risks_narrative(
+            exposure=exposure,
+            outcome=outcome,
+            covariates=covariates,
+            alpha=alpha,
+            software_name=software_name,
+            **kwargs,
+        )
+
     if norm_mtype == "cox":
         if is_firth:
             ph_sentence = (
@@ -326,6 +346,193 @@ def generate_methods_narrative(
     return "\n\n".join(paragraphs)
 
 
+def generate_iptw_narrative(
+    estimand: str = "ATE",
+    exposure: str | None = None,
+    outcome: str | None = None,
+    covariates: list[str] | None = None,
+    n_eff: dict[str, float] | float | None = None,
+    max_smd: float | None = None,
+    stabilized: bool = True,
+    truncated: bool = True,
+    diagnostics: dict[str, Any] | None = None,
+    alpha: float = 0.05,
+    software_name: str = "medstat-core",
+    **kwargs: Any,
+) -> str:
+    """
+    Generate automated clinical Methods and Results narrative for IPTW causal inference analysis.
+    """
+    paragraphs: list[str] = []
+    cov_str = (
+        f"adjusting for {', '.join(covariates)}"
+        if covariates
+        else "adjusting for baseline covariates"
+    )
+    exp_str = exposure or "treatment assignment"
+    out_str = outcome or "primary clinical outcome"
+
+    estimand_u = estimand.upper()
+    if estimand_u == "ATT":
+        est_desc = "Average Treatment Effect on the Treated (ATT), reweighting control participants to reflect baseline characteristics of the treated cohort"
+    elif estimand_u == "ATC":
+        est_desc = "Average Treatment Effect on the Controls (ATC), reweighting treated participants to match the control cohort profile"
+    elif estimand_u == "ATO":
+        est_desc = "Overlap Weights (ATO; Li et al., 2018), evaluating the causal effect among patients at clinical equipoise and achieving exact mean balance"
+    else:
+        est_desc = "Average Treatment Effect (ATE), reweighting the entire study cohort to a pseudo-population where treatment assignment is independent of measured baseline confounders"
+
+    p1 = (
+        f"To evaluate the causal effect of {exp_str} on {out_str}, Inverse Probability of Treatment Weighting (IPTW) was performed "
+        f"based on propensity scores estimated via multivariable logistic regression ({cov_str}). "
+        f"The target estimand was the {est_desc}."
+    )
+    if stabilized and estimand_u != "ATO":
+        p1 += " Stabilized weights were computed to preserve the nominal sample size and prevent variance inflation."
+
+    if truncated and estimand_u != "ATO":
+        p1 += " Weights were truncated at pre-specified quantiles to mitigate extreme weights."
+    elif not truncated and estimand_u != "ATO":
+        p1 += " Weights were not truncated."
+
+    if diagnostics:
+        ext_n = 0
+        if "overall" in diagnostics and isinstance(diagnostics["overall"], dict):
+            ext_n = diagnostics["overall"].get("n_extreme_gt_10", 0)
+        else:
+            ext_n = diagnostics.get("extreme_weights_gt_10", 0)
+        if ext_n > 0:
+            p1 += (
+                f" A total of {ext_n} observations exhibited extreme weights (> 10.0)."
+            )
+
+        pos_n = diagnostics.get(
+            "extreme_ps_count", diagnostics.get("positivity_violations", 0)
+        )
+        if pos_n > 0:
+            p1 += f" Positivity inspection identified {pos_n} subjects with near-deterministic propensity scores (< 0.05 or > 0.95)."
+
+    paragraphs.append(p1)
+
+    # Effective Sample Size and SMD Balance
+    p2_parts = []
+    if n_eff is not None:
+        if isinstance(n_eff, dict):
+            tot = n_eff.get("total", "N/A")
+            tx = n_eff.get("treated", "N/A")
+            ctrl = n_eff.get("control", "N/A")
+            p2_parts.append(
+                f"Statistical precision following weighting was quantified using Kish's Effective Sample Size "
+                f"(total N_eff = {tot}; treated N_eff = {tx}; control N_eff = {ctrl})."
+            )
+        else:
+            p2_parts.append(
+                f"Statistical precision following weighting was evaluated using Kish's Effective Sample Size (N_eff = {n_eff:.1f})."
+            )
+
+    if max_smd is not None:
+        bal_status = (
+            "indicating acceptable covariate balance across all confounders (maximum SMD < 0.10; Austin 2009)"
+            if max_smd < 0.10
+            else f"indicating residual baseline imbalance (maximum SMD = {max_smd:.3f} >= 0.10), warranting doubly robust multivariable adjustment"
+        )
+        p2_parts.append(
+            f"Post-weighting baseline balance was verified using Standardized Mean Differences (SMDs); "
+            f"the maximum post-weighting SMD was {max_smd:.3f}, {bal_status}."
+        )
+
+    p2_parts.append(
+        "Weighted outcome models were fitted using robust Huber-White sandwich standard errors "
+        "to ensure nominal confidence interval coverage in the weighted pseudo-population."
+    )
+    paragraphs.append(" ".join(p2_parts))
+
+    paragraphs.append(
+        f"All statistical tests were two-tailed, and p-values < {alpha} were considered statistically significant. "
+        f"Calculations were executed using {software_name}."
+    )
+    return "\n\n".join(paragraphs)
+
+
+def generate_competing_risks_narrative(
+    exposure: str | None = None,
+    outcome: str | None = None,
+    competing_name: str | None = None,
+    covariates: list[str] | None = None,
+    competing_pct: float | None = None,
+    overestimation_km: float | None = None,
+    cshr_dict: dict[str, Any] | None = None,
+    fg_dict: dict[str, Any] | None = None,
+    alpha: float = 0.05,
+    software_name: str = "medstat-core",
+    **kwargs: Any,
+) -> str:
+    """
+    Generate automated clinical Methods and Results narrative for Competing Risks Survival Analysis.
+    """
+    paragraphs: list[str] = []
+    out_str = outcome or "the primary clinical event"
+    comp_str = competing_name or "competing events"
+    exp_str = f"the association between {exposure} and " if exposure else ""
+    cov_str = (
+        f"adjusting for {', '.join(covariates)}"
+        if covariates
+        else "adjusting for baseline covariates"
+    )
+
+    p1 = (
+        f"Under competing risks between {out_str} and {comp_str}, cumulative incidence functions (CIF) "
+        f"were estimated non-parametrically using the Aalen-Johansen estimator with Greenwood 95% confidence intervals, "
+        f"strictly satisfying probability conservation across all horizons."
+    )
+
+    if (competing_pct is not None and competing_pct > 10.0) or (
+        overestimation_km is not None and overestimation_km > 0.05
+    ):
+        bias_desc = (
+            f"exhibited substantial overestimation bias ({overestimation_km * 100:.1f} percentage points higher than Aalen-Johansen CIF)"
+            if overestimation_km
+            else "substantially overestimated cumulative incidence"
+        )
+        pct_desc = (
+            f"Competing events occurred in {competing_pct:.1f}% of patients. "
+            if competing_pct
+            else ""
+        )
+        p1 += (
+            f" {pct_desc}The naive 1 - Kaplan-Meier estimator {bias_desc} by treating competing events as uninformative right-censoring, "
+            f"which estimates event risk in a hypothetical world where competing events do not exist rather than real-world cumulative incidence."
+        )
+
+    paragraphs.append(p1)
+
+    # Dual regression framework: Cause-Specific vs Fine-Gray
+    p2_parts = [
+        f"To evaluate {exp_str}{out_str} ({cov_str}), multivariable competing risks regression was performed "
+        f"using both Cause-Specific Cox Proportional Hazards regression (csHR) and Fine-Gray Subdistribution Hazard regression (SHR).",
+        "The Cause-Specific HR treats competing events as censored at failure time, measuring the instantaneous relative rate "
+        "among individuals currently event-free to answer biological and etiological questions.",
+        "In contrast, the Fine-Gray SHR maintains competing-event subjects in the risk set with decaying Inverse Probability of Censoring Weights (IPCW), "
+        "directly quantifying overall cumulative incidence to guide clinical prognosis and risk prediction.",
+    ]
+    if cshr_dict and fg_dict:
+        cs_val = cshr_dict.get("hr", cshr_dict.get("estimate", "N/A"))
+        cs_ci = cshr_dict.get("ci", "N/A")
+        fg_val = fg_dict.get("shr", fg_dict.get("estimate", "N/A"))
+        fg_ci = fg_dict.get("ci", "N/A")
+        p2_parts.append(
+            f"Estimated Cause-Specific HR was {cs_val} (95% CI {cs_ci}), compared to Fine-Gray SHR of {fg_val} (95% CI {fg_ci})."
+        )
+
+    paragraphs.append(" ".join(p2_parts))
+
+    paragraphs.append(
+        f"All statistical tests were two-tailed with significance defined at p < {alpha}. "
+        f"Calculations were performed using {software_name}."
+    )
+    return "\n\n".join(paragraphs)
+
+
 def generate_narrative(
     table: Any = None,
     style: str = "nejm",
@@ -340,7 +547,13 @@ def generate_narrative(
         mtype_raw = str(
             getattr(meta, "estimator", getattr(meta, "model_type", "regression"))
         ).lower()
-        if "cox" in mtype_raw or "survival" in mtype_raw:
+        if "iptw" in mtype_raw:
+            mtype = "iptw"
+        elif any(
+            k in mtype_raw for k in ("competing", "cif", "fine_gray", "fine-gray")
+        ):
+            mtype = "competing_risks"
+        elif "cox" in mtype_raw or "survival" in mtype_raw:
             mtype = "cox"
         elif "logistic" in mtype_raw or "logit" in mtype_raw or mtype_raw == "binary":
             mtype = "logistic"

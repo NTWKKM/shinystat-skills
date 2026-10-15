@@ -16,6 +16,8 @@ import numpy as np
 import pandas as pd
 import yaml
 
+from medstat.causal.balance import compute_balance_table
+from medstat.causal.iptw import compute_iptw_weights, fit_iptw_outcome_model
 from medstat.data.clean import prepare_data_for_analysis
 from medstat.data.loader import load_clinical_data
 from medstat.data.missing import pool_estimates
@@ -23,13 +25,22 @@ from medstat.data.retention import SampleFlowTracker
 from medstat.models.firth import fit_firth_logistic
 from medstat.models.glm import fit_linear_regression, fit_standard_logistic
 from medstat.models.sensitivity import calculate_e_value
-from medstat.models.survival import fit_cox_ph
-from medstat.reporting.narrative import generate_narrative
+from medstat.models.survival import (
+    fit_competing_risks_cif,
+    fit_competing_risks_regression,
+    fit_cox_ph,
+)
+from medstat.reporting.narrative import (
+    generate_competing_risks_narrative,
+    generate_iptw_narrative,
+    generate_narrative,
+)
 from medstat.reporting.tables import (
     Estimate,
     EstimateTable,
     ModelMeta,
     PublicationRenderer,
+    render_competing_risks_table,
 )
 
 
@@ -286,7 +297,135 @@ class AnalysisPlan:
                 adjusted_for=model_spec.covariates,
             )
 
-            if mod_type in ("logistic", "binary"):
+            if (
+                mod_type in ("iptw", "causal_iptw")
+                or model_spec.options.get("method") == "iptw"
+            ):
+                estimand = str(model_spec.options.get("estimand", "ATE")).upper()
+                stabilized = bool(model_spec.options.get("stabilized", True))
+                t_quantiles = model_spec.options.get("truncate_quantiles", (0.01, 0.99))
+                if isinstance(t_quantiles, list):
+                    t_quantiles = tuple(t_quantiles)
+
+                exp_col = model_spec.exposure
+                if not exp_col:
+                    raise ValueError(
+                        "IPTW model requires an 'exposure' (treatment) variable."
+                    )
+
+                covar_cols = [c for c in model_spec.covariates if c != exp_col]
+                iptw_res = compute_iptw_weights(
+                    clean_df,
+                    treatment_col=exp_col,
+                    covariates=covar_cols,
+                    estimand=estimand,
+                    stabilized=stabilized,
+                    truncate_quantiles=t_quantiles,
+                )
+
+                out_type = model_spec.options.get("outcome_type")
+                if not out_type:
+                    if model_spec.time:
+                        out_type = "survival"
+                    elif len(clean_df[model_spec.outcome].dropna().unique()) <= 2:
+                        out_type = "binary"
+                    else:
+                        out_type = "continuous"
+
+                if out_type == "survival":
+                    evt_series = clean_df[model_spec.outcome].dropna()
+                    evt_vals = pd.to_numeric(evt_series, errors="coerce")
+                    unique_evt = set(evt_vals.dropna().unique())
+                    if (
+                        evt_vals.isna().any()
+                        or not unique_evt.issubset({0, 1, 0.0, 1.0})
+                        or len(unique_evt) > 2
+                    ):
+                        raise ValueError(
+                            f"Event column '{model_spec.outcome}' for survival IPTW outcome model must contain only numeric 0 and 1 values."
+                        )
+                    iptw_res.df[model_spec.outcome] = pd.to_numeric(
+                        iptw_res.df[model_spec.outcome], errors="coerce"
+                    )
+
+                fit_res = fit_iptw_outcome_model(
+                    iptw_res.df,
+                    outcome_col=model_spec.outcome,
+                    treatment_col=exp_col,
+                    weights_col="iptw_weight",
+                    outcome_type=out_type,
+                    duration_col=model_spec.time,
+                )
+                fit_res["diagnostics"] = iptw_res.diagnostics
+                fit_res["effective_sample_size"] = iptw_res.effective_sample_size
+                bal_df = compute_balance_table(
+                    iptw_res.df,
+                    treatment=exp_col,
+                    covariates=covar_cols,
+                    weights_col="iptw_weight",
+                )
+                fit_res["balance_table"] = bal_df.to_dict(orient="records")
+
+                if out_type == "binary":
+                    scale = "OR"
+                    if (
+                        "odds_ratio" not in fit_res
+                        or "or_ci_lower" not in fit_res
+                        or "or_ci_upper" not in fit_res
+                    ):
+                        raise ValueError(
+                            f"Missing required odds ratio estimate keys in fit_res: {fit_res.keys()}"
+                        )
+                    point_est = float(fit_res["odds_ratio"])
+                    ci_lo = float(fit_res["or_ci_lower"])
+                    ci_hi = float(fit_res["or_ci_upper"])
+                elif out_type == "survival":
+                    scale = "HR"
+                    if (
+                        "hazard_ratio" not in fit_res
+                        or "hr_ci_lower" not in fit_res
+                        or "hr_ci_upper" not in fit_res
+                    ):
+                        raise ValueError(
+                            f"Missing required hazard ratio estimate keys in fit_res: {fit_res.keys()}"
+                        )
+                    point_est = float(fit_res["hazard_ratio"])
+                    ci_lo = float(fit_res["hr_ci_lower"])
+                    ci_hi = float(fit_res["hr_ci_upper"])
+                elif out_type == "continuous":
+                    scale = "Beta"
+                    if (
+                        "coef" not in fit_res
+                        or "ci_lower" not in fit_res
+                        or "ci_upper" not in fit_res
+                    ):
+                        raise ValueError(
+                            f"Missing required coefficient estimate keys in fit_res: {fit_res.keys()}"
+                        )
+                    point_est = float(fit_res["coef"])
+                    ci_lo = float(fit_res["ci_lower"])
+                    ci_hi = float(fit_res["ci_upper"])
+                else:
+                    raise ValueError(f"Unsupported outcome_type: {out_type}")
+
+                if "p_value" not in fit_res:
+                    raise ValueError("Missing required 'p_value' in fit_res")
+                p_v = float(fit_res["p_value"])
+
+                est_rows.append(
+                    Estimate(
+                        term=exp_col,
+                        label=exp_col,
+                        estimate=point_est,
+                        ci_lower=ci_lo,
+                        ci_upper=ci_hi,
+                        p_value=p_v,
+                        scale=scale,
+                    )
+                )
+                mod_meta.estimator = f"IPTW ({estimand}) Outcome Model"
+
+            elif mod_type in ("logistic", "binary"):
                 y_raw = clean_df[model_spec.outcome]
                 u_y = y_raw.dropna().unique()
                 if len(u_y) > 2:
@@ -444,6 +583,67 @@ class AnalysisPlan:
                     e_val = calculate_e_value(est_val, ci_lo, ci_hi, estimate_type="OR")
                     fit_res["e_value"] = e_val
 
+            elif mod_type in (
+                "competing_risks",
+                "competing_risk",
+                "cif",
+                "fine_gray",
+            ) or (
+                mod_type in ("cox", "cox_ph", "survival")
+                and model_spec.options.get("competing_event") is not None
+            ):
+                dur_col = model_spec.time or "time"
+                covar_cols = [
+                    c for c in req_cols if c not in {model_spec.outcome, dur_col}
+                ]
+                ev_of_int = int(model_spec.options.get("event_of_interest", 1))
+                comp_ev = int(model_spec.options.get("competing_event", 2))
+                cif_res = fit_competing_risks_cif(
+                    durations=clean_df[dur_col],
+                    event_observed=clean_df[model_spec.outcome],
+                    event_of_interest=ev_of_int,
+                    competing_event=comp_ev,
+                    horizons=model_spec.options.get("horizons"),
+                )
+                fit_res = fit_competing_risks_regression(
+                    df=clean_df,
+                    duration_col=dur_col,
+                    event_col=model_spec.outcome,
+                    covariates=covar_cols,
+                    event_of_interest=ev_of_int,
+                    competing_event=comp_ev,
+                )
+                fit_res["cif_table"] = cif_res.cif_table
+                fit_res["horizon_summary"] = cif_res.horizon_summary
+                fit_res["clinical_warnings"] = cif_res.clinical_warnings
+
+                comp_df = fit_res["comparison_table"]
+                for _, row in comp_df.iterrows():
+                    cov_name = str(row["covariate"])
+                    est_rows.append(
+                        Estimate(
+                            term=f"{cov_name} (csHR)",
+                            label=f"{cov_name} (Cause-Specific)",
+                            estimate=float(row["cause_specific_hr"]),
+                            ci_lower=float(row["cs_ci_lower"]),
+                            ci_upper=float(row["cs_ci_upper"]),
+                            p_value=float(row["cs_p_value"]),
+                            scale="HR",
+                        )
+                    )
+                    est_rows.append(
+                        Estimate(
+                            term=f"{cov_name} (SHR)",
+                            label=f"{cov_name} (Fine-Gray)",
+                            estimate=float(row["fine_gray_shr"]),
+                            ci_lower=float(row["fg_ci_lower"]),
+                            ci_upper=float(row["fg_ci_upper"]),
+                            p_value=float(row["fg_p_value"]),
+                            scale="SHR",
+                        )
+                    )
+                mod_meta.estimator = "Competing Risks (csHR vs Fine-Gray SHR)"
+
             elif mod_type in ("cox", "cox_ph", "survival"):
                 if (model_spec.missing_strategy or "").lower().replace(
                     "_", "-"
@@ -598,21 +798,69 @@ class AnalysisPlan:
                     rows=est_rows,
                     meta=mod_meta,
                 )
-                html_table = PublicationRenderer.render_html(
-                    est_tbl, style=self.reporting.style
-                )
-                eff_strategy = model_spec.missing_strategy
                 if (
-                    eff_strategy
-                    and eff_strategy.lower().replace("_", "-") == "mice"
-                    and not fit_res.get("pooled", False)
+                    "competing" in mod_meta.estimator.lower()
+                    and "comparison_table" in fit_res
                 ):
-                    eff_strategy = None
-                narrative = generate_narrative(
-                    est_tbl,
-                    style=self.reporting.style,
-                    missing_strategy=eff_strategy,
-                )
+                    html_table = render_competing_risks_table(
+                        f"Table. {model_spec.description or model_spec.name}",
+                        fit_res["comparison_table"],
+                        style=self.reporting.style.upper(),
+                    )
+                    narrative = generate_competing_risks_narrative(
+                        exposure=model_spec.exposure,
+                        outcome=model_spec.outcome,
+                        covariates=model_spec.covariates,
+                    )
+                elif "iptw" in mod_meta.estimator.lower():
+                    html_table = PublicationRenderer.render_html(
+                        est_tbl, style=self.reporting.style
+                    )
+                    max_smd_val = None
+                    if "balance_table" in fit_res:
+                        smd_vals = [
+                            abs(r["Weighted_SMD"])
+                            for r in fit_res["balance_table"]
+                            if r.get("Weighted_SMD") is not None
+                            and np.isfinite(r["Weighted_SMD"])
+                        ]
+                        if smd_vals:
+                            max_smd_val = max(smd_vals)
+                    is_stabilized = bool(model_spec.options.get("stabilized", True))
+                    t_quantiles = model_spec.options.get(
+                        "truncate_quantiles", (0.01, 0.99)
+                    )
+                    is_truncated = t_quantiles is not None
+                    narrative = generate_iptw_narrative(
+                        estimand=model_spec.options.get("estimand", "ATE"),
+                        exposure=model_spec.exposure,
+                        outcome=model_spec.outcome,
+                        covariates=model_spec.covariates,
+                        n_eff=fit_res.get("effective_sample_size")
+                        or fit_res.get("diagnostics", {})
+                        .get("overall", {})
+                        .get("n_eff"),
+                        max_smd=max_smd_val,
+                        stabilized=is_stabilized,
+                        truncated=is_truncated,
+                        diagnostics=fit_res.get("diagnostics"),
+                    )
+                else:
+                    html_table = PublicationRenderer.render_html(
+                        est_tbl, style=self.reporting.style
+                    )
+                    eff_strategy = model_spec.missing_strategy
+                    if (
+                        eff_strategy
+                        and eff_strategy.lower().replace("_", "-") == "mice"
+                        and not fit_res.get("pooled", False)
+                    ):
+                        eff_strategy = None
+                    narrative = generate_narrative(
+                        est_tbl,
+                        style=self.reporting.style,
+                        missing_strategy=eff_strategy,
+                    )
                 results["reports"][model_spec.name] = {
                     "html_table": html_table,
                     "methods_narrative": narrative,

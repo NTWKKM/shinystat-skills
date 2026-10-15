@@ -20,7 +20,12 @@ import pandas as pd
 from medstat.agreement.bland_altman import bland_altman_analysis
 from medstat.agreement.icc import calculate_icc
 from medstat.agreement.kappa import calculate_kappa
-from medstat.causal.balance import _normalize_smd, calculate_smd
+from medstat.causal.balance import (
+    _normalize_smd,
+    calculate_smd,
+    compute_balance_table,
+)
+from medstat.causal.iptw import compute_iptw_weights, fit_iptw_outcome_model
 from medstat.causal.psm import propensity_score_match
 from medstat.cli.spec import AnalysisPlan
 from medstat.data.clean import (
@@ -45,6 +50,7 @@ from medstat.diagnostic.roc import (
     calculate_roc_curve,
     delong_paired_test,
 )
+from medstat.figures.survival import plot_cif
 from medstat.meta.bias import eggers_test
 from medstat.meta.forest import generate_forest_data
 from medstat.meta.models import run_meta_analysis
@@ -61,7 +67,12 @@ from medstat.models.ordinal import (
 )
 from medstat.models.sensitivity import calculate_e_value
 from medstat.models.splines import fit_cox_rcs, fit_logistic_rcs
-from medstat.models.survival import check_proportional_hazards, fit_cox_ph
+from medstat.models.survival import (
+    check_proportional_hazards,
+    fit_competing_risks_cif,
+    fit_competing_risks_regression,
+    fit_cox_ph,
+)
 from medstat.power.sample_size import (
     calculate_sample_size_correlation,
     calculate_sample_size_proportions,
@@ -634,6 +645,23 @@ def table1_cmd(
     type=int,
     help="Number of knots for restricted cubic splines (default: 4).",
 )
+@click.option(
+    "--competing-event",
+    default=None,
+    type=int,
+    help="Integer code for competing event in competing risks survival analysis (e.g. 2).",
+)
+@click.option(
+    "--event-of-interest",
+    default=1,
+    type=int,
+    help="Integer code for primary event of interest in competing risks (default: 1).",
+)
+@click.option(
+    "--cif-plot",
+    type=click.Path(),
+    help="Output file path for Cumulative Incidence Function plot PNG.",
+)
 @click.option("--output", type=click.Path(), help="Output results JSON file path.")
 def model_cmd(
     data: str | None,
@@ -652,6 +680,9 @@ def model_cmd(
     corr_structure: str,
     spline_var: str | None,
     knots: int,
+    competing_event: int | None,
+    event_of_interest: int,
+    cif_plot: str | None,
     output: str | None,
 ) -> None:
     """Fit regression or survival models or execute a pre-specified SAP plan."""
@@ -710,7 +741,60 @@ def model_cmd(
         X_df = X_raw.astype(float)
     feature_names = list(X_df.columns)
 
-    if mtype in ("cox", "cox_ph"):
+    if mtype in ("competing_risks", "competing_risk", "cif", "fine_gray") or (
+        mtype in ("cox", "cox_ph") and competing_event is not None
+    ):
+        t_col = time_col or "time"
+        ev_col = outcome
+        comp_ev = competing_event if competing_event is not None else 2
+        ev_int = event_of_interest
+
+        dur_vals = pd.to_numeric(df[t_col], errors="coerce")
+        ev_vals = pd.to_numeric(df[ev_col], errors="coerce")
+        if dur_vals.isna().any() or ev_vals.isna().any():
+            raise click.ClickException(
+                f"Missing duration or event values detected in competing risks analysis ('{t_col}', '{ev_col}')."
+            )
+
+        cif_res = fit_competing_risks_cif(
+            durations=dur_vals,
+            event_observed=ev_vals,
+            event_of_interest=ev_int,
+            competing_event=comp_ev,
+        )
+        reg_df = X_df.copy()
+        reg_df[t_col] = dur_vals
+        reg_df[ev_col] = ev_vals
+        reg_res = fit_competing_risks_regression(
+            df=reg_df,
+            duration_col=t_col,
+            event_col=ev_col,
+            covariates=feature_names,
+            event_of_interest=ev_int,
+            competing_event=comp_ev,
+        )
+        result_data["model_type"] = "competing_risks"
+        result_data["event_of_interest"] = ev_int
+        result_data["competing_event"] = comp_ev
+        result_data["comparison_table"] = _serialize_summary_df(
+            reg_res["comparison_table"]
+        )
+        result_data["interpretation"] = reg_res.get(
+            "interpretation", reg_res.get("interpretations")
+        )
+        result_data["cif_summary"] = (
+            _serialize_summary_df(cif_res.horizon_summary)
+            if cif_res.horizon_summary is not None
+            else None
+        )
+        result_data["clinical_warnings"] = cif_res.clinical_warnings
+
+        if cif_plot:
+            Path(cif_plot).parent.mkdir(parents=True, exist_ok=True)
+            plot_cif(cif_res, out_path=cif_plot)
+            click.echo(f"Cumulative Incidence Function plot saved: {cif_plot}")
+
+    elif mtype in ("cox", "cox_ph"):
         t_col = time_col or "time"
         t_vals = pd.to_numeric(df[t_col], errors="coerce").values
         ev_raw = df[outcome]
@@ -1588,6 +1672,232 @@ def psm_cmd(
             click.echo(
                 f"Matched cohort saved to: {output} (Matched pairs: {len(matched_df) // 2})"
             )
+
+
+@causal_grp.command("iptw")
+@click.option(
+    "--data", required=True, type=click.Path(exists=True), help="Input CSV dataset."
+)
+@click.option("--treatment", required=True, help="Binary treatment column.")
+@click.option(
+    "--covariates", required=True, help="Comma-separated baseline covariates."
+)
+@click.option(
+    "--estimand",
+    default="ATE",
+    type=click.Choice(["ATE", "ATT", "ATC", "ATO"], case_sensitive=False),
+    help="Target causal estimand (ATE, ATT, ATC, ATO).",
+)
+@click.option(
+    "--stabilized/--unstabilized",
+    default=True,
+    help="Compute stabilized weights (default: True).",
+)
+@click.option(
+    "--truncate",
+    default=None,
+    help="Comma-separated lower and upper quantiles for truncation (e.g. '0.01,0.99').",
+)
+@click.option(
+    "--outcome",
+    default=None,
+    help="Optional outcome column to fit weighted outcome model.",
+)
+@click.option(
+    "--outcome-type",
+    default=None,
+    type=click.Choice(["continuous", "binary", "survival"], case_sensitive=False),
+    help="Outcome model type (continuous, binary, survival).",
+)
+@click.option(
+    "--time",
+    "time_col",
+    default=None,
+    help="Time/duration column for survival outcome.",
+)
+@click.option(
+    "--balance-check",
+    is_flag=True,
+    help="Evaluate weighted Standardized Mean Differences.",
+)
+@click.option("--love-plot", type=click.Path(), help="Output path for Love plot JSON.")
+@click.option(
+    "--output",
+    type=click.Path(),
+    help="Output path for weighted cohort CSV or JSON summary.",
+)
+def iptw_cmd(
+    data: str,
+    treatment: str,
+    covariates: str,
+    estimand: str,
+    stabilized: bool,
+    truncate: str | None,
+    outcome: str | None,
+    outcome_type: str | None,
+    time_col: str | None,
+    balance_check: bool,
+    love_plot: str | None,
+    output: str | None,
+) -> None:
+    """Execute Inverse Probability of Treatment Weighting (IPTW) and outcome modeling."""
+    df = load_clinical_data(data)
+    covar_list = [c.strip() for c in covariates.split(",")]
+    check_cols = [treatment] + covar_list
+    if outcome:
+        check_cols.append(outcome)
+    if time_col:
+        check_cols.append(time_col)
+    validate_columns(df, check_cols, "causal iptw")
+    check_data_missingness(df, check_cols, "causal iptw")
+
+    trunc_tuple = None
+    if truncate:
+        parts = [float(p.strip()) for p in truncate.split(",")]
+        if len(parts) == 2:
+            trunc_tuple = (parts[0], parts[1])
+        else:
+            raise click.BadParameter(
+                "Truncation quantiles must be two numbers (e.g. '0.01,0.99')."
+            )
+    elif truncate is None:
+        trunc_tuple = (0.01, 0.99)
+
+    res = compute_iptw_weights(
+        df,
+        treatment_col=treatment,
+        covariates=covar_list,
+        estimand=estimand.upper(),
+        stabilized=stabilized,
+        truncate_quantiles=trunc_tuple,
+    )
+    weighted_df = res.df
+
+    # Outcome model if requested
+    outcome_res = None
+    if outcome:
+        eff_type = outcome_type
+        if not eff_type:
+            if time_col:
+                eff_type = "survival"
+            elif len(df[outcome].dropna().unique()) <= 2:
+                eff_type = "binary"
+            else:
+                eff_type = "continuous"
+
+        if eff_type in ("binary", "survival"):
+            y_vals = pd.to_numeric(df[outcome].dropna(), errors="coerce")
+            unique_vals = set(y_vals.dropna().unique())
+            if y_vals.isna().any() or not unique_vals.issubset({0, 1, 0.0, 1.0}):
+                raise click.ClickException(
+                    f"Outcome column '{outcome}' for {eff_type} model must contain only numeric 0 and 1 values."
+                )
+            weighted_df[outcome] = pd.to_numeric(weighted_df[outcome], errors="coerce")
+
+        if eff_type == "survival":
+            if not time_col:
+                raise click.UsageError(
+                    "--time is required when outcome-type is survival."
+                )
+            if time_col not in weighted_df.columns:
+                raise click.ClickException(
+                    f"Duration column '{time_col}' not found in dataset."
+                )
+            t_vals = pd.to_numeric(weighted_df[time_col], errors="coerce")
+            if t_vals.isna().any() or (t_vals < 0).any():
+                raise click.ClickException(
+                    f"Duration column '{time_col}' must contain non-negative numeric values."
+                )
+            weighted_df[time_col] = t_vals
+
+        outcome_res = fit_iptw_outcome_model(
+            weighted_df,
+            outcome_col=outcome,
+            treatment_col=treatment,
+            weights_col="iptw_weight",
+            outcome_type=eff_type,
+            duration_col=time_col,
+        )
+
+    # Balance diagnostics
+    bal_table = compute_balance_table(
+        weighted_df,
+        treatment=treatment,
+        covariates=covar_list,
+        weights_col="iptw_weight",
+    )
+
+    if balance_check:
+        click.echo(
+            f"\n--- Austin (2009) IPTW Covariate Balance ({estimand.upper()}) ---"
+        )
+        for _, r in bal_table.iterrows():
+            cov = r["Covariate"]
+            u_smd = r.get("Unadjusted_SMD", np.nan)
+            w_smd = r.get("Weighted_SMD", np.nan)
+            stat = r.get("Status", "Imbalanced")
+            click.echo(
+                f"  {cov:<20} | Pre-SMD: {u_smd:.3f} | Weighted-SMD: {w_smd:.3f} | [{stat.upper()}]"
+            )
+        click.echo("-----------------------------------------------------------\n")
+
+    if love_plot:
+        Path(love_plot).parent.mkdir(parents=True, exist_ok=True)
+        love_data = {
+            "covariates": bal_table["Covariate"].tolist(),
+            "smd_raw": [
+                float(v) if np.isfinite(v) else None
+                for v in bal_table["Unadjusted_SMD"]
+            ],
+            "smd_pre": [
+                float(v) if np.isfinite(v) else None
+                for v in bal_table["Unadjusted_SMD"]
+            ],
+            "smd_weighted": [
+                float(v) if np.isfinite(v) else None for v in bal_table["Weighted_SMD"]
+            ],
+            "post_weight_smd": [
+                float(v) if np.isfinite(v) else None for v in bal_table["Weighted_SMD"]
+            ],
+        }
+        with open(love_plot, "w") as f:
+            json.dump(love_data, f, indent=2)
+        click.echo(f"Love plot balance diagnostics saved: {love_plot}")
+
+    if output:
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        if output.endswith(".json"):
+            summary_dict = {
+                "estimand": estimand.upper(),
+                "diagnostics": res.diagnostics,
+                "effective_sample_size": res.effective_sample_size,
+                "balance_table": bal_table.to_dict(orient="records"),
+            }
+            if outcome_res:
+                summary_dict["outcome_model"] = {
+                    k: v for k, v in outcome_res.items() if k != "model"
+                }
+            sanitized_dict = _sanitize_for_json(summary_dict)
+            with open(output, "w") as f:
+                json.dump(sanitized_dict, f, indent=2, allow_nan=False)
+            click.echo(f"IPTW analysis saved to: {output}")
+        else:
+            weighted_df.to_csv(output, index=False)
+            click.echo(
+                f"Weighted dataset saved to: {output} (Rows: {len(weighted_df)})"
+            )
+    elif not balance_check and not love_plot:
+        summary_dict = {
+            "estimand": estimand.upper(),
+            "diagnostics": res.diagnostics,
+            "effective_sample_size": res.effective_sample_size,
+        }
+        if outcome_res:
+            summary_dict["outcome_model"] = {
+                k: v for k, v in outcome_res.items() if k != "model"
+            }
+        sanitized_dict = _sanitize_for_json(summary_dict)
+        click.echo(json.dumps(sanitized_dict, indent=2, allow_nan=False))
 
 
 # ==============================================================================

@@ -11,6 +11,8 @@
 
 - **Pure Permissive Licensing (Apache-2.0)**: Replaced copyleft GPL dependencies (specifically `pingouin`) with native, pure-Python / NumPy / SciPy algorithms, including a full two-way ANOVA Intraclass Correlation Coefficient (ICC) implementation covering all 6 variants ($ICC(1,1), ICC(2,1), ICC(3,1), ICC(1,k), ICC(2,k), ICC(3,k)$) with exact F-tests and McGraw & Wong (1996) 95% confidence intervals.
 - **Pure Python Firth Penalized Models**: First-class support for penalized logistic and Cox proportional hazards regression via `firthmodels >= 0.8.2` with Profile Likelihood confidence intervals and penalized Likelihood Ratio Tests (LRT), resolving quasi-complete and complete separation in sparse clinical datasets.
+- **Causal Inference & Weighting (IPTW)**: Inverse Probability of Treatment Weighting supporting ATE, ATT, ATC, and Overlap Weights (ATO; Li et al., 2018), stabilized weights, quantile truncation, Kish's Effective Sample Size ($N_{\text{eff}}$), Huber-White robust sandwich SEs, and 3-way Love plots (`Unadjusted` vs `Matched` vs `IPTW`).
+- **Competing Risks Survival Analysis**: Non-parametric Aalen-Johansen Cumulative Incidence Functions (`fit_competing_risks_cif`, `plot_cif`, `plot_dual_cif`), dual Cause-Specific Cox models (etiology), Fine-Gray Subdistribution Hazard models (`fit_competing_risks_regression`) via IPCW counting process expansion (prognosis), and Naive $1 - \text{Kaplan-Meier}$ overestimation bias auditing.
 - **Restricted Cubic Splines (RCS)**: Non-linear relationship modeling and hazard ratio contrast curves via `patsy.cr` natural cubic splines.
 - **Audited Participant Sample Flow**: Explicit missing data handling (`complete-case`, `mice`, `knn`, `indicator`) tracking attrition flows ($N_{initial} \to N_{excluded} \to N_{analyzed}$) conforming to CONSORT, STROBE, and TRIPOD standards.
 - **Dual-Toggle HTML Reports & Publication Figures**: Single-file, zero-dependency self-contained HTML clinical reports featuring segmented toggle switches between interactive exploratory Plotly.js charts (hover tooltips, zoom, pan) and publication-grade 300 DPI Matplotlib PNGs (ICMJE/NEJM/APA styling). Includes offline CDN fallback resilience, print-media CSS parity (`@media print`), and direct one-click high-resolution PNG and raw source CSV data exports.
@@ -59,7 +61,7 @@ shinystat-skills/
 │   │   └── correlation.py      # Pearson, Spearman, Kendall correlation matrices & CIs
 │   ├── models/
 │   │   ├── glm.py              # Linear (OLS), Logistic, Poisson, Negative Binomial
-│   │   ├── survival.py         # Kaplan-Meier, Cox PH, Schoenfeld assumption tests
+│   │   ├── survival.py         # Kaplan-Meier, Cox PH, Competing Risks (CIF, Cause-Specific, Fine-Gray)
 │   │   ├── firth.py            # Firth penalized logistic & Cox with Profile Likelihood CIs
 │   │   ├── splines.py          # Restricted cubic splines (RCS) & HR contrast curves
 │   │   ├── ordinal.py          # Proportional odds cumulative logit & Brant test
@@ -71,8 +73,9 @@ shinystat-skills/
 │   │   ├── dca.py              # Decision Curve Analysis (net benefit across decision thresholds)
 │   │   └── calibration.py      # Calibration curves, Brier score, ICI, Hosmer-Lemeshow
 │   ├── causal/
-│   │   ├── psm.py              # Propensity score matching, caliper, nearest neighbor, IPW
-│   │   └── balance.py          # Standardized Mean Differences (SMD), Love plots
+│   │   ├── psm.py              # Propensity score matching, caliper, nearest neighbor
+│   │   ├── iptw.py             # Inverse Probability Weighting (ATE, ATT, ATC, ATO overlap weights)
+│   │   └── balance.py          # Standardized Mean Differences (SMD), 2-way and 3-way Love plots
 │   ├── meta/
 │   │   ├── models.py           # Fixed-effect, Random-effects (DerSimonian-Laird), I^2, Tau^2
 │   │   ├── forest.py           # Forest plot data generation
@@ -87,18 +90,18 @@ shinystat-skills/
 │   │   ├── base.py             # FigureResult contract and automatic CSV data export
 │   │   ├── styles.py           # 300 DPI publication styles & colorblind-safe palettes
 │   │   ├── forest.py           # Publication-grade forest plots (OR, RR, HR)
-│   │   ├── survival.py         # Kaplan-Meier curves with aligned risk tables
+│   │   ├── survival.py         # Kaplan-Meier curves & Cumulative Incidence Functions (plot_cif)
 │   │   ├── roc.py              # Empirical ROC curves with DeLong 95% CIs
 │   │   ├── calibration.py      # Decile calibration curves with Wilson score CIs
 │   │   ├── dca.py              # Decision Curve Analysis net benefit plots
 │   │   ├── agreement.py        # Bland-Altman agreement with 1999 large-sample CIs
-│   │   ├── balance.py          # Austin 2009 Love plots for PSM balance (0.10 SMD)
+│   │   ├── balance.py          # Austin 2009 Love plots for PSM/IPTW balance (0.10 SMD)
 │   │   ├── retention.py        # STROBE/CONSORT participant retention flowcharts
 │   │   ├── diagnostics.py      # Missingness heatmaps & Schoenfeld residual plots
 │   │   └── html/               # Dedicated mirror submodule for Dual / Toggle View
 │   │       ├── base.py         # DualFigureResult (Plotly JSON + 300 DPI Matplotlib PNG)
 │   │       ├── roc.py          # Interactive & static ROC curve generator
-│   │       ├── survival.py     # Interactive & static Kaplan-Meier generator
+│   │       ├── survival.py     # Interactive & static Kaplan-Meier & CIF generators
 │   │       ├── calibration.py  # Interactive & static calibration curve generator
 │   │       ├── dca.py          # Interactive & static DCA net benefit generator
 │   │       ├── agreement.py    # Interactive & static Bland-Altman generator
@@ -129,20 +132,22 @@ shinystat-skills/
 
 ## Autonomous Agent Skill: `shinystat`
 
-This project ships the unified **`shinystat` agent skill** (`skills/shinystat/` and mirrored in `.agent/`, `.agents/`, `.claude/`, `.cursor/`), designed following `writing-for-agents` principles with **Hybrid Progressive Disclosure**. Rather than forcing agents through rigid canned CLI commands or fragmented multi-skill handoffs, `shinystat` empowers coding agents to exercise autonomous biostatistical judgment across 4 core pillars:
+This project ships the unified **`shinystat` agent skill** (`skills/shinystat/` and mirrored in `.agent/`, `.agents/`, `.claude/`, `.cursor/`), designed following `writing-for-agents` principles with **Hybrid Progressive Disclosure**. Rather than forcing agents through rigid canned CLI commands or fragmented multi-skill handoffs, `shinystat` empowers coding agents to exercise autonomous biostatistical judgment across 5 core pillars:
 
-### The 4 Decision Pillars
+### The 5 Decision Pillars
 
 1. **Pillar 1: Data Reality Inspection**: Audits raw geometry, headers, missingness, and candidate sample sizes directly on raw data (`.csv`, `.xlsx`, `.tsv`, `.parquet`) without assuming pre-cleaned tidy shapes.
-2. **Pillar 2: Research & Estimand Triangulation**: Triangulates research proposals (PICO/PECO) against 8 clinical study archetypes (Cohort, Case-Control, RCT, Diagnostic Accuracy, Ordinal, Survival, Agreement, Clustered) documented in `references/decision-heuristics.md`.
-3. **Pillar 3: Adaptive Python Scripting**: Generates and adapts custom Python scripts combining `medstat` core calculation modules with standard scientific libraries (`pandas`, `scipy.stats`, `statsmodels`, `lifelines`, `scikit-learn`).
+2. **Pillar 2: Research & Estimand Triangulation**: Triangulates research proposals (PICO/PECO) against 10 clinical study archetypes (Cohort, Case-Control, RCT, Diagnostic Accuracy, Ordinal, Survival, Agreement, Clustered, Causal Inference IPTW/PSM, Competing Risks) documented in `references/decision-heuristics.md`.
+3. **Pillar 3: Adaptive Python Scripting (Autonomous Authority)**: Generates and adapts custom Python scripts combining `medstat` core calculation modules with standard scientific libraries (`pandas`, `scipy.stats`, `statsmodels`, `lifelines`, `scikit-learn`), supporting automated upgrades to Firth penalized regression, restricted cubic splines, Inverse Probability of Treatment Weighting (ATE/ATT/ATC/ATO), and Competing Risks analysis (Aalen-Johansen CIF, Cause-Specific Cox csHR, Fine-Gray SHR).
 4. **Pillar 4: Biostatistical Safety Invariants**: Strictly enforces clinical safety rules:
-   - **Numeric 0/1 encoding** for binary endpoints and survival event indicators (accepting explicitly mapped text labels like `"Yes"/"No"` or `"Dead"/"Alive"`, while rejecting unmapped text labels to eliminate clinical event inversion).
+   - **Numeric 0/1 encoding** for binary endpoints and survival event indicators (accepting explicitly mapped text labels like `"Yes"/"No"` or `"Dead"/"Alive"`, while rejecting unmapped text labels to eliminate clinical event inversion). Multi-state competing risk events strictly follow integer encoding (`0 = Censored, 1 = Event of Interest, 2+ = Competing Event`).
    - **Sample retention flow** ($N_{initial} \to N_{excluded} \to N_{analyzed}$) with explicit exclusion tracking.
    - **Zero silent listwise deletion**: Missingness audits (Little's MCAR) and justified handling (`complete-case`, `mice`, `knn`). Primary outcomes are never imputed.
    - **Wilson score 95% CIs** for proportions and 2×2 diagnostic test metrics.
    - **DeLong variance** for empirical ROC AUC comparisons.
    - **Distinct EPV rules**: $\text{EPV}_{\text{binary}} = \frac{\min(N_1, N_0)}{P}$ vs $\text{EPV}_{\text{Cox}} = \frac{N_{\text{failures}}}{P}$.
+   - **Caliper 0.2×SD of logit propensity** for PSM, with Austin (2009) balance requirement (absolute SMD < 0.10).
+5. **Pillar 5: Reporting Integrity, Publication Figures & Multi-Format Documents**: Enforces Zero-PHI regex filtering, numerical traceability, 300 DPI publication standards, colorblind-safe palettes, and multi-format document rendering (HTML Dual-View, Word docx, PowerPoint pptx, PDF, Markdown).
 
 ### Deterministic Grilling Gate
 
@@ -461,6 +466,84 @@ print(f"Audited Source CSV:        {dual_res.csv_path}")
 print(f"Interactive Plotly Figure: {dual_res.plotly_fig is not None}")
 ```
 
+### Causal Inference with IPTW & 3-Way Love Plot
+```python
+import pandas as pd
+from medstat.causal.iptw import compute_iptw_weights, fit_iptw_outcome_model
+from medstat.causal.balance import compute_balance_table
+from medstat.figures.balance import plot_love
+
+# 1. Estimate propensity scores and compute stabilized ATE weights
+res = compute_iptw_weights(
+    df,
+    treatment_col="treatment",
+    covariates=["age", "bmi", "creatinine"],
+    estimand="ATE",
+    stabilized=True,
+    truncate_quantiles=(0.01, 0.99),
+)
+print(f"Kish's Effective Sample Size: {res.effective_sample_size}")
+
+# 2. Check covariate balance & render 3-Way Love Plot (Unadjusted vs Matched vs IPTW)
+bal_table = compute_balance_table(
+    res.df,
+    treatment="treatment",
+    covariates=["age", "bmi", "creatinine"],
+    weights_col="iptw_weight",
+)
+love_fig = plot_love(bal_table, threshold=0.10, out_path="figures/love_plot.png")
+
+# 3. Fit causal outcome model with robust Huber-White sandwich standard errors
+outcome_res = fit_iptw_outcome_model(
+    res.df,
+    outcome_col="mortality",
+    treatment_col="treatment",
+    weights_col="iptw_weight",
+    outcome_type="binary",
+)
+print(f"Causal Odds Ratio: {outcome_res['odds_ratio']:.3f} (95% CI: {outcome_res['or_ci_lower']:.3f} - {outcome_res['or_ci_upper']:.3f})")
+```
+
+### Competing Risks Survival Analysis (Aalen-Johansen CIF & Regression)
+```python
+import pandas as pd
+from medstat.models.survival import fit_competing_risks_cif, fit_competing_risks_regression
+from medstat.figures.survival import plot_cif
+
+# 1. Non-parametric Aalen-Johansen CIF with Naive 1 - KM overestimation audit
+cif_res = fit_competing_risks_cif(
+    durations=df["follow_up_months"],
+    event_observed=df["event_code"],  # 0: Censored, 1: Primary Event, 2: Competing Risk
+    event_of_interest=1,
+    competing_event=2,
+)
+plot_cif(cif_res, out_path="figures/cif_curves.png")
+
+# 2. Multivariable regression: Cause-Specific Cox (etiology) & Fine-Gray (prognosis)
+reg_res = fit_competing_risks_regression(
+    df=df,
+    duration_col="follow_up_months",
+    event_col="event_code",
+    covariates=["treatment", "age", "stage"],
+    event_of_interest=1,
+    competing_event=2,
+)
+print("Cause-Specific HR vs Fine-Gray SHR Comparison:")
+print(reg_res["comparison_table"][["covariate", "cs_hr", "cs_p", "fg_shr", "fg_p"]])
+```
+
+### End-to-End CLI & YAML Statistical Analysis Plan (SAP)
+```bash
+# Execute end-to-end Statistical Analysis Plan from YAML
+medstat model --spec analysis_plan.yaml --output results/report.json
+
+# Or execute standalone causal IPTW with balance check and Love plot
+medstat causal iptw --data cohort.csv --treatment treatment --covariates age,bmi --estimand ATE --love-plot figures/love.png
+
+# Or execute competing risks analysis with CIF plot
+medstat model --data oncology.csv --time months --outcome event --type competing_risks --covariates treatment,stage --cif-plot figures/cif.png
+```
+
 ### Self-Contained Clinical Reporting with Dual-View Figures
 ```python
 from medstat.reporting.ir import FigureBlock, HeadingBlock, ParagraphBlock, ReportDocument
@@ -488,11 +571,14 @@ html_content = render_html(doc, output_path="reports/diagnostic_report.html")
 The project includes an automatic forwarding wrapper in `tests/conftest.py` that transparently forwards execution to the Python 3.12 virtual environment (`.venv/bin/pytest`) even if executed from older system Python environments.
 
 ```bash
-# Run test suite
-pytest
+# Run full comprehensive test suite (559+ passed tests)
+uv run pytest
 
 # Run numerical parity benchmarks against R oracle
-pytest tests/benchmarks/
+uv run pytest tests/benchmarks/
+
+# Run CLI E2E tests for IPTW and Competing Risks
+uv run pytest tests/e2e/test_iptw_competing_risks_cli.py
 ```
 
 ---

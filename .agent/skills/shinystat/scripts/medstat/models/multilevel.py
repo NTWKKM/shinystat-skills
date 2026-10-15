@@ -252,7 +252,10 @@ def fit_gee(
     qic_val = getattr(result, "qic", np.nan)
     if callable(qic_val):
         try:
-            qic_res = qic_val()
+            scale_param = getattr(result, "scale", None)
+            qic_res = (
+                qic_val(scale=scale_param) if scale_param is not None else qic_val()
+            )
             qic = float(qic_res[0]) if isinstance(qic_res, tuple) else float(qic_res)
         except Exception:
             qic = np.nan

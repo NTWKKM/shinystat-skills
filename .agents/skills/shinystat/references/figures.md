@@ -149,16 +149,21 @@ res = plot_bland_altman(
 ```
 
 ### 7. Love Plot (`plot_love`)
-Visualizes covariate balance before and after Propensity Score Matching (PSM).
-- **Features**: Absolute Standardized Mean Differences (SMD), Austin (2009) 0.10 threshold line, distinct markers for Pre-match vs Post-match balance.
+Visualizes covariate balance before and after Propensity Score Matching (PSM) or Inverse Probability of Treatment Weighting (IPTW).
+- **Features**: Absolute Standardized Mean Differences (SMD), Austin (2009) 0.10 threshold line, distinct markers supporting 2-way (Unadjusted vs Matched or Weighted) and 3-way balance comparison (Unadjusted vs Matched vs IPTW).
+- **Column Contract**:
+  - **2-Way Balance (PSM)**: Requires `'Variable'` (or `'Covariate'`), `'Pre_Match_SMD'` (or `'Unadjusted_SMD'`), and `'Post_Match_SMD'` (or `'Matched_SMD'`).
+  - **2-Way Balance (IPTW)**: Requires `'Variable'` (or `'Covariate'`), `'Pre_Match_SMD'` (or `'Unadjusted_SMD'`), and `'Weighted_SMD'` (or `'Post_Weight_SMD'`).
+  - **3-Way Balance (PSM vs IPTW)**: Requires `'Variable'`, `'Pre_Match_SMD'` (or `'Unadjusted_SMD'`), `'Post_Match_SMD'` (or `'Matched_SMD'`), and `'Weighted_SMD'` (or `'Post_Weight_SMD'`).
 - **Usage**:
 ```python
 from medstat.figures.balance import plot_love
 
+# 2-way or 3-way balance DataFrame
 res = plot_love(
-    love_data=love_df,  # DataFrame with columns: ['Variable', 'Pre_Match_SMD', 'Post_Match_SMD']
+    love_data=love_df,  # e.g., Columns: ['Variable', 'Unadjusted_SMD', 'Matched_SMD', 'Weighted_SMD']
     threshold=0.10,
-    out_path="figures/love_plot_psm.png",
+    out_path="figures/love_plot.png",
     target="docx",
 )
 ```
@@ -186,6 +191,22 @@ res = plot_retention_flow(
 ### 9. Statistical Diagnostics (`plot_missingness_map`, `plot_schoenfeld_residuals`, `plot_mice_diagnostics`)
 Automates pre-modeling and post-modeling diagnostic validation plots.
 
+### 10. Cumulative Incidence Function (`plot_cif`)
+Visualizes non-parametric Aalen-Johansen CIF curves alongside Naive $1 - \text{Kaplan-Meier}$ overestimation audit.
+- **Features**: Event of interest CIF with Greenwood 95% confidence bands, competing risk CIF curves, and Naive $1 - \text{KM}$ curve illustrating bias when competing events are treated as independent censoring.
+- **Column Contract**: `cif_table` DataFrame must contain `'time'`, `'cif_primary'`, and `'cif_competing'` columns (with optional `'cif_primary_ci_lower'`, `'cif_primary_ci_upper'`, `'cif_competing_ci_lower'`, `'cif_competing_ci_upper'`, `'naive_1_minus_km'`).
+- **Usage**:
+```python
+from medstat.figures.survival import plot_cif
+
+res = plot_cif(
+    cif_data=cif_df,  # Columns: ['time', 'cif_primary', 'cif_competing', 'naive_1_minus_km']
+    title="Cumulative Incidence of Primary Event vs Competing Risks",
+    out_path="figures/cif_curves.png",
+    target="docx",
+)
+```
+
 ---
 
 ## 3. Interactive HTML Figures (`medstat.figures.html`)
@@ -194,11 +215,12 @@ For interactive HTML reports, use the mirror submodule `medstat.figures.html`. I
 
 - **`plot_dual_roc_curve(roc_data, ...)`**: Empirical ROC curve with interactive threshold/sensitivity/specificity tooltips and chance diagonal.
 - **`plot_dual_kaplan_meier(km_curves, risk_table, ...)`**: Step-function survival curves with 95% CI bands and hover tooltips.
+- **`plot_dual_cif(cif_data, ...)`**: Non-parametric Cumulative Incidence Function (Aalen-Johansen) with Naive $1 - \text{KM}$ audit and interactive hover.
 - **`plot_dual_calibration(calib_bins, ...)`**: Decile calibration points with 95% Wilson CI error bars and Brier/ICI annotations.
 - **`plot_dual_dca(dca_data, ...)`**: Vickers Decision Curve Analysis comparing model net benefit against Treat All and Treat None.
 - **`plot_dual_bland_altman(ba_data, ...)`**: Paired difference plot with mean bias, 95% Limits of Agreement, and confidence intervals.
 - **`plot_dual_forest(data, ...)`**: Forest plot with log-scale axis and interactive point estimates.
-- **`plot_dual_love(love_data, ...)`**: Austin 2009 Love plot comparing Pre- vs Post-match covariate balance relative to 0.10 SMD threshold.
+- **`plot_dual_love(love_data, ...)`**: Austin 2009 Love plot comparing 2-way and 3-way covariate balance relative to 0.10 SMD threshold.
 
 ```python
 from medstat.figures.html import plot_dual_roc_curve, DualFigureResult

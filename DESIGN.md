@@ -1018,4 +1018,76 @@ User feedback and review under `/writing-for-agents` identified two operational 
 
 [MEMORY_LEARN: Empowering agents with Autonomous Biostatistical Authority over statistical mechanics while enforcing a mandatory Output Format Alignment Gate recommending Dual / Toggle View HTML reports guarantees decisive analytical execution and publication-grade deliverable fidelity.]
 
+---
+
+## ADR 39: Single Source of Truth (SSOT) Enforcement & Automated Skill Mirror Parity
+
+### Context
+In multi-agent environments, `shinystat-skills` maintains bundled Python scripts inside `skills/shinystat/scripts/medstat/` and mirrors across `.agent/`, `.agents/`, `.claude/`, and `.cursor/` for zero-setup portability. In commit `313a255` (PR #13), `src/medstat/reporting/renderers/html.py` was updated with standardized static view toggle labels, but the change was not propagated to the skill bundle, causing silent code drift. The existing mirror parity test only asserted equality between `skills/` and agent mirrors, leaving the seam between `src/medstat/` (the SSOT) and `skills/shinystat/scripts/medstat/` unvalidated.
+
+### Decision
+1. **Re-synchronize Code Drift**: Propagated latest `html.py` from `src/medstat/` across `skills/` and all multi-agent mirrors.
+2. **Automated End-to-End Parity Tests**: 
+   - Expanded `test_src_medstat_and_skills_bundled_medstat_byte_identical()` in `tests/unit/test_shinystat_skill.py` to directly verify 100% byte-identical parity of all 78 engine modules against `src/medstat/` across all 5 targets: `skills/shinystat/scripts/medstat/`, `.agent/skills/shinystat/scripts/medstat/`, `.agents/skills/shinystat/scripts/medstat/`, `.claude/skills/shinystat/scripts/medstat/`, and `.cursor/skills/shinystat/scripts/medstat/`.
+   - Verified that `test_shinystat_multi_agent_mirrors_byte_identical` and `test_shinystat_cloud_canonical_skill_exists_and_valid` cover `SKILL.md`, `references/`, and `packaging/cloud/shinystat-cloud` with 100% byte-for-byte fidelity.
+3. **CodeRabbit PR Review Optimization (`.coderabbit.yaml`)**:
+   - Updated `path_filters` to explicitly exclude all mirror folders (`!.agent/**`, `!.agents/**`, `!.claude/**`, `!.cursor/**`, `!packaging/**`, `!skills/**/scripts/medstat/**`) while focusing exclusively on canonical files (`src/**`, `skills/**`, `tests/**`, `docs/**`, and root configs).
+4. **Pytest Warning Elimination (62 -> 0 Warnings)**:
+   - Fixed GEE QIC scale warning at source in `src/medstat/models/multilevel.py` by passing `scale=getattr(result, "scale", None)`.
+   - Configured `filterwarnings` in `pyproject.toml` to elevate unexpected `FutureWarning` or `DeprecationWarning` from `medstat.*` to fatal errors, while safely filtering expected numerical warnings caused by intentional stress/boundary testing (separation, non-convergence, degenerate matrices, pingouin oracle comparisons).
+5. **Installer Auto-Sync & `--sync` Flag**: Enhanced `scripts/install-skills.sh` to automatically rsync `src/medstat/` into `skills/shinystat/scripts/medstat/` before installation, and added a dedicated `--sync` / `--sync-only` CLI workflow that refreshes all workspace mirrors without creating transient backups.
+6. **Living Contract Diary Preservation & Docs Organization**: Relocated historical milestone documentation (`ORIGINAL_REQUEST.md`, `PROJECT.md`, `TEST_INFRA.md`, `TEST_READY.md`) into `docs/` while strictly preserving `ARCHITECTURE.md`, `CONTEXT.md`, and `DESIGN.md` at the project root per Living Contract Diary invariants.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Zero-Drift Invariant**: Every single workspace mirror is tested directly against `src/medstat/` and canonical `skills/`; any unpropagated edit fails pytest deterministically.
+- **Zero-Setup Usability**: Workspace agent mirrors remain committed and usable immediately out-of-the-box in Antigravity, Cursor, and Claude Code without manual install steps.
+- **PR Review Efficiency**: CodeRabbit reviews only canonical files, saving token quota and eliminating duplicate comments.
+- **Pristine Test Execution**: 530/530 tests pass in <20s with **0 warnings** and 100% clean lint/format.
+
+[MEMORY_LEARN: Comprehensive multi-agent skill verification requires direct byte-identical parity tests from the package source (src/medstat) to every platform mirror (.agent, .agents, .claude, .cursor), paired with path_filters in .coderabbit.yaml to eliminate redundant PR review cycles.]
+
+---
+
+## ADR 40: Phase 2 Causal IPTW & Competing Risks Survival Architecture (Aalen-Johansen CIF & IPCW Fine-Gray Model)
+
+### Context
+Two critical biostatistical analytical pillars were previously incomplete in `shinystat-skills`:
+1. **Causal Weighting (IPTW)**: Observational comparative effectiveness studies were limited to 1:1 Propensity Score Matching (PSM). PSM discards unmatched control or treated subjects, diminishing statistical power and restricting the target estimand primarily to the Average Treatment Effect on the Treated (ATT). Clinical researchers and epidemiologists frequently require Inverse Probability of Treatment Weighting (IPTW) to estimate the Average Treatment Effect across the entire eligible population (ATE), the Control (ATC), or the clinical equipoise target via Overlap Weights (ATO; Li et al., 2018). Furthermore, propensity score weighting without variance stabilization, positivity checking, or Kish's effective sample size ($N_{\text{eff}}$) risks extreme weight inflation and false precision.
+2. **Competing Risks Survival Analysis**: In clinical oncology and cardiovascular trials, subjects frequently experience mutually exclusive competing terminal events (e.g., non-cardiovascular death competing with cardiovascular death, or local recurrence competing with distant metastasis). Standard Kaplan-Meier estimation treating competing events as uninformative right-censoring violates the independent censoring assumption, causing substantial upward bias in the cumulative event probability ($1 - \text{KM} > \text{true CIF}$). Furthermore, estimating only Cause-Specific Hazard Ratios (csHR) describes instantaneous event rates in event-free subjects (etiological mechanism) but fails to quantify overall cumulative incidence for prognosis and clinical risk stratification, which requires Fine-Gray Subdistribution Hazard Ratios (SHR).
+
+### Decision
+1. **Phase 2A: Inverse Probability of Treatment Weighting (`medstat.causal.iptw`)**:
+   - Implemented `compute_iptw_weights` supporting 4 target estimands:
+     - **ATE**: $w_i = \frac{T_i}{e_i} + \frac{1 - T_i}{1 - e_i}$ (with optional stabilized weights $sw_i = T_i \frac{p_T}{e_i} + (1 - T_i)\frac{1 - p_T}{1 - e_i}$).
+     - **ATT**: $w_i = T_i + (1 - T_i)\frac{e_i}{1 - e_i}$.
+     - **ATC**: $w_i = T_i\frac{1 - e_i}{e_i} + (1 - T_i)$.
+     - **ATO (Overlap Weights)**: $w_i = T_i(1 - e_i) + (1 - T_i)e_i$, bounded in $[0, 1]$ and robust to poor positivity.
+   - Enforced clinical guardrails: Kish's effective sample size ($N_{\text{eff}} = \frac{(\sum w_i)^2}{\sum w_i^2}$), positivity checking ($e_i < 0.05$ or $> 0.95$), extreme weight flags ($w_i > 10$ or $> 99^{\text{th}}$ percentile), and quantile truncation/trimming.
+   - Designed `IPTWResult` supporting both attribute access and tuple unpacking `(df_weighted, diagnostics)` for backward compatibility.
+   - Implemented `fit_iptw_outcome_model` supporting continuous (WLS), binary (logistic GLM with `freq_weights`), and survival (Cox PH with `weights_col`, `robust=True`), all using Huber-White robust sandwich standard errors (`HC0`/`HC1`).
+   - Extended `medstat.causal.balance` to compute Bessel-corrected weighted sample variance ($s_w^2 = \frac{V_1^2}{V_1^2 - V_2} s_{\text{raw}}^2$), integrated weighted SMD columns in balance tables, and added square-marker weighted SMD traces to Love plots.
+2. **Phase 2B: Competing Risks Survival Analysis (`medstat.models.survival`)**:
+   - Implemented `fit_competing_risks_cif` using non-parametric `lifelines.AalenJohansenFitter(calculate_variance=True)`, Greenwood 95% confidence intervals, horizon evaluations at pre-specified follow-up times, probability conservation audit ($\sum_k \text{CIF}_k(t) + \hat{S}(t) \approx 1.0$), and automated Naive $1 - \text{Kaplan-Meier}$ overestimation calculation.
+   - Resolved `lifelines` 0.30.3 version constraints: binary search step lookup via `index.searchsorted(eval_times, side="right") - 1` on cumulative density tables.
+   - Implemented `fit_competing_risks_regression` reporting dual models:
+     - **Cause-Specific Cox (`csHR`)**: Treats competing events as right-censored at event time (for etiological inference).
+     - **Fine-Gray Subdistribution Hazard (`SHR`)**: Uses Inverse Probability of Censoring Weighting (IPCW) counting process dataset expansion, fitted via `lifelines.CoxPHFitter(entry_col, duration_col, event_col, weights_col, cluster_col, robust=True)` (for clinical prognosis).
+   - Designed publication 300 DPI step curves `plot_cif` with shaded 95% CIs and dashed $1 - \text{KM}$ overestimation curve, accompanied by companion interactive Plotly `plot_dual_cif`.
+   - Created `render_competing_risks_table` in `medstat.reporting.tables` for publication-ready reporting of cause-specific vs subdistribution models.
+3. **Cloud Recipes & Decision Heuristics**:
+   - Created Recipe 14 (IPTW) and Recipe 15 (Competing Risks) in `skills/shinystat-cloud/references/python-recipes.md` with zero `medstat` dependency.
+   - Added Decision Tree D (Causal Inference: PSM vs IPTW vs ATO) and Decision Tree E (Competing Risks: csHR vs Fine-Gray SHR) to `decision-heuristics.md` across canonical skills and multi-agent mirrors.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Zero New Dependencies**: Accomplished entirely within existing packages (`numpy`, `pandas`, `scipy`, `statsmodels`, `lifelines`).
+- **Clinical & Statistical Rigor**: Overestimation of failure probability under competing risks is systematically prevented; causal weighting provides rigorous confounding adjustment with explicit positivity and effective sample size checks.
+- **Comprehensive Verification**: 541/541 tests pass in <21s with **0 warnings** and 100% clean ruff format/check.
+- **Mirror Parity**: 100% byte-identical parity maintained across `skills/`, `.agent/`, `.agents/`, `.claude/`, `.cursor/`, and `packaging/cloud/shinystat-cloud/`.
+
+[MEMORY_LEARN: In clinical survival analysis with competing events, standard Kaplan-Meier estimates systematically overestimate cumulative incidence (1 - KM > CIF); reporting dual Cause-Specific HR for etiology and Fine-Gray SHR for prognosis alongside Aalen-Johansen CIF provides methodologically sound survival insights.]
+
+
+
 

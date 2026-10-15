@@ -168,3 +168,59 @@ def test_shinystat_multi_agent_mirrors_byte_identical():
             assert mirror_file.read_bytes() == canon_file.read_bytes(), (
                 f"Byte mismatch in {rel_path} for mirror {mirror}"
             )
+
+
+def test_src_medstat_and_skills_bundled_medstat_byte_identical():
+    """Verify exact byte-identical parity between src/medstat (SSOT) and all bundled medstat targets."""
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    src_dir = repo_root / "src" / "medstat"
+    assert src_dir.exists(), "src/medstat directory not found"
+
+    targets = [
+        (
+            "canonical skills/",
+            repo_root / "skills" / "shinystat" / "scripts" / "medstat",
+        ),
+        (
+            "antigravity .agent mirror",
+            repo_root / ".agent" / "skills" / "shinystat" / "scripts" / "medstat",
+        ),
+        (
+            "antigravity .agents mirror",
+            repo_root / ".agents" / "skills" / "shinystat" / "scripts" / "medstat",
+        ),
+        (
+            "claude code .claude mirror",
+            repo_root / ".claude" / "skills" / "shinystat" / "scripts" / "medstat",
+        ),
+        (
+            "cursor .cursor mirror",
+            repo_root / ".cursor" / "skills" / "shinystat" / "scripts" / "medstat",
+        ),
+    ]
+
+    src_files = {
+        path.relative_to(src_dir)
+        for path in src_dir.rglob("*")
+        if _is_valid_skill_file(path)
+    }
+    assert src_files, "No valid files found in src/medstat"
+
+    for label, target_dir in targets:
+        assert target_dir.exists(), f"{label} target directory not found: {target_dir}"
+        target_files = {
+            path.relative_to(target_dir)
+            for path in target_dir.rglob("*")
+            if _is_valid_skill_file(path)
+        }
+        assert src_files == target_files, (
+            f"File tree mismatch between src/medstat and {label} ({target_dir}): "
+            f"missing_in_target={sorted(src_files - target_files)}, "
+            f"extra_in_target={sorted(target_files - src_files)}"
+        )
+        for rel_path in src_files:
+            src_file = src_dir / rel_path
+            target_file = target_dir / rel_path
+            assert target_file.read_bytes() == src_file.read_bytes(), (
+                f"Byte mismatch in {rel_path} between src/medstat and {label} ({target_dir})"
+            )

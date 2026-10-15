@@ -379,7 +379,7 @@ def render_html(
                         "          </button>",
                         f'          <button type="button" class="fig-tab-btn" role="tab" id="tab-static-{idx_str}" aria-selected="false" data-tab="static" onclick="switchFigView(\'{idx_str}\', \'static\')">',
                         '            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',
-                        "            Publication 300 DPI (Static)",
+                        "            Publication 300 DPI Figure (Static)",
                         "          </button>",
                         "        </div>",
                     ]
@@ -389,7 +389,7 @@ def render_html(
                     [
                         '        <div class="figure-badge-static">',
                         '          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',
-                        "          Publication Figure (300 DPI)",
+                        "          Publication 300 DPI Figure (Static)",
                         "        </div>",
                     ]
                 )
@@ -433,7 +433,7 @@ def render_html(
                         "            </div>",
                         "          </div>",
                         f'          <button type="button" class="offline-switch-btn" onclick="switchFigView(\'{idx_str}\', \'static\')">',
-                        "            🖼️ สลับไปดู Publication Figure (300 DPI)",
+                        "            🖼️ สลับไปดู Publication 300 DPI Figure (Static)",
                         "          </button>",
                         "        </div>",
                         "      </div>",

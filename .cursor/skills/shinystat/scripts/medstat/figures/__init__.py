@@ -24,7 +24,7 @@ from medstat.figures.styles import (
     save_publication_figure,
     set_clinical_figure_style,
 )
-from medstat.figures.survival import plot_kaplan_meier
+from medstat.figures.survival import plot_cif, plot_kaplan_meier
 
 __all__ = [
     "FigureResult",
@@ -35,6 +35,7 @@ __all__ = [
     "save_publication_figure",
     "plot_forest",
     "plot_kaplan_meier",
+    "plot_cif",
     "plot_roc_curve",
     "plot_calibration",
     "plot_dca",

@@ -54,6 +54,8 @@ def test_cloud_skill_metadata_and_frontmatter():
     assert "Cox" in fm["description"]
     assert "ROC" in fm["description"]
     assert "PSM" in fm["description"]
+    assert "IPTW" in fm["description"]
+    assert "Competing Risks" in fm["description"]
 
 
 def test_decision_heuristics_has_no_phantom_medstat_modules():
@@ -694,7 +696,7 @@ def test_each_recipe_is_self_contained():
     """Verify that every python code block in python-recipes.md executes and runs in an isolated namespace."""
     content = RECIPES_PATH.read_text(encoding="utf-8")
     blocks = re.findall(r"```python\n(.*?)\n```", content, re.DOTALL)
-    assert len(blocks) >= 13, f"Expected at least 13 recipes, got {len(blocks)}"
+    assert len(blocks) >= 15, f"Expected at least 15 recipes, got {len(blocks)}"
     for idx, block in enumerate(blocks, start=1):
         isolated_ns = {}
         try:
@@ -836,6 +838,69 @@ def test_each_recipe_is_self_contained():
                 df_r = pd.DataFrame({"Var": ["Age"], "Val": ["50 ± 10"]})
                 res = isolated_ns["render_publication_table"](df_r, title="Table 1")
                 assert "<table" in res
+            elif idx == 14:
+                np.random.seed(42)
+                n_pts = 40
+                x = np.random.normal(0, 1, n_pts)
+                p = 1.0 / (1.0 + np.exp(-0.5 * x))
+                t = (np.random.rand(n_pts) < p).astype(int)
+                if t.sum() == 0:
+                    t[0] = 1
+                if t.sum() == n_pts:
+                    t[0] = 0
+                df_iptw = pd.DataFrame(
+                    {
+                        "trt": t,
+                        "x1": x,
+                        "y_cont": 2.0 * t + 0.5 * x + np.random.normal(0, 1, n_pts),
+                        "y_bin": (
+                            2.0 * t + 0.5 * x + np.random.normal(0, 1, n_pts) > 0
+                        ).astype(int),
+                        "time": np.random.exponential(10, n_pts) + 1.0,
+                    }
+                )
+                res_df, diag = isolated_ns["compute_iptw"](
+                    df_iptw, treatment_col="trt", covariates=["x1"], estimand="ATE"
+                )
+                assert "iptw_weight" in res_df.columns
+                assert "n_eff" in diag
+                smd = isolated_ns["calculate_weighted_smd"](
+                    res_df.loc[res_df["trt"] == 1, "x1"],
+                    res_df.loc[res_df["trt"] == 0, "x1"],
+                    res_df.loc[res_df["trt"] == 1, "iptw_weight"],
+                    res_df.loc[res_df["trt"] == 0, "iptw_weight"],
+                )
+                assert np.isfinite(smd)
+                fit_res = isolated_ns["fit_weighted_outcome_model"](
+                    res_df,
+                    outcome_col="y_cont",
+                    treatment_col="trt",
+                    weights_col="iptw_weight",
+                    model_type="continuous",
+                )
+                assert "effect" in fit_res
+            elif idx == 15:
+                dur = np.array([5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0])
+                evt = np.array([1, 2, 0, 1, 2, 0, 1, 2])
+                cif_res = isolated_ns["fit_competing_risks_cif"](
+                    dur, evt, event_of_interest=1, competing_event=2
+                )
+                assert "cif_table" in cif_res
+                assert "ajf_primary" in cif_res
+                df_cr = pd.DataFrame(
+                    {"time": dur, "status": evt, "x": [0, 1, 0, 1, 0, 1, 0, 1]}
+                )
+                reg_res = isolated_ns["fit_competing_risks_regression"](
+                    df_cr,
+                    duration_col="time",
+                    event_col="status",
+                    covariates=["x"],
+                    event_of_interest=1,
+                    competing_event=2,
+                )
+                assert isinstance(reg_res, pd.DataFrame)
+                assert "cause_specific_hr" in reg_res.columns
+                assert "fine_gray_shr" in reg_res.columns
         except Exception as e:
             pytest.fail(
                 f"Recipe {idx} failed to run with valid test fixture in an isolated namespace: {e}"
@@ -2007,3 +2072,170 @@ def test_cloud_standalone_plotly_spec_generators(tmp_path):
     xss_content = Path(res_xss_path).read_text(encoding="utf-8")
     assert "\\u003c/script>\\u003cscript>" in xss_content
     assert "</script><script>alert('xss')</script>" not in xss_content
+
+
+# -----------------------------------------------------------------------------
+# 20. Recipe 14: IPTW & Weighted Balance
+# -----------------------------------------------------------------------------
+
+
+def test_recipe_14_iptw_and_weighted_balance(recipes):
+    compute_iptw = recipes["compute_iptw"]
+    calculate_weighted_smd = recipes["calculate_weighted_smd"]
+    fit_weighted_outcome_model = recipes["fit_weighted_outcome_model"]
+
+    np.random.seed(42)
+    n = 100
+    x1 = np.random.normal(0, 1, n)
+    x2 = np.random.normal(50, 10, n)
+    ps_true = 1.0 / (1.0 + np.exp(-(0.5 * x1 + 0.05 * (x2 - 50))))
+    trt = (np.random.rand(n) < ps_true).astype(int)
+    if trt.sum() == 0:
+        trt[0] = 1
+    if trt.sum() == n:
+        trt[0] = 0
+
+    y_cont = 5.0 * trt + 1.2 * x1 + np.random.normal(0, 1, n)
+    y_bin = (y_cont > 5.0).astype(int)
+    duration = np.random.exponential(20, n) + 1.0
+    surv_event = np.random.binomial(1, 0.5, n)
+
+    df = pd.DataFrame(
+        {
+            "treatment": trt,
+            "x1": x1,
+            "x2": x2,
+            "outcome_cont": y_cont,
+            "outcome_bin": y_bin,
+            "surv_event": surv_event,
+            "time": duration,
+        }
+    )
+
+    # 1. Test ATE, ATT, ATC, ATO estimands
+    for estimand in ["ATE", "ATT", "ATC", "ATO"]:
+        res_df, diag = compute_iptw(
+            df,
+            treatment_col="treatment",
+            covariates=["x1", "x2"],
+            estimand=estimand,
+        )
+        assert "iptw_weight" in res_df.columns
+        assert "propensity_score" in res_df.columns
+        assert diag["estimand"] == estimand
+        assert diag["n_eff"]["total"] > 0
+        assert np.all(res_df["iptw_weight"] > 0)
+
+        if estimand == "ATT":
+            treated_w = res_df.loc[res_df["treatment"] == 1, "iptw_weight"]
+            np.testing.assert_allclose(treated_w, 1.0, atol=1e-5)
+        elif estimand == "ATC":
+            control_w = res_df.loc[res_df["treatment"] == 0, "iptw_weight"]
+            np.testing.assert_allclose(control_w, 1.0, atol=1e-5)
+        elif estimand == "ATO":
+            assert np.all(res_df["iptw_weight"] <= 1.0)
+
+    # 2. Test Bessel-corrected weighted SMD
+    res_df, _ = compute_iptw(df, "treatment", ["x1", "x2"], estimand="ATE")
+    smd_x1 = calculate_weighted_smd(
+        res_df.loc[res_df["treatment"] == 1, "x1"],
+        res_df.loc[res_df["treatment"] == 0, "x1"],
+        res_df.loc[res_df["treatment"] == 1, "iptw_weight"],
+        res_df.loc[res_df["treatment"] == 0, "iptw_weight"],
+    )
+    assert np.isfinite(smd_x1)
+    assert calculate_weighted_smd([5.0, 5.0], [5.0, 5.0], [1.0, 1.0], [1.0, 1.0]) == 0.0
+
+    # 3. Test Weighted Outcome Models (continuous, binary, survival)
+    fit_cont = fit_weighted_outcome_model(
+        res_df,
+        outcome_col="outcome_cont",
+        treatment_col="treatment",
+        weights_col="iptw_weight",
+        model_type="continuous",
+    )
+    assert fit_cont["model_type"] == "continuous"
+    assert "effect" in fit_cont
+    assert "robust_se" in fit_cont
+    assert fit_cont["ci_lower"] < fit_cont["ci_upper"]
+
+    fit_bin = fit_weighted_outcome_model(
+        res_df,
+        outcome_col="outcome_bin",
+        treatment_col="treatment",
+        weights_col="iptw_weight",
+        model_type="binary",
+    )
+    assert fit_bin["model_type"] == "binary"
+    assert "odds_ratio" in fit_bin
+    assert fit_bin["odds_ratio"] > 0
+    assert fit_bin["or_ci_lower"] < fit_bin["or_ci_upper"]
+
+    fit_surv = fit_weighted_outcome_model(
+        res_df,
+        outcome_col="surv_event",
+        treatment_col="treatment",
+        weights_col="iptw_weight",
+        model_type="survival",
+        duration_col="time",
+    )
+    assert fit_surv["model_type"] == "survival"
+    assert "hazard_ratio" in fit_surv
+    assert fit_surv["hazard_ratio"] > 0
+
+
+# -----------------------------------------------------------------------------
+# 21. Recipe 15: Competing Risks Survival Analysis
+# -----------------------------------------------------------------------------
+
+
+def test_recipe_15_competing_risks_cif_and_regression(recipes):
+    fit_cif = recipes["fit_competing_risks_cif"]
+    fit_regression = recipes["fit_competing_risks_regression"]
+
+    np.random.seed(42)
+    n = 80
+    time = np.random.exponential(15, n) + 1.0
+    status = np.random.choice([0, 1, 2], size=n, p=[0.3, 0.4, 0.3])
+    status[0] = 1
+    status[1] = 2
+    status[2] = 0
+
+    x1 = np.random.normal(0, 1, n)
+    df = pd.DataFrame({"time": time, "status": status, "x1": x1})
+
+    # 1. Non-parametric CIF & Naive 1-KM audit
+    horizons = [5.0, 10.0, 20.0]
+    res_cif = fit_cif(
+        durations=df["time"],
+        event_observed=df["status"],
+        event_of_interest=1,
+        competing_event=2,
+        horizons=horizons,
+    )
+    assert "ajf_primary" in res_cif
+    assert "ajf_competing" in res_cif
+    assert "km_naive" in res_cif
+    assert isinstance(res_cif["cif_table"], pd.DataFrame)
+    assert isinstance(res_cif["horizon_summary"], pd.DataFrame)
+    assert len(res_cif["horizon_summary"]) == len(horizons)
+    assert np.all(res_cif["cif_table"]["overestimation_bias"] >= -1e-6)
+
+    # 2. Dual Cause-Specific Cox & Fine-Gray Subdistribution models
+    res_reg = fit_regression(
+        df=df,
+        duration_col="time",
+        event_col="status",
+        covariates=["x1"],
+        event_of_interest=1,
+        competing_event=2,
+    )
+    assert isinstance(res_reg, pd.DataFrame)
+    assert len(res_reg) == 1
+    row = res_reg.iloc[0]
+    assert row["covariate"] == "x1"
+    assert row["cause_specific_hr"] > 0
+    assert row["fine_gray_shr"] > 0
+    assert "cs_95_ci" in row
+    assert "fg_95_ci" in row
+    assert row["profile"] in ["Concordant", "Divergent"]
