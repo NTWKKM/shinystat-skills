@@ -24,7 +24,9 @@ from medstat.figures.html import (
     plot_dual_forest,
     plot_dual_kaplan_meier,
     plot_dual_love,
+    plot_dual_reclassification,
     plot_dual_roc_curve,
+    plot_dual_time_dependent_roc,
 )
 from medstat.reporting.ir import ReportDocument
 from medstat.reporting.renderers import render_html
@@ -532,3 +534,64 @@ def test_render_html_unreadable_csv_emits_warning_and_omits_download(
     content = out_html.read_text(encoding="utf-8")
     assert "Download 300 DPI PNG" in content
     assert "CSV Data" not in content
+
+
+def test_plot_dual_reclassification(tmp_fig_dir: Path):
+    """Verifies plot_dual_reclassification produces 300 DPI PNG and Plotly interactive reclassification plot."""
+    from medstat.diagnostic.roc import compute_reclassification_metrics
+
+    y = np.array([1, 1, 0, 0, 1, 0, 1, 0] * 5)
+    p_old = np.array([0.6, 0.5, 0.3, 0.2, 0.7, 0.4, 0.8, 0.1] * 5)
+    p_new = np.array([0.7, 0.6, 0.2, 0.1, 0.8, 0.3, 0.9, 0.2] * 5)
+    reclass_data = compute_reclassification_metrics(
+        y, p_old, p_new, thresholds=[0.3, 0.6]
+    )
+
+    out_png = tmp_fig_dir / "dual_reclass.png"
+    res = plot_dual_reclassification(
+        reclass_data=reclass_data,
+        thresholds=[0.3, 0.6],
+        title="Dual Reclassification Plot",
+        out_path=out_png,
+    )
+
+    assert isinstance(res, DualFigureResult)
+    assert Path(res.png_path).exists()
+    assert Path(res.csv_path).exists()
+    assert res.plotly_fig is not None
+    spec = json.loads(res.plotly_json)
+    assert len(spec["data"]) >= 3  # Diagonal, non-events, events
+    assert "shapes" in spec["layout"]  # Grid lines for thresholds
+
+
+def test_plot_dual_time_dependent_roc_modes(tmp_fig_dir: Path):
+    """Verifies plot_dual_time_dependent_roc curves and auroc_trajectory modes."""
+    from medstat.diagnostic.roc import compute_time_dependent_roc
+
+    dur = np.array([10.0, 20.0, 30.0, 40.0, 50.0, 60.0] * 5)
+    ev = np.array([1, 0, 1, 0, 1, 0] * 5)
+    sc = np.array([0.8, 0.2, 0.7, 0.3, 0.9, 0.1] * 5)
+    td_data = compute_time_dependent_roc(
+        dur, ev, sc, time_horizons=[25.0, 45.0], n_bootstrap=0
+    )
+
+    # 1. Curves mode
+    out_curves = tmp_fig_dir / "dual_td_curves.png"
+    res_curves = plot_dual_time_dependent_roc(
+        td_data, mode="curves", out_path=out_curves
+    )
+    assert isinstance(res_curves, DualFigureResult)
+    assert Path(res_curves.png_path).exists()
+    assert Path(res_curves.csv_path).exists()
+    spec_curves = json.loads(res_curves.plotly_json)
+    assert len(spec_curves["data"]) >= 3  # Diagonal + 2 horizon curves
+
+    # 2. Trajectory mode
+    out_traj = tmp_fig_dir / "dual_td_traj.png"
+    res_traj = plot_dual_time_dependent_roc(
+        td_data, mode="auroc_trajectory", out_path=out_traj
+    )
+    assert isinstance(res_traj, DualFigureResult)
+    assert Path(res_traj.png_path).exists()
+    spec_traj = json.loads(res_traj.plotly_json)
+    assert len(spec_traj["data"]) >= 2  # AUROC(t) + chance diagonal

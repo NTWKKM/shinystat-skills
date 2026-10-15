@@ -48,6 +48,8 @@ from medstat.diagnostic.dca import calculate_dca
 from medstat.diagnostic.roc import (
     auc_ci_delong,
     calculate_roc_curve,
+    compute_reclassification_metrics,
+    compute_time_dependent_roc,
     delong_paired_test,
 )
 from medstat.figures.survival import plot_cif
@@ -1149,14 +1151,14 @@ def model_cmd(
     "--gold-standard",
     "--gold",
     "gold_standard",
-    required=True,
+    default=None,
     help="Binary reference standard column.",
 )
 @click.option(
     "--test-col",
     "--test",
     "test_col",
-    required=True,
+    default=None,
     help="Biomarker/diagnostic score column.",
 )
 @click.option(
@@ -1184,171 +1186,333 @@ def model_cmd(
     is_flag=True,
     help="Compute calibration curve and Brier score (requires predicted risk probabilities in [0, 1]; oriented if --direction low).",
 )
+@click.option(
+    "--p-old",
+    default=None,
+    help="Baseline model predicted probability column for reclassification.",
+)
+@click.option(
+    "--p-new",
+    default=None,
+    help="Updated model predicted probability column for reclassification.",
+)
+@click.option(
+    "--thresholds",
+    default=None,
+    help="Comma-separated risk thresholds for categorical NRI (e.g. '0.05,0.20').",
+)
+@click.option(
+    "--reclassification",
+    is_flag=True,
+    help="Compute Continuous & Categorical NRI and IDI reclassification metrics.",
+)
+@click.option(
+    "--time-dependent-roc",
+    "--td-roc",
+    "time_dependent_roc",
+    is_flag=True,
+    help="Compute cumulative/dynamic time-dependent ROC curves (Uno et al., 2007).",
+)
+@click.option(
+    "--time-col",
+    "--time",
+    "time_col",
+    default=None,
+    help="Follow-up time duration column for time-dependent ROC.",
+)
+@click.option(
+    "--event-col",
+    "--event",
+    "event_col",
+    default=None,
+    help="Event indicator column for time-dependent ROC.",
+)
+@click.option(
+    "--time-horizons",
+    "--horizons",
+    "time_horizons",
+    default=None,
+    help="Comma-separated time horizons for time-dependent ROC (e.g. '7,14,28').",
+)
+@click.option(
+    "--competing-event",
+    default=None,
+    type=int,
+    help="Optional competing event integer code for competing risks time-dependent ROC.",
+)
 @click.option("--output", type=click.Path(), help="Output path for diagnostic JSON.")
 def diag_cmd(
     data: str,
-    gold_standard: str,
-    test_col: str,
+    gold_standard: str | None,
+    test_col: str | None,
     cutoff: float | None,
     direction: str,
     roc: bool,
     compare_roc: str | None,
     dca: bool,
     calibration: bool,
+    p_old: str | None,
+    p_new: str | None,
+    thresholds: str | None,
+    reclassification: bool,
+    time_dependent_roc: bool,
+    time_col: str | None,
+    event_col: str | None,
+    time_horizons: str | None,
+    competing_event: int | None,
     output: str | None,
 ) -> None:
-    """Evaluate diagnostic test accuracy, ROC curves, DeLong comparisons, and DCA."""
-    if cutoff is None and not roc and not compare_roc and not dca and not calibration:
+    """Evaluate diagnostic test accuracy, ROC curves, DeLong comparisons, DCA, NRI/IDI, and TD-ROC."""
+    if (
+        cutoff is None
+        and not roc
+        and not compare_roc
+        and not dca
+        and not calibration
+        and not reclassification
+        and not (p_old and p_new)
+        and not time_dependent_roc
+    ):
         raise click.ClickException(
             "At least one analytical evaluation must be specified: "
-            "--cutoff, --roc, --compare-roc, --dca, or --calibration."
+            "--cutoff, --roc, --compare-roc, --dca, --calibration, --reclassification, or --time-dependent-roc."
         )
 
     df = load_clinical_data(data)
-    cols_to_check = [gold_standard, test_col] + ([compare_roc] if compare_roc else [])
-    validate_columns(df, cols_to_check, "diag")
-    check_data_missingness(df, cols_to_check, "diag")
-
-    gold_series = df[gold_standard]
-    if not pd.api.types.is_numeric_dtype(gold_series) or pd.api.types.is_bool_dtype(
-        gold_series
-    ):
-        raise click.ClickException(
-            f"Gold standard column '{gold_standard}' must be numeric containing only 0 and 1."
-        )
-    valid_gold = gold_series.dropna()
-    unique_vals = set(valid_gold.unique())
-    if not unique_vals.issubset({0, 1}):
-        raise click.ClickException(
-            f"Gold standard column '{gold_standard}' must contain only 0 and 1 (found: {sorted(list(unique_vals))})."
-        )
-
-    test_series = df[test_col]
-    if not pd.api.types.is_numeric_dtype(test_series) or pd.api.types.is_bool_dtype(
-        test_series
-    ):
-        raise click.ClickException(f"Test score column '{test_col}' must be numeric.")
-
-    if compare_roc:
-        comp_series = df[compare_roc]
-        if not pd.api.types.is_numeric_dtype(comp_series) or pd.api.types.is_bool_dtype(
-            comp_series
-        ):
-            raise click.ClickException(
-                f"Comparison ROC column '{compare_roc}' must be numeric."
-            )
-
-    y_true = df[gold_standard].values
-    y_score = df[test_col].values
     diag_res: dict[str, Any] = {}
     dir_norm = direction.lower().strip()
 
-    if cutoff is not None:
-        y_pred = (
-            (y_score <= cutoff).astype(int)
-            if dir_norm == "low"
-            else (y_score >= cutoff).astype(int)
-        )
-        acc = calculate_diagnostic_accuracy(y_true, y_pred)
-        if isinstance(acc, dict):
-            acc["cutoff"] = cutoff
-            acc["direction"] = dir_norm
-        diag_res["cutoff"] = cutoff
-        diag_res["direction"] = dir_norm
-        diag_res["accuracy_at_cutoff"] = acc
-
-    if roc or compare_roc:
-        eff_score = -y_score if dir_norm == "low" else y_score
-        roc_res = calculate_roc_curve(y_true, eff_score)
-        delong_res = auc_ci_delong(y_true, eff_score)
-        diag_res["roc"] = {
-            "auc": roc_res["auc"],
-            "auc_ci": [delong_res["ci_lower"], delong_res["ci_upper"]],
-            "ci_lower": delong_res["ci_lower"],
-            "ci_upper": delong_res["ci_upper"],
-            "se": delong_res["se"],
-            "youden_index": roc_res.get("youden_index"),
-            "direction": dir_norm,
-        }
-        if compare_roc:
-            y_comp = df[compare_roc].values
-            eff_comp = -y_comp if dir_norm == "low" else y_comp
-            comp_res = delong_paired_test(y_true, eff_score, eff_comp)
-            diag_res["delong_comparison"] = comp_res
-
-    is_in_sample_recalibration = False
-    if dca or calibration:
-        valid_mask = ~(pd.isna(y_true) | pd.isna(y_score))
-        valid_scores = y_score[valid_mask]
-        if len(valid_scores) == 0:
+    # 1. Reclassification (NRI and IDI)
+    if reclassification or (p_old and p_new):
+        y_reclass_col = gold_standard or event_col
+        if not y_reclass_col:
             raise click.ClickException(
-                "Test score contains no valid observations for DCA or calibration."
+                "Reclassification requires an outcome column via '--gold-standard' or '--event-col'."
             )
-        min_score = float(np.nanmin(valid_scores))
-        max_score = float(np.nanmax(valid_scores))
+        if not p_old or not p_new:
+            raise click.ClickException(
+                "Reclassification requires both '--p-old' and '--p-new' columns."
+            )
+        reclass_cols = [y_reclass_col, p_old, p_new]
+        validate_columns(df, reclass_cols, "diag reclassification")
+        check_data_missingness(df, reclass_cols, "diag reclassification")
 
-        if min_score >= 0.0 and max_score <= 1.0:
-            prob_risk = (1.0 - y_score) if dir_norm == "low" else y_score
-        else:
-            if len(np.unique(valid_scores)) < 2:
-                raise click.ClickException(
-                    "Test score has no variation (all values identical). "
-                    "Cannot calibrate continuous score to event probabilities."
-                )
-            eff_score = -y_score if dir_norm == "low" else y_score
+        thresh_list = None
+        if thresholds:
             try:
-                import statsmodels.api as sm
-
-                X_log = sm.add_constant(eff_score[valid_mask])
-                if X_log.shape[1] < 2:
-                    raise ValueError("Score has insufficient variance for calibration.")
-                model_prob = sm.Logit(y_true[valid_mask].astype(int), X_log).fit(
-                    disp=False
-                )
-                if len(model_prob.params) < 2 or np.isnan(model_prob.params).any():
-                    raise ValueError("Model parameters could not be estimated.")
-                prob_risk = pd.Series(np.nan, index=df.index, dtype=float)
-                prob_risk.loc[valid_mask] = model_prob.predict(X_log)
-                prob_risk = prob_risk.values
-                is_in_sample_recalibration = True
-                diag_res["probability_source"] = "in-sample logistic recalibration"
-                diag_res["apparent_estimates_note"] = (
-                    "Brier, ICI, and net benefit are apparent estimates evaluated on the same data used for logistic recalibration."
-                )
-            except Exception as e:
+                thresh_list = [
+                    float(t.strip()) for t in str(thresholds).split(",") if t.strip()
+                ]
+            except ValueError:
                 raise click.ClickException(
-                    f"DCA and calibration require predicted event probabilities in [0, 1]. "
-                    f"Test score values are outside [0, 1] (min={min_score:.4f}, max={max_score:.4f}), "
-                    f"and fitting a logistic risk calibration model failed: {e}. "
-                    "Please supply calibrated event probabilities or model-predicted risks."
+                    f"Invalid thresholds format: '{thresholds}'. Must be comma-separated numbers."
                 )
-    else:
-        prob_risk = y_score
 
-    if dca:
-        dca_res = calculate_dca(y_true, prob_risk)
-        if isinstance(dca_res, pd.DataFrame):
-            diag_res["dca"] = dca_res.to_dict(orient="records")
-        else:
-            diag_res["dca"] = dca_res
+        reclass_res = compute_reclassification_metrics(
+            y_true=df[y_reclass_col].values,
+            p_old=df[p_old].values,
+            p_new=df[p_new].values,
+            thresholds=thresh_list,
+        )
+        diag_res["reclassification"] = reclass_res
 
-    if calibration:
-        brier = calculate_brier_score(y_true, prob_risk)
-        if is_in_sample_recalibration:
-            slope_inter = {
-                "slope": None,
-                "intercept": None,
-                "note": "Calibration slope and intercept are not informative for in-sample logistic recalibration (derivation data yields tautological slope=1 and intercept=0).",
+    # 2. Time-Dependent ROC
+    if time_dependent_roc:
+        if not time_col:
+            raise click.ClickException(
+                "Time-dependent ROC requires duration column via '--time-col'."
+            )
+        ev_col = event_col or gold_standard
+        if not ev_col:
+            raise click.ClickException(
+                "Time-dependent ROC requires event column via '--event-col' or '--gold-standard'."
+            )
+        sc_col = test_col or p_new
+        if not sc_col:
+            raise click.ClickException(
+                "Time-dependent ROC requires score column via '--test-col' (or '--p-new')."
+            )
+        td_cols = [time_col, ev_col, sc_col] + ([p_old] if p_old else [])
+        validate_columns(df, td_cols, "diag time_dependent_roc")
+        check_data_missingness(df, td_cols, "diag time_dependent_roc")
+
+        h_list = None
+        if time_horizons:
+            try:
+                h_list = [
+                    float(h.strip()) for h in str(time_horizons).split(",") if h.strip()
+                ]
+            except ValueError:
+                raise click.ClickException(
+                    f"Invalid time-horizons format: '{time_horizons}'. Must be comma-separated numbers."
+                )
+
+        td_res = compute_time_dependent_roc(
+            durations=df[time_col].values,
+            events=df[ev_col].values,
+            scores=df[sc_col].values,
+            time_horizons=h_list,
+            competing_event_code=competing_event,
+            scores_old=df[p_old].values if p_old and p_old in df.columns else None,
+            scores_new=df[sc_col].values if p_old and p_old in df.columns else None,
+        )
+        diag_res["time_dependent_roc"] = td_res
+
+    # 3. Standard DTA, ROC, DeLong, DCA, and Calibration
+    if cutoff is not None or roc or compare_roc or dca or calibration:
+        if not gold_standard or not test_col:
+            raise click.ClickException(
+                "Diagnostic accuracy evaluation requires both '--gold-standard' and '--test-col'."
+            )
+        cols_to_check = [gold_standard, test_col] + (
+            [compare_roc] if compare_roc else []
+        )
+        validate_columns(df, cols_to_check, "diag")
+        check_data_missingness(df, cols_to_check, "diag")
+
+        gold_series = df[gold_standard]
+        if not pd.api.types.is_numeric_dtype(gold_series) or pd.api.types.is_bool_dtype(
+            gold_series
+        ):
+            raise click.ClickException(
+                f"Gold standard column '{gold_standard}' must be numeric containing only 0 and 1."
+            )
+        valid_gold = gold_series.dropna()
+        unique_vals = set(valid_gold.unique())
+        if not unique_vals.issubset({0, 1}):
+            raise click.ClickException(
+                f"Gold standard column '{gold_standard}' must contain only 0 and 1 (found: {sorted(list(unique_vals))})."
+            )
+
+        test_series = df[test_col]
+        if not pd.api.types.is_numeric_dtype(test_series) or pd.api.types.is_bool_dtype(
+            test_series
+        ):
+            raise click.ClickException(
+                f"Test score column '{test_col}' must be numeric."
+            )
+
+        if compare_roc:
+            comp_series = df[compare_roc]
+            if not pd.api.types.is_numeric_dtype(
+                comp_series
+            ) or pd.api.types.is_bool_dtype(comp_series):
+                raise click.ClickException(
+                    f"Comparison ROC column '{compare_roc}' must be numeric."
+                )
+
+        y_true = df[gold_standard].values
+        y_score = df[test_col].values
+
+        if cutoff is not None:
+            y_pred = (
+                (y_score <= cutoff).astype(int)
+                if dir_norm == "low"
+                else (y_score >= cutoff).astype(int)
+            )
+            acc = calculate_diagnostic_accuracy(y_true, y_pred)
+            if isinstance(acc, dict):
+                acc["cutoff"] = cutoff
+                acc["direction"] = dir_norm
+            diag_res["cutoff"] = cutoff
+            diag_res["direction"] = dir_norm
+            diag_res["accuracy_at_cutoff"] = acc
+
+        if roc or compare_roc:
+            eff_score = -y_score if dir_norm == "low" else y_score
+            roc_res = calculate_roc_curve(y_true, eff_score)
+            delong_res = auc_ci_delong(y_true, eff_score)
+            diag_res["roc"] = {
+                "auc": roc_res["auc"],
+                "auc_ci": [delong_res["ci_lower"], delong_res["ci_upper"]],
+                "ci_lower": delong_res["ci_lower"],
+                "ci_upper": delong_res["ci_upper"],
+                "se": delong_res["se"],
+                "youden_index": roc_res.get("youden_index"),
+                "direction": dir_norm,
             }
-        else:
-            slope_inter = calculate_calibration_slope_and_intercept(y_true, prob_risk)
-        ici = calculate_ici(y_true, prob_risk)
-        diag_res["calibration"] = {
-            "brier": brier,
-            "slope_and_intercept": slope_inter,
-            "ici": ici,
-        }
+            if compare_roc:
+                y_comp = df[compare_roc].values
+                eff_comp = -y_comp if dir_norm == "low" else y_comp
+                comp_res = delong_paired_test(y_true, eff_score, eff_comp)
+                diag_res["delong_comparison"] = comp_res
 
+        is_in_sample_recalibration = False
+        if dca or calibration:
+            valid_mask = ~(pd.isna(y_true) | pd.isna(y_score))
+            valid_scores = y_score[valid_mask]
+            if len(valid_scores) == 0:
+                raise click.ClickException(
+                    "Test score contains no valid observations for DCA or calibration."
+                )
+            min_score = float(np.nanmin(valid_scores))
+            max_score = float(np.nanmax(valid_scores))
+
+            if min_score >= 0.0 and max_score <= 1.0:
+                prob_risk = (1.0 - y_score) if dir_norm == "low" else y_score
+            else:
+                if len(np.unique(valid_scores)) < 2:
+                    raise click.ClickException(
+                        "Test score has no variation (all values identical). "
+                        "Cannot calibrate continuous score to event probabilities."
+                    )
+                eff_score = -y_score if dir_norm == "low" else y_score
+                try:
+                    import statsmodels.api as sm
+
+                    X_log = sm.add_constant(eff_score[valid_mask])
+                    if X_log.shape[1] < 2:
+                        raise ValueError(
+                            "Score has insufficient variance for calibration."
+                        )
+                    model_prob = sm.Logit(y_true[valid_mask].astype(int), X_log).fit(
+                        disp=False
+                    )
+                    if len(model_prob.params) < 2 or np.isnan(model_prob.params).any():
+                        raise ValueError("Model parameters could not be estimated.")
+                    prob_risk = pd.Series(np.nan, index=df.index, dtype=float)
+                    prob_risk.loc[valid_mask] = model_prob.predict(X_log)
+                    prob_risk = prob_risk.values
+                    is_in_sample_recalibration = True
+                    diag_res["probability_source"] = "in-sample logistic recalibration"
+                    diag_res["apparent_estimates_note"] = (
+                        "Brier, ICI, and net benefit are apparent estimates evaluated on the same data used for logistic recalibration."
+                    )
+                except Exception as e:
+                    raise click.ClickException(
+                        f"DCA and calibration require predicted event probabilities in [0, 1]. "
+                        f"Test score values are outside [0, 1] (min={min_score:.4f}, max={max_score:.4f}), "
+                        f"and fitting a logistic risk calibration model failed: {e}. "
+                        "Please supply calibrated event probabilities or model-predicted risks."
+                    )
+        else:
+            prob_risk = y_score
+
+        if dca:
+            dca_res = calculate_dca(y_true, prob_risk)
+            if isinstance(dca_res, pd.DataFrame):
+                diag_res["dca"] = dca_res.to_dict(orient="records")
+            else:
+                diag_res["dca"] = dca_res
+
+        if calibration:
+            brier = calculate_brier_score(y_true, prob_risk)
+            if is_in_sample_recalibration:
+                slope_inter = {
+                    "slope": None,
+                    "intercept": None,
+                    "note": "Calibration slope and intercept are not informative for in-sample logistic recalibration (derivation data yields tautological slope=1 and intercept=0).",
+                }
+            else:
+                slope_inter = calculate_calibration_slope_and_intercept(
+                    y_true, prob_risk
+                )
+            ici = calculate_ici(y_true, prob_risk)
+            diag_res["calibration"] = {
+                "brier": brier,
+                "slope_and_intercept": slope_inter,
+                "ici": ici,
+            }
     if output:
         Path(output).parent.mkdir(parents=True, exist_ok=True)
         with open(output, "w") as f:

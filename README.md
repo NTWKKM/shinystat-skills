@@ -10,6 +10,8 @@
 ## Key Highlights
 
 - **Pure Permissive Licensing (Apache-2.0)**: Replaced copyleft GPL dependencies (specifically `pingouin`) with native, pure-Python / NumPy / SciPy algorithms, including a full two-way ANOVA Intraclass Correlation Coefficient (ICC) implementation covering all 6 variants ($ICC(1,1), ICC(2,1), ICC(3,1), ICC(1,k), ICC(2,k), ICC(3,k)$) with exact F-tests and McGraw & Wong (1996) 95% confidence intervals.
+- **Diagnostic Risk Reclassification (NRI & IDI)**: Full implementation of Pencina et al. (2008, 2011) Continuous and Categorical Net Reclassification Improvement (NRI) and Integrated Discrimination Improvement (IDI), complete with $K \times K$ contingency matrices for events, non-events, and combined cohorts, relative IDI, miscalibration guards ($p \in [0, 1]$), and Kerr & Pepe (2014) separate event/non-event reporting.
+- **Time-Dependent ROC ($\text{AUROC}(t)$)**: Cumulative/Dynamic Inverse Probability of Censoring Weighting (IPCW) ROC estimator (Uno et al., 2007; Heagerty et al., 2000) using Kaplan-Meier censoring distribution $G(t)$, supporting competing risk adjustments, longitudinal $\text{AUROC}(t)$ trajectories with bootstrap 95% CI bands, optimal Youden cutoffs per milestone horizon, and paired dual-model trajectory comparisons ($\Delta\text{AUROC}(t)$).
 - **Pure Python Firth Penalized Models**: First-class support for penalized logistic and Cox proportional hazards regression via `firthmodels >= 0.8.2` with Profile Likelihood confidence intervals and penalized Likelihood Ratio Tests (LRT), resolving quasi-complete and complete separation in sparse clinical datasets.
 - **Causal Inference & Weighting (IPTW)**: Inverse Probability of Treatment Weighting supporting ATE, ATT, ATC, and Overlap Weights (ATO; Li et al., 2018), stabilized weights, quantile truncation, Kish's Effective Sample Size ($N_{\text{eff}}$), Huber-White robust sandwich SEs, and 3-way Love plots (`Unadjusted` vs `Matched` vs `IPTW`).
 - **Competing Risks Survival Analysis**: Non-parametric Aalen-Johansen Cumulative Incidence Functions (`fit_competing_risks_cif`, `plot_cif`, `plot_dual_cif`), dual Cause-Specific Cox models (etiology), Fine-Gray Subdistribution Hazard models (`fit_competing_risks_regression`) via IPCW counting process expansion (prognosis), and Naive $1 - \text{Kaplan-Meier}$ overestimation bias auditing.
@@ -69,7 +71,7 @@ shinystat-skills/
 │   │   └── sensitivity.py      # E-value sensitivity analysis for unmeasured confounding
 │   ├── diagnostic/
 │   │   ├── accuracy.py         # 2x2 contingency, Sens, Spec, PPV, NPV, LR+, LR-, DOR, Wilson CIs
-│   │   ├── roc.py              # ROC curves, AUC, Youden index, DeLong 95% CIs and comparisons
+│   │   ├── roc.py              # ROC curves, AUC, Youden, DeLong CIs, Continuous/Categorical NRI, IDI, Time-Dependent ROC (AUROC(t))
 │   │   ├── dca.py              # Decision Curve Analysis (net benefit across decision thresholds)
 │   │   └── calibration.py      # Calibration curves, Brier score, ICI, Hosmer-Lemeshow
 │   ├── causal/
@@ -91,7 +93,7 @@ shinystat-skills/
 │   │   ├── styles.py           # 300 DPI publication styles & colorblind-safe palettes
 │   │   ├── forest.py           # Publication-grade forest plots (OR, RR, HR)
 │   │   ├── survival.py         # Kaplan-Meier curves & Cumulative Incidence Functions (plot_cif)
-│   │   ├── roc.py              # Empirical ROC curves with DeLong 95% CIs
+│   │   ├── roc.py              # Empirical ROC curves with DeLong CIs, reclassification scatter, & Time-Dependent ROC (curves/trajectory)
 │   │   ├── calibration.py      # Decile calibration curves with Wilson score CIs
 │   │   ├── dca.py              # Decision Curve Analysis net benefit plots
 │   │   ├── agreement.py        # Bland-Altman agreement with 1999 large-sample CIs
@@ -100,7 +102,7 @@ shinystat-skills/
 │   │   ├── diagnostics.py      # Missingness heatmaps & Schoenfeld residual plots
 │   │   └── html/               # Dedicated mirror submodule for Dual / Toggle View
 │   │       ├── base.py         # DualFigureResult (Plotly JSON + 300 DPI Matplotlib PNG)
-│   │       ├── roc.py          # Interactive & static ROC curve generator
+│   │       ├── roc.py          # Interactive & static ROC curve, risk reclassification, & time-dependent ROC generators
 │   │       ├── survival.py     # Interactive & static Kaplan-Meier & CIF generators
 │   │       ├── calibration.py  # Interactive & static calibration curve generator
 │   │       ├── dca.py          # Interactive & static DCA net benefit generator
@@ -111,7 +113,7 @@ shinystat-skills/
 │       ├── ir.py               # Report Intermediate Representation (SSOT document tree)
 │       ├── integrity.py        # Reporting integrity audit (Pillar 5, numerical/Zero-PHI)
 │       ├── table1.py           # Baseline characteristics Table 1 with SMDs and auto-testing
-│       ├── tables.py           # APA 7, NEJM, JAMA HTML and text table formatters
+│       ├── tables.py           # APA 7, NEJM, JAMA HTML/text table formatters (including NRI & TD-ROC)
 │       ├── narrative.py        # Automated Statistical Methods narrative generation
 │       ├── checklists.py       # STROBE, CONSORT, TRIPOD, STARD, PRISMA audits
 │       └── renderers/          # Multi-format report renderers
@@ -532,15 +534,78 @@ print("Cause-Specific HR vs Fine-Gray SHR Comparison:")
 print(reg_res["comparison_table"][["covariate", "cs_hr", "cs_p", "fg_shr", "fg_p"]])
 ```
 
+### Diagnostic Risk Reclassification (NRI & IDI)
+```python
+import numpy as np
+from medstat.diagnostic.roc import compute_reclassification_metrics
+from medstat.figures.html.roc import plot_dual_reclassification
+from medstat.reporting.tables import format_reclassification_table
+
+# Compare baseline clinical risk vs updated biomarker model
+y_true = np.array([1, 1, 0, 0, 1, 0, 1, 0])
+p_old = np.array([0.45, 0.55, 0.30, 0.20, 0.65, 0.40, 0.70, 0.15])
+p_new = np.array([0.65, 0.75, 0.20, 0.10, 0.85, 0.30, 0.90, 0.10])
+
+# Compute continuous & categorical NRI, IDI, and KxK contingency matrices
+reclass = compute_reclassification_metrics(
+    y_true, p_old, p_new, thresholds=[0.20, 0.50], n_bootstrap=100
+)
+
+print(f"Continuous NRI: {reclass['nri_continuous']['total']['estimate']:.3f} (p = {reclass['nri_continuous']['total']['p_value']:.4f})")
+print(f"Event NRI:      {reclass['nri_continuous']['events']['estimate']:.3f}")
+print(f"Non-event NRI:  {reclass['nri_continuous']['nonevents']['estimate']:.3f}")
+print(f"IDI:            {reclass['idi']['estimate']:.3f} (p = {reclass['idi']['p_value']:.4f})")
+
+# Render dual publication/interactive shift plot and JAMA/NEJM table
+dual_fig = plot_dual_reclassification(reclass, out_path="figures/reclass_plot.png")
+table_html = format_reclassification_table(reclass, title="Table 3. Risk Reclassification")
+```
+
+### Time-Dependent ROC & Longitudinal $\text{AUROC}(t)$ Trajectory
+```python
+import numpy as np
+from medstat.diagnostic.roc import compute_time_dependent_roc
+from medstat.figures.html.roc import plot_dual_time_dependent_roc
+from medstat.reporting.tables import format_time_dependent_roc_table
+
+# Follow-up times, event indicators, and baseline biomarker scores
+durations = np.array([12.5, 24.0, 6.2, 36.0, 18.3, 48.0, 8.1, 30.5])
+events = np.array([1, 0, 1, 0, 1, 0, 1, 0])  # 1 = death/event, 0 = censored
+scores = np.array([0.85, 0.20, 0.75, 0.30, 0.90, 0.15, 0.65, 0.40])
+
+# Estimate IPCW-weighted ROC curves across milestone follow-up horizons
+td_roc = compute_time_dependent_roc(
+    durations=durations,
+    events=events,
+    scores=scores,
+    time_horizons=[12.0, 24.0, 36.0],
+    n_bootstrap=100,
+)
+
+for h in [12.0, 24.0, 36.0]:
+    res_h = td_roc["results_by_horizon"][h]
+    print(f"Horizon t={h}m: AUROC(t) = {res_h['auroc']:.3f} (95% CI: {res_h['ci_lower']:.3f}-{res_h['ci_upper']:.3f}) | Cutoff: {res_h['optimal_threshold']:.2f}")
+
+# Render interactive & 300 DPI trajectory plot and STARD/TRIPOD table
+dual_td = plot_dual_time_dependent_roc(td_roc, mode="auroc_trajectory", out_path="figures/td_roc_trajectory.png")
+td_table_html = format_time_dependent_roc_table(td_roc, title="Table 4. Time-Dependent Discrimination")
+```
+
 ### End-to-End CLI & YAML Statistical Analysis Plan (SAP)
 ```bash
 # Execute end-to-end Statistical Analysis Plan from YAML
 medstat model --spec analysis_plan.yaml --output results/report.json
 
-# Or execute standalone causal IPTW with balance check and Love plot
+# Execute diagnostic risk reclassification (NRI & IDI)
+medstat diag --data cohort.csv --gold outcome --p-old pred_old --p-new pred_new --thresholds 0.2,0.5 --reclassification
+
+# Execute time-dependent ROC across clinical milestones
+medstat diag --data survival_cohort.csv --gold death --test biomarker --time-dependent-roc --time-col time_to_event --event-col death --time-horizons 12,24,36
+
+# Standalone causal IPTW with balance check and Love plot
 medstat causal iptw --data cohort.csv --treatment treatment --covariates age,bmi --estimand ATE --love-plot figures/love.png
 
-# Or execute competing risks analysis with CIF plot
+# Competing risks analysis with CIF plot
 medstat model --data oncology.csv --time months --outcome event --type competing_risks --covariates treatment,stage --cif-plot figures/cif.png
 ```
 
@@ -571,14 +636,17 @@ html_content = render_html(doc, output_path="reports/diagnostic_report.html")
 The project includes an automatic forwarding wrapper in `tests/conftest.py` that transparently forwards execution to the Python 3.12 virtual environment (`.venv/bin/pytest`) even if executed from older system Python environments.
 
 ```bash
-# Run full comprehensive test suite (559+ passed tests)
+# Run full comprehensive test suite (591 passed tests)
 uv run pytest
+
+# Run unit tests for Reclassification & Time-Dependent ROC
+uv run pytest tests/unit/test_reclassification_and_tdroc.py
+
+# Run CLI E2E tests for Reclassification, Time-Dependent ROC, and IPTW
+uv run pytest tests/e2e/test_reclassification_tdroc_cli.py tests/e2e/test_iptw_competing_risks_cli.py
 
 # Run numerical parity benchmarks against R oracle
 uv run pytest tests/benchmarks/
-
-# Run CLI E2E tests for IPTW and Competing Risks
-uv run pytest tests/e2e/test_iptw_competing_risks_cli.py
 ```
 
 ---

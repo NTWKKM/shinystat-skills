@@ -91,6 +91,9 @@ def generate_methods_narrative(
     has_delong: bool = False,
     has_dca: bool = False,
     has_calibration: bool = False,
+    has_reclassification: bool = False,
+    has_td_roc: bool = False,
+    time_horizons: list[float] | None = None,
     **kwargs: Any,
 ) -> str:
     """
@@ -116,6 +119,9 @@ def generate_methods_narrative(
         has_delong: Whether DeLong paired ROC comparison was conducted.
         has_dca: Whether Decision Curve Analysis was conducted.
         has_calibration: Whether calibration analysis was conducted.
+        has_reclassification: Whether risk reclassification (NRI/IDI) was evaluated.
+        has_td_roc: Whether time-dependent ROC analysis was conducted.
+        time_horizons: Clinical follow-up horizons for time-dependent ROC.
 
     Returns:
         Formatted English narrative paragraph.
@@ -147,6 +153,13 @@ def generate_methods_narrative(
         has_cal_eval = has_calibration or (
             isinstance(diag_data, dict) and "calibration" in diag_data
         )
+        has_reclass_eval = has_reclassification or (
+            isinstance(diag_data, dict)
+            and ("reclassification" in diag_data or "nri_continuous" in diag_data)
+        )
+        has_tdroc_eval = has_td_roc or (
+            isinstance(diag_data, dict) and "time_dependent_roc" in diag_data
+        )
 
         diag_parts = []
         if cutoff_val is not None or (
@@ -175,6 +188,26 @@ def generate_methods_narrative(
             if has_delong_eval:
                 roc_sentence += " Differences between paired ROC curves were tested using the paired DeLong test."
             diag_parts.append(roc_sentence)
+
+        if has_reclass_eval:
+            diag_parts.append(
+                "Risk reclassification improvement was quantified using continuous (category-free) Net Reclassification Improvement (NRI), "
+                "categorical NRI across prespecified clinical strata, and Integrated Discrimination Improvement (IDI) per Pencina et al. (2008, 2011). "
+                "In accordance with clinical reporting guidelines (Kerr et al., 2014; Pepe et al., 2014), Event NRI and Non-event NRI were reported "
+                "separately alongside total NRI to evaluate direction-specific clinical utility."
+            )
+
+        if has_tdroc_eval:
+            h_str = (
+                f" across clinical follow-up horizons ({', '.join(str(h) for h in time_horizons)})"
+                if time_horizons
+                else " across clinical follow-up horizons"
+            )
+            diag_parts.append(
+                f"Time-dependent ROC curves and longitudinal discrimination trajectories (AUROC(t)){h_str} were estimated using the "
+                "cumulative/dynamic inverse probability of censoring weighting (IPCW) estimator (Uno et al., 2007; Heagerty et al., 2000), "
+                "with 95% confidence intervals estimated via non-parametric bootstrap resampling."
+            )
 
         if has_dca_eval:
             diag_parts.append(
@@ -588,3 +621,136 @@ def generate_narrative(
             **kwargs,
         )
     return generate_methods_narrative(model_type=model_type, **kwargs)
+
+
+def generate_reclassification_narrative(
+    reclass_data: dict[str, Any],
+    alpha: float = 0.05,
+    software_name: str = "medstat-core",
+) -> str:
+    """
+    Generate an academic Results narrative for diagnostic risk reclassification (NRI and IDI).
+    Strictly reports Event NRI and Non-event NRI separately per Kerr et al. (2014) guidelines.
+    """
+    if "reclassification" in reclass_data:
+        reclass = reclass_data["reclassification"]
+        delong = reclass_data.get("delong")
+    else:
+        reclass = reclass_data
+        delong = None
+
+    parts = []
+    if delong:
+        diff = delong["difference"]
+        p_val = delong["p_value"]
+        p_str = f"p = {p_val:.3f}" if p_val >= 0.001 else "p < 0.001"
+        parts.append(
+            f"Addition of the new predictor changed the area under the ROC curve by {diff:+.3f} "
+            f"(95% CI, {delong['ci_lower']:.3f} to {delong['ci_upper']:.3f}; {p_str} by paired DeLong test)."
+        )
+
+    nri_c = reclass.get("nri_continuous", {})
+    if nri_c:
+        tot = nri_c.get("total", {})
+        ev = nri_c.get("events", {})
+        nev = nri_c.get("nonevents", {})
+        p_tot = tot.get("p_value", 1.0)
+        p_tot_str = f"p = {p_tot:.3f}" if p_tot >= 0.001 else "p < 0.001"
+        parts.append(
+            f"Continuous Net Reclassification Improvement was {tot.get('estimate', 0.0):.3f} "
+            f"(95% CI, {tot.get('ci_lower', 0.0):.3f} to {tot.get('ci_upper', 0.0):.3f}; {p_tot_str}). "
+            f"In accordance with recommended reclassification reporting standards, component metrics demonstrated "
+            f"an Event NRI of {ev.get('estimate', 0.0):.3f} (95% CI, {ev.get('ci_lower', 0.0):.3f} to {ev.get('ci_upper', 0.0):.3f}) "
+            f"and a Non-event NRI of {nev.get('estimate', 0.0):.3f} (95% CI, {nev.get('ci_lower', 0.0):.3f} to {nev.get('ci_upper', 0.0):.3f})."
+        )
+
+    nri_cat = reclass.get("nri_categorical")
+    if nri_cat:
+        tot_cat = nri_cat.get("total", {})
+        p_cat = tot_cat.get("p_value", 1.0)
+        p_cat_str = f"p = {p_cat:.3f}" if p_cat >= 0.001 else "p < 0.001"
+        pcts = nri_cat.get("reclassification_percentages", {})
+        pct_up = pcts.get("upward", 0.0)
+        pct_down = pcts.get("downward", 0.0)
+        parts.append(
+            f"Categorical NRI across prespecified thresholds was {tot_cat.get('estimate', 0.0):.3f} "
+            f"(95% CI, {tot_cat.get('ci_lower', 0.0):.3f} to {tot_cat.get('ci_upper', 0.0):.3f}; {p_cat_str}), "
+            f"with {pct_up:.1f}% of participants reclassified to higher risk categories and {pct_down:.1f}% to lower risk categories."
+        )
+
+    idi_d = reclass.get("idi", {})
+    if idi_d:
+        p_idi = idi_d.get("p_value", 1.0)
+        p_idi_str = f"p = {p_idi:.3f}" if p_idi >= 0.001 else "p < 0.001"
+        rel_str = (
+            f" (relative IDI: {idi_d['relative_idi'] * 100.0:.1f}%)"
+            if idi_d.get("relative_idi") is not None
+            else ""
+        )
+        parts.append(
+            f"The Integrated Discrimination Improvement was {idi_d.get('estimate', 0.0):.3f} "
+            f"(95% CI, {idi_d.get('ci_lower', 0.0):.3f} to {idi_d.get('ci_upper', 0.0):.3f}; {p_idi_str}){rel_str}."
+        )
+
+    return " ".join(parts)
+
+
+def generate_time_dependent_roc_narrative(
+    td_roc_data: dict[str, Any],
+    alpha: float = 0.05,
+    software_name: str = "medstat-core",
+) -> str:
+    """
+    Generate an academic Results narrative for Time-Dependent ROC and longitudinal AUROC(t).
+    """
+    horizons = td_roc_data.get("time_horizons", [])
+    results = td_roc_data.get("results_by_horizon", {})
+    comp_dict = td_roc_data.get("comparison", {})
+
+    parts = []
+    h_desc = []
+    for h in horizons:
+        res_h = results.get(h, results.get(str(h), {}))
+        if not res_h:
+            continue
+        auc_val = res_h.get("auroc")
+        ci_l = res_h.get("ci_lower")
+        ci_u = res_h.get("ci_upper")
+        if (
+            auc_val is not None
+            and not np.isnan(auc_val)
+            and ci_l is not None
+            and not np.isnan(ci_l)
+            and ci_u is not None
+            and not np.isnan(ci_u)
+        ):
+            h_desc.append(
+                f"at t = {h:g}, AUROC(t) was {auc_val:.3f} (95% CI, {ci_l:.3f} to {ci_u:.3f})"
+            )
+        elif auc_val is not None and not np.isnan(auc_val):
+            h_desc.append(f"at t = {h:g}, AUROC(t) was {auc_val:.3f}")
+
+    if h_desc:
+        parts.append(
+            f"Time-dependent cumulative/dynamic ROC analysis demonstrated discriminative performance across follow-up horizons: {'; '.join(h_desc)}."
+        )
+
+    if comp_dict:
+        comp_desc = []
+        for h, c_res in comp_dict.items():
+            delta = c_res.get("delta_auroc")
+            p_val = c_res.get("p_value")
+            if (
+                delta is not None
+                and not np.isnan(delta)
+                and p_val is not None
+                and not np.isnan(p_val)
+            ):
+                p_str = f"p = {p_val:.3f}" if p_val >= 0.001 else "p < 0.001"
+                comp_desc.append(f"t = {float(h):g} (ΔAUROC = {delta:+.3f}, {p_str})")
+        if comp_desc:
+            parts.append(
+                f"Longitudinal comparison between baseline and updated models showed discrimination differences at {'; '.join(comp_desc)}."
+            )
+
+    return " ".join(parts)

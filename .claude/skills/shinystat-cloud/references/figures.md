@@ -207,6 +207,12 @@ res = plot_cif(
 )
 ```
 
+### 11. Risk Reclassification Plot
+Scatter plot comparing predicted probabilities of baseline vs updated models, color-coded by event status ($Y=1$ events in red, $Y=0$ non-events in blue), with equality line and threshold grid lines.
+
+### 12. Time-Dependent ROC Trajectory & Multi-Horizon Curves
+Visualizes longitudinal discrimination trajectories ($\text{AUROC}(t)$ with 95% CI bands) or multi-horizon ROC curves.
+
 ---
 
 ## 3. Standalone Interactive HTML Figures (Zero-Dependency Plotly Dicts)
@@ -214,6 +220,8 @@ res = plot_cif(
 In cloud sandboxes (such as Claude Web Analysis Tool), `medstat` is not available as an external package. Instead of importing `medstat.figures.html`, use the standalone pure-Python Plotly spec generators provided in [report-builder.md](report-builder.md#b1-standalone-pure-python-plotly-spec-generators-zero-dependencies). They build native JSON-serializable dictionaries (`{"data": [...], "layout": {...}}`) with zero external dependencies and pass directly into `generate_html_report(..., plotly_figs=[spec])`:
 
 - **`build_plotly_roc_spec(roc_data, ...)`**: Empirical ROC curve with interactive threshold/sensitivity/specificity hover tooltips, chance diagonal, and optimal cutoff markers.
+- **`build_plotly_reclassification_spec(reclass_data, ...)`**: Interactive scatter plot of baseline vs updated risks with hover tooltips and event/non-event toggles.
+- **`build_plotly_time_dependent_roc_spec(td_data, ...)`**: Interactive longitudinal AUROC trajectory with CI bounds or multi-horizon ROC curves.
 - **`build_plotly_km_spec(km_data, ...)`**: Step-function survival curves with 95% CI shaded ribbons and hover tooltips.
 - **`build_plotly_calibration_spec(calib_bins, ...)`**: Decile calibration points with 95% Wilson CI error bars and Brier/ICI annotations.
 - **`build_plotly_dca_spec(dca_data, ...)`**: Vickers Decision Curve Analysis comparing model net benefit against Treat All and Treat None.

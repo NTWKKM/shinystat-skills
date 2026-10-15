@@ -2778,3 +2778,691 @@ def fit_competing_risks_regression(
     return pd.DataFrame(comp_rows)
 ```
 
+---
+
+## 16. Diagnostic Risk Reclassification: Continuous & Categorical NRI and IDI
+
+Computes Pencina et al. (2008, 2011) Net Reclassification Improvement (Continuous and Categorical NRI) and Integrated Discrimination Improvement (IDI).
+Enforces clinical guardrails: checks probabilities lie in $[0, 1]$, and reports Event NRI and Non-event NRI separately per Kerr et al. (2014) guidelines.
+
+```python
+from typing import Any
+
+import numpy as np
+import pandas as pd
+import scipy.stats as stats
+
+
+def compute_reclassification_metrics(
+    y_true: pd.Series | np.ndarray,
+    p_old: pd.Series | np.ndarray,
+    p_new: pd.Series | np.ndarray,
+    thresholds: list[float] | None = None,
+    n_bootstrap: int = 0,
+    random_state: int = 42,
+) -> dict[str, Any]:
+    """Calculate Continuous NRI, Categorical NRI, and IDI with asymptotic and bootstrap CIs."""
+    y_t = np.asarray(y_true, dtype=float)
+    p_0 = np.asarray(p_old, dtype=float)
+    p_1 = np.asarray(p_new, dtype=float)
+
+    if len(y_t) != len(p_0) or len(y_t) != len(p_1):
+        raise ValueError("y_true, p_old, and p_new must have identical lengths.")
+
+    valid = ~(np.isnan(y_t) | np.isnan(p_0) | np.isnan(p_1))
+    y_t = y_t[valid].astype(int)
+    p_0 = p_0[valid]
+    p_1 = p_1[valid]
+
+    # Miscalibration Guard
+    if (
+        np.any(p_0 < -1e-7)
+        or np.any(p_0 > 1.0 + 1e-7)
+        or np.any(p_1 < -1e-7)
+        or np.any(p_1 > 1.0 + 1e-7)
+    ):
+        raise ValueError(
+            "NRI and IDI require calibrated probabilities in [0, 1]. Received values outside this range."
+        )
+
+    p_0 = np.clip(p_0, 0.0, 1.0)
+    p_1 = np.clip(p_1, 0.0, 1.0)
+
+    unique_y = np.unique(y_t)
+    if len(unique_y) < 2 or not set(unique_y).issubset({0, 1}):
+        raise ValueError("y_true must contain both 0 and 1 classes.")
+
+    n_events = int(np.sum(y_t == 1))
+    n_nonevents = int(np.sum(y_t == 0))
+    n_total = len(y_t)
+
+    # 1. Continuous NRI
+    up_cont = p_1 > p_0 + 1e-12
+    down_cont = p_1 < p_0 - 1e-12
+
+    mask_1 = y_t == 1
+    mask_0 = y_t == 0
+
+    n_up_e = int(np.sum(mask_1 & up_cont))
+    n_down_e = int(np.sum(mask_1 & down_cont))
+    p_up_e = n_up_e / n_events if n_events > 0 else 0.0
+    p_down_e = n_down_e / n_events if n_events > 0 else 0.0
+    nri_e_cont = p_up_e - p_down_e
+    var_e_cont = (
+        (p_up_e + p_down_e - nri_e_cont**2) / n_events if n_events > 0 else 0.0
+    )
+    se_e_cont = float(np.sqrt(max(0.0, var_e_cont)))
+    z_e_cont = float(nri_e_cont / se_e_cont) if se_e_cont > 0.0 else 0.0
+    p_val_e_cont = (
+        float(2.0 * (1.0 - stats.norm.cdf(abs(z_e_cont))))
+        if se_e_cont > 0.0
+        else (1.0 if nri_e_cont == 0.0 else 0.0)
+    )
+
+    n_up_ne = int(np.sum(mask_0 & up_cont))
+    n_down_ne = int(np.sum(mask_0 & down_cont))
+    p_up_ne = n_up_ne / n_nonevents if n_nonevents > 0 else 0.0
+    p_down_ne = n_down_ne / n_nonevents if n_nonevents > 0 else 0.0
+    nri_ne_cont = p_down_ne - p_up_ne
+    var_ne_cont = (
+        (p_down_ne + p_up_ne - nri_ne_cont**2) / n_nonevents
+        if n_nonevents > 0
+        else 0.0
+    )
+    se_ne_cont = float(np.sqrt(max(0.0, var_ne_cont)))
+    z_ne_cont = float(nri_ne_cont / se_ne_cont) if se_ne_cont > 0.0 else 0.0
+    p_val_ne_cont = (
+        float(2.0 * (1.0 - stats.norm.cdf(abs(z_ne_cont))))
+        if se_ne_cont > 0.0
+        else (1.0 if nri_ne_cont == 0.0 else 0.0)
+    )
+
+    nri_total_cont = nri_e_cont + nri_ne_cont
+    var_total_cont = var_e_cont + var_ne_cont
+    se_total_cont = float(np.sqrt(max(0.0, var_total_cont)))
+    z_total_cont = (
+        float(nri_total_cont / se_total_cont) if se_total_cont > 0.0 else 0.0
+    )
+    p_val_total_cont = (
+        float(2.0 * (1.0 - stats.norm.cdf(abs(z_total_cont))))
+        if se_total_cont > 0.0
+        else (1.0 if nri_total_cont == 0.0 else 0.0)
+    )
+
+    z_crit = 1.959963984540054
+    res_nri_cont = {
+        "total": {
+            "estimate": float(nri_total_cont),
+            "se": se_total_cont,
+            "ci_lower": float(nri_total_cont - z_crit * se_total_cont),
+            "ci_upper": float(nri_total_cont + z_crit * se_total_cont),
+            "z_statistic": z_total_cont,
+            "p_value": p_val_total_cont,
+        },
+        "events": {
+            "estimate": float(nri_e_cont),
+            "se": se_e_cont,
+            "ci_lower": float(nri_e_cont - z_crit * se_e_cont),
+            "ci_upper": float(nri_e_cont + z_crit * se_e_cont),
+            "z_statistic": z_e_cont,
+            "p_value": p_val_e_cont,
+            "n_up": n_up_e,
+            "n_down": n_down_e,
+            "p_up": float(p_up_e),
+            "p_down": float(p_down_e),
+        },
+        "nonevents": {
+            "estimate": float(nri_ne_cont),
+            "se": se_ne_cont,
+            "ci_lower": float(nri_ne_cont - z_crit * se_ne_cont),
+            "ci_upper": float(nri_ne_cont + z_crit * se_ne_cont),
+            "z_statistic": z_ne_cont,
+            "p_value": p_val_ne_cont,
+            "n_up": n_up_ne,
+            "n_down": n_down_ne,
+            "p_up": float(p_up_ne),
+            "p_down": float(p_down_ne),
+        },
+    }
+
+    # 2. Categorical NRI
+    res_nri_cat = None
+    cat_old = None
+    cat_new = None
+    sorted_thresh = None
+    cat_labels = None
+    k_bins = 0
+
+    if thresholds is not None and len(thresholds) > 0:
+        sorted_thresh = sorted(list({float(t) for t in thresholds}))
+        if any(t <= 0.0 or t >= 1.0 for t in sorted_thresh):
+            raise ValueError(
+                "Categorical NRI thresholds must be strictly within (0, 1)."
+            )
+
+        cat_old = np.digitize(p_0, sorted_thresh, right=False)
+        cat_new = np.digitize(p_1, sorted_thresh, right=False)
+        k_bins = len(sorted_thresh) + 1
+
+        cat_labels = []
+        for i in range(k_bins):
+            if i == 0:
+                cat_labels.append(f"< {sorted_thresh[0]:.2g}")
+            elif i == k_bins - 1:
+                cat_labels.append(f"≥ {sorted_thresh[-1]:.2g}")
+            else:
+                cat_labels.append(f"{sorted_thresh[i-1]:.2g} to <{sorted_thresh[i]:.2g}")
+
+        m_events = np.zeros((k_bins, k_bins), dtype=int)
+        m_nonevents = np.zeros((k_bins, k_bins), dtype=int)
+
+        for i in range(n_total):
+            if y_t[i] == 1:
+                m_events[cat_old[i], cat_new[i]] += 1
+            else:
+                m_nonevents[cat_old[i], cat_new[i]] += 1
+        m_combined = m_events + m_nonevents
+
+        up_cat = cat_new > cat_old
+        down_cat = cat_new < cat_old
+
+        n_up_e_cat = int(np.sum(mask_1 & up_cat))
+        n_down_e_cat = int(np.sum(mask_1 & down_cat))
+        p_up_e_cat = n_up_e_cat / n_events if n_events > 0 else 0.0
+        p_down_e_cat = n_down_e_cat / n_events if n_events > 0 else 0.0
+        nri_e_cat = p_up_e_cat - p_down_e_cat
+        var_e_cat = (
+            (p_up_e_cat + p_down_e_cat - nri_e_cat**2) / n_events if n_events > 0 else 0.0
+        )
+        se_e_cat = float(np.sqrt(max(0.0, var_e_cat)))
+        z_e_cat = float(nri_e_cat / se_e_cat) if se_e_cat > 0.0 else 0.0
+        p_val_e_cat = (
+            float(2.0 * (1.0 - stats.norm.cdf(abs(z_e_cat))))
+            if se_e_cat > 0.0
+            else (1.0 if nri_e_cat == 0.0 else 0.0)
+        )
+
+        n_up_ne_cat = int(np.sum(mask_0 & up_cat))
+        n_down_ne_cat = int(np.sum(mask_0 & down_cat))
+        p_up_ne_cat = n_up_ne_cat / n_nonevents if n_nonevents > 0 else 0.0
+        p_down_ne_cat = n_down_ne_cat / n_nonevents if n_nonevents > 0 else 0.0
+        nri_ne_cat = p_down_ne_cat - p_up_ne_cat
+        var_ne_cat = (
+            (p_down_ne_cat + p_up_ne_cat - nri_ne_cat**2) / n_nonevents
+            if n_nonevents > 0
+            else 0.0
+        )
+        se_ne_cat = float(np.sqrt(max(0.0, var_ne_cat)))
+        z_ne_cat = float(nri_ne_cat / se_ne_cat) if se_ne_cat > 0.0 else 0.0
+        p_val_ne_cat = (
+            float(2.0 * (1.0 - stats.norm.cdf(abs(z_ne_cat))))
+            if se_ne_cat > 0.0
+            else (1.0 if nri_ne_cat == 0.0 else 0.0)
+        )
+
+        nri_total_cat = nri_e_cat + nri_ne_cat
+        var_total_cat = var_e_cat + var_ne_cat
+        se_total_cat = float(np.sqrt(max(0.0, var_total_cat)))
+        z_total_cat = (
+            float(nri_total_cat / se_total_cat) if se_total_cat > 0.0 else 0.0
+        )
+        p_val_total_cat = (
+            float(2.0 * (1.0 - stats.norm.cdf(abs(z_total_cat))))
+            if se_total_cat > 0.0
+            else (1.0 if nri_total_cat == 0.0 else 0.0)
+        )
+
+        pct_up = float(np.sum(m_combined[np.triu_indices(k_bins, k=1)]) / n_total * 100.0)
+        pct_down = float(np.sum(m_combined[np.tril_indices(k_bins, k=-1)]) / n_total * 100.0)
+        pct_same = float(np.trace(m_combined) / n_total * 100.0)
+
+    # Bootstrap CIs for reclassification metrics
+    boot_cat_low = None
+    boot_cat_high = None
+    boot_cont_low = None
+    boot_cont_high = None
+    boot_idi_low = None
+    boot_idi_high = None
+
+    if n_bootstrap > 0:
+        rng = np.random.default_rng(random_state)
+        boot_cat_vals = []
+        boot_cont_vals = []
+        boot_idi_vals = []
+        idx_1 = np.where(mask_1)[0]
+        idx_0 = np.where(mask_0)[0]
+        has_cat = cat_old is not None and cat_new is not None
+
+        for _ in range(n_bootstrap):
+            b_1 = rng.choice(idx_1, size=len(idx_1), replace=True)
+            b_0 = rng.choice(idx_0, size=len(idx_0), replace=True)
+            b_idx = np.concatenate([b_1, b_0])
+            p0_b = p_0[b_idx]
+            p1_b = p_1[b_idx]
+            y_b = y_t[b_idx]
+            m1_b = y_b == 1
+            m0_b = y_b == 0
+
+            # Continuous NRI bootstrap
+            nri_e_b = np.mean(p1_b[m1_b] > p0_b[m1_b] + 1e-12) - np.mean(
+                p1_b[m1_b] < p0_b[m1_b] - 1e-12
+            )
+            nri_ne_b = np.mean(p1_b[m0_b] < p0_b[m0_b] - 1e-12) - np.mean(
+                p1_b[m0_b] > p0_b[m0_b] + 1e-12
+            )
+            boot_cont_vals.append(nri_e_b + nri_ne_b)
+
+            # IDI bootstrap
+            idi_b = (np.mean(p1_b[m1_b]) - np.mean(p0_b[m1_b])) - (
+                np.mean(p1_b[m0_b]) - np.mean(p0_b[m0_b])
+            )
+            boot_idi_vals.append(idi_b)
+
+            # Categorical NRI bootstrap
+            if has_cat:
+                c_old = cat_old[b_idx]
+                c_new = cat_new[b_idx]
+                cat_e_b = np.mean(c_new[m1_b] > c_old[m1_b]) - np.mean(
+                    c_new[m1_b] < c_old[m1_b]
+                )
+                cat_ne_b = np.mean(c_new[m0_b] < c_old[m0_b]) - np.mean(
+                    c_new[m0_b] > c_old[m0_b]
+                )
+                boot_cat_vals.append(cat_e_b + cat_ne_b)
+
+        boot_cont_low = float(np.percentile(boot_cont_vals, 2.5))
+        boot_cont_high = float(np.percentile(boot_cont_vals, 97.5))
+        boot_idi_low = float(np.percentile(boot_idi_vals, 2.5))
+        boot_idi_high = float(np.percentile(boot_idi_vals, 97.5))
+        if has_cat:
+            boot_cat_low = float(np.percentile(boot_cat_vals, 2.5))
+            boot_cat_high = float(np.percentile(boot_cat_vals, 97.5))
+
+    if boot_cont_low is not None:
+        res_nri_cont["total"]["ci_lower_boot"] = boot_cont_low
+        res_nri_cont["total"]["ci_upper_boot"] = boot_cont_high
+
+    if sorted_thresh is not None:
+        res_nri_cat = {
+            "thresholds": sorted_thresh,
+            "categories": cat_labels,
+            "total": {
+                "estimate": float(nri_total_cat),
+                "se": se_total_cat,
+                "ci_lower": float(nri_total_cat - z_crit * se_total_cat),
+                "ci_upper": float(nri_total_cat + z_crit * se_total_cat),
+                "ci_lower_boot": boot_cat_low,
+                "ci_upper_boot": boot_cat_high,
+                "z_statistic": z_total_cat,
+                "p_value": p_val_total_cat,
+            },
+            "events": {
+                "estimate": float(nri_e_cat),
+                "se": se_e_cat,
+                "ci_lower": float(nri_e_cat - z_crit * se_e_cat),
+                "ci_upper": float(nri_e_cat + z_crit * se_e_cat),
+                "z_statistic": z_e_cat,
+                "p_value": p_val_e_cat,
+                "n_up": n_up_e_cat,
+                "n_down": n_down_e_cat,
+                "p_up": float(p_up_e_cat),
+                "p_down": float(p_down_e_cat),
+            },
+            "nonevents": {
+                "estimate": float(nri_ne_cat),
+                "se": se_ne_cat,
+                "ci_lower": float(nri_ne_cat - z_crit * se_ne_cat),
+                "ci_upper": float(nri_ne_cat + z_crit * se_ne_cat),
+                "z_statistic": z_ne_cat,
+                "p_value": p_val_ne_cat,
+                "n_up": n_up_ne_cat,
+                "n_down": n_down_ne_cat,
+                "p_up": float(p_up_ne_cat),
+                "p_down": float(p_down_ne_cat),
+            },
+            "contingency_matrices": {
+                "events": m_events.tolist(),
+                "nonevents": m_nonevents.tolist(),
+                "combined": m_combined.tolist(),
+            },
+            "reclassification_percentages": {
+                "upward": pct_up,
+                "downward": pct_down,
+                "unchanged": pct_same,
+            },
+        }
+
+    # 3. IDI
+    mean_p1_events = float(np.mean(p_1[mask_1]))
+    mean_p0_events = float(np.mean(p_0[mask_1]))
+    mean_p1_nonevents = float(np.mean(p_1[mask_0]))
+    mean_p0_nonevents = float(np.mean(p_0[mask_0]))
+
+    idi_val = (mean_p1_events - mean_p0_events) - (mean_p1_nonevents - mean_p0_nonevents)
+    slope_old = mean_p0_events - mean_p0_nonevents
+    slope_new = mean_p1_events - mean_p1_nonevents
+    rel_idi = float(idi_val / slope_old) if slope_old > 1e-12 else None
+
+    delta_p = p_1 - p_0
+    var_delta_1 = float(np.var(delta_p[mask_1], ddof=1)) if n_events > 1 else 0.0
+    var_delta_0 = float(np.var(delta_p[mask_0], ddof=1)) if n_nonevents > 1 else 0.0
+
+    se_idi = float(np.sqrt(max(0.0, var_delta_1 / n_events + var_delta_0 / n_nonevents)))
+    z_idi = float(idi_val / se_idi) if se_idi > 0.0 else 0.0
+    p_val_idi = (
+        float(2.0 * (1.0 - stats.norm.cdf(abs(z_idi))))
+        if se_idi > 0.0
+        else (1.0 if idi_val == 0.0 else 0.0)
+    )
+
+    res_idi = {
+        "estimate": float(idi_val),
+        "se": se_idi,
+        "ci_lower": float(idi_val - z_crit * se_idi),
+        "ci_upper": float(idi_val + z_crit * se_idi),
+        "z_statistic": z_idi,
+        "p_value": p_val_idi,
+        "relative_idi": rel_idi,
+        "discrimination_slope_old": float(slope_old),
+        "discrimination_slope_new": float(slope_new),
+        "mean_p_old_events": mean_p0_events,
+        "mean_p_old_nonevents": mean_p0_nonevents,
+        "mean_p_new_events": mean_p1_events,
+        "mean_p_new_nonevents": mean_p1_nonevents,
+    }
+
+    if boot_idi_low is not None:
+        res_idi["ci_lower_boot"] = boot_idi_low
+        res_idi["ci_upper_boot"] = boot_idi_high
+
+    return {
+        "nri_continuous": res_nri_cont,
+        "nri_categorical": res_nri_cat,
+        "idi": res_idi,
+        "n_events": n_events,
+        "n_nonevents": n_nonevents,
+        "n_total": n_total,
+    }
+```
+
+---
+
+## 17. Time-Dependent ROC: Cumulative/Dynamic IPCW Estimator (AUROC(t))
+
+Cumulative/Dynamic Inverse Probability of Censoring Weighting (IPCW) Time-Dependent ROC estimator (Uno et al., 2007; Heagerty et al., 2000).
+Computes longitudinal discrimination trajectories, optimal Youden cutoffs, and bootstrap confidence intervals across clinical follow-up horizons.
+
+```python
+from typing import Any
+
+import numpy as np
+import pandas as pd
+import scipy.stats as stats
+from lifelines import KaplanMeierFitter
+
+
+def _calc_ipcw_roc_point(
+    durations: np.ndarray,
+    events: np.ndarray,
+    scores: np.ndarray,
+    horizon: float,
+    g_durations: np.ndarray,
+    g_horizon: float,
+    competing_event_code: int | None = None,
+) -> dict[str, Any]:
+    """Single horizon weighted IPCW AUROC calculation."""
+    t = float(horizon)
+    cases_mask = (durations <= t) & (events == 1)
+
+    if competing_event_code is not None:
+        competing_mask = (durations <= t) & (events == competing_event_code)
+        ctrl_mask = (durations > t) | competing_mask
+    else:
+        ctrl_mask = durations > t
+
+    n_cases = int(np.sum(cases_mask))
+    n_controls = int(np.sum(ctrl_mask))
+    n_censored = int(np.sum((durations <= t) & (events == 0)))
+
+    if n_cases < 1 or n_controls < 1:
+        return {
+            "horizon": t,
+            "n_cases": n_cases,
+            "n_controls": n_controls,
+            "n_censored": n_censored,
+            "auroc": float("nan"),
+            "optimal_threshold": float("nan"),
+            "sensitivity": float("nan"),
+            "specificity": float("nan"),
+            "fpr": [0.0, 1.0],
+            "tpr": [0.0, 1.0],
+            "thresholds": [float("inf"), float("-inf")],
+        }
+
+    w_cases = 1.0 / np.clip(g_durations[cases_mask], 1e-3, 1.0)
+    if competing_event_code is not None:
+        w_ctrl = np.where(
+            durations[ctrl_mask] > t,
+            1.0 / max(g_horizon, 1e-3),
+            1.0 / np.clip(g_durations[ctrl_mask], 1e-3, 1.0),
+        )
+    else:
+        w_ctrl = np.full(n_controls, 1.0 / max(g_horizon, 1e-3))
+
+    sc_cases = scores[cases_mask]
+    sc_ctrl = scores[ctrl_mask]
+
+    greater = np.greater.outer(sc_cases, sc_ctrl).astype(float)
+    equal = np.equal.outer(sc_cases, sc_ctrl).astype(float)
+    w_mat = np.outer(w_cases, w_ctrl)
+    sum_w = float(np.sum(w_mat))
+    auroc = float(np.sum((greater + 0.5 * equal) * w_mat) / sum_w) if sum_w > 0 else float("nan")
+
+    sum_w_cases = float(np.sum(w_cases))
+    sum_w_ctrl = float(np.sum(w_ctrl))
+    unique_th = np.sort(np.unique(np.concatenate([sc_cases, sc_ctrl])))[::-1]
+
+    tpr_list = [0.0]
+    fpr_list = [0.0]
+    th_list = [float("inf")]
+    for th in unique_th:
+        tpr_list.append(float(np.sum(w_cases[sc_cases >= th]) / sum_w_cases) if sum_w_cases > 0 else 0.0)
+        fpr_list.append(float(np.sum(w_ctrl[sc_ctrl >= th]) / sum_w_ctrl) if sum_w_ctrl > 0 else 0.0)
+        th_list.append(float(th))
+    tpr_list.append(1.0)
+    fpr_list.append(1.0)
+    th_list.append(float("-inf"))
+
+    tpr_arr = np.array(tpr_list)
+    fpr_arr = np.array(fpr_list)
+    best_idx = int(np.argmax(tpr_arr - fpr_arr))
+    opt_th = th_list[best_idx]
+    if np.isneginf(opt_th):
+        opt_th = float(unique_th[-1]) if len(unique_th) > 0 else 0.0
+    elif np.isposinf(opt_th):
+        opt_th = float(unique_th[0]) if len(unique_th) > 0 else 0.0
+
+    return {
+        "horizon": t,
+        "n_cases": n_cases,
+        "n_controls": n_controls,
+        "n_censored": n_censored,
+        "auroc": auroc,
+        "optimal_threshold": float(opt_th),
+        "sensitivity": float(tpr_arr[best_idx]),
+        "specificity": float(1.0 - fpr_arr[best_idx]),
+        "fpr": fpr_list,
+        "tpr": tpr_list,
+        "thresholds": th_list,
+    }
+
+
+def compute_time_dependent_roc(
+    durations: pd.Series | np.ndarray,
+    events: pd.Series | np.ndarray,
+    scores: pd.Series | np.ndarray | None = None,
+    time_horizons: list[float] | np.ndarray | None = None,
+    competing_event_code: int | None = None,
+    n_bootstrap: int = 200,
+    random_state: int = 42,
+    scores_old: pd.Series | np.ndarray | None = None,
+    scores_new: pd.Series | np.ndarray | None = None,
+) -> dict[str, Any]:
+    """Cumulative/Dynamic IPCW Time-Dependent ROC suite."""
+    dur_arr = pd.Series(durations).to_numpy(dtype=float)
+    ev_arr = pd.Series(events).to_numpy(dtype=float)
+
+    is_comparison = False
+    if scores_old is not None and scores_new is not None:
+        is_comparison = True
+        s_old = pd.Series(scores_old).to_numpy(dtype=float)
+        s_new = pd.Series(scores_new).to_numpy(dtype=float)
+        valid = ~(np.isnan(dur_arr) | np.isnan(ev_arr) | np.isnan(s_old) | np.isnan(s_new))
+        dur_arr, ev_arr, s_old, s_new = dur_arr[valid], ev_arr[valid].astype(int), s_old[valid], s_new[valid]
+        s_arr = s_new
+    elif isinstance(scores, dict):
+        is_comparison = True
+        s_old = pd.Series(scores.get("old", scores.get("baseline"))).to_numpy(dtype=float)
+        s_new = pd.Series(scores.get("new", scores.get("updated"))).to_numpy(dtype=float)
+        valid = ~(np.isnan(dur_arr) | np.isnan(ev_arr) | np.isnan(s_old) | np.isnan(s_new))
+        dur_arr, ev_arr, s_old, s_new = dur_arr[valid], ev_arr[valid].astype(int), s_old[valid], s_new[valid]
+        s_arr = s_new
+    else:
+        if scores is None:
+            raise ValueError("Must provide scores or both scores_old and scores_new.")
+        s_arr = pd.Series(scores).to_numpy(dtype=float)
+        valid = ~(np.isnan(dur_arr) | np.isnan(ev_arr) | np.isnan(s_arr))
+        dur_arr, ev_arr, s_arr = dur_arr[valid], ev_arr[valid].astype(int), s_arr[valid]
+        s_old, s_new = None, None
+
+    if (dur_arr < 0).any():
+        raise ValueError("Time-dependent ROC durations must be non-negative (>= 0).")
+
+    if competing_event_code is None:
+        unique_ev = set(np.unique(ev_arr))
+        if not unique_ev.issubset({0, 1}):
+            raise ValueError(
+                "Event indicator must contain binary values (0 = censored, 1 = event)."
+            )
+
+    n_obs = len(dur_arr)
+    if n_obs < 4:
+        raise ValueError("Time-dependent ROC requires at least 4 valid observations.")
+    max_t = float(np.max(dur_arr)) if n_obs > 0 else 0.0
+
+    if time_horizons is None or len(time_horizons) == 0:
+        ev_times = dur_arr[ev_arr == 1]
+        time_horizons = [float(np.percentile(ev_times, p)) for p in [25, 50, 75]] if len(ev_times) >= 3 else [max_t * 0.5]
+    sorted_horizons = sorted([float(h) for h in time_horizons])
+    if any(h <= 0 for h in sorted_horizons):
+        raise ValueError("Time horizons must contain positive follow-up times (> 0).")
+
+    kmc = KaplanMeierFitter()
+    kmc.fit(dur_arr, event_observed=(ev_arr == 0).astype(int))
+    g_dur = np.clip(kmc.survival_function_at_times(dur_arr).values.flatten(), 1e-3, 1.0)
+
+    results_by_horizon = {}
+    comparison_by_horizon = {} if is_comparison else None
+
+    boot_indices = []
+    if n_bootstrap > 0:
+        rng = np.random.default_rng(random_state)
+        boot_indices = [rng.choice(n_obs, size=n_obs, replace=True) for _ in range(n_bootstrap)]
+
+    for h in sorted_horizons:
+        g_h = max(float(kmc.survival_function_at_times(h).iloc[0]), 1e-3)
+        res_h = _calc_ipcw_roc_point(dur_arr, ev_arr, s_arr, h, g_dur, g_h, competing_event_code)
+
+        is_sparse = (h > max_t) or (res_h["n_cases"] < 5) or (res_h["n_controls"] < 5)
+        res_h["warning"] = "Sparse risk set or beyond follow-up" if is_sparse else None
+
+        if is_sparse:
+            res_h["ci_lower"] = float("nan")
+            res_h["ci_upper"] = float("nan")
+            res_h["se"] = float("nan")
+        else:
+            if n_bootstrap > 0:
+                boot_aucs = []
+                for b_idx in boot_indices:
+                    d_b, e_b, s_b = dur_arr[b_idx], ev_arr[b_idx], s_arr[b_idx]
+                    km_b = KaplanMeierFitter().fit(d_b, event_observed=(e_b == 0).astype(int))
+                    g_dur_b = np.clip(km_b.survival_function_at_times(d_b).values.flatten(), 1e-3, 1.0)
+                    g_h_b = max(float(km_b.survival_function_at_times(h).iloc[0]), 1e-3)
+                    b_res = _calc_ipcw_roc_point(d_b, e_b, s_b, h, g_dur_b, g_h_b, competing_event_code)
+                    if not np.isnan(b_res["auroc"]):
+                        boot_aucs.append(b_res["auroc"])
+                if len(boot_aucs) >= 10:
+                    res_h["ci_lower"] = float(np.percentile(boot_aucs, 2.5))
+                    res_h["ci_upper"] = float(np.percentile(boot_aucs, 97.5))
+                    res_h["se"] = float(np.std(boot_aucs, ddof=1))
+                else:
+                    res_h["ci_lower"] = float("nan")
+                    res_h["ci_upper"] = float("nan")
+                    res_h["se"] = float("nan")
+            else:
+                auc_val = res_h["auroc"]
+                q1 = auc_val / (2.0 - auc_val)
+                q2 = 2.0 * auc_val**2 / (1.0 + auc_val)
+                var_h = (
+                    auc_val * (1.0 - auc_val)
+                    + (res_h["n_cases"] - 1) * (q1 - auc_val**2)
+                    + (res_h["n_controls"] - 1) * (q2 - auc_val**2)
+                ) / (res_h["n_cases"] * res_h["n_controls"])
+                se_h = float(np.sqrt(max(0.0, var_h)))
+                res_h["se"] = se_h
+                res_h["ci_lower"] = max(0.0, float(auc_val - 1.96 * se_h))
+                res_h["ci_upper"] = min(1.0, float(auc_val + 1.96 * se_h))
+
+        results_by_horizon[h] = res_h
+
+        if is_comparison and s_old is not None and s_new is not None:
+            res_old_h = _calc_ipcw_roc_point(dur_arr, ev_arr, s_old, h, g_dur, g_h, competing_event_code)
+            delta = res_h["auroc"] - res_old_h["auroc"]
+            comp_entry = {
+                "horizon": h,
+                "auroc_old": res_old_h["auroc"],
+                "auroc_new": res_h["auroc"],
+                "delta_auroc": delta,
+                "ci_lower": float("nan"),
+                "ci_upper": float("nan"),
+                "se": float("nan"),
+                "p_value": float("nan"),
+            }
+            if not is_sparse and n_bootstrap > 0:
+                boot_deltas = []
+                for b_idx in boot_indices:
+                    d_b, e_b = dur_arr[b_idx], ev_arr[b_idx]
+                    km_b = KaplanMeierFitter().fit(d_b, event_observed=(e_b == 0).astype(int))
+                    g_dur_b = np.clip(km_b.survival_function_at_times(d_b).values.flatten(), 1e-3, 1.0)
+                    g_h_b = max(float(km_b.survival_function_at_times(h).iloc[0]), 1e-3)
+                    bo = _calc_ipcw_roc_point(d_b, e_b, s_old[b_idx], h, g_dur_b, g_h_b, competing_event_code)
+                    bn = _calc_ipcw_roc_point(d_b, e_b, s_new[b_idx], h, g_dur_b, g_h_b, competing_event_code)
+                    if not (np.isnan(bo["auroc"]) or np.isnan(bn["auroc"])):
+                        boot_deltas.append(bn["auroc"] - bo["auroc"])
+                if len(boot_deltas) >= 10:
+                    se_d = float(np.std(boot_deltas, ddof=1))
+                    comp_entry["se"] = se_d
+                    comp_entry["ci_lower"] = float(np.percentile(boot_deltas, 2.5))
+                    comp_entry["ci_upper"] = float(np.percentile(boot_deltas, 97.5))
+                    z_d = float(delta / se_d) if se_d > 0 else 0.0
+                    comp_entry["p_value"] = float(2.0 * (1.0 - stats.norm.cdf(abs(z_d))))
+            comparison_by_horizon[h] = comp_entry
+
+    trajectory = {
+        "horizons": sorted_horizons,
+        "auroc": [results_by_horizon[h]["auroc"] for h in sorted_horizons],
+        "ci_lower": [results_by_horizon[h]["ci_lower"] for h in sorted_horizons],
+        "ci_upper": [results_by_horizon[h]["ci_upper"] for h in sorted_horizons],
+    }
+
+    out = {
+        "time_horizons": sorted_horizons,
+        "results_by_horizon": results_by_horizon,
+        "trajectory": trajectory,
+    }
+    if is_comparison:
+        out["comparison"] = comparison_by_horizon
+    return out
+```
+
+

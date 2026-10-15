@@ -51,6 +51,9 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
 | **Cause-Specific Hazard Ratio** | `cshr` | Cox model treating competing events as right-censored at failure time, estimating the instantaneous relative event rate among subjects currently event-free (etiological inference). |
 | **Fine-Gray Hazard Ratio** | `fine_gray_shr` | Subdistribution hazard model maintaining subjects experiencing competing events in the risk set with decaying IPCW weights, estimating overall cumulative incidence (prognostic inference). |
 | **Probability Conservation** | `cif_conservation` | Mandatory audit ensuring the sum of all cause-specific CIFs plus overall event-free survival probability equals unity ($\sum_k \text{CIF}_k(t) + \hat{S}(t) \approx 1.0$) across all follow-up horizons. |
+| **Net Reclassification Improvement** | `nri` | Pencina et al. (2008, 2011) reclassification metric measuring net upward movement in events and net downward movement in non-events; supports both Category-Free (continuous) and Categorical NRI with $K \times K$ contingency matrices. |
+| **Integrated Discrimination Improvement** | `idi` | Difference in discrimination slopes between updated and baseline risk models ($\text{IDI} = (\bar{p}_{\text{new}, e} - \bar{p}_{\text{old}, e}) - (\bar{p}_{\text{new}, ne} - \bar{p}_{\text{old}, ne})$). |
+| **Time-Dependent ROC** | `time_dependent_roc` | Cumulative/Dynamic IPCW ROC estimator (Uno et al., 2007; Heagerty et al., 2000) evaluating longitudinal discrimination trajectories ($\text{AUROC}(t)$) across milestone horizons under right-censoring. |
 
 ---
 

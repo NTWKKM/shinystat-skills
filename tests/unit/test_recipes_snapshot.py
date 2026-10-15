@@ -230,6 +230,38 @@ def run_all_recipes(ns: dict[str, Any]) -> dict[str, Any]:
         "regression_results": _serialize_val(r15_reg),
     }
 
+    # Recipe 16: Diagnostic Reclassification (Continuous & Categorical NRI + IDI)
+    p_old = 1.0 / (1.0 + np.exp(-(-2.0 + 0.03 * df["age"])))
+    p_new = pred_probs
+    r16_res = ns["compute_reclassification_metrics"](
+        y_true=gold.to_numpy(),
+        p_old=p_old.to_numpy(),
+        p_new=p_new.to_numpy(),
+        thresholds=[0.1, 0.3],
+        n_bootstrap=0,
+    )
+    results["recipe_16_reclassification"] = {
+        "nri_continuous": _serialize_val(r16_res["nri_continuous"]),
+        "nri_categorical": _serialize_val(r16_res["nri_categorical"]),
+        "idi": _serialize_val(r16_res["idi"]),
+    }
+
+    # Recipe 17: Time-Dependent ROC (Cumulative/Dynamic IPCW AUROC(t))
+    r17_res = ns["compute_time_dependent_roc"](
+        durations=df["time_to_event"].to_numpy(),
+        events=df["event_death"].to_numpy(),
+        scores=df["age"].to_numpy(),
+        time_horizons=[30.0, 90.0, 180.0],
+        n_bootstrap=0,
+    )
+    results["recipe_17_time_dependent_roc"] = {
+        "horizons": _serialize_val(r17_res["time_horizons"]),
+        "trajectory": _serialize_val(r17_res["trajectory"]),
+        "auroc_30": _serialize_val(r17_res["results_by_horizon"][30.0]["auroc"]),
+        "auroc_90": _serialize_val(r17_res["results_by_horizon"][90.0]["auroc"]),
+        "auroc_180": _serialize_val(r17_res["results_by_horizon"][180.0]["auroc"]),
+    }
+
     return results
 
 
@@ -299,3 +331,19 @@ def test_capture_or_verify_baseline_snapshot():
         pd.DataFrame({"a": [1.0, 2.0, np.nan], "b": [np.nan, 2.0, 3.0]}), ["a", "b"]
     )
     assert "missingness_summary" in r8_raw
+
+    r16_raw = ns["compute_reclassification_metrics"](
+        [1, 1, 0, 0], [0.8, 0.7, 0.3, 0.2], [0.9, 0.8, 0.2, 0.1], thresholds=[0.5]
+    )
+    assert "nri_continuous" in r16_raw
+    assert "nri_categorical" in r16_raw
+    assert "idi" in r16_raw
+
+    r17_raw = ns["compute_time_dependent_roc"](
+        [10.0, 20.0, 30.0, 40.0],
+        [1, 0, 1, 0],
+        [0.8, 0.2, 0.7, 0.3],
+        time_horizons=[25.0],
+    )
+    assert "trajectory" in r17_raw
+    assert "results_by_horizon" in r17_raw
