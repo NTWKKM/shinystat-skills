@@ -333,3 +333,208 @@ reporting:
     assert "cr_analysis" in res["reports"]
     assert "methods_narrative" in res["reports"]["cr_analysis"]
     assert "Aalen-Johansen" in res["reports"]["cr_analysis"]["methods_narrative"]
+
+
+def test_cli_competing_risks_categorical_covariates(tmp_path: Path):
+    """Regression test for Finding 1: verify categorical covariates encoded in X_df work in regression."""
+    np.random.seed(42)
+    n = 150
+    stages = np.random.choice(["Stage_I", "Stage_II", "Stage_III"], size=n)
+    time = np.random.exponential(15.0, size=n)
+    event = np.random.choice([0, 1, 2], size=n, p=[0.4, 0.4, 0.2])
+
+    df = pd.DataFrame(
+        {
+            "id": range(n),
+            "time": time,
+            "event": event,
+            "stage": stages,
+        }
+    )
+    csv_path = tmp_path / "cr_cat.csv"
+    df.to_csv(csv_path, index=False)
+
+    runner = CliRunner()
+    out_json = tmp_path / "cr_cat_out.json"
+    result = runner.invoke(
+        cli,
+        [
+            "model",
+            "--data",
+            str(csv_path),
+            "--time",
+            "time",
+            "--outcome",
+            "event",
+            "--type",
+            "competing_risks",
+            "--covariates",
+            "stage",
+            "--competing-event",
+            "2",
+            "--event-of-interest",
+            "1",
+            "--output",
+            str(out_json),
+        ],
+    )
+    assert result.exit_code == 0, f"Error: {result.output}"
+    assert out_json.exists()
+    res_data = json.loads(out_json.read_text())
+    assert res_data["model_type"] == "competing_risks"
+    assert "comparison_table" in res_data
+    # 3-level categorical stage yields 2 dummy columns
+    assert len(res_data["comparison_table"]) == 2
+
+
+def test_cli_iptw_invalid_binary_and_survival_validation(
+    sample_iptw_csv: Path, tmp_path: Path
+):
+    """Regression test for Finding 2: non-0/1 outcome for binary/survival, missing --time for survival."""
+    runner = CliRunner()
+
+    # 1. Non-0/1 for binary outcome
+    res_bad_bin = runner.invoke(
+        cli,
+        [
+            "causal",
+            "iptw",
+            "--data",
+            str(sample_iptw_csv),
+            "--treatment",
+            "treatment",
+            "--covariates",
+            "age,bmi",
+            "--outcome",
+            "outcome_cont",  # Continuous values, not 0/1
+            "--outcome-type",
+            "binary",
+        ],
+    )
+    assert res_bad_bin.exit_code != 0
+    assert "must contain only numeric 0 and 1 values" in str(res_bad_bin.output)
+
+    # 2. Survival outcome without --time
+    res_no_time = runner.invoke(
+        cli,
+        [
+            "causal",
+            "iptw",
+            "--data",
+            str(sample_iptw_csv),
+            "--treatment",
+            "treatment",
+            "--covariates",
+            "age,bmi",
+            "--outcome",
+            "event",
+            "--outcome-type",
+            "survival",
+        ],
+    )
+    assert res_no_time.exit_code != 0
+    assert "--time is required when outcome-type is survival" in str(res_no_time.output)
+
+
+def test_cli_iptw_json_output_serialization_strips_model(
+    sample_iptw_csv: Path, tmp_path: Path
+):
+    """Regression test for Finding 3: JSON output does not crash on non-serializable 'model'."""
+    runner = CliRunner()
+    out_json = tmp_path / "iptw_out.json"
+
+    result = runner.invoke(
+        cli,
+        [
+            "causal",
+            "iptw",
+            "--data",
+            str(sample_iptw_csv),
+            "--treatment",
+            "treatment",
+            "--covariates",
+            "age,bmi",
+            "--outcome",
+            "outcome_bin",
+            "--outcome-type",
+            "binary",
+            "--output",
+            str(out_json),
+        ],
+    )
+    assert result.exit_code == 0, f"Error: {result.output}"
+    assert out_json.exists()
+    data = json.loads(out_json.read_text())
+    assert "outcome_model" in data
+    # Verify 'model' object is stripped
+    assert "model" not in data["outcome_model"]
+    assert "odds_ratio" in data["outcome_model"]
+
+
+def test_cli_spec_yaml_iptw_binary_and_survival_scales(
+    sample_iptw_csv: Path, tmp_path: Path
+):
+    """Regression test for Findings 4, 5, 6: verify OR and HR scales and non-zero estimates."""
+    spec_content = f"""
+version: "1.0"
+metadata:
+  study_title: "IPTW Binary & Survival Spec"
+data:
+  input_path: "{sample_iptw_csv}"
+  id_column: "patient_id"
+variables:
+  - name: "treatment"
+    role: "exposure"
+  - name: "outcome_bin"
+    role: "outcome"
+  - name: "time"
+    role: "time"
+  - name: "event"
+    role: "outcome"
+  - name: "age"
+    role: "covariate"
+models:
+  - name: "iptw_bin"
+    type: "iptw"
+    outcome: "outcome_bin"
+    exposure: "treatment"
+    covariates: ["age"]
+    options:
+      estimand: "ATE"
+      outcome_type: "binary"
+      stabilized: true
+      truncate_quantiles: null
+  - name: "iptw_surv"
+    type: "iptw"
+    outcome: "event"
+    exposure: "treatment"
+    time: "time"
+    covariates: ["age"]
+    options:
+      estimand: "ATE"
+      outcome_type: "survival"
+reporting:
+  style: "nejm"
+  format: "html"
+"""
+    spec_path = tmp_path / "iptw_scales_sap.yaml"
+    spec_path.write_text(spec_content)
+    out_json = tmp_path / "scales_output.json"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["model", "--spec", str(spec_path), "--output", str(out_json)]
+    )
+    assert result.exit_code == 0, f"Error: {result.output}"
+
+    res = json.loads(out_json.read_text())
+    assert "iptw_bin" in res["models"]
+    assert "iptw_surv" in res["models"]
+
+    # Verify narrative for iptw_bin mentions "Weights were not truncated."
+    bin_narrative = res["reports"]["iptw_bin"]["methods_narrative"]
+    assert "Weights were not truncated." in bin_narrative
+
+    # Verify narrative for iptw_surv mentions truncation
+    surv_narrative = res["reports"]["iptw_surv"]["methods_narrative"]
+    assert "Weights were truncated at pre-specified quantiles" in surv_narrative

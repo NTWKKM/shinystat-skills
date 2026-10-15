@@ -341,6 +341,7 @@ class AnalysisPlan:
                     duration_col=model_spec.time,
                 )
                 fit_res["diagnostics"] = iptw_res.diagnostics
+                fit_res["effective_sample_size"] = iptw_res.effective_sample_size
                 bal_df = compute_balance_table(
                     iptw_res.df,
                     treatment=exp_col,
@@ -349,30 +350,51 @@ class AnalysisPlan:
                 )
                 fit_res["balance_table"] = bal_df.to_dict(orient="records")
 
-                scale = (
-                    "Beta"
-                    if out_type == "continuous"
-                    else ("OR" if out_type == "binary" else "HR")
-                )
-                point_est = float(
-                    fit_res.get(
-                        "coef",
-                        fit_res.get("odds_ratio", fit_res.get("hazard_ratio", 0.0)),
-                    )
-                )
-                ci_lo = float(
-                    fit_res.get(
-                        "ci_lower",
-                        fit_res.get("or_ci_lower", fit_res.get("hr_ci_lower", 0.0)),
-                    )
-                )
-                ci_hi = float(
-                    fit_res.get(
-                        "ci_upper",
-                        fit_res.get("or_ci_upper", fit_res.get("hr_ci_upper", 0.0)),
-                    )
-                )
-                p_v = float(fit_res.get("p_value", 0.0))
+                if out_type == "binary":
+                    scale = "OR"
+                    if (
+                        "odds_ratio" not in fit_res
+                        or "or_ci_lower" not in fit_res
+                        or "or_ci_upper" not in fit_res
+                    ):
+                        raise ValueError(
+                            f"Missing required odds ratio estimate keys in fit_res: {fit_res.keys()}"
+                        )
+                    point_est = float(fit_res["odds_ratio"])
+                    ci_lo = float(fit_res["or_ci_lower"])
+                    ci_hi = float(fit_res["or_ci_upper"])
+                elif out_type == "survival":
+                    scale = "HR"
+                    if (
+                        "hazard_ratio" not in fit_res
+                        or "hr_ci_lower" not in fit_res
+                        or "hr_ci_upper" not in fit_res
+                    ):
+                        raise ValueError(
+                            f"Missing required hazard ratio estimate keys in fit_res: {fit_res.keys()}"
+                        )
+                    point_est = float(fit_res["hazard_ratio"])
+                    ci_lo = float(fit_res["hr_ci_lower"])
+                    ci_hi = float(fit_res["hr_ci_upper"])
+                elif out_type == "continuous":
+                    scale = "Beta"
+                    if (
+                        "coef" not in fit_res
+                        or "ci_lower" not in fit_res
+                        or "ci_upper" not in fit_res
+                    ):
+                        raise ValueError(
+                            f"Missing required coefficient estimate keys in fit_res: {fit_res.keys()}"
+                        )
+                    point_est = float(fit_res["coef"])
+                    ci_lo = float(fit_res["ci_lower"])
+                    ci_hi = float(fit_res["ci_upper"])
+                else:
+                    raise ValueError(f"Unsupported outcome_type: {out_type}")
+
+                if "p_value" not in fit_res:
+                    raise ValueError("Missing required 'p_value' in fit_res")
+                p_v = float(fit_res["p_value"])
 
                 est_rows.append(
                     Estimate(
@@ -788,13 +810,23 @@ class AnalysisPlan:
                         ]
                         if smd_vals:
                             max_smd_val = max(smd_vals)
+                    is_stabilized = bool(model_spec.options.get("stabilized", True))
+                    t_quantiles = model_spec.options.get(
+                        "truncate_quantiles", (0.01, 0.99)
+                    )
+                    is_truncated = t_quantiles is not None
                     narrative = generate_iptw_narrative(
                         estimand=model_spec.options.get("estimand", "ATE"),
                         exposure=model_spec.exposure,
                         outcome=model_spec.outcome,
                         covariates=model_spec.covariates,
-                        n_eff=fit_res.get("diagnostics", {}).get("n_eff"),
+                        n_eff=fit_res.get("effective_sample_size")
+                        or fit_res.get("diagnostics", {})
+                        .get("overall", {})
+                        .get("n_eff"),
                         max_smd=max_smd_val,
+                        stabilized=is_stabilized,
+                        truncated=is_truncated,
                         diagnostics=fit_res.get("diagnostics"),
                     )
                 else:

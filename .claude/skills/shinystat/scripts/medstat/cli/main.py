@@ -762,8 +762,11 @@ def model_cmd(
             event_of_interest=ev_int,
             competing_event=comp_ev,
         )
+        reg_df = X_df.copy()
+        reg_df[t_col] = dur_vals
+        reg_df[ev_col] = ev_vals
         reg_res = fit_competing_risks_regression(
-            df=df,
+            df=reg_df,
             duration_col=t_col,
             event_col=ev_col,
             covariates=feature_names,
@@ -1782,6 +1785,24 @@ def iptw_cmd(
             else:
                 eff_type = "continuous"
 
+        if eff_type in ("binary", "survival"):
+            y_vals = pd.to_numeric(df[outcome].dropna(), errors="coerce")
+            unique_vals = set(y_vals.dropna().unique())
+            if y_vals.isna().any() or not unique_vals.issubset({0, 1, 0.0, 1.0}):
+                raise click.ClickException(
+                    f"Outcome column '{outcome}' for {eff_type} model must contain only numeric 0 and 1 values."
+                )
+
+        if eff_type == "survival":
+            if not time_col:
+                raise click.UsageError(
+                    "--time is required when outcome-type is survival."
+                )
+            if time_col not in df.columns:
+                raise click.ClickException(
+                    f"Duration column '{time_col}' not found in dataset."
+                )
+
         outcome_res = fit_iptw_outcome_model(
             weighted_df,
             outcome_col=outcome,
@@ -1846,9 +1867,12 @@ def iptw_cmd(
                 "balance_table": bal_table.to_dict(orient="records"),
             }
             if outcome_res:
-                summary_dict["outcome_model"] = outcome_res
+                summary_dict["outcome_model"] = {
+                    k: v for k, v in outcome_res.items() if k != "model"
+                }
+            sanitized_dict = _sanitize_for_json(summary_dict)
             with open(output, "w") as f:
-                json.dump(summary_dict, f, indent=2, default=str)
+                json.dump(sanitized_dict, f, indent=2, allow_nan=False)
             click.echo(f"IPTW analysis saved to: {output}")
         else:
             weighted_df.to_csv(output, index=False)
@@ -1862,8 +1886,11 @@ def iptw_cmd(
             "effective_sample_size": res.effective_sample_size,
         }
         if outcome_res:
-            summary_dict["outcome_model"] = outcome_res
-        click.echo(json.dumps(summary_dict, indent=2, default=str))
+            summary_dict["outcome_model"] = {
+                k: v for k, v in outcome_res.items() if k != "model"
+            }
+        sanitized_dict = _sanitize_for_json(summary_dict)
+        click.echo(json.dumps(sanitized_dict, indent=2, allow_nan=False))
 
 
 # ==============================================================================

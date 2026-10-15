@@ -354,6 +354,7 @@ def generate_iptw_narrative(
     n_eff: dict[str, float] | float | None = None,
     max_smd: float | None = None,
     stabilized: bool = True,
+    truncated: bool = True,
     diagnostics: dict[str, Any] | None = None,
     alpha: float = 0.05,
     software_name: str = "medstat-core",
@@ -389,11 +390,25 @@ def generate_iptw_narrative(
     if stabilized and estimand_u != "ATO":
         p1 += " Stabilized weights were computed to preserve the nominal sample size and prevent variance inflation."
 
+    if truncated and estimand_u != "ATO":
+        p1 += " Weights were truncated at pre-specified quantiles to mitigate extreme weights."
+    elif not truncated and estimand_u != "ATO":
+        p1 += " Weights were not truncated."
+
     if diagnostics:
-        ext_n = diagnostics.get("extreme_weights_gt_10", 0)
+        ext_n = 0
+        if "overall" in diagnostics and isinstance(diagnostics["overall"], dict):
+            ext_n = diagnostics["overall"].get("n_extreme_gt_10", 0)
+        else:
+            ext_n = diagnostics.get("extreme_weights_gt_10", 0)
         if ext_n > 0:
-            p1 += f" A total of {ext_n} observations exhibited extreme weights (> 10.0), which were truncated at pre-specified quantiles."
-        pos_n = diagnostics.get("positivity_violations", 0)
+            p1 += (
+                f" A total of {ext_n} observations exhibited extreme weights (> 10.0)."
+            )
+
+        pos_n = diagnostics.get(
+            "extreme_ps_count", diagnostics.get("positivity_violations", 0)
+        )
         if pos_n > 0:
             p1 += f" Positivity inspection identified {pos_n} subjects with near-deterministic propensity scores (< 0.05 or > 0.95)."
 

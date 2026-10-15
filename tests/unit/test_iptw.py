@@ -14,6 +14,7 @@ from medstat.causal.balance import calculate_smd, compute_balance_table
 from medstat.causal.iptw import compute_iptw_weights, fit_iptw_outcome_model
 from medstat.figures.balance import plot_love
 from medstat.figures.html.balance import plot_dual_love
+from medstat.reporting.narrative import generate_iptw_narrative
 from medstat.reporting.tables import render_balance_table
 
 
@@ -347,3 +348,47 @@ def test_render_balance_table_consistent_columns():
     html = render_balance_table("Balance Table", bal_data)
     assert "Post-Matching SMD" in html
     assert "IPTW Weighted SMD" in html
+
+
+def test_generate_iptw_narrative_truncated_and_diagnostics_schema():
+    # 1. Truncated True with extreme weights and positivity violations
+    diag = {
+        "overall": {"n_extreme_gt_10": 4, "n_eff": 180.5},
+        "extreme_ps_count": 6,
+    }
+    nar_trunc = generate_iptw_narrative(
+        estimand="ATE",
+        exposure="treatment",
+        outcome="mortality",
+        covariates=["age", "bmi"],
+        n_eff={"total": 180.5, "treated": 90.0, "control": 90.5},
+        max_smd=0.04,
+        stabilized=True,
+        truncated=True,
+        diagnostics=diag,
+    )
+    assert "Weights were truncated at pre-specified quantiles" in nar_trunc
+    assert "A total of 4 observations exhibited extreme weights (> 10.0)." in nar_trunc
+    assert "Positivity inspection identified 6 subjects" in nar_trunc
+    assert "N_eff = 180.5" in nar_trunc
+
+    # 2. Truncated False
+    nar_notrunc = generate_iptw_narrative(
+        estimand="ATE",
+        exposure="treatment",
+        outcome="mortality",
+        stabilized=True,
+        truncated=False,
+    )
+    assert "Weights were not truncated." in nar_notrunc
+
+    # 3. ATO (Overlap Weights) should not mention truncation
+    nar_ato = generate_iptw_narrative(
+        estimand="ATO",
+        exposure="treatment",
+        outcome="mortality",
+        stabilized=False,
+        truncated=False,
+    )
+    assert "Weights were not truncated" not in nar_ato
+    assert "Weights were truncated" not in nar_ato

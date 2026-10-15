@@ -151,13 +151,17 @@ res = plot_bland_altman(
 ### 7. Love Plot (`plot_love`)
 Visualizes covariate balance before and after Propensity Score Matching (PSM) or Inverse Probability of Treatment Weighting (IPTW).
 - **Features**: Absolute Standardized Mean Differences (SMD), Austin (2009) 0.10 threshold line, distinct markers supporting 2-way (Unadjusted vs Matched or Weighted) and 3-way balance comparison (Unadjusted vs Matched vs IPTW).
+- **Column Contract**:
+  - **2-Way Balance (PSM)**: Requires `'Variable'` (or `'Covariate'`), `'Pre_Match_SMD'` (or `'Unadjusted_SMD'`), and `'Post_Match_SMD'` (or `'Matched_SMD'`).
+  - **2-Way Balance (IPTW)**: Requires `'Variable'` (or `'Covariate'`), `'Pre_Match_SMD'` (or `'Unadjusted_SMD'`), and `'Weighted_SMD'` (or `'Post_Weight_SMD'`).
+  - **3-Way Balance (PSM vs IPTW)**: Requires `'Variable'`, `'Pre_Match_SMD'` (or `'Unadjusted_SMD'`), `'Post_Match_SMD'` (or `'Matched_SMD'`), and `'Weighted_SMD'` (or `'Post_Weight_SMD'`).
 - **Usage**:
 ```python
 from medstat.figures.balance import plot_love
 
 # 2-way or 3-way balance DataFrame
 res = plot_love(
-    love_data=love_df,  # Columns: ['Variable', 'Unadjusted_Abs_SMD', 'Matched_Abs_SMD', 'Weighted_Abs_SMD']
+    love_data=love_df,  # e.g., Columns: ['Variable', 'Unadjusted_SMD', 'Matched_SMD', 'Weighted_SMD']
     threshold=0.10,
     out_path="figures/love_plot.png",
     target="docx",
@@ -190,12 +194,13 @@ Automates pre-modeling and post-modeling diagnostic validation plots.
 ### 10. Cumulative Incidence Function (`plot_cif`)
 Visualizes non-parametric Aalen-Johansen CIF curves alongside Naive $1 - \text{Kaplan-Meier}$ overestimation audit.
 - **Features**: Event of interest CIF with Greenwood 95% confidence bands, competing risk CIF curves, and Naive $1 - \text{KM}$ curve illustrating bias when competing events are treated as independent censoring.
+- **Column Contract**: `cif_table` DataFrame must contain `'time'`, `'cif_primary'`, and `'cif_competing'` columns (with optional `'cif_primary_ci_lower'`, `'cif_primary_ci_upper'`, `'cif_competing_ci_lower'`, `'cif_competing_ci_upper'`, `'naive_1_minus_km'`).
 - **Usage**:
 ```python
-from medstat.figures.cif import plot_cif
+from medstat.figures.survival import plot_cif
 
 res = plot_cif(
-    cif_table=cif_df,  # Columns: ['time', 'cif_primary', 'cif_primary_ci_lower', 'cif_primary_ci_upper', 'cif_competing', 'naive_1_minus_km']
+    cif_table=cif_df,  # Columns: ['time', 'cif_primary', 'cif_competing', 'naive_1_minus_km']
     title="Cumulative Incidence of Primary Event vs Competing Risks",
     out_path="figures/cif_curves.png",
     target="docx",
