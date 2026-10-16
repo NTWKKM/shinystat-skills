@@ -10,8 +10,10 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 from click.testing import CliRunner
 from scipy.special import expit
+from sklearn.metrics import roc_auc_score
 
 from medstat.cli.main import cli
 from medstat.cli.spec import AnalysisPlan
@@ -211,8 +213,8 @@ models:
   - name: "recalibration_model"
     type: "recalibration"
     outcome: "outcome"
-    exposure: "p_pred"
     options:
+      p_recal: "p_pred"
       method: "logistic"
   - name: "logistic_with_p_pred_recal"
     type: "logistic"
@@ -251,7 +253,10 @@ reporting:
     assert "<table" in results["reports"]["validation_model"]["html_table"]
     assert "TRIPOD+AI" in results["reports"]["validation_model"]["methods_narrative"]
 
-    # Recalibration model checks (exposure: p_pred)
+    expected_auc = float(roc_auc_score(y, p))
+    expected_brier = float(np.mean((y - p) ** 2))
+
+    # Recalibration model checks (options: {p_recal: "p_pred"})
     assert "recalibration_model" in results["models"]
     recal_res = results["models"]["recalibration_model"]
     assert "recalibration_parameters" in recal_res
@@ -260,6 +265,9 @@ reporting:
     assert "p_orig" not in recal_res
     assert "recalibration_model" in results["reports"]
     assert "<table" in results["reports"]["recalibration_model"]["html_table"]
+    # Verify pre-calibration AUROC and Brier score against fixture ground-truth y and p
+    assert np.isclose(recal_res["pre"]["auroc"], expected_auc, atol=1e-5)
+    assert np.isclose(recal_res["pre"]["brier_score"], expected_brier, atol=1e-5)
 
     # Logistic model with options: {recalibration: true, p_pred: "p_pred"} (without p_recal)
     assert "logistic_with_p_pred_recal" in results["models"]
@@ -268,6 +276,11 @@ reporting:
     assert "recalibration_parameters" in log_recal["recalibration"]
     assert "pre" in log_recal["recalibration"]
     assert "post" in log_recal["recalibration"]
+    # Check that logistic_with_p_pred_recal preserves AUROC and has post-calibration slope near 1.0
+    log_recal_pre = log_recal["recalibration"]["pre"]
+    log_recal_post = log_recal["recalibration"]["post"]
+    assert np.isclose(log_recal_post["auroc"], log_recal_pre["auroc"], atol=1e-5)
+    assert np.isclose(log_recal_post["calibration_slope"], 1.0, atol=0.05)
 
     # Recalibration model via options: {p_pred: "p_pred"} (without p_recal, exposure, or covariates)
     assert "recalibration_via_options_p_pred" in results["models"]
@@ -275,3 +288,73 @@ reporting:
     assert "recalibration_parameters" in opt_recal
     assert "pre" in opt_recal
     assert "post" in opt_recal
+    # Compare standalone recalibration_via_options_p_pred pre/post metrics with recalibration_model
+    assert np.isclose(opt_recal["pre"]["auroc"], recal_res["pre"]["auroc"], atol=1e-6)
+    assert np.isclose(
+        opt_recal["pre"]["brier_score"], recal_res["pre"]["brier_score"], atol=1e-6
+    )
+    assert np.isclose(opt_recal["post"]["auroc"], recal_res["post"]["auroc"], atol=1e-6)
+    assert np.isclose(
+        opt_recal["post"]["brier_score"], recal_res["post"]["brier_score"], atol=1e-6
+    )
+    assert np.isclose(
+        opt_recal["post"]["calibration_slope"],
+        recal_res["post"]["calibration_slope"],
+        atol=1e-6,
+    )
+
+
+def test_spec_yaml_recalibration_validation_errors(tmp_path: Path):
+    """Verify ValueError with resolved column name when recalibration column is missing/invalid."""
+    df = pd.DataFrame(
+        {
+            "outcome": [0, 1] * 20,
+            "x1": np.ones(40),
+            "score": np.linspace(0.1, 0.9, 40),
+        }
+    )
+    csv_file = tmp_path / "err_data.csv"
+    df.to_csv(csv_file, index=False)
+
+    # 1. Logistic with recalibration enabled but unresolved p_recal/p_pred
+    yaml_log_missing = f"""
+metadata:
+  study_title: "Err"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "log_err"
+    type: "logistic"
+    outcome: "outcome"
+    covariates: ["x1"]
+    options:
+      recalibration: true
+"""
+    f1 = tmp_path / "p1.yaml"
+    f1.write_text(yaml_log_missing)
+    with pytest.raises(
+        ValueError,
+        match=r"Recalibration requires a valid predicted probability column.*Resolved 'None'",
+    ):
+        AnalysisPlan.from_yaml(str(f1)).execute()
+
+    # 2. Standalone recalibration with nonexistent column
+    yaml_recal_absent = f"""
+metadata:
+  study_title: "Err"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "recal_err"
+    type: "recalibration"
+    outcome: "outcome"
+    options:
+      p_recal: "nonexistent_prob_col"
+"""
+    f2 = tmp_path / "p2.yaml"
+    f2.write_text(yaml_recal_absent)
+    with pytest.raises(
+        ValueError,
+        match=r"Recalibration requires a valid predicted probability column.*Resolved 'nonexistent_prob_col'",
+    ):
+        AnalysisPlan.from_yaml(str(f2)).execute()

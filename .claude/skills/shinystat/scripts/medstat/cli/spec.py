@@ -644,21 +644,23 @@ class AnalysisPlan:
                     p_recal_col = model_spec.options.get(
                         "p_recal"
                     ) or model_spec.options.get("p_pred")
-                    if p_recal_col and p_recal_col in clean_df.columns:
-                        recal_m = model_spec.options.get(
-                            "recalibration_method", "logistic"
+                    if not p_recal_col or p_recal_col not in clean_df.columns:
+                        raise ValueError(
+                            f"Recalibration requires a valid predicted probability column via options 'p_recal' or 'p_pred'. "
+                            f"Resolved '{p_recal_col}', which was not found in dataset columns: {list(clean_df.columns)}."
                         )
-                        recal_res = recalibrate_prediction_model(
-                            y_true=clean_df[model_spec.outcome].values,
-                            p_pred=clean_df[p_recal_col].values,
-                            method=recal_m,
-                        )
-                        fit_res["recalibration"] = {
-                            k: v
-                            for k, v in recal_res.items()
-                            if not str(k).startswith("p_recal")
-                            and k not in ("y_true", "p_orig")
-                        }
+                    recal_m = model_spec.options.get("recalibration_method", "logistic")
+                    recal_res = recalibrate_prediction_model(
+                        y_true=clean_df[model_spec.outcome].values,
+                        p_pred=clean_df[p_recal_col].values,
+                        method=recal_m,
+                    )
+                    fit_res["recalibration"] = {
+                        k: v
+                        for k, v in recal_res.items()
+                        if not str(k).startswith("p_recal")
+                        and k not in ("y_true", "p_orig")
+                    }
 
             elif mod_type in (
                 "competing_risks",
@@ -986,15 +988,13 @@ class AnalysisPlan:
                 mod_type in ("diagnostic", "diag")
                 and model_spec.options.get("recalibration")
             ):
-                p_recal_col = (
-                    model_spec.options.get("p_recal")
-                    or model_spec.options.get("p_pred")
-                    or (model_spec.covariates[0] if model_spec.covariates else None)
-                    or model_spec.exposure
-                )
+                p_recal_col = model_spec.options.get(
+                    "p_recal"
+                ) or model_spec.options.get("p_pred")
                 if not p_recal_col or p_recal_col not in clean_df.columns:
                     raise ValueError(
-                        "Recalibration requires predicted probability column via p_recal/p_pred/covariates/exposure."
+                        f"Recalibration requires a valid predicted probability column via options 'p_recal' or 'p_pred'. "
+                        f"Resolved '{p_recal_col}', which was not found in dataset columns: {list(clean_df.columns)}."
                     )
                 recal_method = model_spec.options.get("method", "logistic")
                 fit_res_raw = recalibrate_prediction_model(
