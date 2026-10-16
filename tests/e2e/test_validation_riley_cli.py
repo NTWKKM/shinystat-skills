@@ -214,6 +214,21 @@ models:
     exposure: "p_pred"
     options:
       method: "logistic"
+  - name: "logistic_with_p_pred_recal"
+    type: "logistic"
+    outcome: "outcome"
+    exposure: "x1"
+    covariates: ["x2"]
+    options:
+      recalibration: true
+      p_pred: "p_pred"
+      recalibration_method: "logistic"
+  - name: "recalibration_via_options_p_pred"
+    type: "recalibration"
+    outcome: "outcome"
+    options:
+      p_pred: "p_pred"
+      method: "logistic"
 reporting:
   style: "nejm"
   format: "html"
@@ -236,7 +251,7 @@ reporting:
     assert "<table" in results["reports"]["validation_model"]["html_table"]
     assert "TRIPOD+AI" in results["reports"]["validation_model"]["methods_narrative"]
 
-    # Recalibration model checks
+    # Recalibration model checks (exposure: p_pred)
     assert "recalibration_model" in results["models"]
     recal_res = results["models"]["recalibration_model"]
     assert "recalibration_parameters" in recal_res
@@ -245,3 +260,18 @@ reporting:
     assert "p_orig" not in recal_res
     assert "recalibration_model" in results["reports"]
     assert "<table" in results["reports"]["recalibration_model"]["html_table"]
+
+    # Logistic model with options: {recalibration: true, p_pred: "p_pred"} (without p_recal)
+    assert "logistic_with_p_pred_recal" in results["models"]
+    log_recal = results["models"]["logistic_with_p_pred_recal"]
+    assert "recalibration" in log_recal
+    assert "recalibration_parameters" in log_recal["recalibration"]
+    assert "pre" in log_recal["recalibration"]
+    assert "post" in log_recal["recalibration"]
+
+    # Recalibration model via options: {p_pred: "p_pred"} (without p_recal, exposure, or covariates)
+    assert "recalibration_via_options_p_pred" in results["models"]
+    opt_recal = results["models"]["recalibration_via_options_p_pred"]
+    assert "recalibration_parameters" in opt_recal
+    assert "pre" in opt_recal
+    assert "post" in opt_recal

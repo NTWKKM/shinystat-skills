@@ -641,14 +641,16 @@ class AnalysisPlan:
                     fit_res["internal_validation"] = val_res
 
                 if model_spec.options.get("recalibration"):
-                    p_col = model_spec.options.get("p_recal")
-                    if p_col and p_col in clean_df.columns:
+                    p_recal_col = model_spec.options.get(
+                        "p_recal"
+                    ) or model_spec.options.get("p_pred")
+                    if p_recal_col and p_recal_col in clean_df.columns:
                         recal_m = model_spec.options.get(
                             "recalibration_method", "logistic"
                         )
                         recal_res = recalibrate_prediction_model(
                             y_true=clean_df[model_spec.outcome].values,
-                            p_pred=clean_df[p_col].values,
+                            p_pred=clean_df[p_recal_col].values,
                             method=recal_m,
                         )
                         fit_res["recalibration"] = {
@@ -984,20 +986,20 @@ class AnalysisPlan:
                 mod_type in ("diagnostic", "diag")
                 and model_spec.options.get("recalibration")
             ):
-                p_col = (
+                p_recal_col = (
                     model_spec.options.get("p_recal")
                     or model_spec.options.get("p_pred")
                     or (model_spec.covariates[0] if model_spec.covariates else None)
                     or model_spec.exposure
                 )
-                if not p_col or p_col not in clean_df.columns:
+                if not p_recal_col or p_recal_col not in clean_df.columns:
                     raise ValueError(
-                        "Recalibration requires predicted probability column via p_recal/covariates/exposure."
+                        "Recalibration requires predicted probability column via p_recal/p_pred/covariates/exposure."
                     )
                 recal_method = model_spec.options.get("method", "logistic")
                 fit_res_raw = recalibrate_prediction_model(
                     y_true=clean_df[model_spec.outcome].values,
-                    p_pred=clean_df[p_col].values,
+                    p_pred=clean_df[p_recal_col].values,
                     method=recal_method,
                 )
                 fit_res = {
