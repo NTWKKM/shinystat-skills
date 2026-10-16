@@ -197,10 +197,28 @@ def bootstrap_internal_validation(
     if norm_penalty not in ("none", "firth"):
         raise ValueError(f"Unsupported penalty '{penalty}'. Must be 'none' or 'firth'.")
 
-    X_orig = sub_df[predictors].to_numpy(dtype=float)
+    # Check for categorical / non-float predictor dtypes (object, string, category, bool)
+    pred_df = sub_df[predictors].copy()
+    has_categorical = any(
+        col_dtype.name in ("object", "category", "string", "bool")
+        or isinstance(col_dtype, pd.CategoricalDtype)
+        or pd.api.types.is_bool_dtype(col_dtype)
+        or pd.api.types.is_string_dtype(col_dtype)
+        or pd.api.types.is_object_dtype(col_dtype)
+        for col_dtype in [pred_df[c].dtype for c in predictors]
+    )
+
+    if has_categorical:
+        X_expanded = pd.get_dummies(pred_df, drop_first=True, dtype=float)
+        model_predictors = list(X_expanded.columns)
+        X_orig = X_expanded.to_numpy(dtype=float)
+    else:
+        model_predictors = list(predictors)
+        X_orig = pred_df.to_numpy(dtype=float)
+
     n_total = len(y_orig)
     n_events = int(np.sum(y_orig))
-    n_predictors = len(predictors)
+    n_predictors = len(model_predictors)
     epp = float(n_events / n_predictors) if n_predictors > 0 else 0.0
 
     # 1. Fit original model on full dataset
@@ -210,7 +228,7 @@ def bootstrap_internal_validation(
 
         try:
             firth_res = fit_firth_logistic(
-                y=y_orig, X=X_orig, feature_names=predictors, fit_intercept=True
+                y=y_orig, X=X_orig, feature_names=model_predictors, fit_intercept=True
             )
             orig_params = np.asarray(firth_res["model"].coef_).ravel()
         except Exception as e:
@@ -269,13 +287,20 @@ def bootstrap_internal_validation(
         if sum_boot == 0 or sum_boot == n_total:
             continue
 
+        # Skip samples with zero variance in any dummy/predictor column (singular design matrix)
+        if np.any(np.var(X_boot, axis=0) <= 1e-12):
+            continue
+
         X_boot_const = sm.add_constant(X_boot, has_constant="add")
         if norm_penalty == "firth":
             from medstat.models.firth import fit_firth_logistic
 
             try:
                 b_fit = fit_firth_logistic(
-                    y=y_boot, X=X_boot, feature_names=predictors, fit_intercept=True
+                    y=y_boot,
+                    X=X_boot,
+                    feature_names=model_predictors,
+                    fit_intercept=True,
                 )
                 b_params = np.asarray(b_fit["model"].coef_).ravel()
                 if np.any(np.isnan(b_params)) or np.any(np.abs(b_params) > 50.0):
@@ -385,7 +410,7 @@ def bootstrap_internal_validation(
 
     orig_coef_dict = {"Intercept": orig_intercept}
     shrunk_coef_dict = {"Intercept": reestimated_intercept}
-    for p_name, o_c, s_c in zip(predictors, orig_slopes, shrunk_slopes):
+    for p_name, o_c, s_c in zip(model_predictors, orig_slopes, shrunk_slopes):
         orig_coef_dict[p_name] = o_c
         shrunk_coef_dict[p_name] = s_c
 
@@ -523,90 +548,84 @@ def recalibrate_prediction_model(
     pre_metrics = _calc_suite(y_arr, p_clipped, lp_orig)
 
     norm_method = method.lower().strip()
-    if norm_method in ("calibration_in_the_large", "intercept_only"):
-        # Shift intercept only: logit(Y) = alpha + 1 * LP
-        alpha_recal = _compute_calibration_intercept_offset(y_arr, lp_orig)
-        beta_recal = 1.0
-        lp_recal = alpha_recal + lp_orig
-        p_recal = expit(lp_recal)
-        post_metrics = _calc_suite(y_arr, p_recal, lp_recal)
 
-        params_info = {
-            "method": "intercept_only",
-            "alpha": alpha_recal,
-            "beta": beta_recal,
-        }
+    # 1. Intercept-only recalibration
+    alpha_inter = _compute_calibration_intercept_offset(y_arr, lp_orig)
+    beta_inter = 1.0
+    lp_inter = alpha_inter + lp_orig
+    p_recal_int = expit(lp_inter)
 
-        return {
-            "method": "intercept_only",
-            "n": n,
-            "y_true": y_arr,
-            "p_orig": p_clipped,
-            "pre": pre_metrics,
-            "post": post_metrics,
-            "recalibration_parameters": params_info,
-            "p_recalibrated": p_recal,
-            "p_recalibrated_intercept_only": p_recal,
-        }
-
-    elif norm_method == "logistic":
-        # Logistic recalibration: logit(Y) = alpha + beta * LP
-        X = sm.add_constant(lp_orig)
-        try:
-            fit_mod = sm.Logit(y_arr, X).fit(disp=False)
-            alpha_recal = float(fit_mod.params[0])
-            beta_recal = float(fit_mod.params[1])
-            alpha_ci = [float(c) for c in fit_mod.conf_int()[0]]
-            beta_ci = [float(c) for c in fit_mod.conf_int()[1]]
-            alpha_p = float(fit_mod.pvalues[0])
-            beta_p = float(fit_mod.pvalues[1])
-        except Exception as e:
-            raise RuntimeError(
-                f"Logistic recalibration model failed to converge: {e}"
-            ) from e
-
-        lp_recal = alpha_recal + beta_recal * lp_orig
-        p_recal = expit(lp_recal)
-        post_metrics = _calc_suite(y_arr, p_recal, lp_recal)
-
-        params_info = {
-            "method": "logistic",
-            "alpha": alpha_recal,
-            "alpha_ci": alpha_ci,
-            "alpha_pvalue": alpha_p,
-            "beta": beta_recal,
-            "beta_ci": beta_ci,
-            "beta_pvalue": beta_p,
-        }
-
-        return {
-            "method": "logistic",
-            "n": n,
-            "y_true": y_arr,
-            "p_orig": p_clipped,
-            "pre": pre_metrics,
-            "post": post_metrics,
-            "recalibration_parameters": params_info,
-            "p_recalibrated": p_recal,
-            "p_recalibrated_logistic": p_recal,
-        }
-
-    elif norm_method == "both":
-        # Intercept only
-        alpha_inter = _compute_calibration_intercept_offset(y_arr, lp_orig)
-        lp_inter = alpha_inter + lp_orig
-        p_inter = expit(lp_inter)
-        post_inter = _calc_suite(y_arr, p_inter, lp_inter)
-
-        # Logistic
-        X = sm.add_constant(lp_orig)
+    # 2. Logistic recalibration
+    X = sm.add_constant(lp_orig)
+    try:
         fit_mod = sm.Logit(y_arr, X).fit(disp=False)
         alpha_log = float(fit_mod.params[0])
         beta_log = float(fit_mod.params[1])
+        alpha_ci = [float(c) for c in fit_mod.conf_int()[0]]
+        beta_ci = [float(c) for c in fit_mod.conf_int()[1]]
+        alpha_p = float(fit_mod.pvalues[0])
+        beta_p = float(fit_mod.pvalues[1])
         lp_log = alpha_log + beta_log * lp_orig
-        p_log = expit(lp_log)
-        post_log = _calc_suite(y_arr, p_log, lp_log)
+        p_recal_log = expit(lp_log)
+    except Exception as e:
+        if norm_method in ("logistic", "both"):
+            raise RuntimeError(
+                f"Logistic recalibration model failed to converge: {e}"
+            ) from e
+        alpha_log = alpha_inter
+        beta_log = 1.0
+        alpha_ci = [alpha_inter, alpha_inter]
+        beta_ci = [1.0, 1.0]
+        alpha_p = 1.0
+        beta_p = 1.0
+        lp_log = lp_inter
+        p_recal_log = p_recal_int
 
+    if norm_method in ("calibration_in_the_large", "intercept_only"):
+        post_metrics = _calc_suite(y_arr, p_recal_int, lp_inter)
+        params_info = {
+            "method": "intercept_only",
+            "alpha": alpha_inter,
+            "beta": beta_inter,
+        }
+        return {
+            "method": "intercept_only",
+            "n": n,
+            "y_true": y_arr,
+            "p_orig": p_clipped,
+            "pre": pre_metrics,
+            "post": post_metrics,
+            "recalibration_parameters": params_info,
+            "p_recalibrated": p_recal_int,
+            "p_recalibrated_intercept_only": p_recal_int,
+            "p_recalibrated_logistic": p_recal_log,
+        }
+    elif norm_method == "logistic":
+        post_metrics = _calc_suite(y_arr, p_recal_log, lp_log)
+        params_info = {
+            "method": "logistic",
+            "alpha": alpha_log,
+            "alpha_ci": alpha_ci,
+            "alpha_pvalue": alpha_p,
+            "beta": beta_log,
+            "beta_ci": beta_ci,
+            "beta_pvalue": beta_p,
+        }
+        return {
+            "method": "logistic",
+            "n": n,
+            "y_true": y_arr,
+            "p_orig": p_clipped,
+            "pre": pre_metrics,
+            "post": post_metrics,
+            "recalibration_parameters": params_info,
+            "p_recalibrated": p_recal_log,
+            "p_recalibrated_intercept_only": p_recal_int,
+            "p_recalibrated_logistic": p_recal_log,
+        }
+    elif norm_method == "both":
+        post_inter = _calc_suite(y_arr, p_recal_int, lp_inter)
+        post_log = _calc_suite(y_arr, p_recal_log, lp_log)
         return {
             "method": "both",
             "n": n,
@@ -622,13 +641,13 @@ def recalibrate_prediction_model(
             },
             "parameters_logistic": {
                 "alpha": alpha_log,
-                "alpha_ci": [float(c) for c in fit_mod.conf_int()[0]],
+                "alpha_ci": alpha_ci,
                 "beta": beta_log,
-                "beta_ci": [float(c) for c in fit_mod.conf_int()[1]],
+                "beta_ci": beta_ci,
             },
-            "p_recalibrated": p_log,
-            "p_recalibrated_intercept_only": p_inter,
-            "p_recalibrated_logistic": p_log,
+            "p_recalibrated": p_recal_log,
+            "p_recalibrated_intercept_only": p_recal_int,
+            "p_recalibrated_logistic": p_recal_log,
         }
     else:
         raise ValueError(

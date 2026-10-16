@@ -3596,10 +3596,29 @@ def bootstrap_internal_validation(
     cols = [outcome] + list(predictors)
     sub_df = df[cols].dropna()
     y_orig = sub_df[outcome].to_numpy(dtype=float)
-    X_orig = sub_df[predictors].to_numpy(dtype=float)
+
+    # Check for categorical / non-float predictor dtypes (object, string, category, bool)
+    pred_df = sub_df[predictors].copy()
+    has_categorical = any(
+        col_dtype.name in ("object", "category", "string", "bool")
+        or isinstance(col_dtype, pd.CategoricalDtype)
+        or pd.api.types.is_bool_dtype(col_dtype)
+        or pd.api.types.is_string_dtype(col_dtype)
+        or pd.api.types.is_object_dtype(col_dtype)
+        for col_dtype in [pred_df[c].dtype for c in predictors]
+    )
+
+    if has_categorical:
+        X_expanded = pd.get_dummies(pred_df, drop_first=True, dtype=float)
+        model_predictors = list(X_expanded.columns)
+        X_orig = X_expanded.to_numpy(dtype=float)
+    else:
+        model_predictors = list(predictors)
+        X_orig = pred_df.to_numpy(dtype=float)
+
     n_total = len(y_orig)
     n_events = int(np.sum(y_orig))
-    n_predictors = len(predictors)
+    n_predictors = len(model_predictors)
     epp = float(n_events / n_predictors) if n_predictors > 0 else 0.0
 
     # 1. Fit initial model
@@ -3683,6 +3702,9 @@ def bootstrap_internal_validation(
         X_b = X_orig[boot_idx]
         if len(np.unique(y_b)) < 2:
             continue
+        # Skip samples with zero variance in any dummy/predictor column
+        if np.any(np.var(X_b, axis=0) <= 1e-12):
+            continue
         X_b_const = sm.add_constant(X_b, has_constant="add")
         try:
             boot_mod = sm.Logit(y_b, X_b_const).fit(disp=False)
@@ -3752,7 +3774,7 @@ def bootstrap_internal_validation(
 
     orig_coef_dict = {"Intercept": orig_intercept}
     shrunk_coef_dict = {"Intercept": shrunk_intercept}
-    for name, ob, sb in zip(predictors, orig_betas, shrunk_betas):
+    for name, ob, sb in zip(model_predictors, orig_betas, shrunk_betas):
         orig_coef_dict[name] = ob
         shrunk_coef_dict[name] = sb
 
@@ -3879,16 +3901,35 @@ def recalibrate_prediction_model(
         else method
     )
 
-    if norm_m == "intercept_only":
-        sum_y = float(np.sum(y_arr))
-        alpha_recal = float(
+    sum_y = float(np.sum(y_arr))
+    try:
+        alpha_inter = float(
             opt.brentq(
                 lambda a: float(np.sum(expit(a + lp_orig)) - sum_y), -50.0, 50.0
             )
         )
-        lp_recal = alpha_recal + lp_orig
-        p_recal = expit(lp_recal)
-        post_metrics = _calc_suite(y_arr, p_recal, lp_recal)
+    except Exception:
+        alpha_inter = 0.0
+    p_inter = expit(alpha_inter + lp_orig)
+
+    X = sm.add_constant(lp_orig)
+    try:
+        fit_mod = sm.Logit(y_arr, X).fit(disp=False)
+        alpha_log = float(fit_mod.params[0])
+        beta_log = float(fit_mod.params[1])
+        alpha_ci = [float(c) for c in fit_mod.conf_int()[0]]
+        beta_ci = [float(c) for c in fit_mod.conf_int()[1]]
+        p_log = expit(alpha_log + beta_log * lp_orig)
+    except Exception:
+        alpha_log = alpha_inter
+        beta_log = 1.0
+        alpha_ci = [alpha_inter, alpha_inter]
+        beta_ci = [1.0, 1.0]
+        p_log = p_inter
+
+    if norm_m == "intercept_only":
+        lp_recal = alpha_inter + lp_orig
+        post_metrics = _calc_suite(y_arr, p_inter, lp_recal)
         return {
             "method": "intercept_only",
             "n": n,
@@ -3896,19 +3937,16 @@ def recalibrate_prediction_model(
             "post": post_metrics,
             "recalibration_parameters": {
                 "method": "intercept_only",
-                "alpha": alpha_recal,
+                "alpha": alpha_inter,
                 "beta": 1.0,
             },
-            "p_recalibrated": p_recal,
+            "p_recalibrated": p_inter,
+            "p_recalibrated_intercept_only": p_inter,
+            "p_recalibrated_logistic": p_log,
         }
     elif norm_m == "logistic":
-        X = sm.add_constant(lp_orig)
-        fit_mod = sm.Logit(y_arr, X).fit(disp=False)
-        alpha_recal = float(fit_mod.params[0])
-        beta_recal = float(fit_mod.params[1])
-        lp_recal = alpha_recal + beta_recal * lp_orig
-        p_recal = expit(lp_recal)
-        post_metrics = _calc_suite(y_arr, p_recal, lp_recal)
+        lp_recal = alpha_log + beta_log * lp_orig
+        post_metrics = _calc_suite(y_arr, p_log, lp_recal)
         return {
             "method": "logistic",
             "n": n,
@@ -3916,28 +3954,17 @@ def recalibrate_prediction_model(
             "post": post_metrics,
             "recalibration_parameters": {
                 "method": "logistic",
-                "alpha": alpha_recal,
-                "alpha_ci": [float(c) for c in fit_mod.conf_int()[0]],
-                "beta": beta_recal,
-                "beta_ci": [float(c) for c in fit_mod.conf_int()[1]],
+                "alpha": alpha_log,
+                "alpha_ci": alpha_ci,
+                "beta": beta_log,
+                "beta_ci": beta_ci,
             },
-            "p_recalibrated": p_recal,
+            "p_recalibrated": p_log,
+            "p_recalibrated_intercept_only": p_inter,
+            "p_recalibrated_logistic": p_log,
         }
     else:  # both
-        sum_y = float(np.sum(y_arr))
-        alpha_inter = float(
-            opt.brentq(
-                lambda a: float(np.sum(expit(a + lp_orig)) - sum_y), -50.0, 50.0
-            )
-        )
-        p_inter = expit(alpha_inter + lp_orig)
         post_inter = _calc_suite(y_arr, p_inter, alpha_inter + lp_orig)
-
-        X = sm.add_constant(lp_orig)
-        fit_mod = sm.Logit(y_arr, X).fit(disp=False)
-        alpha_log = float(fit_mod.params[0])
-        beta_log = float(fit_mod.params[1])
-        p_log = expit(alpha_log + beta_log * lp_orig)
         post_log = _calc_suite(y_arr, p_log, alpha_log + beta_log * lp_orig)
 
         return {
@@ -3966,8 +3993,47 @@ import math
 from typing import Any
 
 import numpy as np
-import scipy.integrate as integrate
+import scipy.optimize as opt
 import scipy.stats as stats
+from scipy.special import expit, log_expit
+
+
+def _approximate_cox_snell_r2_from_c_stat(
+    c_stat: float,
+    prevalence: float,
+    deg: int = 64,
+) -> float:
+    """Exact deterministic Gauss-Hermite numerical integration of Riley et al. (2021)."""
+    c = float(c_stat)
+    phi = float(prevalence)
+    if not (0.5 < c < 1.0):
+        raise ValueError(f"c_statistic ({c}) must be strictly between 0.5 and 1.0.")
+    if not (0.0 < phi < 1.0):
+        raise ValueError(f"prevalence ({phi}) must be strictly between 0 and 1.")
+
+    mu1 = math.sqrt(2.0) * float(stats.norm.ppf(c))
+    nodes, weights = np.polynomial.hermite.hermgauss(deg)
+    z = np.sqrt(2.0) * nodes
+    inv_sqrt_pi = 1.0 / math.sqrt(math.pi)
+
+    def f_alpha(alpha0: float) -> float:
+        e0 = inv_sqrt_pi * float(np.sum(weights * expit(alpha0 + mu1 * z)))
+        e1 = inv_sqrt_pi * float(np.sum(weights * expit(alpha0 + mu1 * (z + mu1))))
+        return (1.0 - phi) * e0 + phi * e1 - phi
+
+    alpha0 = float(opt.brentq(f_alpha, -50.0, 50.0))
+
+    u0 = alpha0 + mu1 * z
+    u1 = alpha0 + mu1 * (z + mu1)
+    ll_0 = inv_sqrt_pi * float(np.sum(weights * log_expit(-u0)))
+    ll_1 = inv_sqrt_pi * float(np.sum(weights * log_expit(u1)))
+    ll_model = (1.0 - phi) * ll_0 + phi * ll_1
+
+    ll_null = phi * math.log(phi) + (1.0 - phi) * math.log(1.0 - phi)
+    r2_cs = 1.0 - math.exp(-2.0 * (ll_model - ll_null))
+    r2_max = 1.0 - math.exp(2.0 * ll_null)
+
+    return float(min(r2_max - 1e-6, max(1e-6, r2_cs)))
 
 
 def calculate_riley_sample_size(
@@ -3995,22 +4061,7 @@ def calculate_riley_sample_size(
         cs_r2 = float(nagelkerke_r2) * r2_max
     elif c_statistic is not None:
         c_stat = float(c_statistic)
-        mu = math.sqrt(2.0) * float(stats.norm.ppf(c_stat))
-        alpha = math.log(phi / (1.0 - phi)) - 0.5 * (mu**2)
-        beta = mu
-
-        def integrand(x: float) -> float:
-            z = alpha + beta * x
-            px = 1.0 / (1.0 + math.exp(-z))
-            px_c = max(1e-15, min(1.0 - 1e-15, px))
-            f0 = float(stats.norm.pdf(x, loc=0.0, scale=1.0))
-            f1 = float(stats.norm.pdf(x, loc=mu, scale=1.0))
-            return phi * f1 * math.log(px_c) + (1.0 - phi) * f0 * math.log(1.0 - px_c)
-
-        ll_full, _ = integrate.quad(integrand, -15.0, 15.0)
-        cs_r2 = float(
-            min(r2_max - 1e-6, max(1e-6, 1.0 - math.exp(2.0 * (ll_null - ll_full))))
-        )
+        cs_r2 = _approximate_cox_snell_r2_from_c_stat(c_stat, phi)
     else:
         raise ValueError("Must provide c_statistic, cox_snell_r2, or nagelkerke_r2.")
 

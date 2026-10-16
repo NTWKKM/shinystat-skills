@@ -13,10 +13,12 @@ from __future__ import annotations
 import math
 from typing import Any, Literal
 
-import scipy.integrate as integrate
+import numpy as np
+import scipy.optimize as opt
 import scipy.stats as stats
 import statsmodels.stats.power as smp
 import statsmodels.stats.proportion as smprop
+from scipy.special import expit, log_expit
 
 
 def calculate_sample_size_means(
@@ -229,6 +231,71 @@ def calculate_sample_size_correlation(
     }
 
 
+def _approximate_cox_snell_r2_from_c_stat(
+    c_stat: float,
+    prevalence: float,
+    deg: int = 64,
+) -> float:
+    """
+    Exact deterministic numerical derivation of Cox-Snell R2 from target C-statistic
+    and outcome prevalence per Riley et al. (Stat Med 2021) / Austin & Steyerberg (2012).
+
+    Given target c-statistic c in (0.5, 1.0) and outcome prevalence phi in (0, 1),
+    under the two-component normal mixture model:
+      - Non-events (Y=0): LP ~ N(0, 1)
+      - Events (Y=1): LP ~ N(mu1, 1), where mu1 = sqrt(2) * Phi^(-1)(c)
+      - The true log-odds ratio of LP is beta1 = mu1.
+
+    Uses deterministic Gauss-Hermite quadrature (deg=64) to:
+      1. Solve for intercept alpha0 via Brent's method such that:
+         (1 - phi) * E[expit(alpha0 + mu1 * Z)] + phi * E[expit(alpha0 + mu1 * (Z + mu1))] = phi
+      2. Compute expected model log-likelihood:
+         E[ell_model] = (1 - phi) * E[ln(1 - expit(alpha0 + mu1 * Z))] + phi * E[ln(expit(alpha0 + mu1 * (Z + mu1)))]
+      3. Compute expected null log-likelihood:
+         E[ell_null] = phi * ln(phi) + (1 - phi) * ln(1 - phi)
+      4. Return Cox-Snell R2 = 1 - exp(-2 * (E[ell_model] - E[ell_null]))
+    """
+    c = float(c_stat)
+    phi = float(prevalence)
+
+    if not (0.5 < c < 1.0):
+        raise ValueError(f"c_statistic ({c}) must be strictly between 0.5 and 1.0.")
+    if not (0.0 < phi < 1.0):
+        raise ValueError(f"prevalence ({phi}) must be strictly between 0 and 1.")
+
+    mu1 = math.sqrt(2.0) * float(stats.norm.ppf(c))
+    nodes, weights = np.polynomial.hermite.hermgauss(deg)
+    z = np.sqrt(2.0) * nodes
+    inv_sqrt_pi = 1.0 / math.sqrt(math.pi)
+
+    # 1. Solve for alpha0 via Brent's method
+    def f_alpha(alpha0: float) -> float:
+        e0 = inv_sqrt_pi * float(np.sum(weights * expit(alpha0 + mu1 * z)))
+        e1 = inv_sqrt_pi * float(np.sum(weights * expit(alpha0 + mu1 * (z + mu1))))
+        return (1.0 - phi) * e0 + phi * e1 - phi
+
+    alpha0 = float(opt.brentq(f_alpha, -50.0, 50.0))
+
+    # 2. Compute expected model log-likelihood using numerically stable log_expit
+    u0 = alpha0 + mu1 * z
+    u1 = alpha0 + mu1 * (z + mu1)
+    ll_0 = inv_sqrt_pi * float(np.sum(weights * log_expit(-u0)))
+    ll_1 = inv_sqrt_pi * float(np.sum(weights * log_expit(u1)))
+    ll_model = (1.0 - phi) * ll_0 + phi * ll_1
+
+    # 3. Compute expected null log-likelihood
+    ll_null = phi * math.log(phi) + (1.0 - phi) * math.log(1.0 - phi)
+
+    # 4. Return Cox-Snell R2 bounded by (0, R2_max)
+    r2_cs = 1.0 - math.exp(-2.0 * (ll_model - ll_null))
+    r2_max = 1.0 - math.exp(2.0 * ll_null)
+
+    return float(min(r2_max - 1e-6, max(1e-6, r2_cs)))
+
+
+approximate_cox_snell_r2_from_c_stat = _approximate_cox_snell_r2_from_c_stat
+
+
 def calculate_riley_sample_size(
     n_parameters: int,
     prevalence: float,
@@ -300,31 +367,7 @@ def calculate_riley_sample_size(
         cs_r2 = nag_r2 * r2_max
     elif c_statistic is not None:
         c_stat = float(c_statistic)
-        if not (0.5 < c_stat < 1.0):
-            raise ValueError(
-                f"c_statistic ({c_stat}) must be strictly between 0.5 and 1.0."
-            )
-        # Riley et al. (2021) / Austin-Steyerberg normal linear predictor integration
-        mu = math.sqrt(2.0) * float(stats.norm.ppf(c_stat))
-        alpha = math.log(phi / (1.0 - phi)) - 0.5 * (mu**2)
-        beta = mu
-
-        def integrand(x: float) -> float:
-            z = alpha + beta * x
-            if z > 35.0:
-                px_c = 1.0 - 1e-15
-            elif z < -35.0:
-                px_c = 1e-15
-            else:
-                px = 1.0 / (1.0 + math.exp(-z))
-                px_c = max(1e-15, min(1.0 - 1e-15, px))
-            f0 = float(stats.norm.pdf(x, loc=0.0, scale=1.0))
-            f1 = float(stats.norm.pdf(x, loc=mu, scale=1.0))
-            return phi * f1 * math.log(px_c) + (1.0 - phi) * f0 * math.log(1.0 - px_c)
-
-        ll_full, _ = integrate.quad(integrand, -15.0, 15.0)
-        cs_r2_val = 1.0 - math.exp(2.0 * (ll_null - ll_full))
-        cs_r2 = float(min(r2_max - 1e-6, max(1e-6, cs_r2_val)))
+        cs_r2 = _approximate_cox_snell_r2_from_c_stat(c_stat, phi)
     else:
         raise ValueError(
             "Must provide at least one model strength measure: c_statistic, cox_snell_r2, or nagelkerke_r2."

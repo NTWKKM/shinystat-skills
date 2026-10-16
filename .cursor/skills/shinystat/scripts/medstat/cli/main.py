@@ -1457,11 +1457,18 @@ def diag_cmd(
             p_pred=df[p_col].values,
             method=recalibration_method,
         )
-        # Strip patient array before serializing to CLI JSON
+        # Strip patient-level probability and outcome arrays before serializing to CLI JSON
+        patient_level_keys = {
+            "p_recalibrated",
+            "p_recalibrated_intercept_only",
+            "p_recalibrated_logistic",
+            "p_orig",
+            "y_true",
+        }
         recal_clean = {
             k: v
             for k, v in recal_res.items()
-            if not str(k).startswith("p_recal") and k not in ("y_true", "p_orig")
+            if k not in patient_level_keys and not str(k).startswith("p_recal")
         }
         diag_res["recalibration"] = recal_clean
 

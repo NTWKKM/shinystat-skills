@@ -1150,7 +1150,7 @@ In clinical prediction modeling and prognostic biomarker development:
 3. **Sample Size Engines (`medstat.power.sample_size`)**:
    - Implemented `calculate_riley_sample_size`:
      - Evaluates Riley Criteria 1–4, identifying the binding criterion, total $N$, required events, and anticipated EPP.
-     - Automated numerical derivation of Cox-Snell $R^2_{CS}$ from user-supplied C-statistic or Nagelkerke $R^2$ using Gauss-Legendre quadrature integration and Brent root finding.
+     - Automated deterministic numerical derivation of Cox-Snell $R^2_{CS}$ from user-supplied C-statistic or Nagelkerke $R^2$ using 64-node Gauss-Hermite quadrature integration (Riley et al. Stat Med 2021 / Austin & Steyerberg 2012) and Brent root finding.
      - Enforces conservative bound $R^2_{CS,\max} = 1 - \phi^{2\phi}(1 - \phi)^{2(1-\phi)}$.
    - Implemented `calculate_diagnostic_auroc_sample_size`:
      - Non-parametric Obuchowski (1998) / Hanley-McNeil (1982) sample size calculation given $\text{AUROC}_{\text{expected}}$, $\text{AUROC}_{\text{null}}$, prevalence $\phi$, $\alpha$, and power.

@@ -27,6 +27,7 @@ from medstat.figures.html.calibration import (
     plot_dual_recalibration_comparison,
 )
 from medstat.power.sample_size import (
+    _approximate_cox_snell_r2_from_c_stat,
     calculate_diagnostic_auroc_sample_size,
     calculate_riley_sample_size,
 )
@@ -169,6 +170,66 @@ def test_bootstrap_internal_validation_edge_cases():
     assert 0.01 <= res_firth["shrinkage_factor"] <= 1.0
 
 
+def test_bootstrap_internal_validation_categorical_predictors():
+    """Verify categorical and boolean predictor expansion with pd.get_dummies."""
+    np.random.seed(42)
+    n = 150
+    df = pd.DataFrame(
+        {
+            "y": np.random.binomial(1, 0.35, size=n),
+            "age": np.random.normal(55, 10, size=n),
+            "sex": np.random.choice(["male", "female"], size=n),
+            "stage": pd.Categorical(
+                np.random.choice(["I", "II", "III"], size=n),
+                categories=["I", "II", "III"],
+                ordered=True,
+            ),
+            "smoker": np.random.choice([True, False], size=n),
+        }
+    )
+
+    res = bootstrap_internal_validation(
+        df=df,
+        outcome="y",
+        predictors=["age", "sex", "stage", "smoker"],
+        n_bootstrap=25,
+        random_state=42,
+    )
+
+    # 1 continuous (age) + 1 sex dummy + 2 stage dummies + 1 smoker dummy = 5 parameters
+    assert res["n_predictors"] == 5
+    assert res["n_successful_replicates"] > 0
+    assert 0.01 <= res["shrinkage_factor"] <= 1.0
+
+    shrunk_orig = res["shrunk_coefficients"]["original"]
+    shrunk_shrunk = res["shrunk_coefficients"]["shrunk"]
+    for expected_feat in ["age", "stage_II", "stage_III"]:
+        assert any(expected_feat in k for k in shrunk_orig)
+        assert any(expected_feat in k for k in shrunk_shrunk)
+
+
+def test_bootstrap_internal_validation_singular_matrix_skipped():
+    """Verify bootstrap samples with zero-variance dummy columns are cleanly skipped."""
+    np.random.seed(42)
+    n = 100
+    cat_vals = ["common"] * 95 + ["rare"] * 5
+    y = np.array([0, 1] * 50)
+    x1 = np.random.normal(0, 1, size=n)
+    df = pd.DataFrame({"y": y, "x1": x1, "rare_cat": cat_vals})
+
+    res = bootstrap_internal_validation(
+        df=df,
+        outcome="y",
+        predictors=["x1", "rare_cat"],
+        n_bootstrap=30,
+        random_state=42,
+    )
+
+    # Replicates with zero variance in rare_cat are cleanly skipped
+    assert res["n_successful_replicates"] > 0
+    assert res["n_successful_replicates"] <= res["n_bootstrap"]
+
+
 # ==============================================================================
 # 2. Prediction Model Recalibration
 # ==============================================================================
@@ -239,6 +300,50 @@ def test_recalibrate_prediction_model_both():
     assert "p_recalibrated_logistic" in res
 
 
+def test_recalibrate_prediction_model_method_selection():
+    """Verify p_recalibrated respects method selection while providing both arrays."""
+    np.random.seed(42)
+    n = 200
+    x = np.random.normal(0, 1, size=n)
+    y = (np.random.uniform(size=n) < expit(-0.5 + 1.2 * x)).astype(int)
+    # Miscalibrated probabilities
+    p = np.clip(expit(-1.5 + 2.0 * x), 0.01, 0.99)
+
+    # 1. method='intercept_only'
+    res_int = recalibrate_prediction_model(y, p, method="intercept_only")
+    assert "p_recalibrated_intercept_only" in res_int
+    assert "p_recalibrated_logistic" in res_int
+    assert np.array_equal(
+        res_int["p_recalibrated"], res_int["p_recalibrated_intercept_only"]
+    )
+    assert not np.allclose(
+        res_int["p_recalibrated"], res_int["p_recalibrated_logistic"]
+    )
+
+    # 2. method='calibration_in_the_large'
+    res_citl = recalibrate_prediction_model(y, p, method="calibration_in_the_large")
+    assert np.array_equal(
+        res_citl["p_recalibrated"], res_citl["p_recalibrated_intercept_only"]
+    )
+
+    # 3. method='logistic'
+    res_log = recalibrate_prediction_model(y, p, method="logistic")
+    assert "p_recalibrated_intercept_only" in res_log
+    assert "p_recalibrated_logistic" in res_log
+    assert np.array_equal(res_log["p_recalibrated"], res_log["p_recalibrated_logistic"])
+    assert not np.allclose(
+        res_log["p_recalibrated"], res_log["p_recalibrated_intercept_only"]
+    )
+
+    # 4. method='both'
+    res_both = recalibrate_prediction_model(y, p, method="both")
+    assert np.array_equal(
+        res_both["p_recalibrated"], res_both["p_recalibrated_logistic"]
+    )
+    assert "p_recalibrated_intercept_only" in res_both
+    assert "p_recalibrated_logistic" in res_both
+
+
 def test_recalibrate_prediction_model_errors():
     """Verify bounds and shape validation for recalibration."""
     # Length mismatch
@@ -295,6 +400,36 @@ def test_riley_sample_size_from_c_statistic():
         "Criterion 3 (Shrinkage)",
         "Criterion 4 (Optimism)",
     ]
+
+
+def test_approximate_cox_snell_r2_from_c_stat_accuracy():
+    """Verify Riley et al. (2021) Gauss-Hermite quadrature c-statistic to R2_CS conversion."""
+    # Benchmark tests matching Riley et al. (Stat Med 2021)
+    # c=0.80, phi=0.10 -> R2_CS ~ 0.11149
+    r2_1 = _approximate_cox_snell_r2_from_c_stat(0.80, 0.10)
+    assert np.isclose(r2_1, 0.11149, atol=1e-4)
+
+    # c=0.70, phi=0.20 -> R2_CS ~ 0.08070
+    r2_2 = _approximate_cox_snell_r2_from_c_stat(0.70, 0.20)
+    assert np.isclose(r2_2, 0.08070, atol=1e-4)
+
+    # c=0.80, phi=0.20 -> R2_CS ~ 0.18272
+    r2_3 = _approximate_cox_snell_r2_from_c_stat(0.80, 0.20)
+    assert np.isclose(r2_3, 0.18272, atol=1e-4)
+
+    # Monotonicity: higher c-statistic with same prevalence yields higher R2_CS
+    r2_high_c = _approximate_cox_snell_r2_from_c_stat(0.85, 0.20)
+    assert r2_high_c > r2_3
+
+    # Error handling on invalid bounds
+    with pytest.raises(ValueError, match="c_statistic"):
+        _approximate_cox_snell_r2_from_c_stat(0.50, 0.20)
+    with pytest.raises(ValueError, match="c_statistic"):
+        _approximate_cox_snell_r2_from_c_stat(1.00, 0.20)
+    with pytest.raises(ValueError, match="prevalence"):
+        _approximate_cox_snell_r2_from_c_stat(0.80, 0.00)
+    with pytest.raises(ValueError, match="prevalence"):
+        _approximate_cox_snell_r2_from_c_stat(0.80, 1.00)
 
 
 def test_riley_sample_size_from_nagelkerke():
