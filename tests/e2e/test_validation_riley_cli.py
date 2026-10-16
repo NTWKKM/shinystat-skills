@@ -309,7 +309,7 @@ def test_spec_yaml_recalibration_validation_errors(tmp_path: Path):
     df = pd.DataFrame(
         {
             "outcome": [0, 1] * 20,
-            "x1": np.ones(40),
+            "x1": np.linspace(-1.0, 1.0, 40),
             "score": np.linspace(0.1, 0.9, 40),
         }
     )
@@ -338,7 +338,30 @@ models:
     ):
         AnalysisPlan.from_yaml(str(f1)).execute()
 
-    # 2. Standalone recalibration with nonexistent column
+    # 2. Logistic with recalibration enabled and nonexistent p_pred column
+    yaml_log_nonexistent = f"""
+metadata:
+  study_title: "Err"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "log_nonexistent"
+    type: "logistic"
+    outcome: "outcome"
+    covariates: ["x1"]
+    options:
+      recalibration: true
+      p_pred: "nonexistent_col"
+"""
+    f2 = tmp_path / "p2.yaml"
+    f2.write_text(yaml_log_nonexistent)
+    with pytest.raises(
+        ValueError,
+        match=r"Recalibration requires a valid predicted probability column.*Resolved 'nonexistent_col'",
+    ):
+        AnalysisPlan.from_yaml(str(f2)).execute()
+
+    # 3. Standalone recalibration with nonexistent column
     yaml_recal_absent = f"""
 metadata:
   study_title: "Err"
@@ -351,10 +374,10 @@ models:
     options:
       p_recal: "nonexistent_prob_col"
 """
-    f2 = tmp_path / "p2.yaml"
-    f2.write_text(yaml_recal_absent)
+    f3 = tmp_path / "p3.yaml"
+    f3.write_text(yaml_recal_absent)
     with pytest.raises(
         ValueError,
         match=r"Recalibration requires a valid predicted probability column.*Resolved 'nonexistent_prob_col'",
     ):
-        AnalysisPlan.from_yaml(str(f2)).execute()
+        AnalysisPlan.from_yaml(str(f3)).execute()
