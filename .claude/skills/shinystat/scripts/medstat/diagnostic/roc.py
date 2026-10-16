@@ -1205,7 +1205,9 @@ def compute_time_dependent_roc(
     if top_warnings:
         out["warnings"] = top_warnings
         if n_bootstrap == 0 and any(
-            results_by_horizon[h].get("n_censored", 0) > 0 for h in sorted_horizons
+            results_by_horizon[h].get("ci_method") == "hanley_mcneil"
+            and results_by_horizon[h].get("n_censored", 0) > 0
+            for h in sorted_horizons
         ):
             out["warning"] = (
                 "Hanley-McNeil confidence interval is an unweighted approximation that does not account for "

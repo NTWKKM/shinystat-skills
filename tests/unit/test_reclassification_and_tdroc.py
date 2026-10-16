@@ -674,6 +674,14 @@ def test_time_dependent_roc_ci_method_reporting():
     )
     assert "bootstrap resampling" in narr_boot
 
+    # Sparse horizon with n_bootstrap=0 should NOT trigger the Hanley-McNeil censoring warning
+    res_sparse_only = compute_time_dependent_roc(
+        dur, ev, sc, time_horizons=[100.0], n_bootstrap=0
+    )
+    assert res_sparse_only["results_by_horizon"][100.0]["ci_method"] is None
+    assert "exceeds maximum follow-up" in res_sparse_only["warning"]
+    assert "Hanley-McNeil" not in res_sparse_only["warning"]
+
 
 def test_plot_time_dependent_roc_non_finite_horizon_and_dynamic_ylim(tmp_path):
     """Verify non-finite horizon curves are skipped with unavailable notes, and y-axis is dynamic."""
