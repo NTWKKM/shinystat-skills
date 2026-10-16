@@ -287,10 +287,10 @@ def _approximate_cox_snell_r2_from_c_stat(
     ll_null = phi * math.log(phi) + (1.0 - phi) * math.log(1.0 - phi)
 
     # 4. Return Cox-Snell R2 bounded by (0, R2_max)
-    r2_cs = 1.0 - math.exp(-2.0 * (ll_model - ll_null))
-    r2_max = 1.0 - math.exp(2.0 * ll_null)
+    r2_cs = -math.expm1(-2.0 * (ll_model - ll_null))
+    r2_max = -math.expm1(2.0 * ll_null)
 
-    return float(min(r2_max - 1e-6, max(1e-6, r2_cs)))
+    return float(min(r2_max, max(0.0, r2_cs)))
 
 
 approximate_cox_snell_r2_from_c_stat = _approximate_cox_snell_r2_from_c_stat
@@ -349,7 +349,7 @@ def calculate_riley_sample_size(
     # R2_max for binary logistic model
     # R2_max = 1 - [phi^phi * (1-phi)^(1-phi)]^2
     ll_null = phi * math.log(phi) + (1.0 - phi) * math.log(1.0 - phi)
-    r2_max = 1.0 - math.exp(2.0 * ll_null)
+    r2_max = -math.expm1(2.0 * ll_null)
 
     # Determine Cox-Snell R2
     if cox_snell_r2 is not None:
@@ -427,7 +427,7 @@ def calculate_riley_sample_size(
         "Criterion 3 (Shrinkage)": n_crit3,
         "Criterion 4 (Optimism)": n_crit4,
     }
-    if mape_target is not None and n_crit2 is not None:
+    if n_crit2 is not None:
         eval_dict["Criterion 2 (MAPE)"] = n_crit2
 
     n_total = max(eval_dict.values())
@@ -520,9 +520,7 @@ def calculate_diagnostic_auroc_sample_size(
     def _calc_v(theta: float) -> float:
         q1 = theta / (2.0 - theta)
         q2 = (2.0 * (theta**2)) / (1.0 + theta)
-        return float(
-            theta * (1.0 - theta) + (q1 - theta**2) + (q2 - theta**2) / r_ratio
-        )
+        return (q2 - (theta**2)) + (q1 - (theta**2)) / r_ratio
 
     v0 = _calc_v(theta0)
     v1 = _calc_v(theta1)

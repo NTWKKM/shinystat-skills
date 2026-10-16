@@ -214,10 +214,12 @@ Scatter plot comparing predicted probabilities of baseline vs updated models, co
 Visualizes longitudinal discrimination trajectories ($\text{AUROC}(t)$ with 95% CI bands) or multi-horizon ROC curves.
 
 ### 13. Recalibration Comparison Plot
+
 Compares pre-recalibration vs post-recalibration calibration curves against the ideal 45-degree reference line, annotated with intercept, slope, and Brier score.
 
 ### 14. Bootstrap Optimism Plot
-Horizontal barbell chart comparing apparent, test, optimism, and optimism-corrected metrics across bootstrap iterations.
+
+Grouped horizontal bar chart of **Apparent vs Optimism-Corrected** metrics (including 1 - Brier Score where applicable) and the uniform shrinkage factor callout.
 
 ---
 

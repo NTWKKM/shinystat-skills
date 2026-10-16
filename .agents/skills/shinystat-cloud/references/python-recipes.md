@@ -3591,10 +3591,40 @@ def bootstrap_internal_validation(
     predictors: list[str],
     n_bootstrap: int = 200,
     random_state: int = 42,
+    missing_strategy: str = "error",
 ) -> dict[str, Any]:
     """TRIPOD+AI Optimism-Corrected Bootstrap Internal Validation and Uniform Shrinkage."""
+    norm_strat = str(missing_strategy).lower().strip()
+    if norm_strat not in ("error", "complete_case"):
+        raise ValueError(
+            f"Unsupported missing_strategy '{missing_strategy}'. Must be 'error' or 'complete_case'."
+        )
+
     cols = [outcome] + list(predictors)
+    n_initial = len(df)
+    missing_counts = {
+        c: int(df[c].isna().sum()) for c in cols if df[c].isna().sum() > 0
+    }
     sub_df = df[cols].dropna()
+    n_excluded = n_initial - len(sub_df)
+
+    if n_excluded > 0 and norm_strat == "error":
+        counts_str = ", ".join(f"{c} ({cnt})" for c, cnt in missing_counts.items())
+        raise ValueError(
+            f"Missing values detected in input columns: {counts_str}. "
+            "Please perform complete-case filtering or multiple imputation before running internal validation."
+        )
+
+    exclusion_summary = {
+        "n_initial": n_initial,
+        "n_excluded": n_excluded,
+        "n_retained": len(sub_df),
+        "missing_counts": missing_counts,
+    }
+
+    if len(sub_df) < 10:
+        raise ValueError(f"Insufficient non-missing observations (N = {len(sub_df)}).")
+
     y_orig = sub_df[outcome].to_numpy(dtype=float)
 
     # Check for categorical / non-float predictor dtypes (object, string, category, bool)
@@ -3618,13 +3648,29 @@ def bootstrap_internal_validation(
 
     n_total = len(y_orig)
     n_events = int(np.sum(y_orig))
+    n_non_events = n_total - n_events
+    n_minority = min(n_events, n_non_events)
     n_predictors = len(model_predictors)
-    epp = float(n_events / n_predictors) if n_predictors > 0 else 0.0
+    epp = float(n_minority / n_predictors) if n_predictors > 0 else 0.0
 
-    # 1. Fit initial model
+    # 1. Fit initial model with separation/singular fallback
     X_orig_const = sm.add_constant(X_orig, has_constant="add")
-    orig_model = sm.Logit(y_orig, X_orig_const).fit(disp=False)
-    orig_params = orig_model.params
+    warnings = []
+    try:
+        orig_model = sm.Logit(y_orig, X_orig_const).fit(disp=False)
+        converged = getattr(orig_model, "mle_retvals", {}).get("converged", True)
+        if not converged or np.any(np.abs(orig_model.params) > 50.0):
+            raise RuntimeError("Model separation or non-convergence detected.")
+        orig_params = orig_model.params
+    except Exception as e:
+        warnings.append(
+            f"Standard MLE logit failed or encountered quasi-complete separation ({e}); falling back to regularized logit."
+        )
+        reg_model = sm.Logit(y_orig, X_orig_const).fit_regularized(
+            method="l1", alpha=1e-4, disp=False
+        )
+        orig_params = reg_model.params
+
     lp_orig = np.dot(X_orig_const, orig_params)
     p_orig = expit(lp_orig)
 
@@ -3778,10 +3824,9 @@ def bootstrap_internal_validation(
         orig_coef_dict[name] = ob
         shrunk_coef_dict[name] = sb
 
-    warnings = []
     if epp < 10.0:
         warnings.append(
-            f"Events per predictor (EPP = {epp:.1f}) is below 10; risk of model overfitting is high."
+            f"Low events per predictor (EPP = {epp:.2f} < 10), indicating elevated risk of model overfitting."
         )
     if shrinkage_factor < 0.80:
         warnings.append(
@@ -3799,6 +3844,7 @@ def bootstrap_internal_validation(
         "events_per_predictor": epp,
         "n_bootstrap": n_bootstrap,
         "n_successful_replicates": n_successful,
+        "missing_data_summary": exclusion_summary,
         "apparent_metrics": apparent,
         "metrics": metrics_summary,
         "shrinkage_factor": shrinkage_factor,
@@ -3836,13 +3882,53 @@ def recalibrate_prediction_model(
     clip_eps: float = 1e-6,
 ) -> dict[str, Any]:
     """Prediction model recalibration and updating (intercept-only, logistic, or both)."""
+    if not (0.0 < clip_eps < 0.5):
+        raise ValueError(
+            f"clip_eps must be strictly between 0.0 and 0.5, got {clip_eps}"
+        )
+
+    norm_m = (
+        "intercept_only"
+        if method in ("intercept_only", "calibration_in_the_large")
+        else method
+    )
+    if norm_m not in ("intercept_only", "logistic", "both"):
+        raise ValueError(f"Unsupported recalibration method: {method}")
+
     y_arr = np.asarray(y_true, dtype=float).ravel()
     p_arr = np.asarray(p_pred, dtype=float).ravel()
 
-    valid_mask = ~(np.isnan(y_arr) | np.isnan(p_arr))
-    y_arr = y_arr[valid_mask]
-    p_arr = p_arr[valid_mask]
+    if len(y_arr) != len(p_arr):
+        raise ValueError(
+            f"Length mismatch between y_true (N={len(y_arr)}) and p_pred (N={len(p_arr)})."
+        )
+
+    n_invalid_y = int(np.sum(~np.isfinite(y_arr)))
+    n_invalid_p = int(np.sum(~np.isfinite(p_arr)))
+    n_excluded = n_invalid_y + n_invalid_p
+    if n_excluded > 0:
+        raise ValueError(
+            f"Non-finite values detected in input arrays: y_true has {n_invalid_y} non-finite value(s), "
+            f"p_pred has {n_invalid_p} non-finite value(s) ({n_excluded} non-finite values total). "
+            "Please perform complete-case filtering or multiple imputation before running recalibration."
+        )
+
     n = len(y_arr)
+    if n == 0:
+        raise ValueError("Cannot perform recalibration on empty arrays (N = 0).")
+    if n < 10:
+        raise ValueError(f"Insufficient observations for recalibration (N = {n}).")
+
+    unique_y = np.unique(y_arr)
+    if not np.array_equal(unique_y, [0.0, 1.0]):
+        raise ValueError(
+            f"y_true must contain strictly binary classes {{0, 1}} with both classes present, got {unique_y}."
+        )
+
+    if np.any(p_arr < 0.0) or np.any(p_arr > 1.0):
+        raise ValueError(
+            "Predicted probabilities p_pred must lie strictly within [0, 1]."
+        )
 
     p_clipped = np.clip(p_arr, clip_eps, 1.0 - clip_eps)
     lp_orig = logit(p_clipped)
@@ -3858,14 +3944,19 @@ def recalibrate_prediction_model(
         except Exception:
             inter = 0.0
 
-        if np.allclose(lp, lp[0]):
-            slope = 1.0
+        if np.var(lp) <= 1e-12 or np.allclose(lp, lp[0]):
+            slope = float("nan")
         else:
             try:
                 mod_s = sm.Logit(y, sm.add_constant(lp)).fit(disp=False)
-                slope = float(mod_s.params[1])
+                if not getattr(mod_s, "mle_retvals", {}).get("converged", True):
+                    slope = float("nan")
+                else:
+                    slope = float(mod_s.params[1])
+                    if not np.isfinite(slope):
+                        slope = float("nan")
             except Exception:
-                slope = 1.0
+                slope = float("nan")
 
         brier = float(np.mean((y - p) ** 2))
         auc = (
@@ -3895,11 +3986,6 @@ def recalibrate_prediction_model(
         }
 
     pre_metrics = _calc_suite(y_arr, p_clipped, lp_orig)
-    norm_m = (
-        "intercept_only"
-        if method in ("intercept_only", "calibration_in_the_large")
-        else method
-    )
 
     sum_y = float(np.sum(y_arr))
     try:
@@ -4030,10 +4116,10 @@ def _approximate_cox_snell_r2_from_c_stat(
     ll_model = (1.0 - phi) * ll_0 + phi * ll_1
 
     ll_null = phi * math.log(phi) + (1.0 - phi) * math.log(1.0 - phi)
-    r2_cs = 1.0 - math.exp(-2.0 * (ll_model - ll_null))
-    r2_max = 1.0 - math.exp(2.0 * ll_null)
+    r2_cs = -math.expm1(-2.0 * (ll_model - ll_null))
+    r2_max = -math.expm1(2.0 * ll_null)
 
-    return float(min(r2_max - 1e-6, max(1e-6, r2_cs)))
+    return float(min(r2_max, max(0.0, r2_cs)))
 
 
 def calculate_riley_sample_size(
@@ -4048,17 +4134,35 @@ def calculate_riley_sample_size(
     mape_target: float | None = None,
 ) -> dict[str, Any]:
     """Riley et al. (2020) sample size for developing clinical prediction models."""
+    if n_parameters < 1:
+        raise ValueError(f"n_parameters must be >= 1, got {n_parameters}")
+    if not (0.0 < prevalence < 1.0):
+        raise ValueError(f"prevalence must be strictly in (0, 1), got {prevalence}")
+    if not (0.5 < shrinkage_target < 1.0):
+        raise ValueError(
+            f"shrinkage_target must be strictly in (0.5, 1.0), got {shrinkage_target}"
+        )
+
     phi = float(prevalence)
     p_params = int(n_parameters)
     s_target = float(shrinkage_target)
 
     ll_null = phi * math.log(phi) + (1.0 - phi) * math.log(1.0 - phi)
-    r2_max = 1.0 - math.exp(2.0 * ll_null)
+    r2_max = -math.expm1(2.0 * ll_null)
 
     if cox_snell_r2 is not None:
         cs_r2 = float(cox_snell_r2)
+        if not (0.0 < cs_r2 < r2_max):
+            raise ValueError(
+                f"cox_snell_r2 ({cs_r2}) must be strictly between 0 and R2_max ({r2_max:.4f})."
+            )
     elif nagelkerke_r2 is not None:
-        cs_r2 = float(nagelkerke_r2) * r2_max
+        nag_r2 = float(nagelkerke_r2)
+        if not (0.0 < nag_r2 < 1.0):
+            raise ValueError(
+                f"nagelkerke_r2 ({nag_r2}) must be strictly between 0 and 1."
+            )
+        cs_r2 = nag_r2 * r2_max
     elif c_statistic is not None:
         c_stat = float(c_statistic)
         cs_r2 = _approximate_cox_snell_r2_from_c_stat(c_stat, phi)
@@ -4073,9 +4177,10 @@ def calculate_riley_sample_size(
         mape_target if mape_target is not None else (0.05 if phi <= 0.5 else None)
     )
     if target_m is not None:
+        min_phi = min(phi, 1.0 - phi)
         exp_val = (
             -0.508
-            + 0.259 * math.log(phi)
+            + 0.259 * math.log(min_phi)
             + 0.504 * math.log(p_params)
             - math.log(target_m)
         ) / 0.544
@@ -4101,16 +4206,19 @@ def calculate_riley_sample_size(
         denom_opt = (s_req - 1.0) * math.log(arg_opt)
         n4 = n3 if denom_opt <= 0 else int(math.ceil(p_params / denom_opt))
 
-    crit_dict = {
+    crit_dict: dict[str, Any] = {
         "Criterion 1 (Intercept)": n1,
         "Criterion 3 (Shrinkage)": n3,
         "Criterion 4 (Optimism)": n4,
     }
     if n2 is not None:
         crit_dict["Criterion 2 (MAPE)"] = n2
+    else:
+        crit_dict["Criterion 2 (MAPE)"] = None
 
-    n_total = max(crit_dict.values())
-    binding = max(crit_dict, key=crit_dict.get)  # type: ignore[arg-type]
+    valid_crits = {k: v for k, v in crit_dict.items() if v is not None}
+    n_total = max(valid_crits.values())
+    binding = max(valid_crits, key=valid_crits.get)  # type: ignore[arg-type]
     n_events = int(math.ceil(n_total * phi))
     epp = float(n_events / p_params)
 
@@ -4127,7 +4235,13 @@ def calculate_riley_sample_size(
         "binding_criterion": binding,
         "criteria": {
             "criterion1_intercept": {"n": n1, "margin": intercept_margin},
-            "criterion2_mape": {"n": n2, "target_mape": target_m},
+            "criterion2_mape": {
+                "n": n2,
+                "target_mape": target_m,
+                "status": "evaluated"
+                if n2 is not None
+                else "N/A (default MAPE target 0.05 is only validated for prevalence <= 0.50; pass mape_target explicitly to evaluate)",
+            },
             "criterion3_shrinkage": {"n": n3, "target_shrinkage": s_target},
             "criterion4_optimism": {"n": n4, "optimism_margin": optimism_margin},
         },
@@ -4147,19 +4261,29 @@ def calculate_diagnostic_auroc_sample_size(
     theta0 = float(auroc_null)
     phi = float(prevalence)
 
+    if not (0.0 <= theta0 < theta1 <= 1.0):
+        raise ValueError(
+            f"auroc_null ({theta0}) must be strictly less than auroc_expected ({theta1}) within [0, 1]."
+        )
+    if not (0.0 < phi < 1.0):
+        raise ValueError(f"prevalence ({phi}) must be strictly in (0, 1).")
+    if not (0.0 < alpha < 1.0):
+        raise ValueError(f"alpha ({alpha}) must be strictly in (0, 1).")
+    if not (0.0 < power < 1.0):
+        raise ValueError(f"power ({power}) must be strictly in (0, 1).")
+
     z_alpha = float(stats.norm.ppf(1.0 - alpha / 2.0 if two_sided else 1.0 - alpha))
     z_beta = float(stats.norm.ppf(power))
 
     R = (1.0 - phi) / phi
-    Q1 = theta1 / (2.0 - theta1)
-    Q2 = 2.0 * (theta1**2) / (1.0 + theta1)
-    var_theta1 = theta1 * (1.0 - theta1) + (Q1 - theta1**2) + ((Q2 - theta1**2) / R)
 
-    Q1_0 = theta0 / (2.0 - theta0)
-    Q2_0 = 2.0 * (theta0**2) / (1.0 + theta0)
-    var_theta0 = (
-        theta0 * (1.0 - theta0) + (Q1_0 - theta0**2) + ((Q2_0 - theta0**2) / R)
-    )
+    def _v(t: float) -> float:
+        q1 = t / (2.0 - t)
+        q2 = 2.0 * (t**2) / (1.0 + t)
+        return float((q2 - t**2) + (q1 - t**2) / R)
+
+    var_theta1 = _v(theta1)
+    var_theta0 = _v(theta0)
 
     numerator = (z_alpha * math.sqrt(var_theta0) + z_beta * math.sqrt(var_theta1)) ** 2
     delta = (theta1 - theta0) ** 2

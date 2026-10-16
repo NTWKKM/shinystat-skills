@@ -281,6 +281,7 @@ class AnalysisPlan:
             if model_spec.time:
                 req_cols.append(model_spec.time)
             req_cols.extend(model_spec.covariates)
+            score_col_names: set[str] = set()
             for opt_key in (
                 "p_old",
                 "p_old_col",
@@ -298,6 +299,8 @@ class AnalysisPlan:
                 val = model_spec.options.get(opt_key)
                 if val and isinstance(val, str) and val in current_df.columns:
                     req_cols.append(val)
+                    if opt_key in ("p_recal", "p_pred", "score"):
+                        score_col_names.add(val)
             req_cols = list(dict.fromkeys(req_cols))
 
             # Clean and handle missingness with explicit justification
@@ -477,7 +480,11 @@ class AnalysisPlan:
                         f"Binary outcome column '{model_spec.outcome}' contains values outside {{0, 1}}: {set(u_y)}"
                     )
 
-                covar_cols = [c for c in req_cols if c != model_spec.outcome]
+                covar_cols = [
+                    c
+                    for c in req_cols
+                    if c != model_spec.outcome and c not in score_col_names
+                ]
                 if is_pooled:
                     if model_spec.options.get("method") == "firth":
                         raise NotImplementedError(
@@ -932,7 +939,11 @@ class AnalysisPlan:
                     or model_spec.options.get("validation")
                 )
             ):
-                covar_cols = [c for c in req_cols if c != model_spec.outcome]
+                covar_cols = [
+                    c
+                    for c in req_cols
+                    if c != model_spec.outcome and c not in score_col_names
+                ]
                 n_boot = int(model_spec.options.get("n_bootstrap", 200))
                 fit_res = bootstrap_internal_validation(
                     df=clean_df,

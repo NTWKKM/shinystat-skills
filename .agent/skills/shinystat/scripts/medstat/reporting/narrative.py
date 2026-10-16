@@ -259,7 +259,9 @@ def generate_methods_narrative(
         if has_recalibration:
             diag_parts.append(
                 "Model recalibration and updating were performed using logistic recalibration and calibration-in-the-large adjustment, "
-                "improving risk calibration and Brier score while preserving baseline model discrimination (AUROC)."
+                "improving risk calibration and Brier score while preserving baseline model discrimination (AUROC). "
+                "Post-recalibration calibration metrics are apparent in-sample estimates, where post-update calibration intercept (0.00) "
+                "and slope (1.00 under logistic recalibration) are fixed by construction in the updating sample rather than independent evidence of external calibration improvement."
             )
 
         if has_riley_sample_size:
@@ -849,31 +851,58 @@ def generate_recalibration_narrative(
     """
     pre = recal_res.get("pre", {})
     method = recal_res.get("method", "logistic")
-    post = recal_res.get("post", {})
-    params = recal_res.get("recalibration_parameters", {})
 
-    alpha = params.get("alpha")
-    beta = params.get("beta", 1.0)
+    if method == "both":
+        desc_method = "both intercept-only (calibration-in-the-large) and logistic recalibration updating"
+    else:
+        desc_method = f"{method.replace('_', ' ')} updating"
 
     parts = [
-        f"Model recalibration was performed using {method.replace('_', ' ')} updating.",
+        f"Model recalibration was performed using {desc_method}.",
         f"Prior to recalibration, the model exhibited a calibration intercept of {pre.get('calibration_intercept', float('nan')):.3f}, "
         f"calibration slope of {pre.get('calibration_slope', float('nan')):.3f}, and Brier score of {pre.get('brier_score', float('nan')):.3f} "
         f"(ICI: {pre.get('ici', float('nan')):.3f}).",
     ]
 
-    if alpha is not None:
-        parts.append(
-            f"Recalibration updated the linear predictor with an intercept adjustment of α = {alpha:.3f} "
-            f"and slope multiplier of β = {beta:.3f}."
-        )
+    if method == "both":
+        p_int = recal_res.get("parameters_intercept_only", {})
+        p_log = recal_res.get("parameters_logistic", {})
+        post_int = recal_res.get("post_intercept_only", {})
+        post_log = recal_res.get("post_logistic", {})
+        alpha_i = p_int.get("alpha")
+        alpha_l = p_log.get("alpha")
+        beta_l = p_log.get("beta", 1.0)
 
-    parts.append(
-        f"Post-recalibration calibration metrics improved to intercept = {post.get('calibration_intercept', float('nan')):.3f}, "
-        f"slope = {post.get('calibration_slope', float('nan')):.3f}, Brier score = {post.get('brier_score', float('nan')):.3f}, "
-        f"and Integrated Calibration Index (ICI) = {post.get('ici', float('nan')):.3f}, "
-        f"while identically preserving model discrimination (AUROC = {post.get('auroc', float('nan')):.3f})."
-    )
+        parts.append(
+            f"Intercept-only updating adjusted the linear predictor by α = {alpha_i:.3f} (slope fixed at β = 1.000), "
+            f"yielding apparent in-sample Brier score of {post_int.get('brier_score', float('nan')):.3f} and ICI of {post_int.get('ici', float('nan')):.3f}. "
+            f"Logistic recalibration updated both parameters (α = {alpha_l:.3f}, β = {beta_l:.3f}), "
+            f"yielding apparent in-sample Brier score of {post_log.get('brier_score', float('nan')):.3f} and ICI of {post_log.get('ici', float('nan')):.3f}."
+        )
+        parts.append(
+            f"Post-recalibration calibration metrics are apparent in-sample estimates evaluated on the updating cohort, "
+            f"where post-update calibration intercept (0.000) and slope (1.000 under logistic recalibration) are fixed by construction "
+            f"rather than independent evidence of external calibration improvement, while identically preserving model discrimination (AUROC = {post_log.get('auroc', float('nan')):.3f})."
+        )
+    else:
+        post = recal_res.get("post", {})
+        params = recal_res.get("recalibration_parameters", {})
+        alpha = params.get("alpha")
+        beta = params.get("beta", 1.0)
+
+        if alpha is not None:
+            parts.append(
+                f"Recalibration updated the linear predictor with an intercept adjustment of α = {alpha:.3f} "
+                f"and slope multiplier of β = {beta:.3f}."
+            )
+
+        parts.append(
+            f"Post-recalibration calibration metrics are apparent in-sample estimates: intercept = {post.get('calibration_intercept', float('nan')):.3f}, "
+            f"slope = {post.get('calibration_slope', float('nan')):.3f}, Brier score = {post.get('brier_score', float('nan')):.3f}, "
+            f"and Integrated Calibration Index (ICI) = {post.get('ici', float('nan')):.3f}, "
+            f"while identically preserving model discrimination (AUROC = {post.get('auroc', float('nan')):.3f}). "
+            f"Note that post-update calibration intercept (0.000) and slope (1.000 under logistic recalibration) are fixed by construction in the updating sample rather than independent evidence of external calibration improvement."
+        )
 
     return " ".join(parts)
 
@@ -921,12 +950,14 @@ def generate_diagnostic_auroc_sample_size_narrative(
     prev = auroc_res.get("prevalence", 0.50)
     alpha = auroc_res.get("alpha", 0.05)
     power = auroc_res.get("power", 0.80)
+    is_two_sided = auroc_res.get("two_sided", True)
+    sided_str = "two-sided" if is_two_sided else "one-sided"
 
     parts = [
         "Sample size requirements for prospective diagnostic test evaluation were determined using the Obuchowski (1998) "
         "and Hanley-McNeil (1982) formulation for receiver operating characteristic curves.",
         f"To detect a statistically significant difference between an anticipated AUROC of {theta1:.3f} and null AUROC of {theta0:.2f} "
-        f"with {power * 100:.0f}% statistical power at a two-sided significance level of alpha = {alpha:.2f} under an anticipated case prevalence of {prev * 100:.1f}%, "
+        f"with {power * 100:.0f}% statistical power at a {sided_str} significance level of alpha = {alpha:.2f} under an anticipated case prevalence of {prev * 100:.1f}%, "
         f"the study requires a total of N = {n_tot} participants ({n_cases} cases and {n_ctrls} controls).",
     ]
     return " ".join(parts)

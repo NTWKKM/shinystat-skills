@@ -257,7 +257,7 @@ res = plot_recalibration_comparison(
 ```
 
 ### 12. Bootstrap Optimism Plot (`plot_bootstrap_optimism`)
-Horizontal barbell chart comparing apparent, test, optimism, and optimism-corrected metrics across bootstrap iterations.
+Grouped horizontal bar chart of **Apparent vs Optimism-Corrected** metrics (including `1 - Brier Score` where applicable) and the uniform shrinkage factor callout.
 - **Usage**:
 ```python
 from medstat.figures.calibration import plot_bootstrap_optimism
@@ -279,7 +279,7 @@ For interactive HTML reports, use the mirror submodule `medstat.figures.html`. I
 - **`plot_dual_reclassification(reclass_data, ...)`**: Interactive scatter plot of baseline vs updated risks with hover tooltips and event/non-event toggles.
 - **`plot_dual_time_dependent_roc(td_data, ...)`**: Interactive longitudinal AUROC trajectory with CI bounds or multi-horizon ROC curves.
 - **`plot_dual_recalibration_comparison(recal_res, ...)`**: Interactive pre vs post recalibration curve comparison with hover tooltips and calibration slope/intercept metrics.
-- **`plot_dual_bootstrap_optimism(val_res, ...)`**: Interactive horizontal bar chart comparing apparent, bootstrap mean, test mean, and optimism-corrected performance.
+- **`plot_dual_bootstrap_optimism(val_res, ...)`**: Interactive grouped horizontal bar chart of **Apparent vs Optimism-Corrected** metrics (including `1 - Brier Score` where applicable) and the uniform shrinkage factor callout.
 - **`plot_dual_kaplan_meier(km_curves, risk_table, ...)`**: Step-function survival curves with 95% CI bands and hover tooltips.
 - **`plot_dual_cif(cif_data, ...)`**: Non-parametric Cumulative Incidence Function (Aalen-Johansen) with Naive $1 - \text{KM}$ audit and interactive hover.
 - **`plot_dual_calibration(calib_bins, ...)`**: Decile calibration points with 95% Wilson CI error bars and Brier/ICI annotations.

@@ -15,6 +15,7 @@ import pytest
 from scipy.special import expit
 
 from medstat.diagnostic.validation import (
+    _compute_calibration_slope,
     bootstrap_internal_validation,
     recalibrate_prediction_model,
 )
@@ -131,8 +132,10 @@ def test_bootstrap_internal_validation_mathematical_invariants():
 
 def test_bootstrap_internal_validation_edge_cases():
     """Verify input validation, degenerate handling, and clinical warnings."""
+    rng = np.random.default_rng(0)
+
     # 1. Missing outcome or predictor column
-    df = pd.DataFrame({"y": [0, 1] * 10, "x1": np.random.randn(20)})
+    df = pd.DataFrame({"y": [0, 1] * 10, "x1": rng.standard_normal(20)})
     with pytest.raises(ValueError, match="not found"):
         bootstrap_internal_validation(df, "missing_y", ["x1"])
     with pytest.raises(ValueError, match="not found"):
@@ -140,25 +143,40 @@ def test_bootstrap_internal_validation_edge_cases():
     with pytest.raises(ValueError, match="At least one predictor"):
         bootstrap_internal_validation(df, "y", [])
 
-    # 2. Non-binary outcome
-    df_multiclass = pd.DataFrame({"y": [0, 1, 2] * 10, "x": np.random.randn(30)})
+    # 2. Explicit Missing-Value Rejection with column details
+    df_missing = pd.DataFrame(
+        {
+            "y": [0, 1, 0, 1, 0, 1, 0, 1, 0, np.nan],
+            "x1": [1.0, np.nan, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+            "x2": np.arange(10, dtype=float),
+        }
+    )
+    with pytest.raises(
+        ValueError,
+        match="Missing values detected in input columns: y \\(1\\), x1 \\(1\\)|Missing values detected in input columns:",
+    ):
+        bootstrap_internal_validation(df_missing, "y", ["x1", "x2"])
+
+    # 3. Non-binary outcome
+    df_multiclass = pd.DataFrame({"y": [0, 1, 2] * 10, "x": rng.standard_normal(30)})
     with pytest.raises(ValueError, match="strictly binary"):
         bootstrap_internal_validation(df_multiclass, "y", ["x"])
 
-    # 3. Low EPP warning
+    # 4. Low minority-class EPP warning
     df_low_epp = pd.DataFrame(
         {
-            "y": [0] * 95 + [1] * 5,  # Only 5 events
-            "x1": np.random.randn(100),
-            "x2": np.random.randn(100),
+            "y": [0] * 95 + [1] * 5,  # Only 5 minority events
+            "x1": rng.standard_normal(100),
+            "x2": rng.standard_normal(100),
         }
     )
     res_low = bootstrap_internal_validation(
         df_low_epp, "y", ["x1", "x2"], n_bootstrap=10, random_state=42
     )
     assert any("EPP" in w for w in res_low["warnings"])
+    assert res_low["events_per_predictor"] == pytest.approx(2.5)
 
-    # 4. Penalty validation & Firth support
+    # 5. Penalty validation & Firth support
     with pytest.raises(ValueError, match="Unsupported penalty"):
         bootstrap_internal_validation(df, "y", ["x1"], penalty="unsupported")
 
@@ -168,6 +186,12 @@ def test_bootstrap_internal_validation_edge_cases():
     assert "metrics" in res_firth
     assert res_firth["n_successful_replicates"] > 0
     assert 0.01 <= res_firth["shrinkage_factor"] <= 1.0
+
+    # 6. Degenerate / zero-variance linear predictor returns NaN slope
+    y_bin = np.array([0, 1] * 10)
+    lp_const = np.ones(20) * 0.5
+    slope_nan = _compute_calibration_slope(y_bin, lp_const)
+    assert np.isnan(slope_nan)
 
 
 def test_bootstrap_internal_validation_categorical_predictors():
@@ -356,6 +380,32 @@ def test_recalibrate_prediction_model_errors():
     with pytest.raises(ValueError, match="within \\[0, 1\\]"):
         recalibrate_prediction_model([0, 1, 0] * 5, [0.1, 1.5, 0.6] * 5)
 
+    # Non-finite values in y_true or p_pred
+    y_nan = np.array([0, 1, 0, 1, np.nan, 0, 1, 0, 1, 0])
+    p_valid = np.linspace(0.1, 0.9, 10)
+    with pytest.raises(
+        ValueError,
+        match="Non-finite values detected in input arrays: y_true has 1 non-finite value",
+    ):
+        recalibrate_prediction_model(y_nan, p_valid)
+
+    y_valid = np.array([0, 1] * 5)
+    p_inf = np.array([0.1, 0.2, np.inf, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95])
+    with pytest.raises(
+        ValueError,
+        match="Non-finite values detected in input arrays: .* p_pred has 1 non-finite value",
+    ):
+        recalibrate_prediction_model(y_valid, p_inf)
+
+    # Test recalibration narrative with method == 'both'
+    recal_res = recalibrate_prediction_model(y_valid, p_valid, method="both")
+    narr_both = generate_recalibration_narrative(recal_res)
+    assert (
+        "both intercept-only (calibration-in-the-large) and logistic recalibration updating"
+        in narr_both
+    )
+    assert "apparent in-sample estimates" in narr_both
+
 
 # ==============================================================================
 # 3. Riley et al. (2020) Minimum Sample Size for Clinical Prediction Models
@@ -504,6 +554,40 @@ def test_diagnostic_auroc_sample_size_obuchowski():
         auroc_expected=0.65, auroc_null=0.50, prevalence=0.30, power=0.80
     )
     assert res_smaller_effect["total_n"] > res["total_n"]
+
+
+def test_diagnostic_auroc_sample_size_obuchowski_benchmark():
+    """Verify published Obuchowski (1997) / Hanley-McNeil benchmark in calculate_diagnostic_auroc_sample_size."""
+    res = calculate_diagnostic_auroc_sample_size(
+        auroc_expected=0.70,
+        auroc_null=0.50,
+        prevalence=0.50,
+        alpha=0.05,
+        power=0.80,
+        two_sided=True,
+    )
+    # Under Obuchowski (1997) / Hanley-McNeil asymptotic variance per case:
+    # V0 = (Q2_0 - 0.25) + (Q1_0 - 0.25) = 1/6 ~ 0.1667
+    # V1 = (Q2_1 - 0.49) + (Q1_1 - 0.49) ~ 0.1349
+    # (z_alpha * sqrt(V0) + z_beta * sqrt(V1))^2 / (0.7 - 0.5)^2 = 30.76 -> 31 cases
+    assert res["n_cases"] == 31
+    assert res["n_controls"] == 31
+    assert res["total_n"] == 62
+
+    # Verify one-sided vs two-sided narrative generation
+    narr_two = generate_diagnostic_auroc_sample_size_narrative(res)
+    assert "two-sided" in narr_two
+
+    res_one = calculate_diagnostic_auroc_sample_size(
+        auroc_expected=0.70,
+        auroc_null=0.50,
+        prevalence=0.50,
+        alpha=0.05,
+        power=0.80,
+        two_sided=False,
+    )
+    narr_one = generate_diagnostic_auroc_sample_size_narrative(res_one)
+    assert "one-sided" in narr_one
 
 
 # ==============================================================================

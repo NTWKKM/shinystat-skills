@@ -3235,7 +3235,7 @@
   "recipe_20_sample_size": {
     "riley_n_total": 549,
     "riley_criterion3_n": 549,
-    "auroc_total_n": 67,
-    "auroc_n_cases": 20
+    "auroc_total_n": 24,
+    "auroc_n_cases": 7
   }
 }

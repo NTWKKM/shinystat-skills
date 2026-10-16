@@ -732,6 +732,9 @@ def model_cmd(
         elif "cox" in mtype or "survival" in mtype:
             mtype = "cox"
 
+    if mtype == "logistic":
+        covar_list = [c for c in covar_list if c not in ("p_recal", "p_pred", "score")]
+
     result_data: dict[str, Any] = {
         "model_type": mtype,
         "outcome": outcome,
@@ -1424,7 +1427,18 @@ def diag_cmd(
             raise click.ClickException(
                 "Internal validation requires predictor column(s) via '--predictors' (comma-separated)."
             )
-        pred_cols = [p.strip() for p in str(predictors).split(",") if p.strip()]
+        score_cols = {
+            col for col in (p_recal, test_col, "p_recal", "p_pred", "score") if col
+        }
+        pred_cols = [
+            p.strip()
+            for p in str(predictors).split(",")
+            if p.strip() and p.strip() not in score_cols
+        ]
+        if not pred_cols:
+            raise click.ClickException(
+                "Internal validation requires predictor column(s) via '--predictors' excluding score/probability columns."
+            )
         val_cols = [gold_standard] + pred_cols
         validate_columns(df, val_cols, "diag internal_validation")
         check_data_missingness(df, val_cols, "diag internal_validation")

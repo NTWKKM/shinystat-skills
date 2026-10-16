@@ -104,15 +104,20 @@ def _compute_calibration_slope(
     lp_arr = np.asarray(lp, dtype=float)
 
     # Guard against zero-variance LP
-    if np.allclose(lp_arr, lp_arr[0]):
-        return 1.0
+    if np.var(lp_arr) <= 1e-12 or np.allclose(lp_arr, lp_arr[0]):
+        return float("nan")
 
     X = sm.add_constant(lp_arr)
     try:
         mod = sm.Logit(y_arr, X).fit(disp=False)
-        return float(mod.params[1])
+        if not getattr(mod, "mle_retvals", {}).get("converged", True):
+            return float("nan")
+        val = float(mod.params[1])
+        if not np.isfinite(val):
+            return float("nan")
+        return val
     except Exception:
-        return 1.0
+        return float("nan")
 
 
 def _find_reestimated_intercept(
@@ -181,8 +186,18 @@ def bootstrap_internal_validation(
     if len(predictors) == 0:
         raise ValueError("At least one predictor must be provided.")
 
-    cols = [outcome] + list(predictors)
-    sub_df = df[cols].dropna()
+    req_cols = [outcome] + list(predictors)
+    missing_counts = {
+        c: int(df[c].isna().sum()) for c in req_cols if df[c].isna().sum() > 0
+    }
+    if missing_counts:
+        counts_str = ", ".join(f"{c} ({cnt})" for c, cnt in missing_counts.items())
+        raise ValueError(
+            f"Missing values detected in input columns: {counts_str}. "
+            "Please perform complete-case filtering or multiple imputation before running internal validation."
+        )
+
+    sub_df = df[req_cols]
     if len(sub_df) < 10:
         raise ValueError(f"Insufficient non-missing observations (N = {len(sub_df)}).")
 
@@ -218,8 +233,10 @@ def bootstrap_internal_validation(
 
     n_total = len(y_orig)
     n_events = int(np.sum(y_orig))
+    n_non_events = n_total - n_events
+    n_minority = min(n_events, n_non_events)
     n_predictors = len(model_predictors)
-    epp = float(n_events / n_predictors) if n_predictors > 0 else 0.0
+    epp = float(n_minority / n_predictors) if n_predictors > 0 else 0.0
 
     # 1. Fit original model on full dataset
     X_orig_const = sm.add_constant(X_orig, has_constant="add")
@@ -418,7 +435,7 @@ def bootstrap_internal_validation(
     warnings_list = []
     if epp < 10.0:
         warnings_list.append(
-            f"Events Per Predictor (EPP = {epp:.1f}) is below 10, indicating elevated risk of model overfitting."
+            f"Low events per predictor (EPP = {epp:.2f} < 10), indicating elevated risk of model overfitting."
         )
     if shrinkage_factor < 0.80:
         warnings_list.append(
@@ -484,13 +501,18 @@ def recalibrate_prediction_model(
             f"Length mismatch between y_true (N={len(y_arr)}) and p_pred (N={len(p_arr)})."
         )
 
-    valid_mask = ~(np.isnan(y_arr) | np.isnan(p_arr))
-    y_arr = y_arr[valid_mask]
-    p_arr = p_arr[valid_mask]
+    n_invalid_y = int(np.sum(~np.isfinite(y_arr)))
+    n_invalid_p = int(np.sum(~np.isfinite(p_arr)))
+    if n_invalid_y > 0 or n_invalid_p > 0:
+        raise ValueError(
+            f"Non-finite values detected in input arrays: y_true has {n_invalid_y} non-finite value(s), "
+            f"p_pred has {n_invalid_p} non-finite value(s). "
+            "Please perform complete-case filtering or multiple imputation before running recalibration."
+        )
 
     n = len(y_arr)
     if n < 10:
-        raise ValueError(f"Insufficient non-missing pairs for recalibration (N = {n}).")
+        raise ValueError(f"Insufficient observations for recalibration (N = {n}).")
 
     unique_y = np.unique(y_arr)
     if not np.array_equal(unique_y, [0.0, 1.0]):

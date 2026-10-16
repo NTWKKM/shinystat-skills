@@ -127,6 +127,7 @@ Evaluating Diagnostic / Prognostic Biomarkers Over Follow-up Time
 ```
 
 ### H. TRIPOD+AI Prediction Model Internal Validation & Uniform Shrinkage
+
 ```
 Developing / Validating Clinical Prediction Models
 ├── Apparent Performance ──▶ Optimistically biased due to fitting on derivation data
@@ -141,6 +142,7 @@ Developing / Validating Clinical Prediction Models
 ```
 
 ### I. Minimum Sample Size for Clinical Prediction Models (Riley et al. 2020)
+
 ```
 Determining Required Sample Size for Multivariable Prediction Model Development
 ├── Do NOT rely on simplistic 10 EPP rule-of-thumb
