@@ -2365,3 +2365,155 @@ def test_recipe_17_time_dependent_roc_statistical_invariants(recipes):
         assert "specificity" in h_res
         assert 0.0 <= h_res["sensitivity"] <= 1.0
         assert 0.0 <= h_res["specificity"] <= 1.0
+
+
+# -----------------------------------------------------------------------------
+# 30. Recipe 18: TRIPOD+AI Bootstrap Internal Validation & Uniform Shrinkage
+# -----------------------------------------------------------------------------
+
+
+def test_recipe_18_bootstrap_internal_validation_invariants(recipes):
+    boot_val = recipes["bootstrap_internal_validation"]
+    np.random.seed(42)
+    n = 200
+    x1 = np.random.normal(0, 1, size=n)
+    x2 = np.random.normal(0, 1, size=n)
+    lp = -0.5 + 0.8 * x1 + 0.6 * x2
+    prob = 1.0 / (1.0 + np.exp(-lp))
+    y = (np.random.uniform(size=n) < prob).astype(int)
+
+    df = pd.DataFrame({"y": y, "x1": x1, "x2": x2})
+    res = boot_val(
+        df, outcome="y", predictors=["x1", "x2"], n_bootstrap=30, random_state=42
+    )
+
+    assert "apparent_metrics" in res
+    assert "metrics" in res
+    assert "shrinkage_factor" in res
+    assert "shrunk_coefficients" in res
+
+    metrics = res["metrics"]
+    for m in (
+        "auroc",
+        "brier_score",
+        "nagelkerke_r2",
+        "calibration_intercept",
+        "calibration_slope",
+    ):
+        assert m in metrics
+        info = metrics[m]
+        assert np.isclose(
+            info["optimism_corrected"], info["apparent"] - info["optimism"]
+        )
+
+    s_hat = res["shrinkage_factor"]
+    assert 0.01 <= s_hat <= 1.0
+
+    shrunk = res["shrunk_coefficients"]
+    orig_b1 = shrunk["original"]["x1"]
+    shrunk_b1 = shrunk["shrunk"]["x1"]
+    assert np.isclose(shrunk_b1, orig_b1 * s_hat)
+
+    # Re-estimated intercept preserves mean predicted risk
+    shrunk_inter = shrunk["shrunk"]["Intercept"]
+    lp_shrunk = shrunk_inter + shrunk["shrunk"]["x1"] * x1 + shrunk["shrunk"]["x2"] * x2
+    p_shrunk = 1.0 / (1.0 + np.exp(-lp_shrunk))
+    assert np.isclose(np.mean(p_shrunk), np.mean(y), atol=1e-3)
+
+
+# -----------------------------------------------------------------------------
+# 31. Recipe 19: Prediction Model Recalibration and Updating
+# -----------------------------------------------------------------------------
+
+
+def test_recipe_19_recalibration_invariants(recipes):
+    recal_fn = recipes["recalibrate_prediction_model"]
+    np.random.seed(42)
+    n = 200
+    # True event probability
+    x = np.random.normal(0, 1, size=n)
+    p_true = 1.0 / (1.0 + np.exp(-(0.5 + 1.2 * x)))
+    y = (np.random.uniform(size=n) < p_true).astype(int)
+
+    # Miscalibrated probabilities (under-predicting risk and over-confident)
+    p_miscal = np.clip(1.0 / (1.0 + np.exp(-(-1.5 + 2.5 * x))), 0.01, 0.99)
+
+    # 1. Logistic recalibration
+    res_log = recal_fn(y, p_miscal, method="logistic")
+    assert "pre" in res_log
+    assert "post" in res_log
+    assert "recalibration_parameters" in res_log
+
+    # Discrimination preserved
+    assert res_log["post"]["auroc"] == pytest.approx(res_log["pre"]["auroc"], abs=1e-5)
+    # Post slope near 1.0 and intercept near 0.0
+    assert res_log["post"]["calibration_slope"] == pytest.approx(1.0, abs=0.05)
+    assert res_log["post"]["calibration_intercept"] == pytest.approx(0.0, abs=0.05)
+
+    # 2. Intercept-only recalibration
+    res_inter = recal_fn(y, p_miscal, method="intercept_only")
+    assert res_inter["recalibration_parameters"]["beta"] == 1.0
+    # Mean predicted probability matches event rate
+    p_recal = res_inter["p_recalibrated"]
+    assert np.mean(p_recal) == pytest.approx(np.mean(y), abs=1e-3)
+
+    # 3. Both method
+    res_both = recal_fn(y, p_miscal, method="both")
+    assert "post_intercept_only" in res_both
+    assert "post_logistic" in res_both
+
+
+# -----------------------------------------------------------------------------
+# 32. Recipe 20: Riley Prediction & Obuchowski Diagnostic Sample Size
+# -----------------------------------------------------------------------------
+
+
+def test_recipe_20_riley_and_diagnostic_sample_size_invariants(recipes):
+    calc_riley = recipes["calculate_riley_sample_size"]
+    calc_auroc = recipes["calculate_diagnostic_auroc_sample_size"]
+
+    # Riley textbook benchmark: P=10, phi=0.20, R2_CS=0.15, S=0.90 -> N3 = 549
+    res_riley = calc_riley(
+        n_parameters=10,
+        prevalence=0.20,
+        cox_snell_r2=0.15,
+        shrinkage_target=0.90,
+    )
+    assert res_riley["criteria"]["criterion3_shrinkage"]["n"] == 549
+    assert res_riley["n_total"] >= 549
+    assert res_riley["n_events"] == int(np.ceil(res_riley["n_total"] * 0.20))
+    assert res_riley["events_per_parameter"] == pytest.approx(
+        res_riley["n_events"] / 10.0
+    )
+
+    # Test Riley derivation from C-statistic
+    res_cstat = calc_riley(
+        n_parameters=5,
+        prevalence=0.15,
+        c_statistic=0.75,
+        shrinkage_target=0.90,
+    )
+    assert res_cstat["cox_snell_r2"] > 0
+    assert res_cstat["n_total"] > 0
+
+    # Obuchowski diagnostic AUROC sample size
+    res_auroc = calc_auroc(
+        auroc_expected=0.85,
+        auroc_null=0.50,
+        prevalence=0.30,
+        alpha=0.05,
+        power=0.80,
+    )
+    assert res_auroc["n_cases"] > 0
+    assert res_auroc["n_controls"] > 0
+    assert res_auroc["total_n"] == res_auroc["n_cases"] + res_auroc["n_controls"]
+
+    # Monotonicity: higher power requires more subjects
+    res_high_power = calc_auroc(
+        auroc_expected=0.85,
+        auroc_null=0.50,
+        prevalence=0.30,
+        alpha=0.05,
+        power=0.90,
+    )
+    assert res_high_power["total_n"] > res_auroc["total_n"]

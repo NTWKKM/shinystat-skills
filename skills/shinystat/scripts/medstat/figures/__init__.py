@@ -8,7 +8,11 @@ from __future__ import annotations
 from medstat.figures.agreement import plot_bland_altman
 from medstat.figures.balance import plot_love
 from medstat.figures.base import FigureResult, export_source_data
-from medstat.figures.calibration import plot_calibration
+from medstat.figures.calibration import (
+    plot_bootstrap_optimism,
+    plot_calibration,
+    plot_recalibration_comparison,
+)
 from medstat.figures.dca import plot_dca
 from medstat.figures.diagnostics import (
     plot_mice_diagnostics,
@@ -44,6 +48,8 @@ __all__ = [
     "plot_time_dependent_roc",
     "plot_reclassification",
     "plot_calibration",
+    "plot_recalibration_comparison",
+    "plot_bootstrap_optimism",
     "plot_dca",
     "plot_bland_altman",
     "plot_love",

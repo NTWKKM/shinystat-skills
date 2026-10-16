@@ -3567,4 +3567,567 @@ def compute_time_dependent_roc(
     return out
 ```
 
+---
+
+## 18. TRIPOD+AI Optimism-Corrected Bootstrap Internal Validation & Uniform Shrinkage
+
+Computes Efron-Gong optimism-corrected performance metrics (AUROC, Brier score, Cox-Snell $R^2$, Nagelkerke $R^2$, calibration-in-the-large, calibration slope) across $B$ bootstrap resamples. Derives the uniform shrinkage factor $\hat{s}$ and re-estimates the intercept $\alpha_0$ to preserve sample prevalence on future predictions.
+
+```python
+import math
+from typing import Any
+
+import numpy as np
+import pandas as pd
+import scipy.optimize as opt
+import statsmodels.api as sm
+from scipy.special import expit, logit
+from sklearn.metrics import roc_auc_score
+
+
+def bootstrap_internal_validation(
+    df: pd.DataFrame,
+    outcome: str,
+    predictors: list[str],
+    n_bootstrap: int = 200,
+    random_state: int = 42,
+) -> dict[str, Any]:
+    """TRIPOD+AI Optimism-Corrected Bootstrap Internal Validation and Uniform Shrinkage."""
+    cols = [outcome] + list(predictors)
+    sub_df = df[cols].dropna()
+    y_orig = sub_df[outcome].to_numpy(dtype=float)
+    X_orig = sub_df[predictors].to_numpy(dtype=float)
+    n_total = len(y_orig)
+    n_events = int(np.sum(y_orig))
+    n_predictors = len(predictors)
+    epp = float(n_events / n_predictors) if n_predictors > 0 else 0.0
+
+    # 1. Fit initial model
+    X_orig_const = sm.add_constant(X_orig, has_constant="add")
+    orig_model = sm.Logit(y_orig, X_orig_const).fit(disp=False)
+    orig_params = orig_model.params
+    lp_orig = np.dot(X_orig_const, orig_params)
+    p_orig = expit(lp_orig)
+
+    def _calc_metrics(
+        y_true: np.ndarray, p_pred: np.ndarray, lp: np.ndarray
+    ) -> dict[str, float]:
+        n = len(y_true)
+        p_c = np.clip(p_pred, 1e-15, 1.0 - 1e-15)
+        prev = np.clip(float(np.mean(y_true)), 1e-15, 1.0 - 1e-15)
+        ll_null = float(
+            np.sum(y_true * np.log(prev) + (1.0 - y_true) * np.log(1.0 - prev))
+        )
+        ll_model = float(
+            np.sum(y_true * np.log(p_c) + (1.0 - y_true) * np.log(1.0 - p_c))
+        )
+        cs_r2 = max(0.0, 1.0 - math.exp(-2.0 * (ll_model - ll_null) / n))
+        r2_max = max(1e-12, 1.0 - math.exp(2.0 * ll_null / n))
+        nag_r2 = min(1.0, max(0.0, cs_r2 / r2_max))
+        auc = (
+            float(roc_auc_score(y_true, p_pred))
+            if len(np.unique(y_true)) == 2
+            else 0.5
+        )
+        brier = float(np.mean((y_true - p_pred) ** 2))
+
+        # Intercept offset
+        sum_y = float(np.sum(y_true))
+        if sum_y <= 0:
+            inter = -50.0
+        elif sum_y >= n:
+            inter = 50.0
+        else:
+            try:
+                inter = float(
+                    opt.brentq(
+                        lambda a: float(np.sum(expit(a + lp)) - sum_y),
+                        -50.0,
+                        50.0,
+                    )
+                )
+            except Exception:
+                inter = 0.0
+
+        # Slope
+        if np.allclose(lp, lp[0]):
+            slope = 1.0
+        else:
+            try:
+                mod_slope = sm.Logit(y_true, sm.add_constant(lp)).fit(disp=False)
+                slope = float(mod_slope.params[1])
+            except Exception:
+                slope = 1.0
+
+        return {
+            "auroc": auc,
+            "brier_score": brier,
+            "nagelkerke_r2": nag_r2,
+            "calibration_intercept": inter,
+            "calibration_slope": slope,
+        }
+
+    apparent = _calc_metrics(y_orig, p_orig, lp_orig)
+
+    # 2. Bootstrap loop
+    rng = np.random.default_rng(random_state)
+    boot_records = {k: [] for k in apparent}
+    test_records = {k: [] for k in apparent}
+    optimism_records = {k: [] for k in apparent}
+    test_slopes = []
+    n_successful = 0
+
+    for _ in range(n_bootstrap):
+        boot_idx = rng.choice(n_total, size=n_total, replace=True)
+        y_b = y_orig[boot_idx]
+        X_b = X_orig[boot_idx]
+        if len(np.unique(y_b)) < 2:
+            continue
+        X_b_const = sm.add_constant(X_b, has_constant="add")
+        try:
+            boot_mod = sm.Logit(y_b, X_b_const).fit(disp=False)
+            b_params = boot_mod.params
+            if np.isnan(b_params).any() or np.isinf(b_params).any():
+                continue
+        except Exception:
+            continue
+
+        lp_b = np.dot(X_b_const, b_params)
+        p_b = expit(lp_b)
+        m_b = _calc_metrics(y_b, p_b, lp_b)
+
+        lp_test = np.dot(X_orig_const, b_params)
+        p_test = expit(lp_test)
+        m_test = _calc_metrics(y_orig, p_test, lp_test)
+
+        n_successful += 1
+        for k in apparent:
+            boot_records[k].append(m_b[k])
+            test_records[k].append(m_test[k])
+            optimism_records[k].append(m_b[k] - m_test[k])
+        test_slopes.append(m_test["calibration_slope"])
+
+    # Summary
+    metrics_summary = {}
+    for k in apparent:
+        app_val = apparent[k]
+        opt_mean = float(np.mean(optimism_records[k])) if optimism_records[k] else 0.0
+        b_mean = float(np.mean(boot_records[k])) if boot_records[k] else app_val
+        t_mean = float(np.mean(test_records[k])) if test_records[k] else app_val
+        corrected = app_val - opt_mean
+        if k in ("auroc", "nagelkerke_r2"):
+            corrected = max(0.0, min(1.0, corrected))
+        elif k == "brier_score":
+            corrected = max(0.0, corrected)
+        metrics_summary[k] = {
+            "apparent": float(app_val),
+            "boot_mean": float(b_mean),
+            "test_mean": float(t_mean),
+            "optimism": float(opt_mean),
+            "optimism_corrected": float(corrected),
+        }
+
+    raw_s = float(np.mean(test_slopes)) if test_slopes else 1.0
+    shrinkage_factor = float(np.clip(raw_s, 0.01, 1.0))
+
+    # Shrunk coefficients
+    orig_intercept = float(orig_params[0])
+    orig_betas = [float(b) for b in orig_params[1:]]
+    shrunk_betas = [shrinkage_factor * b for b in orig_betas]
+    lp_shrunk_no_inter = np.dot(X_orig, shrunk_betas)
+
+    # Re-estimate intercept
+    target_events = float(np.sum(y_orig))
+    try:
+        shrunk_intercept = float(
+            opt.brentq(
+                lambda a: float(np.sum(expit(a + lp_shrunk_no_inter)) - target_events),
+                -50.0,
+                50.0,
+            )
+        )
+    except Exception:
+        prev_orig = np.clip(target_events / n_total, 1e-6, 1.0 - 1e-6)
+        shrunk_intercept = float(logit(prev_orig) - np.mean(lp_shrunk_no_inter))
+
+    orig_coef_dict = {"Intercept": orig_intercept}
+    shrunk_coef_dict = {"Intercept": shrunk_intercept}
+    for name, ob, sb in zip(predictors, orig_betas, shrunk_betas):
+        orig_coef_dict[name] = ob
+        shrunk_coef_dict[name] = sb
+
+    warnings = []
+    if epp < 10.0:
+        warnings.append(
+            f"Events per predictor (EPP = {epp:.1f}) is below 10; risk of model overfitting is high."
+        )
+    if shrinkage_factor < 0.80:
+        warnings.append(
+            f"Uniform shrinkage factor s_hat = {shrinkage_factor:.3f} (< 0.80) indicates substantial overfitting."
+        )
+    if n_successful < n_bootstrap * 0.5:
+        warnings.append(
+            f"Fewer than 50% of bootstrap resamples converged ({n_successful}/{n_bootstrap})."
+        )
+
+    return {
+        "n_total": n_total,
+        "n_events": n_events,
+        "n_predictors": n_predictors,
+        "events_per_predictor": epp,
+        "n_bootstrap": n_bootstrap,
+        "n_successful_replicates": n_successful,
+        "apparent_metrics": apparent,
+        "metrics": metrics_summary,
+        "shrinkage_factor": shrinkage_factor,
+        "shrunk_coefficients": {
+            "original": orig_coef_dict,
+            "shrunk": shrunk_coef_dict,
+        },
+        "warnings": warnings,
+    }
+```
+
+---
+
+## 19. Prediction Model Recalibration and Updating (Logistic & Intercept-Only)
+
+Adjusts existing prediction models to a new target population or cohort. Supports Intercept-Only updating (calibration-in-the-large, shifting mean predicted risk to the observed outcome incidence while fixing slope=1) and Logistic Recalibration (updating both calibration intercept $\alpha$ and calibration slope $\beta$).
+
+```python
+from typing import Any, Literal
+
+import numpy as np
+import pandas as pd
+import scipy.optimize as opt
+import statsmodels.api as sm
+from scipy.special import expit, logit
+from sklearn.metrics import roc_auc_score
+
+
+def recalibrate_prediction_model(
+    y_true: pd.Series | np.ndarray,
+    p_pred: pd.Series | np.ndarray,
+    method: Literal[
+        "intercept_only", "calibration_in_the_large", "logistic", "both"
+    ] = "logistic",
+    clip_eps: float = 1e-6,
+) -> dict[str, Any]:
+    """Prediction model recalibration and updating (intercept-only, logistic, or both)."""
+    y_arr = np.asarray(y_true, dtype=float).ravel()
+    p_arr = np.asarray(p_pred, dtype=float).ravel()
+
+    valid_mask = ~(np.isnan(y_arr) | np.isnan(p_arr))
+    y_arr = y_arr[valid_mask]
+    p_arr = p_arr[valid_mask]
+    n = len(y_arr)
+
+    p_clipped = np.clip(p_arr, clip_eps, 1.0 - clip_eps)
+    lp_orig = logit(p_clipped)
+
+    def _calc_suite(y: np.ndarray, p: np.ndarray, lp: np.ndarray) -> dict[str, float]:
+        sum_y = float(np.sum(y))
+        try:
+            inter = float(
+                opt.brentq(
+                    lambda a: float(np.sum(expit(a + lp)) - sum_y), -50.0, 50.0
+                )
+            )
+        except Exception:
+            inter = 0.0
+
+        if np.allclose(lp, lp[0]):
+            slope = 1.0
+        else:
+            try:
+                mod_s = sm.Logit(y, sm.add_constant(lp)).fit(disp=False)
+                slope = float(mod_s.params[1])
+            except Exception:
+                slope = 1.0
+
+        brier = float(np.mean((y - p) ** 2))
+        auc = (
+            float(roc_auc_score(y, p))
+            if len(np.unique(y)) == 2
+            else 0.5
+        )
+
+        try:
+            from statsmodels.nonparametric.smoothers_lowess import lowess
+
+            smoothed = lowess(y, p, frac=0.67, return_sorted=False)
+            cal_err = np.abs(smoothed - p)
+            emax = float(np.max(cal_err))
+            ici = float(np.mean(cal_err))
+        except Exception:
+            emax = float("nan")
+            ici = float("nan")
+
+        return {
+            "calibration_intercept": inter,
+            "calibration_slope": slope,
+            "brier_score": brier,
+            "emax": emax,
+            "ici": ici,
+            "auroc": auc,
+        }
+
+    pre_metrics = _calc_suite(y_arr, p_clipped, lp_orig)
+    norm_m = (
+        "intercept_only"
+        if method in ("intercept_only", "calibration_in_the_large")
+        else method
+    )
+
+    if norm_m == "intercept_only":
+        sum_y = float(np.sum(y_arr))
+        alpha_recal = float(
+            opt.brentq(
+                lambda a: float(np.sum(expit(a + lp_orig)) - sum_y), -50.0, 50.0
+            )
+        )
+        lp_recal = alpha_recal + lp_orig
+        p_recal = expit(lp_recal)
+        post_metrics = _calc_suite(y_arr, p_recal, lp_recal)
+        return {
+            "method": "intercept_only",
+            "n": n,
+            "pre": pre_metrics,
+            "post": post_metrics,
+            "recalibration_parameters": {
+                "method": "intercept_only",
+                "alpha": alpha_recal,
+                "beta": 1.0,
+            },
+            "p_recalibrated": p_recal,
+        }
+    elif norm_m == "logistic":
+        X = sm.add_constant(lp_orig)
+        fit_mod = sm.Logit(y_arr, X).fit(disp=False)
+        alpha_recal = float(fit_mod.params[0])
+        beta_recal = float(fit_mod.params[1])
+        lp_recal = alpha_recal + beta_recal * lp_orig
+        p_recal = expit(lp_recal)
+        post_metrics = _calc_suite(y_arr, p_recal, lp_recal)
+        return {
+            "method": "logistic",
+            "n": n,
+            "pre": pre_metrics,
+            "post": post_metrics,
+            "recalibration_parameters": {
+                "method": "logistic",
+                "alpha": alpha_recal,
+                "alpha_ci": [float(c) for c in fit_mod.conf_int()[0]],
+                "beta": beta_recal,
+                "beta_ci": [float(c) for c in fit_mod.conf_int()[1]],
+            },
+            "p_recalibrated": p_recal,
+        }
+    else:  # both
+        sum_y = float(np.sum(y_arr))
+        alpha_inter = float(
+            opt.brentq(
+                lambda a: float(np.sum(expit(a + lp_orig)) - sum_y), -50.0, 50.0
+            )
+        )
+        p_inter = expit(alpha_inter + lp_orig)
+        post_inter = _calc_suite(y_arr, p_inter, alpha_inter + lp_orig)
+
+        X = sm.add_constant(lp_orig)
+        fit_mod = sm.Logit(y_arr, X).fit(disp=False)
+        alpha_log = float(fit_mod.params[0])
+        beta_log = float(fit_mod.params[1])
+        p_log = expit(alpha_log + beta_log * lp_orig)
+        post_log = _calc_suite(y_arr, p_log, alpha_log + beta_log * lp_orig)
+
+        return {
+            "method": "both",
+            "n": n,
+            "pre": pre_metrics,
+            "post_intercept_only": post_inter,
+            "post_logistic": post_log,
+            "post": post_log,
+            "parameters_intercept_only": {"alpha": alpha_inter, "beta": 1.0},
+            "parameters_logistic": {"alpha": alpha_log, "beta": beta_log},
+            "p_recalibrated": p_log,
+            "p_recalibrated_intercept_only": p_inter,
+            "p_recalibrated_logistic": p_log,
+        }
+```
+
+---
+
+## 20. Sample Size Determination for Clinical Prediction Models (Riley et al. 2020) & Diagnostic AUROC (Obuchowski 1998)
+
+Calculates the minimum required sample size for multivariable prediction model development per the 4 criteria of Riley et al. (BMJ 2020;368:m441), including numerical derivation of $R^2_{CS}$ from C-statistic or Nagelkerke $R^2$. Also determines required case and control sample sizes for diagnostic ROC test evaluation against a null benchmark per Obuchowski (1998) and Hanley & McNeil (1982).
+
+```python
+import math
+from typing import Any
+
+import numpy as np
+import scipy.integrate as integrate
+import scipy.stats as stats
+
+
+def calculate_riley_sample_size(
+    n_parameters: int,
+    prevalence: float,
+    c_statistic: float | None = None,
+    cox_snell_r2: float | None = None,
+    nagelkerke_r2: float | None = None,
+    shrinkage_target: float = 0.90,
+    intercept_margin: float = 0.05,
+    optimism_margin: float = 0.05,
+    mape_target: float | None = None,
+) -> dict[str, Any]:
+    """Riley et al. (2020) sample size for developing clinical prediction models."""
+    phi = float(prevalence)
+    p_params = int(n_parameters)
+    s_target = float(shrinkage_target)
+
+    ll_null = phi * math.log(phi) + (1.0 - phi) * math.log(1.0 - phi)
+    r2_max = 1.0 - math.exp(2.0 * ll_null)
+
+    if cox_snell_r2 is not None:
+        cs_r2 = float(cox_snell_r2)
+    elif nagelkerke_r2 is not None:
+        cs_r2 = float(nagelkerke_r2) * r2_max
+    elif c_statistic is not None:
+        c_stat = float(c_statistic)
+        mu = math.sqrt(2.0) * float(stats.norm.ppf(c_stat))
+        alpha = math.log(phi / (1.0 - phi)) - 0.5 * (mu**2)
+        beta = mu
+
+        def integrand(x: float) -> float:
+            z = alpha + beta * x
+            px = 1.0 / (1.0 + math.exp(-z))
+            px_c = max(1e-15, min(1.0 - 1e-15, px))
+            f0 = float(stats.norm.pdf(x, loc=0.0, scale=1.0))
+            f1 = float(stats.norm.pdf(x, loc=mu, scale=1.0))
+            return phi * f1 * math.log(px_c) + (1.0 - phi) * f0 * math.log(1.0 - px_c)
+
+        ll_full, _ = integrate.quad(integrand, -15.0, 15.0)
+        cs_r2 = float(
+            min(r2_max - 1e-6, max(1e-6, 1.0 - math.exp(2.0 * (ll_null - ll_full))))
+        )
+    else:
+        raise ValueError("Must provide c_statistic, cox_snell_r2, or nagelkerke_r2.")
+
+    # Criterion 1: Overall risk/intercept
+    n1 = int(math.ceil(((1.96 / intercept_margin) ** 2) * phi * (1.0 - phi)))
+
+    # Criterion 2: MAPE (van Smeden 2019)
+    target_m = (
+        mape_target if mape_target is not None else (0.05 if phi <= 0.5 else None)
+    )
+    if target_m is not None:
+        exp_val = (
+            -0.508
+            + 0.259 * math.log(phi)
+            + 0.504 * math.log(p_params)
+            - math.log(target_m)
+        ) / 0.544
+        n2 = int(math.ceil(math.exp(exp_val)))
+    else:
+        n2 = None
+
+    # Criterion 3: Uniform shrinkage
+    arg_s = 1.0 - cs_r2 / s_target
+    if arg_s <= 0.0:
+        raise ValueError(
+            f"Target shrinkage factor ({s_target:.2f}) must be strictly greater than anticipated Cox-Snell R2 ({cs_r2:.4f})."
+        )
+    denom_s = (s_target - 1.0) * math.log(arg_s)
+    n3 = 1000000 if denom_s <= 0 else int(math.ceil(p_params / denom_s))
+
+    # Criterion 4: Small optimism in R2
+    s_req = cs_r2 / (cs_r2 + optimism_margin * r2_max)
+    arg_opt = 1.0 - cs_r2 / s_req
+    if s_req >= 1.0 or arg_opt <= 0.0:
+        n4 = n3
+    else:
+        denom_opt = (s_req - 1.0) * math.log(arg_opt)
+        n4 = n3 if denom_opt <= 0 else int(math.ceil(p_params / denom_opt))
+
+    crit_dict = {
+        "Criterion 1 (Intercept)": n1,
+        "Criterion 3 (Shrinkage)": n3,
+        "Criterion 4 (Optimism)": n4,
+    }
+    if n2 is not None:
+        crit_dict["Criterion 2 (MAPE)"] = n2
+
+    n_total = max(crit_dict.values())
+    binding = max(crit_dict, key=crit_dict.get)  # type: ignore[arg-type]
+    n_events = int(math.ceil(n_total * phi))
+    epp = float(n_events / p_params)
+
+    return {
+        "n_total": n_total,
+        "n_events": n_events,
+        "n_parameters": p_params,
+        "prevalence": phi,
+        "events_per_parameter": epp,
+        "cox_snell_r2": cs_r2,
+        "nagelkerke_r2": float(cs_r2 / r2_max),
+        "r2_max": float(r2_max),
+        "shrinkage_target": s_target,
+        "binding_criterion": binding,
+        "criteria": {
+            "criterion1_intercept": {"n": n1, "margin": intercept_margin},
+            "criterion2_mape": {"n": n2, "target_mape": target_m},
+            "criterion3_shrinkage": {"n": n3, "target_shrinkage": s_target},
+            "criterion4_optimism": {"n": n4, "optimism_margin": optimism_margin},
+        },
+    }
+
+
+def calculate_diagnostic_auroc_sample_size(
+    auroc_expected: float,
+    auroc_null: float = 0.50,
+    prevalence: float = 0.50,
+    alpha: float = 0.05,
+    power: float = 0.80,
+    two_sided: bool = True,
+) -> dict[str, Any]:
+    """Obuchowski (1998) / Hanley-McNeil (1982) diagnostic AUROC sample size."""
+    theta1 = float(auroc_expected)
+    theta0 = float(auroc_null)
+    phi = float(prevalence)
+
+    z_alpha = float(stats.norm.ppf(1.0 - alpha / 2.0 if two_sided else 1.0 - alpha))
+    z_beta = float(stats.norm.ppf(power))
+
+    R = (1.0 - phi) / phi
+    Q1 = theta1 / (2.0 - theta1)
+    Q2 = 2.0 * (theta1**2) / (1.0 + theta1)
+    var_theta1 = theta1 * (1.0 - theta1) + (Q1 - theta1**2) + ((Q2 - theta1**2) / R)
+
+    Q1_0 = theta0 / (2.0 - theta0)
+    Q2_0 = 2.0 * (theta0**2) / (1.0 + theta0)
+    var_theta0 = (
+        theta0 * (1.0 - theta0) + (Q1_0 - theta0**2) + ((Q2_0 - theta0**2) / R)
+    )
+
+    numerator = (z_alpha * math.sqrt(var_theta0) + z_beta * math.sqrt(var_theta1)) ** 2
+    delta = (theta1 - theta0) ** 2
+    n_cases = int(math.ceil(numerator / delta))
+    n_controls = int(math.ceil(n_cases * R))
+
+    return {
+        "n_cases": n_cases,
+        "n_controls": n_controls,
+        "total_n": n_cases + n_controls,
+        "n_total": n_cases + n_controls,
+        "auroc_expected": theta1,
+        "auroc_null": theta0,
+        "prevalence": phi,
+        "allocation_ratio_controls_to_cases": float(R),
+        "alpha": alpha,
+        "power": power,
+        "two_sided": two_sided,
+    }
+```
+
 

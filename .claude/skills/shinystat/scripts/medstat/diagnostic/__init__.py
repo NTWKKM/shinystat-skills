@@ -30,6 +30,10 @@ from medstat.diagnostic.roc import (
     delong_paired_test,
     find_optimal_threshold,
 )
+from medstat.diagnostic.validation import (
+    bootstrap_internal_validation,
+    recalibrate_prediction_model,
+)
 
 __all__ = [
     "calculate_2x2_metrics",
@@ -52,4 +56,6 @@ __all__ = [
     "hosmer_lemeshow_test",
     "create_calibration_plot",
     "validate_gold_standard",
+    "bootstrap_internal_validation",
+    "recalibrate_prediction_model",
 ]

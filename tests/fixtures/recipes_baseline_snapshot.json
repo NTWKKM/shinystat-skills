@@ -3221,5 +3221,21 @@
     "auroc_30": 0.627398,
     "auroc_90": 0.65378,
     "auroc_180": 0.61923
+  },
+  "recipe_18_validation": {
+    "shrinkage_factor": 0.897898,
+    "apparent_auroc": 0.990975,
+    "corrected_auroc": 0.98981
+  },
+  "recipe_19_recalibration": {
+    "alpha": -1.242332,
+    "beta": 4.135918,
+    "post_brier": 0.130267
+  },
+  "recipe_20_sample_size": {
+    "riley_n_total": 549,
+    "riley_criterion3_n": 549,
+    "auroc_total_n": 67,
+    "auroc_n_cases": 20
   }
 }

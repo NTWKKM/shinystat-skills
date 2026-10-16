@@ -19,11 +19,13 @@ from medstat.figures.base import FigureResult
 from medstat.figures.html import (
     DualFigureResult,
     plot_dual_bland_altman,
+    plot_dual_bootstrap_optimism,
     plot_dual_calibration,
     plot_dual_dca,
     plot_dual_forest,
     plot_dual_kaplan_meier,
     plot_dual_love,
+    plot_dual_recalibration_comparison,
     plot_dual_reclassification,
     plot_dual_roc_curve,
     plot_dual_time_dependent_roc,
@@ -595,3 +597,106 @@ def test_plot_dual_time_dependent_roc_modes(tmp_fig_dir: Path):
     assert Path(res_traj.png_path).exists()
     spec_traj = json.loads(res_traj.plotly_json)
     assert len(spec_traj["data"]) >= 2  # AUROC(t) + chance diagonal
+
+
+def test_plot_dual_recalibration_comparison_parity(tmp_fig_dir: Path):
+    """Verifies plot_dual_recalibration_comparison parity and output generation."""
+    import inspect
+
+    from medstat.figures.calibration import (
+        plot_recalibration_comparison as static_recal,
+    )
+    from medstat.figures.html.calibration import (
+        plot_recalibration_comparison as html_recal,
+    )
+
+    # 100% parameter signature parity check
+    static_params = list(inspect.signature(static_recal).parameters.keys())
+    html_params = list(inspect.signature(html_recal).parameters.keys())
+    dual_params = list(
+        inspect.signature(plot_dual_recalibration_comparison).parameters.keys()
+    )
+    assert static_params == html_params == dual_params
+
+    y = np.array([0, 1, 0, 1, 0, 1, 0, 1] * 10)
+    p_orig = np.clip(
+        np.array([0.2, 0.7, 0.3, 0.6, 0.1, 0.9, 0.4, 0.8] * 10), 0.01, 0.99
+    )
+    p_recal = np.clip(
+        np.array([0.1, 0.8, 0.2, 0.7, 0.1, 0.9, 0.3, 0.9] * 10), 0.01, 0.99
+    )
+
+    out_png = tmp_fig_dir / "dual_recal_test.png"
+    res = plot_dual_recalibration_comparison(
+        y_true=y,
+        p_orig=p_orig,
+        p_recal=p_recal,
+        title="Model Recalibration Comparison Test",
+        out_path=out_png,
+    )
+
+    assert isinstance(res, DualFigureResult)
+    assert Path(res.png_path).exists()
+    assert Path(res.csv_path).exists()
+    assert res.plotly_spec is not None
+    spec = res.plotly_spec
+    assert len(spec["data"]) >= 3  # Ideal line + Pre + Post
+
+
+def test_plot_dual_bootstrap_optimism_parity(tmp_fig_dir: Path):
+    """Verifies plot_dual_bootstrap_optimism parity and output generation."""
+    import inspect
+
+    from medstat.figures.calibration import (
+        plot_bootstrap_optimism as static_opt,
+    )
+    from medstat.figures.html.calibration import (
+        plot_bootstrap_optimism as html_opt,
+    )
+
+    # 100% parameter signature parity check
+    static_params = list(inspect.signature(static_opt).parameters.keys())
+    html_params = list(inspect.signature(html_opt).parameters.keys())
+    dual_params = list(
+        inspect.signature(plot_dual_bootstrap_optimism).parameters.keys()
+    )
+    assert static_params == html_params == dual_params
+
+    val_res = {
+        "shrinkage_factor": 0.885,
+        "events_per_predictor": 15.2,
+        "n_bootstrap": 100,
+        "n_successful_replicates": 98,
+        "metrics": {
+            "auroc": {"apparent": 0.82, "optimism": 0.03, "optimism_corrected": 0.79},
+            "calibration_slope": {
+                "apparent": 1.05,
+                "optimism": 0.12,
+                "optimism_corrected": 0.93,
+            },
+            "nagelkerke_r2": {
+                "apparent": 0.35,
+                "optimism": 0.05,
+                "optimism_corrected": 0.30,
+            },
+            "brier_score": {
+                "apparent": 0.15,
+                "optimism": -0.02,
+                "optimism_corrected": 0.17,
+            },
+        },
+    }
+
+    out_png = tmp_fig_dir / "dual_opt_test.png"
+    res = plot_dual_bootstrap_optimism(
+        validation_res=val_res,
+        title="Bootstrap Optimism Test",
+        out_path=out_png,
+    )
+
+    assert isinstance(res, DualFigureResult)
+    assert Path(res.png_path).exists()
+    assert Path(res.csv_path).exists()
+    assert res.plotly_spec is not None
+    spec = res.plotly_spec
+    assert len(spec["data"]) >= 2  # Apparent bar + Corrected bar

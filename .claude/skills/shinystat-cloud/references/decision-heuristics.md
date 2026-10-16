@@ -16,11 +16,14 @@ Reference guide for the `shinystat-cloud` autonomous agent in cloud code-executi
 | **Type 3b: Competing Risks Survival** | Subdistribution Hazard (SHR) & Cause-Specific HR (csHR) | Aalen-Johansen CIF & Fine-Gray Model (IPCW) | Competing risk probability conservation; Naive KM overestimation audit | [Recipe 15: Competing Risks Survival](python-recipes.md#15-competing-risks-survival-analysis-aalen-johansen-cif--fine-gray-model) |
 | **Type 4: Diagnostic Test Accuracy** | Sens, Spec, PPV, NPV, AUC, LRs | 2x2 Contingency Matrix & Empirical ROC | Wilson score CIs; Haldane correction; Single/Paired DeLong | [Recipe 2: 2x2 Diagnostics](python-recipes.md#2-2x2-diagnostic-accuracy-with-wilson-score--log-scale-95-cis) & [Recipe 3: ROC & DeLong](python-recipes.md#3-empirical-roc-optimal-cutoff--single--paired-delong-95-cis) |
 | **Type 4b: Clinical Utility & Calib** | Net Benefit, Model Calibration | Decision Curve Analysis (DCA) & Recalibration | Brier score; Calibration slope & intercept; Austin-Steyerberg ICI | [Recipe 4: Calibration & DCA](python-recipes.md#4-model-calibration--vickers-decision-curve-analysis-dca) |
+| **Type 4c: Internal Validation & Shrinkage** | Optimism-corrected C-statistic, Brier, R2, Slope | TRIPOD+AI Bootstrap Internal Validation | B >= 200 resamples; uniform shrinkage factor s_hat, re-estimated intercept | [Recipe 18: Internal Validation & Shrinkage](python-recipes.md#18-tripodai-optimism-corrected-bootstrap-internal-validation--uniform-shrinkage) |
+| **Type 4d: Model Recalibration & Updating** | Target Population Calibration, Intercept, Slope | Intercept-only & Logistic Recalibration | Alpha and Beta recalibration parameters, ICI, Emax, AUROC preserved | [Recipe 19: Model Recalibration](python-recipes.md#19-prediction-model-recalibration-and-updating-logistic--intercept-only) |
 | **Type 5: Observational Causal (PSM)** | Average Treatment Effect in Treated (ATT) | Propensity Score Matching (PSM, 1:1, Caliper 0.2 SD) | Austin (2009) balance (SMD < 0.10); Pair ID tracking; E-value | [Recipe 6: PSM & Balance](python-recipes.md#6-propensity-score-matching-psm-with-pair-ids--covariate-balance) & [Recipe 9: E-Value](python-recipes.md#9-vanderweele--ding-2017-sensitivity-e-value) |
 | **Type 5b: Causal Weighting (IPTW)** | Population Effect (ATE, ATT, ATC, Overlap ATO) | Inverse Probability Treatment Weighting (IPTW) | Kish's Effective Sample Size ($N_{\text{eff}} \ge 0.5 \times N$), Positivity (PS 0.05–0.95), Robust SE | [Recipe 14: IPTW & Balance](python-recipes.md#14-inverse-probability-of-treatment-weighting-iptw--weighted-balance) |
 | **Type 6: Device / Rater Agreement** | Limits of Agreement, Reliability | Bland-Altman Difference Analysis & ICC (1–3k) | Bland-Altman 1999 large-sample CIs; Shrout-Fleiss exact F CIs | [Recipe 5: Bland-Altman & ICC](python-recipes.md#5-observer-agreement-bland-altman--shrout-fleiss-1979-icc) |
 | **Type 7: Systematic Meta-Analysis** | Pooled Effect (RR/OR/MD) | Inverse-Variance Fixed-Effects or DerSimonian-Laird | Condition on clinical variation; small $k < 5$ caution | Pure SciPy meta-analysis or `statsmodels` |
 | **Type 8: Clustered / Multi-Center** | Population-averaged effect | Generalized Estimating Equations (GEE) | Cluster Design Effect ($\text{DEFF}$); Robust sandwich SEs | `statsmodels.genmod.generalized_estimating_equations.GEE` |
+| **Type 9: Sample Size Determination** | Required N, Events, EPP, Statistical Power | Riley et al. (BMJ 2020) & Obuchowski (1998) | 4 criteria (intercept, MAPE, shrinkage, optimism); Obuchowski AUROC variance | [Recipe 20: Sample Size Determination](python-recipes.md#20-sample-size-determination-for-clinical-prediction-models-riley-et-al-2020--diagnostic-auroc-obuchowski-1998) |
 
 ---
 
@@ -121,6 +124,33 @@ Evaluating Diagnostic / Prognostic Biomarkers Over Follow-up Time
 ├── Under Competing Risks ──▶ When competing_event_code is provided, patients experiencing competing events by t (T_i <= t, delta_i = k_comp) are retained in the control set weighted by IPCW (Fine-Gray/Uno subdistribution definition); default mode (competing_event_code=None) requires strictly binary event coding {0, 1}
 ├── Horizon Selection ──▶ Clinically meaningful milestones (e.g., 30d, 90d, 1y, 3y, 5y); avoid horizons where remaining cases or controls < 5
 └── Reporting ──▶ AUROC(t) trajectory curve with 95% bootstrap CI band, optimal Youden cutpoint, sensitivity, specificity per milestone (Recipe 17)
+```
+
+### H. TRIPOD+AI Prediction Model Internal Validation & Uniform Shrinkage
+```
+Developing / Validating Clinical Prediction Models
+├── Apparent Performance ──▶ Optimistically biased due to fitting on derivation data
+├── Internal Validation Strategy:
+│   ├── K-fold Cross-Validation ──▶ Acceptable, but bootstrap is preferred for smaller sample sizes
+│   └── Efron-Gong Bootstrap (B ≥ 200) ──▶ Recommended by TRIPOD+AI; samples N with replacement, computes Optimism = Boot_mean - Test_mean, Corrected = Apparent - Optimism (Recipe 18)
+├── Overfitting Adjustment:
+│   ├── Uniform Shrinkage Factor s_hat = clip(mean(beta_cal,test), 0.01, 1.0)
+│   ├── Shrunk Predictor Coefficients: beta_shrunk = s_hat * beta_orig
+│   └── Re-estimated Intercept: solve sum(expit(alpha_0 + LP_shrunk)) = sum(Y) to maintain calibration-in-the-large
+└── Clinical Safeguards ──▶ EPP < 10 warning; s_hat < 0.80 severe overfitting warning; <50% bootstrap convergence alert (Recipe 18)
+```
+
+### I. Minimum Sample Size for Clinical Prediction Models (Riley et al. 2020)
+```
+Determining Required Sample Size for Multivariable Prediction Model Development
+├── Do NOT rely on simplistic 10 EPP rule-of-thumb
+└── Evaluate All 4 Criteria of Riley et al. (BMJ 2020;368:m441) (Recipe 20):
+    ├── Criterion 1: Precise estimation of overall intercept / risk (margin <= 0.05)
+    ├── Criterion 2: Mean Absolute Prediction Error (MAPE <= 0.05, van Smeden 2019)
+    ├── Criterion 3: Uniform shrinkage factor to minimize overfitting (S >= 0.90)
+    └── Criterion 4: Small difference in apparent vs adjusted R2 (optimism <= 0.05)
+├── Model Strength Input: C-statistic, Cox-Snell R2, or Nagelkerke R2
+└── Required Sample Size = max(N1, N2, N3, N4) with binding criterion explicitly reported (Recipe 20)
 ```
 
 ---

@@ -213,6 +213,12 @@ Scatter plot comparing predicted probabilities of baseline vs updated models, co
 ### 12. Time-Dependent ROC Trajectory & Multi-Horizon Curves
 Visualizes longitudinal discrimination trajectories ($\text{AUROC}(t)$ with 95% CI bands) or multi-horizon ROC curves.
 
+### 13. Recalibration Comparison Plot
+Compares pre-recalibration vs post-recalibration calibration curves against the ideal 45-degree reference line, annotated with intercept, slope, and Brier score.
+
+### 14. Bootstrap Optimism Plot
+Horizontal barbell chart comparing apparent, test, optimism, and optimism-corrected metrics across bootstrap iterations.
+
 ---
 
 ## 3. Standalone Interactive HTML Figures (Zero-Dependency Plotly Dicts)

@@ -52,6 +52,10 @@ from medstat.diagnostic.roc import (
     compute_time_dependent_roc,
     delong_paired_test,
 )
+from medstat.diagnostic.validation import (
+    bootstrap_internal_validation,
+    recalibrate_prediction_model,
+)
 from medstat.figures.survival import plot_cif
 from medstat.meta.bias import eggers_test
 from medstat.meta.forest import generate_forest_data
@@ -76,6 +80,8 @@ from medstat.models.survival import (
     fit_cox_ph,
 )
 from medstat.power.sample_size import (
+    calculate_diagnostic_auroc_sample_size,
+    calculate_riley_sample_size,
     calculate_sample_size_correlation,
     calculate_sample_size_proportions,
     calculate_sample_size_survival,
@@ -1240,6 +1246,43 @@ def model_cmd(
     type=int,
     help="Optional competing event integer code for competing risks time-dependent ROC.",
 )
+@click.option(
+    "--internal-validation",
+    is_flag=True,
+    default=False,
+    help="TRIPOD+AI bootstrap internal validation and uniform shrinkage factor.",
+)
+@click.option(
+    "--predictors",
+    default=None,
+    help="Comma-separated predictor column names for internal validation.",
+)
+@click.option(
+    "--n-bootstrap",
+    default=200,
+    type=int,
+    help="Number of bootstrap replicates for internal validation (default: 200).",
+)
+@click.option(
+    "--recalibration",
+    is_flag=True,
+    default=False,
+    help="Evaluate pre- vs post-recalibration parameters and calibration metrics.",
+)
+@click.option(
+    "--recalibration-method",
+    default="logistic",
+    type=click.Choice(
+        ["logistic", "intercept_only", "calibration_in_the_large", "both"],
+        case_sensitive=False,
+    ),
+    help="Recalibration method (default: logistic).",
+)
+@click.option(
+    "--p-recal",
+    default=None,
+    help="Predicted risk probabilities column for recalibration updating.",
+)
 @click.option("--output", type=click.Path(), help="Output path for diagnostic JSON.")
 def diag_cmd(
     data: str,
@@ -1260,9 +1303,15 @@ def diag_cmd(
     event_col: str | None,
     time_horizons: str | None,
     competing_event: int | None,
+    internal_validation: bool,
+    predictors: str | None,
+    n_bootstrap: int,
+    recalibration: bool,
+    recalibration_method: str,
+    p_recal: str | None,
     output: str | None,
 ) -> None:
-    """Evaluate diagnostic test accuracy, ROC curves, DeLong comparisons, DCA, NRI/IDI, and TD-ROC."""
+    """Evaluate diagnostic test accuracy, ROC curves, DeLong comparisons, DCA, NRI/IDI, TD-ROC, validation, and recalibration."""
     if (
         cutoff is None
         and not roc
@@ -1272,10 +1321,13 @@ def diag_cmd(
         and not reclassification
         and not (p_old and p_new)
         and not time_dependent_roc
+        and not internal_validation
+        and not recalibration
     ):
         raise click.ClickException(
             "At least one analytical evaluation must be specified: "
-            "--cutoff, --roc, --compare-roc, --dca, --calibration, --reclassification, or --time-dependent-roc."
+            "--cutoff, --roc, --compare-roc, --dca, --calibration, --reclassification, "
+            "--time-dependent-roc, --internal-validation, or --recalibration."
         )
 
     df = load_clinical_data(data)
@@ -1362,7 +1414,58 @@ def diag_cmd(
         )
         diag_res["time_dependent_roc"] = td_res
 
-    # 3. Standard DTA, ROC, DeLong, DCA, and Calibration
+    # 3. Bootstrap Internal Validation (TRIPOD+AI)
+    if internal_validation:
+        if not gold_standard:
+            raise click.ClickException(
+                "Internal validation requires a binary outcome column via '--gold-standard'."
+            )
+        if not predictors:
+            raise click.ClickException(
+                "Internal validation requires predictor column(s) via '--predictors' (comma-separated)."
+            )
+        pred_cols = [p.strip() for p in str(predictors).split(",") if p.strip()]
+        val_cols = [gold_standard] + pred_cols
+        validate_columns(df, val_cols, "diag internal_validation")
+        check_data_missingness(df, val_cols, "diag internal_validation")
+
+        val_res = bootstrap_internal_validation(
+            df=df,
+            outcome=gold_standard,
+            predictors=pred_cols,
+            n_bootstrap=n_bootstrap,
+        )
+        diag_res["internal_validation"] = val_res
+
+    # 4. Model Recalibration and Updating
+    if recalibration:
+        if not gold_standard:
+            raise click.ClickException(
+                "Model recalibration requires a binary outcome column via '--gold-standard'."
+            )
+        p_col = p_recal or test_col
+        if not p_col:
+            raise click.ClickException(
+                "Model recalibration requires predicted risk probabilities via '--p-recal' or '--test-col'."
+            )
+        recal_cols = [gold_standard, p_col]
+        validate_columns(df, recal_cols, "diag recalibration")
+        check_data_missingness(df, recal_cols, "diag recalibration")
+
+        recal_res = recalibrate_prediction_model(
+            y_true=df[gold_standard].values,
+            p_pred=df[p_col].values,
+            method=recalibration_method,
+        )
+        # Strip patient array before serializing to CLI JSON
+        recal_clean = {
+            k: v
+            for k, v in recal_res.items()
+            if not str(k).startswith("p_recal") and k not in ("y_true", "p_orig")
+        }
+        diag_res["recalibration"] = recal_clean
+
+    # 5. Standard DTA, ROC, DeLong, DCA, and Calibration
     if cutoff is not None or roc or compare_roc or dca or calibration:
         if not gold_standard or not test_col:
             raise click.ClickException(
@@ -2287,6 +2390,88 @@ def meta_cmd(
     type=float,
     help="Expected Pearson correlation coefficient r in (-1, 1).",
 )
+@click.option(
+    "--n-parameters",
+    "--n-params",
+    "n_parameters",
+    default=None,
+    type=int,
+    help="Number of candidate predictor parameters for clinical prediction model (Riley et al.).",
+)
+@click.option(
+    "--prevalence",
+    default=None,
+    type=float,
+    help="Anticipated outcome prevalence or case proportion in (0, 1).",
+)
+@click.option(
+    "--c-statistic",
+    "--c-stat",
+    "c_statistic",
+    default=None,
+    type=float,
+    help="Anticipated C-statistic / AUROC in (0.5, 1.0) for Riley sample size.",
+)
+@click.option(
+    "--cox-snell-r2",
+    "--cs-r2",
+    "cox_snell_r2",
+    default=None,
+    type=float,
+    help="Anticipated Cox-Snell R2 for Riley sample size.",
+)
+@click.option(
+    "--nagelkerke-r2",
+    "--nag-r2",
+    "nagelkerke_r2",
+    default=None,
+    type=float,
+    help="Anticipated Nagelkerke R2 in (0, 1) for Riley sample size.",
+)
+@click.option(
+    "--shrinkage-target",
+    default=0.90,
+    type=float,
+    help="Target uniform shrinkage factor (default: 0.90) for Riley Criterion 3.",
+)
+@click.option(
+    "--intercept-margin",
+    default=0.05,
+    type=float,
+    help="Absolute margin of error for overall risk / intercept (default: 0.05).",
+)
+@click.option(
+    "--optimism-margin",
+    default=0.05,
+    type=float,
+    help="Maximum acceptable optimism margin in R2 (default: 0.05).",
+)
+@click.option(
+    "--mape-target",
+    default=None,
+    type=float,
+    help="Optional Mean Absolute Prediction Error (MAPE) target (van Smeden 2019).",
+)
+@click.option(
+    "--auroc-expected",
+    "--auroc",
+    "auroc_expected",
+    default=None,
+    type=float,
+    help="Anticipated diagnostic test AUROC (theta_1) for Obuchowski / Hanley-McNeil.",
+)
+@click.option(
+    "--auroc-null",
+    default=0.50,
+    type=float,
+    help="Null hypothesis AUROC (theta_0, default: 0.50).",
+)
+@click.option(
+    "--two-sided/--one-sided",
+    "two_sided",
+    default=True,
+    help="Two-sided vs one-sided hypothesis test (default: two-sided).",
+)
 @click.option("--output", type=click.Path(), help="Output path for sample size JSON.")
 def sample_size_cmd(
     test_type: str,
@@ -2298,6 +2483,18 @@ def sample_size_cmd(
     hazard_ratio: float | None,
     event_probability: float | None,
     correlation_r: float | None,
+    n_parameters: int | None,
+    prevalence: float | None,
+    c_statistic: float | None,
+    cox_snell_r2: float | None,
+    nagelkerke_r2: float | None,
+    shrinkage_target: float,
+    intercept_margin: float,
+    optimism_margin: float,
+    mape_target: float | None,
+    auroc_expected: float | None,
+    auroc_null: float,
+    two_sided: bool,
     output: str | None,
 ) -> None:
     """Calculate statistical power and required sample size."""
@@ -2310,6 +2507,11 @@ def sample_size_cmd(
         "proportions",
         "survival",
         "correlation",
+        "riley",
+        "diagnostic-auroc",
+        "diagnostic_auroc",
+        "diagnostic-roc",
+        "auroc",
     )
     if tt_lower not in valid_types:
         raise click.ClickException(
@@ -2421,16 +2623,85 @@ def sample_size_cmd(
             "correlation_r": r_val,
             "total_sample_size": corr_res["required_n"],
         }
+    elif tt_lower == "riley":
+        if n_parameters is None:
+            raise click.ClickException(
+                "Riley sample size calculation requires --n-parameters (candidate predictor parameters)."
+            )
+        if prevalence is None:
+            raise click.ClickException(
+                "Riley sample size calculation requires --prevalence (anticipated outcome prevalence in (0, 1))."
+            )
+        if c_statistic is None and cox_snell_r2 is None and nagelkerke_r2 is None:
+            raise click.ClickException(
+                "Riley sample size calculation requires at least one model strength measure: "
+                "--c-statistic, --cox-snell-r2, or --nagelkerke-r2."
+            )
+        riley_res = calculate_riley_sample_size(
+            n_parameters=n_parameters,
+            prevalence=prevalence,
+            c_statistic=c_statistic,
+            cox_snell_r2=cox_snell_r2,
+            nagelkerke_r2=nagelkerke_r2,
+            shrinkage_target=shrinkage_target,
+            intercept_margin=intercept_margin,
+            optimism_margin=optimism_margin,
+            mape_target=mape_target,
+        )
+        res = {
+            "test_type": test_type,
+            "total_sample_size": riley_res["n_total"],
+            "required_events": riley_res["n_events"],
+            "events_per_parameter": riley_res["events_per_parameter"],
+            "binding_criterion": riley_res["binding_criterion"],
+            "details": riley_res,
+        }
+    elif tt_lower in (
+        "diagnostic-auroc",
+        "diagnostic_auroc",
+        "diagnostic-roc",
+        "auroc",
+    ):
+        if auroc_expected is None:
+            if effect_size is not None:
+                auroc_expected = effect_size
+            else:
+                raise click.ClickException(
+                    "Diagnostic AUROC sample size calculation requires --auroc-expected (anticipated AUROC > null)."
+                )
+        auroc_prev = prevalence if prevalence is not None else 0.50
+        auroc_res = calculate_diagnostic_auroc_sample_size(
+            auroc_expected=auroc_expected,
+            auroc_null=auroc_null,
+            prevalence=auroc_prev,
+            alpha=alpha,
+            power=power,
+            two_sided=two_sided,
+        )
+        res = {
+            "test_type": test_type,
+            "alpha": alpha,
+            "power": power,
+            "auroc_expected": auroc_expected,
+            "auroc_null": auroc_null,
+            "prevalence": auroc_prev,
+            "two_sided": two_sided,
+            "required_cases": auroc_res["n_cases"],
+            "required_controls": auroc_res["n_controls"],
+            "total_sample_size": auroc_res.get("total_n", auroc_res.get("n_total")),
+            "details": auroc_res,
+        }
     else:
         raise click.ClickException(f"Unsupported test type: {test_type}")
 
+    sanitized_res = _sanitize_for_json(res)
     if output:
         Path(output).parent.mkdir(parents=True, exist_ok=True)
         with open(output, "w") as f:
-            json.dump(res, f, indent=2)
+            json.dump(sanitized_res, f, indent=2, default=str, allow_nan=False)
         click.echo(f"Sample size calculation saved: {output}")
     else:
-        click.echo(json.dumps(res, indent=2))
+        click.echo(json.dumps(sanitized_res, indent=2, default=str, allow_nan=False))
 
 
 # ==============================================================================

@@ -1122,6 +1122,53 @@ Clinical diagnostic and prognostic evaluation requires rigorous quantification o
 
 [MEMORY_LEARN: In diagnostic incremental value assessment, ΔAUROC is often insensitive; combining DeLong tests with Category-Free NRI, Categorical NRI (with KxK matrices), and IDI under probability calibration guards provides robust evaluation. For survival data, IPCW Time-Dependent ROC prevents static classification bias across milestone horizons.]
 
+---
+
+## ADR 42: Phase 3B TRIPOD+AI Bootstrap Internal Validation, Model Recalibration, and Riley Minimum Sample Size Determination
+
+### Context
+In clinical prediction modeling and prognostic biomarker development:
+1. **Model Overfitting & Apparent Optimism**: Derivation models evaluated on their training data exhibit optimistic apparent performance (inflated AUROC, attenuated Brier score, calibration slope > 1 on derivation but < 1 on new cohorts). Split-sample or cross-validation suffers from data loss and model instability in typical clinical sample sizes ($N < 5,000$). The TRIPOD+AI (2024) statement strongly recommends Harrell's bootstrap optimism-correction protocol to estimate honest out-of-sample performance and calculate a post-estimation uniform shrinkage factor ($\hat{s}$) to counter overfitting.
+2. **Model Updating & Recalibration**: Clinical models transferred to new geographic, temporal, or hospital populations frequently miscalibrate due to baseline prevalence differences or case-mix variations. Researchers require model recalibration techniques (Steyerberg 2019): Intercept-only updating (calibration-in-the-large, fixing slope $\beta = 1.0$) vs Logistic recalibration (updating both $\alpha$ and $\beta$).
+3. **Rigorous Sample Size Determination**: Clinical studies historically relied on crude 10 events-per-variable (EPP) heuristics, which frequently lead to severe model underpowering or overestimation. Riley et al. (BMJ 2020; 368:m441) established a rigorous 4-criteria formulation for clinical prediction models targeting global shrinkage ($\ge 0.90$), small margin in apparent vs adjusted $R^2$, precise intercept estimation, and small Mean Absolute Prediction Error (MAPE $\le 0.05$). Additionally, prospective diagnostic studies testing AUROC against a null benchmark require non-parametric power formulations per Obuchowski (1998, 2004) and Hanley & McNeil (1982) accounting for disease prevalence.
+
+### Decision
+1. **TRIPOD+AI Bootstrap Internal Validation Engine (`medstat.diagnostic.validation`)**:
+   - Implemented `bootstrap_internal_validation`:
+     - Fits derivation logistic regression on cohort of size $N$.
+     - Evaluates apparent metrics ($M_{\text{app}}$): AUROC, Brier score, Cox-Snell and Nagelkerke $R^2$, calibration intercept, and calibration slope.
+     - Performs $B$ bootstrap resamples ($B \ge 100$, default 200) with replacement.
+     - In each replicate: fits bootstrap model, computes performance in bootstrap resample ($M_{\text{boot}}$) and in original cohort ($M_{\text{test}}$).
+     - Calculates optimism $\mathcal{O}_m = \frac{1}{B}\sum (M_{\text{boot}} - M_{\text{test}})$ and optimism-corrected metric $M_{\text{opt\_corr}} = M_{\text{app}} - \mathcal{O}_m$.
+     - Computes uniform shrinkage factor $\hat{s} = \text{mean}(\text{calibration\_slopes}_{\text{test}})$, and applies it to produce shrunk coefficients $\hat{\beta}_{\text{shrunk}} = \hat{s} \cdot \hat{\beta}_{\text{orig}}$.
+     - Clinical guardrails: warns on EPP < 10, severe overfitting ($\hat{s} < 0.70$), or bootstrap non-convergence.
+2. **Model Recalibration Engine (`medstat.diagnostic.validation`)**:
+   - Implemented `recalibrate_prediction_model`:
+     - Method `"intercept_only"`: $\text{logit}(Y) = \alpha + 1 \cdot \text{LP}$, solving $\sum \text{expit}(\alpha + \text{LP}_i) = \sum y_i$ via Brent's method.
+     - Method `"logistic"`: $\text{logit}(Y) = \alpha + \beta \cdot \text{LP}$, updating intercept and calibration slope with 95% CIs and p-values.
+     - Method `"both"`: Evaluates both methods simultaneously, reporting pre- and post-updating calibration intercept, slope, Brier score, Emax, ICI, and AUROC.
+3. **Sample Size Engines (`medstat.power.sample_size`)**:
+   - Implemented `calculate_riley_sample_size`:
+     - Evaluates Riley Criteria 1–4, identifying the binding criterion, total $N$, required events, and anticipated EPP.
+     - Automated numerical derivation of Cox-Snell $R^2_{CS}$ from user-supplied C-statistic or Nagelkerke $R^2$ using Gauss-Legendre quadrature integration and Brent root finding.
+     - Enforces conservative bound $R^2_{CS,\max} = 1 - \phi^{2\phi}(1 - \phi)^{2(1-\phi)}$.
+   - Implemented `calculate_diagnostic_auroc_sample_size`:
+     - Non-parametric Obuchowski (1998) / Hanley-McNeil (1982) sample size calculation given $\text{AUROC}_{\text{expected}}$, $\text{AUROC}_{\text{null}}$, prevalence $\phi$, $\alpha$, and power.
+     - Computes variance terms $V_0, V_1$, required case count $n_{\text{cases}}$, control count $n_{\text{controls}}$, and total $N$.
+4. **Publication Figures & Reporting Tables**:
+   - Static Matplotlib (300 DPI) and interactive Plotly HTML figures: `plot_recalibration_comparison`, `plot_dual_recalibration_comparison`, `plot_bootstrap_optimism`, `plot_dual_bootstrap_optimism`.
+   - Publication-grade HTML tables: `format_internal_validation_table`, `format_recalibration_table`, `format_riley_sample_size_table`.
+   - Academic narrative generation: `generate_internal_validation_narrative`, `generate_recalibration_narrative`, `generate_riley_sample_size_narrative`, `generate_diagnostic_auroc_sample_size_narrative`.
+   - CLI options: `medstat diag --internal-validation --recalibration`, and `medstat sample-size --type riley / diagnostic-auroc`.
+   - Standalone Python Recipes 18, 19, and 20 in `skills/shinystat-cloud/references/python-recipes.md`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Zero New Dependencies**: Accomplished with existing `scipy`, `numpy`, `pandas`, `statsmodels`.
+- **Methodological Standards**: Full alignment with TRIPOD+AI guidelines for prediction model development and validation, and state-of-the-art power planning via Riley et al. and Obuchowski.
+
+[MEMORY_LEARN: For clinical prediction models, TRIPOD+AI bootstrap internal validation computes honest optimism-corrected AUROC, Brier score, and uniform shrinkage factors (ŝ) to mitigate overfitting. For sample size planning, Riley et al. (2020) 4-criteria formulation replaces fragile EPP heuristics by tying required N directly to target shrinkage and expected R².]
+
 
 
 
