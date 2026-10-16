@@ -62,7 +62,7 @@ System architecture and structural specifications for `medstat-core` and the `me
 
 ### `medstat.diagnostic`
 - **`accuracy.py`**: Complete 2x2 contingency metrics (Sensitivity, Specificity, PPV, NPV, LR+, LR-, DOR) with Wilson score confidence intervals, low-is-abnormal directionality handling, and `validate_gold_standard` reference standard integrity validation.
-- **`roc.py`**: Non-parametric empirical ROC curve, Youden's J cutpoint, and DeLong covariance matrix calculation for paired AUC comparisons.
+- **`roc.py`**: Non-parametric empirical ROC curve, Youden's J cutpoint, DeLong covariance matrix calculation for paired AUC comparisons, Continuous and Categorical Net Reclassification Improvement (`compute_reclassification_metrics`: NRI events, non-events, total, $K \times K$ contingency matrices), Integrated Discrimination Improvement (IDI), combined diagnostic model comparison (`compare_diagnostic_models`), and Cumulative/Dynamic IPCW Time-Dependent ROC (`compute_time_dependent_roc`: $\text{AUROC}(t)$ trajectory, optimal cutoffs, bootstrap CIs, competing risk control).
 - **`dca.py`**: Vickers Decision Curve Analysis calculating net benefit across threshold probabilities relative to "Treat All" and "Treat None".
 - **`calibration.py`**: Model calibration assessment: Brier score (with scaled Brier), calibration slope & intercept via logistic recalibration, Integrated Calibration Index (ICI / E50 / E90 / Emax) per Austin & Steyerberg (2019), Hosmer-Lemeshow goodness-of-fit test, and Plotly calibration plot generation.
 
@@ -87,17 +87,17 @@ System architecture and structural specifications for `medstat-core` and the `me
 - **`styles.py`**: Publication styling (300 DPI, Okabe-Ito/Tol colorblind palettes, Thai typography fallback chain: `Sarabun`, `Thonburi`, `Sukhumvit Set`, `Arial`).
 - **`forest.py`**: Forest plots for OR/HR/RR multivariable models and meta-analyses.
 - **`survival.py`**: Stratified Kaplan-Meier survival curves with aligned Numbers at Risk table and log-rank p-value; Cumulative Incidence Function (`plot_cif`) step curves under competing risks with Greenwood 95% CIs and Naive $1 - \text{KM}$ overestimation overlay.
-- **`roc.py`**: ROC curves with 45-degree chance diagonal, Youden optimal cutpoint, DeLong 95% CIs, and paired overlay.
+- **`roc.py`**: ROC curves with 45-degree chance diagonal, Youden optimal cutpoint, DeLong 95% CIs, paired overlay, Risk Reclassification scatter plots (`plot_reclassification`, `plot_dual_reclassification`), and Time-Dependent ROC trajectory and multi-horizon curve plots (`plot_time_dependent_roc`, `plot_dual_time_dependent_roc`).
 - **`calibration.py`**: Decile calibration plots with Wilson CIs, LOESS curves, Brier score, and ICI.
 - **`dca.py`**: Decision Curve Analysis with Net Benefit comparison against Treat All and Treat None.
 - **`agreement.py`**: Bland-Altman agreement plots with mean bias, 95% Limits of Agreement, and 1999 large-sample CIs.
 - **`balance.py`**: Austin 2009 Love plots for PSM and IPTW covariate balance with 0.10 SMD threshold.
 - **`retention.py`**: Pure-Matplotlib STROBE / CONSORT participant retention flowcharts.
 - **`diagnostics.py`**: Missingness heatmaps, Schoenfeld proportional hazards residuals, and MICE density overlays.
-- **`html/`**: Dedicated mirror submodule for Dual / Toggle View (`DualFigureResult`, `plot_dual_roc_curve`, `plot_dual_kaplan_meier`, `plot_dual_cif`, `plot_dual_calibration`, `plot_dual_dca`, `plot_dual_bland_altman`, `plot_dual_forest`, `plot_dual_love`). Produces companion Plotly interactive visualizations (primary view) alongside "Publication 300 DPI Figure (Static)" Matplotlib images with instant toggle switching and direct journal download links.
+- **`html/`**: Dedicated mirror submodule for Dual / Toggle View (`DualFigureResult`, `plot_dual_roc_curve`, `plot_dual_reclassification`, `plot_dual_time_dependent_roc`, `plot_dual_kaplan_meier`, `plot_dual_cif`, `plot_dual_calibration`, `plot_dual_dca`, `plot_dual_bland_altman`, `plot_dual_forest`, `plot_dual_love`). Produces companion Plotly interactive visualizations (primary view) alongside "Publication 300 DPI Figure (Static)" Matplotlib images with instant toggle switching and direct journal download links.
 
 ### `medstat.reporting`
-- **`tables.py`**: Journal-compliant polymorphic HTML table rendering (NEJM, JAMA, APA 7) with strict border rules, no vertical dividers, and support for Table 1, Regression, Diagnostic accuracy, Bland-Altman, ICC, Covariate balance (unadjusted, matched, weighted), and Competing Risks (`render_competing_risks_table`).
+- **`tables.py`**: Journal-compliant polymorphic HTML table rendering (NEJM, JAMA, APA 7) with strict border rules, no vertical dividers, and support for Table 1, Regression, Diagnostic accuracy, Reclassification tables (`format_reclassification_table`), Time-Dependent ROC tables (`format_time_dependent_roc_table`), Bland-Altman, ICC, Covariate balance (unadjusted, matched, weighted), and Competing Risks (`render_competing_risks_table`).
 - **`narrative.py`**: Automated biomedical Methods and Results narrative generation.
 - **`checklists.py`**: Audited item checklists for STROBE, CONSORT, TRIPOD, STARD (diagnostic studies), and PRISMA (systematic reviews).
 - **`ir.py`**: Report Intermediate Representation (IR) acting as Single Source of Truth (`ReportDocument`, `Block`, `HeadingBlock`, `ParagraphBlock`, `TableBlock`, `FigureBlock`, `CalloutBlock`).

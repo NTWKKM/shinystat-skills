@@ -684,3 +684,296 @@ def render_competing_risks_table(
         "Fine-Gray subdistribution hazard ratios (SHR) estimate relative effects on cumulative incidence over time (clinical prognosis)."
     )
     return render_records_table(title, records, style=style, note=note)
+
+
+def format_reclassification_table(
+    reclass_data: dict[str, Any],
+    title: str = "Table. Risk Reclassification and Discrimination Metrics",
+    style: Literal["NEJM", "JAMA", "APA7"] = "NEJM",
+) -> str:
+    """
+    Renders publication-grade NEJM/JAMA model reclassification table with:
+    - Model AUROCs and paired DeLong ΔAUROC
+    - Continuous Net Reclassification Improvement (NRI_total, NRI_events, NRI_nonevents)
+    - Categorical NRI across prespecified risk strata
+    - Integrated Discrimination Improvement (IDI) and Relative IDI
+    - Reclassification contingency matrix sub-table
+    """
+    if "reclassification" in reclass_data:
+        reclass = reclass_data["reclassification"]
+        delong = reclass_data.get("delong")
+        old_m = reclass_data.get("model_old")
+        new_m = reclass_data.get("model_new")
+    else:
+        reclass = reclass_data
+        delong = None
+        old_m = None
+        new_m = None
+
+    records: list[dict[str, Any]] = []
+
+    if old_m:
+        ci_l = old_m.get("ci_lower")
+        ci_u = old_m.get("ci_upper")
+        ci_str = (
+            f"{old_m['auc']:.3f} ({ci_l:.3f} to {ci_u:.3f})"
+            if ci_l is not None and ci_u is not None
+            else f"{old_m['auc']:.3f}"
+        )
+        records.append(
+            {
+                "Model / Metric": "Baseline Model AUROC",
+                "Estimate (95% CI)": ci_str,
+                "P-Value": "—",
+            }
+        )
+
+    if new_m:
+        ci_l = new_m.get("ci_lower")
+        ci_u = new_m.get("ci_upper")
+        ci_str = (
+            f"{new_m['auc']:.3f} ({ci_l:.3f} to {ci_u:.3f})"
+            if ci_l is not None and ci_u is not None
+            else f"{new_m['auc']:.3f}"
+        )
+        records.append(
+            {
+                "Model / Metric": "Updated Model AUROC",
+                "Estimate (95% CI)": ci_str,
+                "P-Value": "—",
+            }
+        )
+
+    if delong:
+        records.append(
+            {
+                "Model / Metric": "ΔAUROC (Paired DeLong)",
+                "Estimate (95% CI)": f"{delong['difference']:.3f} ({delong['ci_lower']:.3f} to {delong['ci_upper']:.3f})",
+                "P-Value": format_journal_p_value(delong["p_value"], style=style),
+            }
+        )
+
+    # Continuous NRI
+    nri_c = reclass.get("nri_continuous", {})
+    if nri_c:
+        tot = nri_c.get("total", {})
+        ev = nri_c.get("events", {})
+        nev = nri_c.get("nonevents", {})
+        if tot:
+            records.append(
+                {
+                    "Model / Metric": "Continuous NRI (Total)",
+                    "Estimate (95% CI)": f"{tot['estimate']:.3f} ({tot['ci_lower']:.3f} to {tot['ci_upper']:.3f})",
+                    "P-Value": format_journal_p_value(tot["p_value"], style=style),
+                }
+            )
+        if ev:
+            records.append(
+                {
+                    "Model / Metric": "  Event NRI (P[up] – P[down])",
+                    "Estimate (95% CI)": f"{ev['estimate']:.3f} ({ev['ci_lower']:.3f} to {ev['ci_upper']:.3f})",
+                    "P-Value": format_journal_p_value(ev["p_value"], style=style),
+                }
+            )
+        if nev:
+            records.append(
+                {
+                    "Model / Metric": "  Non-event NRI (P[down] – P[up])",
+                    "Estimate (95% CI)": f"{nev['estimate']:.3f} ({nev['ci_lower']:.3f} to {nev['ci_upper']:.3f})",
+                    "P-Value": format_journal_p_value(nev["p_value"], style=style),
+                }
+            )
+
+    # Categorical NRI
+    nri_cat = reclass.get("nri_categorical")
+    if nri_cat:
+        tot_cat = nri_cat.get("total", {})
+        ev_cat = nri_cat.get("events", {})
+        nev_cat = nri_cat.get("nonevents", {})
+        th_str = ", ".join(f"{t:g}" for t in nri_cat.get("thresholds", []))
+        if tot_cat:
+            records.append(
+                {
+                    "Model / Metric": f"Categorical NRI ({th_str})",
+                    "Estimate (95% CI)": f"{tot_cat['estimate']:.3f} ({tot_cat['ci_lower']:.3f} to {tot_cat['ci_upper']:.3f})",
+                    "P-Value": format_journal_p_value(tot_cat["p_value"], style=style),
+                }
+            )
+        if ev_cat:
+            records.append(
+                {
+                    "Model / Metric": "  Event Categorical NRI",
+                    "Estimate (95% CI)": f"{ev_cat['estimate']:.3f} ({ev_cat['ci_lower']:.3f} to {ev_cat['ci_upper']:.3f})",
+                    "P-Value": format_journal_p_value(ev_cat["p_value"], style=style),
+                }
+            )
+        if nev_cat:
+            records.append(
+                {
+                    "Model / Metric": "  Non-event Categorical NRI",
+                    "Estimate (95% CI)": f"{nev_cat['estimate']:.3f} ({nev_cat['ci_lower']:.3f} to {nev_cat['ci_upper']:.3f})",
+                    "P-Value": format_journal_p_value(nev_cat["p_value"], style=style),
+                }
+            )
+
+    # IDI
+    idi_d = reclass.get("idi", {})
+    if idi_d:
+        records.append(
+            {
+                "Model / Metric": "Integrated Discrimination Improvement (IDI)",
+                "Estimate (95% CI)": f"{idi_d['estimate']:.3f} ({idi_d['ci_lower']:.3f} to {idi_d['ci_upper']:.3f})",
+                "P-Value": format_journal_p_value(idi_d["p_value"], style=style),
+            }
+        )
+        if idi_d.get("relative_idi") is not None and not math.isnan(
+            idi_d["relative_idi"]
+        ):
+            records.append(
+                {
+                    "Model / Metric": "  Relative IDI",
+                    "Estimate (95% CI)": f"{idi_d['relative_idi'] * 100.0:.1f}%",
+                    "P-Value": "—",
+                }
+            )
+
+    note = (
+        "Net Reclassification Improvement (NRI) and Integrated Discrimination Improvement (IDI) "
+        "evaluate risk reclassification per Pencina et al. (2008, 2011). Event and Non-event components are reported "
+        "separately per Kerr et al. (2014) guidelines."
+    )
+    main_html = render_records_table(title, records, style=style, note=note)
+
+    # Render companion contingency matrix if categorical NRI present
+    if nri_cat and "contingency_matrices" in nri_cat:
+        cats = nri_cat.get("categories", [])
+        m_comb = nri_cat["contingency_matrices"].get("combined", [])
+        m_ev = nri_cat["contingency_matrices"].get("events", [])
+        m_nev = nri_cat["contingency_matrices"].get("nonevents", [])
+
+        matrix_records = []
+        for r_idx, cat_name in enumerate(cats):
+            row_dict = {"Baseline Category": cat_name}
+            for c_idx, c_name in enumerate(cats):
+                comb_val = (
+                    m_comb[r_idx][c_idx]
+                    if r_idx < len(m_comb) and c_idx < len(m_comb[r_idx])
+                    else 0
+                )
+                ev_val = (
+                    m_ev[r_idx][c_idx]
+                    if r_idx < len(m_ev) and c_idx < len(m_ev[r_idx])
+                    else 0
+                )
+                nev_val = (
+                    m_nev[r_idx][c_idx]
+                    if r_idx < len(m_nev) and c_idx < len(m_nev[r_idx])
+                    else 0
+                )
+                row_dict[f"Updated: {c_name}"] = (
+                    f"{comb_val} (E: {ev_val}, NE: {nev_val})"
+                )
+            matrix_records.append(row_dict)
+
+        matrix_title = f"{title} — Reclassification Contingency Matrix (Combined [E: Events, NE: Non-Events])"
+        matrix_note = "Rows represent baseline risk categories; columns represent updated model risk categories."
+        matrix_html = render_records_table(
+            matrix_title, matrix_records, style=style, note=matrix_note
+        )
+        return f"{main_html}<br>\n{matrix_html}"
+
+    return main_html
+
+
+def format_time_dependent_roc_table(
+    td_roc_data: dict[str, Any],
+    title: str = "Table. Time-Dependent ROC Performance Across Clinical Follow-up Horizons",
+    style: Literal["NEJM", "JAMA", "APA7"] = "NEJM",
+) -> str:
+    """
+    Renders publication-grade Time-Dependent ROC table across follow-up horizons t.
+    Reports Horizon t, N Cases, N Controls, Censored, AUROC(t) (95% CI), Optimal Threshold,
+    Sensitivity, and Specificity.
+    """
+    horizons = td_roc_data.get("time_horizons", [])
+    results_by_horizon = td_roc_data.get("results_by_horizon", {})
+    comp_dict = td_roc_data.get("comparison", {})
+
+    records: list[dict[str, Any]] = []
+
+    for t in horizons:
+        res_h = results_by_horizon.get(t, results_by_horizon.get(str(t), {}))
+        if not res_h:
+            continue
+
+        auc_val = res_h.get("auroc")
+        ci_l = res_h.get("ci_lower")
+        ci_u = res_h.get("ci_upper")
+
+        if (
+            auc_val is not None
+            and not math.isnan(auc_val)
+            and ci_l is not None
+            and not math.isnan(ci_l)
+            and ci_u is not None
+            and not math.isnan(ci_u)
+        ):
+            auc_str = f"{auc_val:.3f} ({ci_l:.3f} to {ci_u:.3f})"
+        elif auc_val is not None and not math.isnan(auc_val):
+            auc_str = f"{auc_val:.3f} (CI unavail.)"
+        else:
+            auc_str = "—"
+
+        opt_cut = res_h.get("optimal_threshold")
+        opt_str = (
+            f"{opt_cut:.3f}" if opt_cut is not None and math.isfinite(opt_cut) else "—"
+        )
+        sens = res_h.get("sensitivity")
+        sens_str = (
+            f"{sens * 100.0:.1f}%" if sens is not None and math.isfinite(sens) else "—"
+        )
+        spec = res_h.get("specificity")
+        spec_str = (
+            f"{spec * 100.0:.1f}%" if spec is not None and math.isfinite(spec) else "—"
+        )
+
+        rec = {
+            "Horizon (t)": f"{t:g}",
+            "Cases (N)": str(res_h.get("n_cases", 0)),
+            "Controls (N)": str(res_h.get("n_controls", 0)),
+            "Censored (N)": str(res_h.get("n_censored", 0)),
+            "AUROC(t) (95% CI)": auc_str,
+            "Optimal Cutoff": opt_str,
+            "Sensitivity": sens_str,
+            "Specificity": spec_str,
+        }
+
+        if comp_dict and t in comp_dict:
+            comp_h = comp_dict[t]
+            delta = comp_h.get("delta_auroc")
+            p_val = comp_h.get("p_value")
+            rec["ΔAUROC(t)"] = (
+                f"{delta:.3f}" if delta is not None and not math.isnan(delta) else "—"
+            )
+            rec["Comparison P-Value"] = (
+                format_journal_p_value(p_val, style=style)
+                if p_val is not None and not math.isnan(p_val)
+                else "—"
+            )
+
+        records.append(rec)
+
+    ci_method = td_roc_data.get("ci_method")
+    if ci_method == "bootstrap":
+        ci_str = "Confidence intervals (95%) calculated via bootstrap resampling."
+    elif ci_method == "hanley_mcneil":
+        ci_str = "Confidence intervals (95%) calculated via unweighted Hanley-McNeil approximation."
+    else:
+        ci_str = "Confidence intervals (95%) calculated where risk sets allow."
+
+    note = (
+        "Time-dependent receiver operating characteristic curves and AUROC(t) estimated using the "
+        "cumulative/dynamic inverse probability of censoring weighting (IPCW) estimator (Uno et al., 2007; Heagerty et al., 2000). "
+        f"{ci_str}"
+    )
+    return render_records_table(title, records, style=style, note=note)

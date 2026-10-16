@@ -207,6 +207,42 @@ res = plot_cif(
 )
 ```
 
+### 9. Risk Reclassification Plot (`plot_reclassification`)
+Scatter plot comparing predicted probabilities of baseline vs updated models, color-coded by event status ($Y=1$ events in red, $Y=0$ non-events in blue), with equality line and threshold grid.
+- **Usage**:
+```python
+from medstat.figures.roc import plot_reclassification
+
+res = plot_reclassification(
+    reclass_data,  # Output dict from compute_reclassification_metrics
+    title="Risk Reclassification: Model 1 vs Model 2",
+    out_path="figures/reclassification.png",
+)
+```
+
+### 10. Time-Dependent ROC Trajectory & Multi-Horizon Curves (`plot_time_dependent_roc`)
+Visualizes longitudinal discrimination trajectories ($\text{AUROC}(t)$ with 95% CI bands) or multi-horizon ROC curves.
+- **Usage**:
+```python
+from medstat.figures.roc import plot_time_dependent_roc
+
+# AUROC trajectory over time
+res = plot_time_dependent_roc(
+    td_data,  # Output dict from compute_time_dependent_roc
+    mode="auroc_trajectory",
+    title="Time-Dependent Discrimination Trajectory",
+    out_path="figures/td_roc_trajectory.png",
+)
+
+# Multi-horizon ROC curves
+res_curves = plot_time_dependent_roc(
+    td_data,
+    mode="curves",
+    title="Time-Dependent ROC Curves across Follow-up Horizons",
+    out_path="figures/td_roc_curves.png",
+)
+```
+
 ---
 
 ## 3. Interactive HTML Figures (`medstat.figures.html`)
@@ -214,6 +250,8 @@ res = plot_cif(
 For interactive HTML reports, use the mirror submodule `medstat.figures.html`. It generates a `DualFigureResult` (subclass of `FigureResult`) containing both a publication-standard 300 DPI Matplotlib figure and a Plotly interactive figure:
 
 - **`plot_dual_roc_curve(roc_data, ...)`**: Empirical ROC curve with interactive threshold/sensitivity/specificity tooltips and chance diagonal.
+- **`plot_dual_reclassification(reclass_data, ...)`**: Interactive scatter plot of baseline vs updated risks with hover tooltips and event/non-event toggles.
+- **`plot_dual_time_dependent_roc(td_data, ...)`**: Interactive longitudinal AUROC trajectory with CI bounds or multi-horizon ROC curves.
 - **`plot_dual_kaplan_meier(km_curves, risk_table, ...)`**: Step-function survival curves with 95% CI bands and hover tooltips.
 - **`plot_dual_cif(cif_data, ...)`**: Non-parametric Cumulative Incidence Function (Aalen-Johansen) with Naive $1 - \text{KM}$ audit and interactive hover.
 - **`plot_dual_calibration(calib_bins, ...)`**: Decile calibration points with 95% Wilson CI error bars and Brier/ICI annotations.

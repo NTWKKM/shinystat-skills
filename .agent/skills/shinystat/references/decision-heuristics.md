@@ -99,6 +99,29 @@ Audit Event Types: Event of Interest vs. Competing Risks (e.g., CV death vs. non
         └── Best Practice: Report both csHR and SHR side-by-side with clinical takeaway
 ```
 
+### F. Diagnostic Risk Reclassification & Incremental Value
+```
+Evaluating Added Value of Updated Biomarker/Model over Baseline
+├── Discrimination Change ──▶ DeLong paired test for ΔAUROC (`compare_diagnostic_models`)
+├── Net Reclassification Improvement (NRI)
+│   ├── Continuous / Category-Free NRI ──▶ Primary metric when no established clinical thresholds exist (Pencina 2011)
+│   ├── Categorical NRI ──▶ Use strictly when established clinical risk tiers exist (e.g. low <10%, intermediate 10-20%, high >20%)
+│   ├── Separate Event & Non-Event Reporting ──▶ Mandatory per Kerr & Pepe (2014) to detect asymmetric reclassification
+│   └── Calibration Guard ──▶ Enforce probability range validity (p_hat in [0, 1]); true model calibration requires separate evaluation (calibration plot, slope/intercept, Brier score), as poorly calibrated models produce spurious positive NRI/IDI values
+└── Integrated Discrimination Improvement (IDI)
+    └── Difference in discrimination slopes (mean predicted risk difference between events and non-events)
+```
+
+### G. Time-Dependent ROC in Longitudinal Follow-up
+```
+Evaluating Diagnostic / Prognostic Biomarkers Over Follow-up Time
+├── Censoring Handling ──▶ Inverse Probability of Censoring Weighting (IPCW) via Kaplan-Meier on censoring distribution G(t) (Uno et al. 2007, Heagerty et al. 2000)
+├── Definition ──▶ Cumulative/Dynamic ROC: Cases = primary events by t (T_i <= t, delta_i = 1); Controls = event-free beyond t (T_i > t)
+├── Under Competing Risks ──▶ When competing_event_code is provided, patients experiencing competing events by t (T_i <= t, delta_i = k_comp) are retained in the control set weighted by IPCW (Fine-Gray/Uno subdistribution definition); default mode (competing_event_code=None) requires strictly binary event coding {0, 1}
+├── Horizon Selection ──▶ Clinically meaningful milestones (e.g., 30d, 90d, 1y, 3y, 5y); avoid horizons where remaining cases or controls < 5
+└── Reporting ──▶ AUROC(t) trajectory curve with 95% bootstrap CI band, optimal Youden cutpoint, sensitivity, specificity per milestone
+```
+
 ---
 
 ## 3. Reporting & Table Styling Standards

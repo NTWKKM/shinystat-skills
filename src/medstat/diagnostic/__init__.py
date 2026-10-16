@@ -24,6 +24,9 @@ from medstat.diagnostic.dca import (
 from medstat.diagnostic.roc import (
     auc_ci_delong,
     calculate_roc_curve,
+    compare_diagnostic_models,
+    compute_reclassification_metrics,
+    compute_time_dependent_roc,
     delong_paired_test,
     find_optimal_threshold,
 )
@@ -36,6 +39,9 @@ __all__ = [
     "find_optimal_threshold",
     "auc_ci_delong",
     "delong_paired_test",
+    "compute_reclassification_metrics",
+    "compare_diagnostic_models",
+    "compute_time_dependent_roc",
     "calculate_dca",
     "calculate_net_benefit",
     "create_dca_plot",

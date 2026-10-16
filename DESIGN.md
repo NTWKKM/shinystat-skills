@@ -1083,10 +1083,45 @@ Two critical biostatistical analytical pillars were previously incomplete in `sh
 - **Status**: Accepted & Verified.
 - **Zero New Dependencies**: Accomplished entirely within existing packages (`numpy`, `pandas`, `scipy`, `statsmodels`, `lifelines`).
 - **Clinical & Statistical Rigor**: Overestimation of failure probability under competing risks is systematically prevented; causal weighting provides rigorous confounding adjustment with explicit positivity and effective sample size checks.
-- **Comprehensive Verification**: 541/541 tests pass in <21s with **0 warnings** and 100% clean ruff format/check.
-- **Mirror Parity**: 100% byte-identical parity maintained across `skills/`, `.agent/`, `.agents/`, `.claude/`, `.cursor/`, and `packaging/cloud/shinystat-cloud/`.
+---
 
-[MEMORY_LEARN: In clinical survival analysis with competing events, standard Kaplan-Meier estimates systematically overestimate cumulative incidence (1 - KM > CIF); reporting dual Cause-Specific HR for etiology and Fine-Gray SHR for prognosis alongside Aalen-Johansen CIF provides methodologically sound survival insights.]
+## ADR 41: Phase 3A Diagnostic Risk Reclassification (NRI & IDI) and Time-Dependent ROC (AUROC(t))
+
+### Context
+Clinical diagnostic and prognostic evaluation requires rigorous quantification of the incremental value added by novel biomarkers, risk scores, or multivariable models beyond standard baseline predictors:
+1. **Diagnostic Risk Reclassification**: While overall discrimination ($\Delta\text{AUROC}$) tested via the DeLong paired test measures rank-order separation, it is notoriously insensitive to meaningful incremental clinical shifts in predicted probabilities. Clinicians and researchers require Net Reclassification Improvement (Continuous and Categorical NRI) and Integrated Discrimination Improvement (IDI; Pencina et al., 2008, 2011). However, uncalibrated probabilities or poorly configured thresholds produce spurious positive NRI (Kerr et al., 2014; Pepe et al., 2014). Transparent clinical reporting demands separate event ($NRI_e$) and non-event ($NRI_{ne}$) calculations, $K \times K$ contingency matrices, and probability calibration enforcement ($p \in [0, 1]$).
+2. **Time-Dependent ROC in Longitudinal Cohorts**: In time-to-event survival settings with right-censoring (and competing risks), static binary ROC calculations are invalid because disease status changes dynamically over follow-up time. Clinical investigators require Cumulative/Dynamic Inverse Probability of Censoring Weighting (IPCW) ROC estimation ($\text{AUROC}(t)$; Uno et al., 2007; Heagerty et al., 2000) across milestone follow-up horizons (e.g., 30-day, 90-day, 1-year, 5-year), paired with longitudinal discrimination trajectory plots, optimal Youden cutoffs, and bootstrap confidence intervals.
+
+### Decision
+1. **Diagnostic Risk Reclassification Engine (`medstat.diagnostic.roc`)**:
+   - Implemented `compute_reclassification_metrics`:
+     - **Continuous (Category-Free) NRI**: $NRI_e = P(\text{up} \mid Y=1) - P(\text{down} \mid Y=1)$, $NRI_{ne} = P(\text{down} \mid Y=0) - P(\text{up} \mid Y=0)$, $NRI_{\text{total}} = NRI_e + NRI_{ne}$ with asymptotic standard errors and bootstrap CIs.
+     - **Categorical NRI**: Evaluates movements across user-specified clinical risk cutoffs (e.g., `[0.10, 0.20]`), generating $K \times K$ transition contingency matrices for events, non-events, and combined cohorts, reclassification percentages (upward, downward, unchanged), and bootstrap CIs.
+     - **Integrated Discrimination Improvement (IDI)**: Quantifies difference in discrimination slopes $(\bar{p}_{\text{new}, 1} - \bar{p}_{\text{old}, 1}) - (\bar{p}_{\text{new}, 0} - \bar{p}_{\text{old}, 0})$ with asymptotic SE, z-statistic, and relative IDI ($IDI / \text{slope}_{\text{old}}$).
+     - **Safety Guards**: Miscalibration guard enforcing $p_0, p_1 \in [0, 1]$; separate event and non-event reporting per Kerr & Pepe guidelines.
+   - Implemented `compare_diagnostic_models`: Combined DeLong paired test + Continuous NRI + Categorical NRI + IDI.
+2. **Time-Dependent ROC Engine (`medstat.diagnostic.roc`)**:
+   - Implemented `compute_time_dependent_roc`:
+     - Cumulative/Dynamic IPCW estimator using Kaplan-Meier censoring distribution $G(t) = P(C > t)$.
+     - Weighted concordance AUROC calculation algebraically identical to weighted trapezoidal integration.
+     - Handles competing risks (subjects failing from competing events before horizon $t$ remain in the risk set as controls).
+     - Evaluates optimal Youden cutoffs ($\max(\text{TPR}(c) - \text{FPR}(c))$), sensitivity, and specificity per horizon.
+     - Bootstrap confidence intervals across milestones and dual-model trajectory comparison ($\Delta\text{AUROC}(t)$).
+     - Sparse horizon safety guard: emits warnings and sets CI to NaN if horizon $t > \max(T)$ or remaining cases/controls $< 5$.
+3. **Figures & Reporting Integration**:
+   - Static Matplotlib (300 DPI) and interactive Plotly HTML figures: `plot_reclassification`, `plot_time_dependent_roc` (modes: `"auroc_trajectory"` and `"curves"`), `plot_dual_reclassification`, `plot_dual_time_dependent_roc`.
+   - ICMJE/NEJM/JAMA table formatters: `format_reclassification_table` (with $K \times K$ contingency matrices), `format_time_dependent_roc_table`.
+   - Automated narrative generation: `generate_reclassification_narrative`, `generate_time_dependent_roc_narrative`, and enhanced `generate_methods_narrative`.
+   - CLI options: `medstat diag --p-old --p-new --thresholds --reclassification --time-dependent-roc --time-col --event-col --time-horizons`.
+   - Cloud Recipes: Added Recipe 16 (NRI/IDI) and Recipe 17 (Time-Dependent ROC) to `python-recipes.md`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Zero New Dependencies**: Uses standard `numpy`, `pandas`, `scipy`, `lifelines`.
+- **Methodological Soundness**: Resolves the insensitivity of $\Delta\text{AUROC}$ and prevents the bias of static ROC in longitudinal cohorts.
+
+[MEMORY_LEARN: In diagnostic incremental value assessment, ΔAUROC is often insensitive; combining DeLong tests with Category-Free NRI, Categorical NRI (with KxK matrices), and IDI under probability calibration guards provides robust evaluation. For survival data, IPCW Time-Dependent ROC prevents static classification bias across milestone horizons.]
+
 
 
 

@@ -17,7 +17,11 @@ from medstat.figures.diagnostics import (
 )
 from medstat.figures.forest import plot_forest
 from medstat.figures.retention import plot_retention_flow
-from medstat.figures.roc import plot_roc_curve
+from medstat.figures.roc import (
+    plot_reclassification,
+    plot_roc_curve,
+    plot_time_dependent_roc,
+)
 from medstat.figures.styles import (
     CLINICAL_PALETTE,
     GROUP_COLORS,
@@ -37,6 +41,8 @@ __all__ = [
     "plot_kaplan_meier",
     "plot_cif",
     "plot_roc_curve",
+    "plot_time_dependent_roc",
+    "plot_reclassification",
     "plot_calibration",
     "plot_dca",
     "plot_bland_altman",

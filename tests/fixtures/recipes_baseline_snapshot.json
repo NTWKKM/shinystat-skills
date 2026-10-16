@@ -3035,5 +3035,191 @@
         "profile": "Concordant"
       }
     ]
+  },
+  "recipe_16_reclassification": {
+    "nri_continuous": {
+      "total": {
+        "estimate": 0.0,
+        "se": 0.0,
+        "ci_lower": 0.0,
+        "ci_upper": 0.0,
+        "z_statistic": 0.0,
+        "p_value": 1.0
+      },
+      "events": {
+        "estimate": 1.0,
+        "se": 0.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "z_statistic": 0.0,
+        "p_value": 0.0,
+        "n_up": 252,
+        "n_down": 0,
+        "p_up": 1.0,
+        "p_down": 0.0
+      },
+      "nonevents": {
+        "estimate": -1.0,
+        "se": 0.0,
+        "ci_lower": -1.0,
+        "ci_upper": -1.0,
+        "z_statistic": 0.0,
+        "p_value": 0.0,
+        "n_up": 248,
+        "n_down": 0,
+        "p_up": 1.0,
+        "p_down": 0.0
+      }
+    },
+    "nri_categorical": {
+      "thresholds": [
+        0.1,
+        0.3
+      ],
+      "categories": [
+        "< 0.1",
+        "0.1 to <0.3",
+        "\u2265 0.3"
+      ],
+      "total": {
+        "estimate": -0.012353,
+        "se": 0.013137,
+        "ci_lower": -0.038101,
+        "ci_upper": 0.013396,
+        "ci_lower_boot": "None",
+        "ci_upper_boot": "None",
+        "z_statistic": -0.940281,
+        "p_value": 0.347073
+      },
+      "events": {
+        "estimate": 0.015873,
+        "se": 0.007873,
+        "ci_lower": 0.000442,
+        "ci_upper": 0.031304,
+        "z_statistic": 2.016065,
+        "p_value": 0.043793,
+        "n_up": 4,
+        "n_down": 0,
+        "p_up": 0.015873,
+        "p_down": 0.0
+      },
+      "nonevents": {
+        "estimate": -0.028226,
+        "se": 0.010517,
+        "ci_lower": -0.048838,
+        "ci_upper": -0.007613,
+        "z_statistic": -2.6839,
+        "p_value": 0.007277,
+        "n_up": 7,
+        "n_down": 0,
+        "p_up": 0.028226,
+        "p_down": 0.0
+      },
+      "contingency_matrices": {
+        "events": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            4
+          ],
+          [
+            0,
+            0,
+            248
+          ]
+        ],
+        "nonevents": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            7
+          ],
+          [
+            0,
+            0,
+            240
+          ]
+        ],
+        "combined": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            11
+          ],
+          [
+            0,
+            0,
+            488
+          ]
+        ]
+      },
+      "reclassification_percentages": {
+        "upward": 2.2,
+        "downward": 0.0,
+        "unchanged": 97.8
+      }
+    },
+    "idi": {
+      "estimate": 0.160985,
+      "se": 0.00612,
+      "ci_lower": 0.14899,
+      "ci_upper": 0.172979,
+      "z_statistic": 26.305303,
+      "p_value": 0.0,
+      "relative_idi": 6.374888,
+      "discrimination_slope_old": 0.025253,
+      "discrimination_slope_new": 0.186238,
+      "mean_p_old_events": 0.477302,
+      "mean_p_old_nonevents": 0.45205,
+      "mean_p_new_events": 0.67788,
+      "mean_p_new_nonevents": 0.491643
+    }
+  },
+  "recipe_17_time_dependent_roc": {
+    "horizons": [
+      30.0,
+      90.0,
+      180.0
+    ],
+    "trajectory": {
+      "horizons": [
+        30.0,
+        90.0,
+        180.0
+      ],
+      "auroc": [
+        0.627398,
+        0.65378,
+        0.61923
+      ],
+      "ci_lower": [
+        0.496916,
+        0.567154,
+        0.543859
+      ],
+      "ci_upper": [
+        0.75788,
+        0.740406,
+        0.694602
+      ]
+    },
+    "auroc_30": 0.627398,
+    "auroc_90": 0.65378,
+    "auroc_180": 0.61923
   }
 }

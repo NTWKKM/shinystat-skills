@@ -696,7 +696,7 @@ def test_each_recipe_is_self_contained():
     """Verify that every python code block in python-recipes.md executes and runs in an isolated namespace."""
     content = RECIPES_PATH.read_text(encoding="utf-8")
     blocks = re.findall(r"```python\n(.*?)\n```", content, re.DOTALL)
-    assert len(blocks) >= 15, f"Expected at least 15 recipes, got {len(blocks)}"
+    assert len(blocks) >= 17, f"Expected at least 17 recipes, got {len(blocks)}"
     for idx, block in enumerate(blocks, start=1):
         isolated_ns = {}
         try:
@@ -901,6 +901,42 @@ def test_each_recipe_is_self_contained():
                 assert isinstance(reg_res, pd.DataFrame)
                 assert "cause_specific_hr" in reg_res.columns
                 assert "fine_gray_shr" in reg_res.columns
+            elif idx == 16:
+                y = np.array([1, 1, 0, 0, 1, 0])
+                p_old = np.array([0.7, 0.6, 0.4, 0.3, 0.5, 0.2])
+                p_new = np.array([0.8, 0.7, 0.3, 0.2, 0.6, 0.1])
+                res16 = isolated_ns["compute_reclassification_metrics"](
+                    y, p_old, p_new, thresholds=[0.5]
+                )
+                assert "nri_continuous" in res16
+                assert "nri_categorical" in res16
+                assert "idi" in res16
+            elif idx == 17:
+                d = np.array(
+                    [
+                        10.0,
+                        20.0,
+                        30.0,
+                        40.0,
+                        50.0,
+                        60.0,
+                        70.0,
+                        80.0,
+                        90.0,
+                        100.0,
+                        110.0,
+                        120.0,
+                    ]
+                )
+                e = np.array([1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0])
+                s = np.array(
+                    [0.8, 0.2, 0.7, 0.3, 0.9, 0.1, 0.85, 0.15, 0.75, 0.25, 0.95, 0.05]
+                )
+                res17 = isolated_ns["compute_time_dependent_roc"](
+                    d, e, s, time_horizons=[25.0, 45.0], n_bootstrap=0
+                )
+                assert "trajectory" in res17
+                assert "results_by_horizon" in res17
         except Exception as e:
             pytest.fail(
                 f"Recipe {idx} failed to run with valid test fixture in an isolated namespace: {e}"
@@ -2239,3 +2275,93 @@ def test_recipe_15_competing_risks_cif_and_regression(recipes):
     assert "cs_95_ci" in row
     assert "fg_95_ci" in row
     assert row["profile"] in ["Concordant", "Divergent"]
+
+
+# -----------------------------------------------------------------------------
+# 28. Recipe 16: Diagnostic Reclassification (Continuous & Categorical NRI + IDI)
+# -----------------------------------------------------------------------------
+
+
+def test_recipe_16_reclassification_statistical_invariants(recipes):
+    compute_reclass = recipes["compute_reclassification_metrics"]
+    np.random.seed(42)
+    n = 200
+    y = np.random.binomial(1, 0.3, size=n)
+    # Generate old and new probabilities
+    p_old = 1.0 / (1.0 + np.exp(-(-1.5 + 0.8 * y + np.random.normal(0, 0.5, size=n))))
+    # New model adds genuine predictive signal
+    p_new = 1.0 / (1.0 + np.exp(-(-1.8 + 1.6 * y + np.random.normal(0, 0.4, size=n))))
+
+    res = compute_reclass(
+        y, p_old, p_new, thresholds=[0.2, 0.5], n_bootstrap=100, random_state=42
+    )
+
+    # Invariant: Continuous NRI total = NRI_events + NRI_nonevents
+    cont = res["nri_continuous"]
+    assert np.isclose(
+        cont["total"]["estimate"],
+        cont["events"]["estimate"] + cont["nonevents"]["estimate"],
+    )
+
+    # Invariant: Categorical NRI total = NRI_events + NRI_nonevents
+    cat = res["nri_categorical"]
+    assert np.isclose(
+        cat["total"]["estimate"],
+        cat["events"]["estimate"] + cat["nonevents"]["estimate"],
+    )
+
+    # Invariant: Bootstrap CIs computed
+    assert cat["total"]["ci_lower_boot"] is not None
+    assert cat["total"]["ci_upper_boot"] is not None
+
+    # Invariant: Better model has positive NRI and IDI
+    assert cont["total"]["estimate"] > 0
+    assert res["idi"]["estimate"] > 0
+    assert res["idi"]["relative_idi"] is not None
+    assert res["idi"]["relative_idi"] > 0
+
+    # Invariant: Miscalibration guard
+    with pytest.raises(ValueError, match="range"):
+        compute_reclass(y, p_old * 2.0, p_new)
+
+
+# -----------------------------------------------------------------------------
+# 29. Recipe 17: Time-Dependent ROC (Cumulative/Dynamic IPCW AUROC(t))
+# -----------------------------------------------------------------------------
+
+
+def test_recipe_17_time_dependent_roc_statistical_invariants(recipes):
+    compute_td = recipes["compute_time_dependent_roc"]
+    np.random.seed(42)
+    n = 200
+    # Simulate survival data with predictive marker
+    marker = np.random.normal(0, 1, size=n)
+    lambda_param = 0.05 * np.exp(0.8 * marker)
+    durations = np.random.exponential(1.0 / lambda_param)
+    censoring = np.random.exponential(30.0, size=n)
+    obs_time = np.minimum(durations, censoring)
+    events = (durations <= censoring).astype(int)
+
+    horizons = [5.0, 10.0, 20.0]
+    res = compute_td(
+        obs_time,
+        events,
+        marker,
+        time_horizons=horizons,
+        n_bootstrap=50,
+        random_state=42,
+    )
+
+    assert "results_by_horizon" in res
+    assert "trajectory" in res
+    assert len(res["trajectory"]["auroc"]) == len(horizons)
+
+    for h in horizons:
+        h_res = res["results_by_horizon"][h]
+        assert "auroc" in h_res
+        assert 0.5 <= h_res["auroc"] <= 1.0
+        assert "optimal_threshold" in h_res
+        assert "sensitivity" in h_res
+        assert "specificity" in h_res
+        assert 0.0 <= h_res["sensitivity"] <= 1.0
+        assert 0.0 <= h_res["specificity"] <= 1.0

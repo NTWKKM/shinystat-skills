@@ -22,6 +22,10 @@ from medstat.data.clean import prepare_data_for_analysis
 from medstat.data.loader import load_clinical_data
 from medstat.data.missing import pool_estimates
 from medstat.data.retention import SampleFlowTracker
+from medstat.diagnostic.roc import (
+    compare_diagnostic_models,
+    compute_time_dependent_roc,
+)
 from medstat.models.firth import fit_firth_logistic
 from medstat.models.glm import fit_linear_regression, fit_standard_logistic
 from medstat.models.sensitivity import calculate_e_value
@@ -34,12 +38,16 @@ from medstat.reporting.narrative import (
     generate_competing_risks_narrative,
     generate_iptw_narrative,
     generate_narrative,
+    generate_reclassification_narrative,
+    generate_time_dependent_roc_narrative,
 )
 from medstat.reporting.tables import (
     Estimate,
     EstimateTable,
     ModelMeta,
     PublicationRenderer,
+    format_reclassification_table,
+    format_time_dependent_roc_table,
     render_competing_risks_table,
 )
 
@@ -265,6 +273,20 @@ class AnalysisPlan:
             if model_spec.time:
                 req_cols.append(model_spec.time)
             req_cols.extend(model_spec.covariates)
+            for opt_key in (
+                "p_old",
+                "p_old_col",
+                "score_old",
+                "p_new",
+                "p_new_col",
+                "score_new",
+                "score_col",
+                "time_col",
+                "event_col",
+            ):
+                val = model_spec.options.get(opt_key)
+                if val and isinstance(val, str) and val in current_df.columns:
+                    req_cols.append(val)
             req_cols = list(dict.fromkeys(req_cols))
 
             # Clean and handle missingness with explicit justification
@@ -289,6 +311,8 @@ class AnalysisPlan:
 
             mod_type = model_spec.type.lower().strip()
             est_rows: list[Estimate] = []
+            html_table: str | None = None
+            narrative: str | None = None
             mod_meta = ModelMeta(
                 estimator=f"{mod_type.upper()} Regression",
                 n_total=len(clean_df),
@@ -786,13 +810,93 @@ class AnalysisPlan:
                                 scale="Beta",
                             )
                         )
+            elif mod_type in ("reclassification", "diagnostic", "diag") and (
+                model_spec.options.get("p_old_col")
+                or model_spec.options.get("p_old")
+                or model_spec.options.get("reclassification")
+            ):
+                p_old_c = model_spec.options.get(
+                    "p_old_col", model_spec.options.get("p_old")
+                )
+                p_new_c = model_spec.options.get(
+                    "p_new_col", model_spec.options.get("p_new")
+                )
+                th_list = model_spec.options.get("thresholds")
+                y_out = clean_df[model_spec.outcome].values
+                fit_res = compare_diagnostic_models(
+                    y_true=y_out,
+                    p_old=clean_df[p_old_c].values,
+                    p_new=clean_df[p_new_c].values,
+                    thresholds=th_list,
+                )
+                mod_meta.estimator = "Diagnostic Risk Reclassification (NRI & IDI)"
+                html_table = format_reclassification_table(
+                    fit_res,
+                    title=f"Table. {model_spec.description or model_spec.name}",
+                    style=self.reporting.style.upper(),
+                )
+                narrative = generate_reclassification_narrative(fit_res)
+
+            elif mod_type in ("time_dependent_roc", "td_roc") or (
+                mod_type in ("diagnostic", "diag")
+                and (
+                    model_spec.options.get("time_dependent_roc")
+                    or model_spec.options.get("time_horizons")
+                    or model_spec.options.get("horizons")
+                )
+            ):
+                dur_col = model_spec.time or model_spec.options.get("time_col", "time")
+                ev_col = model_spec.outcome or model_spec.options.get(
+                    "event_col", "event"
+                )
+                sc_col = (
+                    model_spec.exposure
+                    or model_spec.options.get("score_col")
+                    or (model_spec.covariates[0] if model_spec.covariates else None)
+                )
+                horizons = model_spec.options.get(
+                    "time_horizons", model_spec.options.get("horizons")
+                )
+                comp_ev = model_spec.options.get("competing_event")
+                p_old_col = model_spec.options.get(
+                    "p_old_col", model_spec.options.get("score_old")
+                )
+                fit_res = compute_time_dependent_roc(
+                    durations=clean_df[dur_col].values,
+                    events=clean_df[ev_col].values,
+                    scores=clean_df[sc_col].values,
+                    time_horizons=horizons,
+                    competing_event_code=comp_ev,
+                    scores_old=(
+                        clean_df[p_old_col].values
+                        if p_old_col and p_old_col in clean_df.columns
+                        else None
+                    ),
+                    scores_new=(
+                        clean_df[sc_col].values
+                        if p_old_col and p_old_col in clean_df.columns
+                        else None
+                    ),
+                )
+                mod_meta.estimator = "Cumulative/Dynamic Time-Dependent ROC"
+                html_table = format_time_dependent_roc_table(
+                    fit_res,
+                    title=f"Table. {model_spec.description or model_spec.name}",
+                    style=self.reporting.style.upper(),
+                )
+                narrative = generate_time_dependent_roc_narrative(fit_res)
             else:
                 fit_res = {"error": f"Unsupported model type: {mod_type}"}
 
             results["models"][model_spec.name] = fit_res
 
             # Generate publication table
-            if est_rows:
+            if html_table is not None and narrative is not None:
+                results["reports"][model_spec.name] = {
+                    "html_table": html_table,
+                    "methods_narrative": narrative,
+                }
+            elif est_rows:
                 est_tbl = EstimateTable(
                     title=f"Table. {model_spec.description or model_spec.name}",
                     rows=est_rows,
