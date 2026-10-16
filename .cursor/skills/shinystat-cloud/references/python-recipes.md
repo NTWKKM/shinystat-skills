@@ -3881,11 +3881,15 @@ def recalibrate_prediction_model(
     ] = "logistic",
     clip_eps: float = 1e-6,
 ) -> dict[str, Any]:
-    """Prediction model recalibration and updating (intercept-only, logistic, or both)."""
-    if not (0.0 < clip_eps < 0.5):
+    if (
+        not isinstance(clip_eps, (int, float))
+        or not np.isfinite(clip_eps)
+        or not (0.0 < float(clip_eps) < 0.5)
+    ):
         raise ValueError(
-            f"clip_eps must be strictly between 0.0 and 0.5, got {clip_eps}"
+            f"clip_eps ({clip_eps}) must be a finite number strictly between 0 and 0.5."
         )
+    clip_eps = float(clip_eps)
 
     norm_m = (
         "intercept_only"

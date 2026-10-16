@@ -258,10 +258,9 @@ def generate_methods_narrative(
 
         if has_recalibration:
             diag_parts.append(
-                "Model recalibration and updating were performed using logistic recalibration and calibration-in-the-large adjustment, "
-                "improving risk calibration and Brier score while preserving baseline model discrimination (AUROC). "
-                "Post-recalibration calibration metrics are apparent in-sample estimates, where post-update calibration intercept (0.00) "
-                "and slope (1.00 under logistic recalibration) are fixed by construction in the updating sample rather than independent evidence of external calibration improvement."
+                "Model updating and recalibration were evaluated using calibration-in-the-large (intercept-only adjustment) "
+                "and logistic recalibration (simultaneous intercept and slope updating) to adjust predicted risks while preserving "
+                "rank-order discrimination (AUROC); post-update calibration intercept and slope represent apparent in-sample estimates fixed by construction."
             )
 
         if has_riley_sample_size:

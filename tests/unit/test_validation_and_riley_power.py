@@ -397,6 +397,33 @@ def test_recalibrate_prediction_model_errors():
     ):
         recalibrate_prediction_model(y_valid, p_inf)
 
+    # Invalid clip_eps
+    with pytest.raises(
+        ValueError,
+        match="clip_eps .* must be a finite number strictly between 0 and 0.5",
+    ):
+        recalibrate_prediction_model(y_valid, p_valid, clip_eps=0.0)
+    with pytest.raises(
+        ValueError,
+        match="clip_eps .* must be a finite number strictly between 0 and 0.5",
+    ):
+        recalibrate_prediction_model(y_valid, p_valid, clip_eps=-0.01)
+    with pytest.raises(
+        ValueError,
+        match="clip_eps .* must be a finite number strictly between 0 and 0.5",
+    ):
+        recalibrate_prediction_model(y_valid, p_valid, clip_eps=0.5)
+    with pytest.raises(
+        ValueError,
+        match="clip_eps .* must be a finite number strictly between 0 and 0.5",
+    ):
+        recalibrate_prediction_model(y_valid, p_valid, clip_eps=0.7)
+    with pytest.raises(
+        ValueError,
+        match="clip_eps .* must be a finite number strictly between 0 and 0.5",
+    ):
+        recalibrate_prediction_model(y_valid, p_valid, clip_eps=float("nan"))
+
     # Test recalibration narrative with method == 'both'
     recal_res = recalibrate_prediction_model(y_valid, p_valid, method="both")
     narr_both = generate_recalibration_narrative(recal_res)
@@ -573,6 +600,23 @@ def test_diagnostic_auroc_sample_size_obuchowski_benchmark():
     assert res["n_cases"] == 31
     assert res["n_controls"] == 31
     assert res["total_n"] == 62
+
+    # Asymmetric prevalence benchmark (phi = 0.25, R = 3.0, theta_0 = 0.50, theta_1 = 0.70, alpha = 0.05 two-sided, power = 0.80)
+    # Independently compute Q1, Q2:
+    # Q1(0.50) = 1/3, Q2(0.50) = 1/3 -> V(theta_0) = (1/12) + (1/12)/3.0 = 1/9
+    # Q1(0.70) = 7/13, Q2(0.70) = 49/85 -> V(theta_1) = (49/85 - 0.49) + (7/13 - 0.49)/3.0 ~= 0.102624434
+    # (z_alpha * sqrt(V0) + z_beta * sqrt(V1))^2 / (0.7 - 0.5)^2 ~= 21.295 -> n_cases = 22, n_controls = 66, total = 88.
+    res_asym = calculate_diagnostic_auroc_sample_size(
+        auroc_expected=0.70,
+        auroc_null=0.50,
+        prevalence=0.25,
+        alpha=0.05,
+        power=0.80,
+        two_sided=True,
+    )
+    assert res_asym["n_cases"] == 22
+    assert res_asym["n_controls"] == 66
+    assert res_asym["total_n"] == 88
 
     # Verify one-sided vs two-sided narrative generation
     narr_two = generate_diagnostic_auroc_sample_size_narrative(res)

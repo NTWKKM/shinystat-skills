@@ -281,7 +281,6 @@ class AnalysisPlan:
             if model_spec.time:
                 req_cols.append(model_spec.time)
             req_cols.extend(model_spec.covariates)
-            score_col_names: set[str] = set()
             for opt_key in (
                 "p_old",
                 "p_old_col",
@@ -299,8 +298,6 @@ class AnalysisPlan:
                 val = model_spec.options.get(opt_key)
                 if val and isinstance(val, str) and val in current_df.columns:
                     req_cols.append(val)
-                    if opt_key in ("p_recal", "p_pred", "score"):
-                        score_col_names.add(val)
             req_cols = list(dict.fromkeys(req_cols))
 
             # Clean and handle missingness with explicit justification
@@ -480,10 +477,18 @@ class AnalysisPlan:
                         f"Binary outcome column '{model_spec.outcome}' contains values outside {{0, 1}}: {set(u_y)}"
                     )
 
+                raw_covars = (
+                    [model_spec.exposure] if model_spec.exposure else []
+                ) + list(model_spec.covariates)
+                recal_opts = {
+                    model_spec.options.get(k)
+                    for k in ("p_recal", "p_pred")
+                    if model_spec.options.get(k)
+                }
                 covar_cols = [
                     c
-                    for c in req_cols
-                    if c != model_spec.outcome and c not in score_col_names
+                    for c in dict.fromkeys(raw_covars)
+                    if c and c != model_spec.outcome and c not in recal_opts
                 ]
                 if is_pooled:
                     if model_spec.options.get("method") == "firth":
@@ -939,10 +944,26 @@ class AnalysisPlan:
                     or model_spec.options.get("validation")
                 )
             ):
+                raw_covars = (
+                    [model_spec.exposure] if model_spec.exposure else []
+                ) + list(model_spec.covariates)
+                opt_preds = model_spec.options.get("predictors")
+                if opt_preds:
+                    if isinstance(opt_preds, list):
+                        raw_covars.extend(opt_preds)
+                    elif isinstance(opt_preds, str):
+                        raw_covars.extend(
+                            [p.strip() for p in opt_preds.split(",") if p.strip()]
+                        )
+                recal_opts = {
+                    model_spec.options.get(k)
+                    for k in ("p_recal", "p_pred")
+                    if model_spec.options.get(k)
+                }
                 covar_cols = [
                     c
-                    for c in req_cols
-                    if c != model_spec.outcome and c not in score_col_names
+                    for c in dict.fromkeys(raw_covars)
+                    if c and c != model_spec.outcome and c not in recal_opts
                 ]
                 n_boot = int(model_spec.options.get("n_bootstrap", 200))
                 fit_res = bootstrap_internal_validation(

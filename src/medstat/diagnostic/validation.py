@@ -525,6 +525,16 @@ def recalibrate_prediction_model(
             "Predicted probabilities p_pred must lie strictly within [0, 1]."
         )
 
+    if (
+        not isinstance(clip_eps, (int, float))
+        or not np.isfinite(clip_eps)
+        or not (0.0 < float(clip_eps) < 0.5)
+    ):
+        raise ValueError(
+            f"clip_eps ({clip_eps}) must be a finite number strictly between 0 and 0.5."
+        )
+    clip_eps = float(clip_eps)
+
     p_clipped = np.clip(p_arr, clip_eps, 1.0 - clip_eps)
     lp_orig = logit(p_clipped)
 

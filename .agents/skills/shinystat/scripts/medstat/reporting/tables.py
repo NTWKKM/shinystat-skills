@@ -1124,11 +1124,11 @@ def format_recalibration_table(
             )
 
     note = (
-        "Evaluation of model calibration pre- and post-updating. Intercept-only recalibration corrects "
-        "calibration-in-the-large while holding the slope fixed at 1.0; logistic recalibration fits both "
-        "intercept and slope. Monotonic recalibration preserves discrimination (AUROC) while improving calibration. "
-        "Post-recalibration metrics are apparent in-sample estimates; post-update calibration intercept (0.00) "
-        "and slope (1.00 under logistic recalibration) are fixed by construction in the updating sample rather than independent evidence of external calibration improvement."
+        "Note: Intercept-only recalibration adjusts baseline risk (calibration-in-the-large). "
+        "Logistic recalibration updates both intercept and slope. "
+        "Monotonic recalibration preserves rank-order discrimination (AUROC). "
+        "Post-recalibration metrics are apparent in-sample estimates; "
+        "intercept (0.00) and slope (1.00 under logistic recalibration) are fixed by construction in the updating sample."
     )
     return render_records_table(title, records, style=style, note=note)
 
