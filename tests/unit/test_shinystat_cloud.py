@@ -1128,6 +1128,33 @@ def test_survival_analysis_suite_penalizer_options(recipes):
     # 4. No covariates returns cox_penalizer=None
     res_no_cov = fit_surv(df, duration_col="time", event_col="event")
     assert res_no_cov["cox_penalizer"] is None
+    assert res_no_cov["cox_standardization"] is None
+
+    # 5. Scale-aware standardization yields unit-invariant HRs under L2 penalty
+    df_scaled = df.copy()
+    df_scaled["age"] = df_scaled["age"] * 10.0
+    res_std_1 = fit_surv(
+        df,
+        duration_col="time",
+        event_col="event",
+        covariates=["age"],
+        penalizer=0.1,
+        standardize_continuous=True,
+    )
+    res_std_10 = fit_surv(
+        df_scaled,
+        duration_col="time",
+        event_col="event",
+        covariates=["age"],
+        penalizer=0.1,
+        standardize_continuous=True,
+    )
+    assert "age" in res_std_1["cox_standardization"]
+    assert res_std_1["cox_standardization"]["age"]["scale"] == "per 1 SD increase"
+    assert np.isclose(
+        res_std_1["forest_data"][0]["estimate"],
+        res_std_10["forest_data"][0]["estimate"],
+    )
 
 
 # -----------------------------------------------------------------------------

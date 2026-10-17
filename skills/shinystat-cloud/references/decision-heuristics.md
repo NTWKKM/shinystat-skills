@@ -38,14 +38,14 @@ Calculate diagnostic EPV:
 ├── EPV ≥ 10 & No Separation ──▶ Standard Multivariable Logistic (Recipe 10) / Standard Unpenalized Cox PH (Recipe 11 with default `penalizer=0.0`)
 ├── Monotone Separation Detected ──▶ Halt at Grilling Gate for clinical confirmation:
 │   ├── Binary Logistic: (A) Firth penalized likelihood with profile likelihood CIs (Recipe 7), or (B) Remove/collapse separating covariate
-│   └── Cox Proportional Hazards (Monotone Likelihood): (A) Penalized Cox regression via lifelines (`CoxPHFitter(penalizer=0.1)` in Recipe 11 with explicit `penalizer=0.1`), or (B) Remove/collapse separating covariate
+│   └── Cox Proportional Hazards (Monotone Likelihood): (A) Scale-aware, data-validated L2-penalized Cox regression via lifelines (Recipe 11: standardize continuous predictors and report the transformation, or select and validate `penalizer > 0` on the supported data), or (B) Remove/collapse separating covariate
 └── Low EPV (< 10) without Separation
     ├── Binary Logistic:
     │   ├── Strategy 1 (Etiological Effect): Firth penalized logistic regression with profile likelihood CIs (Recipe 7)
     │   ├── Strategy 2 (Prediction Model): L2 Ridge penalization / shrinkage to prevent overfitting (Riley et al., 2019)
     │   └── Strategy 3: Domain-guided clinical composite score or univariable reporting with sparse-data disclaimer
     └── Cox Proportional Hazards:
-        ├── Strategy 1: L2-penalized Cox regression via lifelines (`CoxPHFitter(penalizer=0.1)` in Recipe 11 with explicit `penalizer=0.1`)
+        ├── Strategy 1: Scale-aware, data-validated L2-penalized Cox regression via lifelines (Recipe 11: standardize continuous predictors and report the transformation, or select and validate `penalizer > 0` on the supported data)
         ├── Strategy 2: Pre-specified clinical risk index / score reduction
         └── Strategy 3: Univariable survival analysis (Kaplan-Meier / univariable Cox) with sparse-data disclaimer
 ```
@@ -58,6 +58,7 @@ Audit Missingness Pattern & Mechanism (Recipe 8: Little's MCAR Test; note H0: MC
 
 ├── Per-variable missingness < 5% in non-primary covariates ──▶ Complete-case analysis with documented justification
 ├── Missing 5%–40% under Missing at Random (MAR) ──▶ Multiple Imputation by Chained Equations (Recipe 12: MICE; proper Bayesian draws, M ≥ 5 for ≤ 30% missing, M ≥ 20 for > 30% missing; always run Complete-Case Analysis as sensitivity analysis, noting agreement does not prove MAR or exclude MNAR bias)
+├── Non-Primary Missing > 40% (Not MNAR) ──▶ Halt at Grilling Gate: (a) drop auxiliary covariate, (b) high-M MICE (M ≥ 40, tracking FMI) under MAR, or (c) pattern-mixture modeling (or missing-indicator adjustment restricted to randomized-trial baseline covariates or explicitly labeled sensitivity analyses)
 ├── Primary Outcome Missing ──▶ Never impute outcome; preserve true sample retention flow (N_initial ➔ N_analyzed)
 └── Missingness Informative / MNAR ──▶ Halt for clinical domain review or sensitivity bounds
 ```

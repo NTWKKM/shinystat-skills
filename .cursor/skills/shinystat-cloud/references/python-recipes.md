@@ -1602,8 +1602,9 @@ def fit_survival_analysis_suite(
     strata_col: str | None = None,
     covariates: list[str] | None = None,
     penalizer: float = 0.0,
+    standardize_continuous: bool = False,
 ) -> dict:
-    """Run Kaplan-Meier, Log-Rank, and Cox PH modeling with per-covariate Schoenfeld test."""
+    """Run Kaplan-Meier, Log-Rank, and Cox PH modeling with per-covariate Schoenfeld test and optional scale-aware standardization."""
     n_initial = len(df)
 
     # 1. Unadjusted Kaplan-Meier cohort: subset duration, event, and strata (preserves KM cohort)
@@ -1695,6 +1696,7 @@ def fit_survival_analysis_suite(
     cox_table = pd.DataFrame()
     schoenfeld_summary = {}
     forest_items = []
+    cox_standardization = {}
     n_analyzed_cox = 0
     if covariates:
         cox_cols = [duration_col, event_col] + covariates
@@ -1708,8 +1710,21 @@ def fit_survival_analysis_suite(
 
         if penalizer < 0:
             raise ValueError("penalizer must be >= 0")
+        cox_data = clean_cox[cox_cols].copy()
+        if standardize_continuous:
+            for var in covariates:
+                col_s = cox_data[var]
+                if pd.api.types.is_numeric_dtype(col_s) and col_s.nunique() > 2:
+                    mean_v = float(col_s.mean())
+                    sd_v = float(col_s.std(ddof=1))
+                    if sd_v > 0:
+                        cox_data[var] = (col_s - mean_v) / sd_v
+                        cox_standardization[var] = {
+                            "mean": mean_v,
+                            "sd": sd_v,
+                            "scale": "per 1 SD increase",
+                        }
         cph = CoxPHFitter(penalizer=penalizer)
-        cox_data = clean_cox[cox_cols]
         cph.fit(cox_data, duration_col=duration_col, event_col=event_col)
 
         summary = cph.summary
@@ -1766,6 +1781,7 @@ def fit_survival_analysis_suite(
         "risk_table": risk_table,
         "cox_table": cox_table,
         "cox_penalizer": penalizer if covariates else None,
+        "cox_standardization": cox_standardization if covariates else None,
         "forest_data": forest_items,
         "schoenfeld_diagnostics": schoenfeld_summary,
         "retention_km": {
