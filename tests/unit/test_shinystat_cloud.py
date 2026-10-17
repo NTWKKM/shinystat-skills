@@ -1094,12 +1094,14 @@ def test_survival_strict_binary_event_negative_duration_and_cohort_separation(re
 
 
 def test_survival_analysis_suite_penalizer_options(recipes):
+    """Verify Cox L2 penalizer options, explicit continuous_covariates standardization, and categorical covariate validation."""
     fit_surv = recipes["fit_survival_analysis_suite"]
     df = pd.DataFrame(
         {
             "time": [10.0, 20.0, 30.0, 40.0, 50.0],
             "event": [1, 0, 1, 0, 1],
             "age": [45.0, 55.0, 65.0, 75.0, 85.0],
+            "diabetes": [0, 1, 0, 1, 1],
         }
     )
 
@@ -1130,26 +1132,59 @@ def test_survival_analysis_suite_penalizer_options(recipes):
     assert res_no_cov["cox_penalizer"] is None
     assert res_no_cov["cox_standardization"] is None
 
-    # 5. Scale-aware standardization yields unit-invariant HRs under L2 penalty
+    # 5. standardize_continuous=True requires explicit continuous_covariates metadata
+    with pytest.raises(
+        ValueError, match="continuous_covariates must be specified explicitly"
+    ):
+        fit_surv(
+            df,
+            duration_col="time",
+            event_col="event",
+            covariates=["age"],
+            penalizer=0.1,
+            standardize_continuous=True,
+        )
+
+    # 6. Numeric-coded multi-level categorical covariate not in continuous_covariates is rejected
+    df_cat = df.copy()
+    df_cat["stage_code"] = [1, 2, 3, 2, 1]
+    with pytest.raises(
+        ValueError,
+        match="Non-continuous covariate 'stage_code' must be pre-encoded as binary 0/1",
+    ):
+        fit_surv(
+            df_cat,
+            duration_col="time",
+            event_col="event",
+            covariates=["age", "stage_code"],
+            penalizer=0.1,
+            standardize_continuous=True,
+            continuous_covariates=["age"],
+        )
+
+    # 7. Scale-aware standardization yields unit-invariant HRs under L2 penalty
     df_scaled = df.copy()
     df_scaled["age"] = df_scaled["age"] * 10.0
     res_std_1 = fit_surv(
         df,
         duration_col="time",
         event_col="event",
-        covariates=["age"],
+        covariates=["age", "diabetes"],
         penalizer=0.1,
         standardize_continuous=True,
+        continuous_covariates=["age"],
     )
     res_std_10 = fit_surv(
         df_scaled,
         duration_col="time",
         event_col="event",
-        covariates=["age"],
+        covariates=["age", "diabetes"],
         penalizer=0.1,
         standardize_continuous=True,
+        continuous_covariates=["age"],
     )
     assert "age" in res_std_1["cox_standardization"]
+    assert "diabetes" not in res_std_1["cox_standardization"]
     assert res_std_1["cox_standardization"]["age"]["scale"] == "per 1 SD increase"
     assert np.isclose(
         res_std_1["forest_data"][0]["estimate"],

@@ -1603,6 +1603,7 @@ def fit_survival_analysis_suite(
     covariates: list[str] | None = None,
     penalizer: float = 0.0,
     standardize_continuous: bool = False,
+    continuous_covariates: list[str] | None = None,
 ) -> dict:
     """Run Kaplan-Meier, Log-Rank, and Cox PH modeling with per-covariate Schoenfeld test and optional scale-aware standardization."""
     n_initial = len(df)
@@ -1711,19 +1712,43 @@ def fit_survival_analysis_suite(
         if penalizer < 0:
             raise ValueError("penalizer must be >= 0")
         cox_data = clean_cox[cox_cols].copy()
+        for var in covariates:
+            col_s = cox_data[var]
+            if not pd.api.types.is_numeric_dtype(col_s) or pd.api.types.is_bool_dtype(col_s):
+                raise ValueError(
+                    f"Covariate '{var}' must be numeric; encode categorical covariates as binary 0/1 indicators before Cox fitting."
+                )
         if standardize_continuous:
+            if continuous_covariates is None:
+                raise ValueError(
+                    "continuous_covariates must be specified explicitly when standardize_continuous=True."
+                )
+            cont_set = set(continuous_covariates)
+            unknown_cont = cont_set - set(covariates)
+            if unknown_cont:
+                raise ValueError(
+                    f"continuous_covariates {sorted(unknown_cont)} must be present in covariates."
+                )
             for var in covariates:
                 col_s = cox_data[var]
-                if pd.api.types.is_numeric_dtype(col_s) and col_s.nunique() > 2:
+                if var in cont_set:
                     mean_v = float(col_s.mean())
                     sd_v = float(col_s.std(ddof=1))
-                    if sd_v > 0:
-                        cox_data[var] = (col_s - mean_v) / sd_v
-                        cox_standardization[var] = {
-                            "mean": mean_v,
-                            "sd": sd_v,
-                            "scale": "per 1 SD increase",
-                        }
+                    if sd_v <= 0:
+                        raise ValueError(
+                            f"Continuous covariate '{var}' has zero variance and cannot be standardized."
+                        )
+                    cox_data[var] = (col_s - mean_v) / sd_v
+                    cox_standardization[var] = {
+                        "mean": mean_v,
+                        "sd": sd_v,
+                        "scale": "per 1 SD increase",
+                    }
+                else:
+                    if not np.all(np.isin(col_s.to_numpy(), [0, 1])):
+                        raise ValueError(
+                            f"Non-continuous covariate '{var}' must be pre-encoded as binary 0/1 indicator(s) before Cox fitting."
+                        )
         cph = CoxPHFitter(penalizer=penalizer)
         cph.fit(cox_data, duration_col=duration_col, event_col=event_col)
 

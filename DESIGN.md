@@ -1181,7 +1181,7 @@ In PR #17 (`docs/elevate-skills-writing-for-agents`), both canonical skills (`sk
 
 ### Decision
 1. **Scale-Aware Cox Shrinkage (`Recipe 11`, `SKILL.md`, `decision-heuristics.md`)**:
-   - Updated `fit_survival_analysis_suite` in `skills/shinystat-cloud/references/python-recipes.md` with optional `standardize_continuous: bool = False`, z-score standardizing continuous covariates (`(x - mean) / sd`, `ddof=1`) and recording transformations in `cox_standardization` (`{"mean", "sd", "scale": "per 1 SD increase"}`).
+   - Updated `fit_survival_analysis_suite` in `skills/shinystat-cloud/references/python-recipes.md` with optional `standardize_continuous: bool = False` and explicit `continuous_covariates: list[str] | None = None` metadata, z-score standardizing only explicitly declared continuous covariates (`(x - mean) / sd`, `ddof=1`), recording transformations in `cox_standardization` (`{"mean", "sd", "scale": "per 1 SD increase"}`), and rejecting unencoded or numeric-coded multi-level categorical covariates unless pre-encoded as binary `0/1` indicators.
    - Updated low-EPV and monotone-likelihood Cox guidance in `skills/shinystat-cloud/SKILL.md` and `skills/shinystat-cloud/references/decision-heuristics.md` to require scale-aware, data-validated L2 penalization (standardizing continuous predictors and reporting the transformation, or selecting and validating `penalizer` on the supported data), alongside clinical risk score reduction.
 2. **Design-Scoped Missing-Indicator Guidance (`SKILL.md` & `decision-heuristics.md`)**:
    - Restricted missing-indicator modeling in the `> 40%` non-primary missingness branch across `skills/shinystat/` and `skills/shinystat-cloud/` to randomized-trial baseline-covariate adjustment or explicitly labeled sensitivity analyses alongside pattern-mixture modeling.
@@ -1190,7 +1190,7 @@ In PR #17 (`docs/elevate-skills-writing-for-agents`), both canonical skills (`sk
 
 ### Consequences
 - **Status**: Accepted & Verified.
-- **Unit Invariance**: Verified via unit tests (`test_survival_analysis_suite_penalizer_options`) that 10x rescaling of continuous covariates yields identical hazard ratios under `standardize_continuous=True` with `penalizer=0.1`.
+- **Unit Invariance & Categorical Safety**: Verified via unit tests (`test_survival_analysis_suite_penalizer_options`) that 10x rescaling of continuous covariates yields identical hazard ratios under `standardize_continuous=True` with explicit `continuous_covariates` and `penalizer=0.1`, while numeric-coded multi-level categorical covariates are explicitly rejected unless pre-encoded as binary `0/1` indicators.
 - **Mirror Parity**: Synchronized across all 4 multi-agent mirrors (`.agent/`, `.agents/`, `.claude/`, `.cursor/`) and `packaging/cloud/shinystat-cloud/`.
 
-[MEMORY_LEARN: L2-penalized Cox regression requires predictor standardization or data-validated penalty selection for unit invariance; missing-indicator adjustment in high-missingness routing must be restricted to RCT baseline covariates or labeled sensitivity analyses; and agent completion gates must require manual verification of any remaining untraced numbers.]
+[MEMORY_LEARN: L2-penalized Cox regression requires explicit continuous-covariate metadata for standardization (never inferring continuity from nunique() > 2, which misclassifies numeric-coded categorical covariates); missing-indicator adjustment in high-missingness routing must be restricted to RCT baseline covariates or labeled sensitivity analyses; and agent completion gates must require manual verification of any remaining untraced numbers.]
