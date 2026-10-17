@@ -207,7 +207,7 @@ res = plot_cif(
 )
 ```
 
-### 11. Risk Reclassification Plot (`plot_reclassification`)
+### 9. Risk Reclassification Plot (`plot_reclassification`)
 Scatter plot comparing predicted probabilities of baseline vs updated models, color-coded by event status ($Y=1$ events in red, $Y=0$ non-events in blue), with equality line and threshold grid.
 - **Usage**:
 ```python
@@ -220,7 +220,7 @@ res = plot_reclassification(
 )
 ```
 
-### 12. Time-Dependent ROC Trajectory & Multi-Horizon Curves (`plot_time_dependent_roc`)
+### 10. Time-Dependent ROC Trajectory & Multi-Horizon Curves (`plot_time_dependent_roc`)
 Visualizes longitudinal discrimination trajectories ($\text{AUROC}(t)$ with 95% CI bands) or multi-horizon ROC curves.
 - **Usage**:
 ```python
@@ -243,7 +243,7 @@ res_curves = plot_time_dependent_roc(
 )
 ```
 
-### 13. Recalibration Comparison Plot (`plot_recalibration_comparison`)
+### 11. Recalibration Comparison Plot (`plot_recalibration_comparison`)
 Compares pre-recalibration vs post-recalibration calibration curves against the ideal 45-degree reference line, annotated with intercept, slope, and Brier score.
 - **Usage**:
 ```python
@@ -256,7 +256,7 @@ res = plot_recalibration_comparison(
 )
 ```
 
-### 14. Bootstrap Optimism Plot (`plot_bootstrap_optimism`)
+### 12. Bootstrap Optimism Plot (`plot_bootstrap_optimism`)
 Grouped horizontal bar chart of **Apparent vs Optimism-Corrected** metrics (including `1 - Brier Score` where applicable) and the uniform shrinkage factor callout.
 - **Usage**:
 ```python
