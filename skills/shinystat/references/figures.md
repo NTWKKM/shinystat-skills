@@ -243,6 +243,32 @@ res_curves = plot_time_dependent_roc(
 )
 ```
 
+### 11. Recalibration Comparison Plot (`plot_recalibration_comparison`)
+Compares pre-recalibration vs post-recalibration calibration curves against the ideal 45-degree reference line, annotated with intercept, slope, and Brier score.
+- **Usage**:
+```python
+from medstat.figures.calibration import plot_recalibration_comparison
+
+res = plot_recalibration_comparison(
+    recal_res,  # Output dict from recalibrate_prediction_model
+    title="Prediction Model Recalibration",
+    out_path="figures/recalibration.png",
+)
+```
+
+### 12. Bootstrap Optimism Plot (`plot_bootstrap_optimism`)
+Grouped horizontal bar chart of **Apparent vs Optimism-Corrected** metrics (including `1 - Brier Score` where applicable) and the uniform shrinkage factor callout.
+- **Usage**:
+```python
+from medstat.figures.calibration import plot_bootstrap_optimism
+
+res = plot_bootstrap_optimism(
+    val_res,  # Output dict from bootstrap_internal_validation
+    title="TRIPOD+AI Bootstrap Optimism Validation",
+    out_path="figures/bootstrap_optimism.png",
+)
+```
+
 ---
 
 ## 3. Interactive HTML Figures (`medstat.figures.html`)
@@ -252,6 +278,8 @@ For interactive HTML reports, use the mirror submodule `medstat.figures.html`. I
 - **`plot_dual_roc_curve(roc_data, ...)`**: Empirical ROC curve with interactive threshold/sensitivity/specificity tooltips and chance diagonal.
 - **`plot_dual_reclassification(reclass_data, ...)`**: Interactive scatter plot of baseline vs updated risks with hover tooltips and event/non-event toggles.
 - **`plot_dual_time_dependent_roc(td_data, ...)`**: Interactive longitudinal AUROC trajectory with CI bounds or multi-horizon ROC curves.
+- **`plot_dual_recalibration_comparison(recal_res, ...)`**: Interactive pre vs post recalibration curve comparison with hover tooltips and calibration slope/intercept metrics.
+- **`plot_dual_bootstrap_optimism(val_res, ...)`**: Interactive grouped horizontal bar chart of **Apparent vs Optimism-Corrected** metrics (including `1 - Brier Score` where applicable) and the uniform shrinkage factor callout.
 - **`plot_dual_kaplan_meier(km_curves, risk_table, ...)`**: Step-function survival curves with 95% CI bands and hover tooltips.
 - **`plot_dual_cif(cif_data, ...)`**: Non-parametric Cumulative Incidence Function (Aalen-Johansen) with Naive $1 - \text{KM}$ audit and interactive hover.
 - **`plot_dual_calibration(calib_bins, ...)`**: Decile calibration points with 95% Wilson CI error bars and Brier/ICI annotations.

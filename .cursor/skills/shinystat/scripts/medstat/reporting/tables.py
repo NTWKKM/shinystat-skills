@@ -977,3 +977,268 @@ def format_time_dependent_roc_table(
         f"{ci_str}"
     )
     return render_records_table(title, records, style=style, note=note)
+
+
+def format_internal_validation_table(
+    val_res: dict[str, Any],
+    title: str = "Table. TRIPOD+AI Bootstrap Internal Validation and Model Shrinkage",
+    style: Literal["NEJM", "JAMA", "APA7"] = "NEJM",
+) -> str:
+    """
+    Renders publication-grade table for TRIPOD+AI bootstrap internal validation:
+    - Apparent, bootstrap mean, test mean, optimism, and optimism-corrected metrics
+    - Uniform shrinkage factor s_hat and shrunk coefficients
+    """
+    metrics = val_res.get("metrics", {})
+    metric_labels = [
+        ("auroc", "C-statistic (AUROC)"),
+        ("brier_score", "Brier Score"),
+        ("nagelkerke_r2", "Nagelkerke R²"),
+        ("calibration_intercept", "Calibration-in-the-large (Intercept)"),
+        ("calibration_slope", "Calibration Slope"),
+    ]
+
+    records: list[dict[str, Any]] = []
+    for key, display_name in metric_labels:
+        m_info = metrics.get(key, {})
+        app = m_info.get("apparent")
+        b_mean = m_info.get("boot_mean")
+        t_mean = m_info.get("test_mean")
+        opt = m_info.get("optimism")
+        corr = m_info.get("optimism_corrected")
+
+        def _fmt(v: Any) -> str:
+            return (
+                f"{float(v):.3f}" if v is not None and not np.isnan(float(v)) else "—"
+            )
+
+        records.append(
+            {
+                "Performance Metric": display_name,
+                "Apparent": _fmt(app),
+                "Bootstrap Mean": _fmt(b_mean),
+                "Test Mean": _fmt(t_mean),
+                "Optimism": _fmt(opt),
+                "Optimism-Corrected": _fmt(corr),
+            }
+        )
+
+    s_hat = val_res.get("shrinkage_factor", 1.0)
+    n_boot = val_res.get("n_bootstrap", 200)
+    n_succ = val_res.get("n_successful_replicates", n_boot)
+    epp = val_res.get("events_per_predictor", 0.0)
+
+    note = (
+        f"Internal validation conducted via {n_succ}/{n_boot} successful bootstrap replicates. "
+        f"Optimism is defined as bootstrap performance minus test performance on the derivation dataset. "
+        f"Uniform shrinkage factor ŝ = {s_hat:.3f}. Events per predictor (EPP) = {epp:.1f}."
+    )
+    main_table = render_records_table(title, records, style=style, note=note)
+
+    # Shrunk coefficients sub-table
+    shrunk_dict = val_res.get("shrunk_coefficients", {})
+    orig_c = shrunk_dict.get("original", {})
+    shrunk_c = shrunk_dict.get("shrunk", {})
+
+    if orig_c:
+        coef_records: list[dict[str, Any]] = []
+        for term, o_val in orig_c.items():
+            s_val = shrunk_c.get(term, o_val)
+            coef_records.append(
+                {
+                    "Parameter / Predictor": term,
+                    "Original Coefficient": f"{float(o_val):.4f}",
+                    "Shrunk Coefficient": f"{float(s_val):.4f}",
+                    "Adjustment Type": "Re-estimated Intercept"
+                    if term == "Intercept"
+                    else f"Shrunk (ŝ = {s_hat:.3f})",
+                }
+            )
+        coef_note = (
+            "Predictor coefficients shrunk uniformly by ŝ. The intercept was re-estimated to ensure mean predicted "
+            "risk exactly matches the observed outcome proportion on the derivation cohort."
+        )
+        sub_table = render_records_table(
+            "Table. Original vs. Shrunk Model Coefficients",
+            coef_records,
+            style=style,
+            note=coef_note,
+        )
+        return main_table + "\n\n" + sub_table
+
+    return main_table
+
+
+def format_recalibration_table(
+    recal_res: dict[str, Any],
+    title: str = "Table. Model Recalibration and Updating Evaluation",
+    style: Literal["NEJM", "JAMA", "APA7"] = "NEJM",
+) -> str:
+    """
+    Renders publication-grade model recalibration comparison table:
+    Compares Pre-Recalibration vs Post-Recalibration (Intercept-Only and Logistic).
+    """
+    pre = recal_res.get("pre", {})
+    method = recal_res.get("method", "logistic")
+
+    metric_rows = [
+        ("calibration_intercept", "Calibration Intercept (α)"),
+        ("calibration_slope", "Calibration Slope (β)"),
+        ("brier_score", "Brier Score"),
+        ("emax", "Maximum Calibration Error (Emax)"),
+        ("ici", "Integrated Calibration Index (ICI / Eavg)"),
+        ("auroc", "Discrimination (AUROC)"),
+    ]
+
+    records: list[dict[str, Any]] = []
+
+    def _fmt(v: Any) -> str:
+        return f"{float(v):.3f}" if v is not None and not np.isnan(float(v)) else "—"
+
+    if method == "both":
+        post_inter = recal_res.get("post_intercept_only", {})
+        post_log = recal_res.get("post_logistic", {})
+        for k, name in metric_rows:
+            records.append(
+                {
+                    "Calibration Metric": name,
+                    "Pre-Recalibration": _fmt(pre.get(k)),
+                    "Post-Recalibration (Intercept-Only)": _fmt(post_inter.get(k)),
+                    "Post-Recalibration (Logistic)": _fmt(post_log.get(k)),
+                }
+            )
+    else:
+        post = recal_res.get("post", {})
+        post_label = (
+            "Post-Recalibration (Intercept-Only)"
+            if "intercept" in method
+            else "Post-Recalibration (Logistic)"
+        )
+        for k, name in metric_rows:
+            records.append(
+                {
+                    "Calibration Metric": name,
+                    "Pre-Recalibration": _fmt(pre.get(k)),
+                    post_label: _fmt(post.get(k)),
+                }
+            )
+
+    note = (
+        "Note: Intercept-only recalibration adjusts baseline risk (calibration-in-the-large). "
+        "Logistic recalibration updates both intercept and slope. "
+        "Monotonic recalibration preserves rank-order discrimination (AUROC). "
+        "Post-recalibration metrics are apparent in-sample estimates; "
+        "intercept (0.00) and slope (1.00 under logistic recalibration) are fixed by construction in the updating sample."
+    )
+    return render_records_table(title, records, style=style, note=note)
+
+
+def format_riley_sample_size_table(
+    riley_res: dict[str, Any],
+    title: str = "Table. Riley et al. (2020) Minimum Sample Size Calculation",
+    style: Literal["NEJM", "JAMA", "APA7"] = "NEJM",
+) -> str:
+    """
+    Renders publication-grade summary table for Riley prediction model sample size criteria:
+    Criteria 1-4 breakdown, required total N, events, EPP, and binding criterion.
+    """
+    crit_info = riley_res.get("criteria", {})
+    c1 = crit_info.get("criterion1_intercept", {})
+    c2 = crit_info.get("criterion2_mape", {})
+    c3 = crit_info.get("criterion3_shrinkage", {})
+    c4 = crit_info.get("criterion4_optimism", {})
+
+    records: list[dict[str, Any]] = []
+
+    records.append(
+        {
+            "Criterion": "Criterion 1: Estimation of Intercept / Mean Risk",
+            "Target Specification": f"Margin of error δ ≤ {c1.get('margin', 0.05):.2f}",
+            "Required N": str(c1.get("n", "—")),
+            "Required Events": str(
+                int(math.ceil(c1.get("n", 0) * riley_res.get("prevalence", 0.5)))
+            ),
+        }
+    )
+
+    if c2.get("n") is not None:
+        records.append(
+            {
+                "Criterion": "Criterion 2: Mean Absolute Prediction Error (MAPE)",
+                "Target Specification": f"Target MAPE ≤ {c2.get('target_mape', 0.05):.2f}",
+                "Required N": str(c2.get("n", "—")),
+                "Required Events": str(
+                    int(math.ceil(c2.get("n", 0) * riley_res.get("prevalence", 0.5)))
+                ),
+            }
+        )
+
+    records.append(
+        {
+            "Criterion": "Criterion 3: Minimizing Overfitting (Shrinkage)",
+            "Target Specification": f"Target shrinkage factor S ≥ {c3.get('target_shrinkage', 0.90):.2f}",
+            "Required N": str(c3.get("n", "—")),
+            "Required Events": str(
+                int(math.ceil(c3.get("n", 0) * riley_res.get("prevalence", 0.5)))
+            ),
+        }
+    )
+
+    records.append(
+        {
+            "Criterion": "Criterion 4: Optimism in R² (Apparent vs Adjusted)",
+            "Target Specification": f"Difference δ_R² ≤ {c4.get('optimism_margin', 0.05):.2f}",
+            "Required N": str(c4.get("n", "—")),
+            "Required Events": str(
+                int(math.ceil(c4.get("n", 0) * riley_res.get("prevalence", 0.5)))
+            ),
+        }
+    )
+
+    # Summary table
+    sum_records: list[dict[str, Any]] = [
+        {
+            "Parameter / Design Feature": "Candidate Predictor Parameters (P)",
+            "Specification": str(riley_res.get("n_parameters", "—")),
+        },
+        {
+            "Parameter / Design Feature": "Anticipated Outcome Prevalence (φ)",
+            "Specification": f"{riley_res.get('prevalence', 0.0) * 100:.1f}%",
+        },
+        {
+            "Parameter / Design Feature": "Anticipated Cox-Snell R²",
+            "Specification": f"{riley_res.get('cox_snell_r2', 0.0):.3f}",
+        },
+        {
+            "Parameter / Design Feature": "Anticipated Nagelkerke R²",
+            "Specification": f"{riley_res.get('nagelkerke_r2', 0.0):.3f}",
+        },
+        {
+            "Parameter / Design Feature": "Binding Design Criterion",
+            "Specification": str(riley_res.get("binding_criterion", "—")),
+        },
+        {
+            "Parameter / Design Feature": "Minimum Required Sample Size (N)",
+            "Specification": str(riley_res.get("n_total", "—")),
+        },
+        {
+            "Parameter / Design Feature": "Minimum Required Events",
+            "Specification": str(riley_res.get("n_events", "—")),
+        },
+        {
+            "Parameter / Design Feature": "Events Per Candidate Parameter (EPP)",
+            "Specification": f"{riley_res.get('events_per_parameter', 0.0):.1f}",
+        },
+    ]
+
+    note = (
+        "Calculations based on Riley et al. (BMJ 2020; 368:m441). The recommended minimum sample size corresponds "
+        "to the maximum N across all evaluated performance criteria to ensure parameter precision and control overfitting."
+    )
+    t1 = render_records_table(title, records, style=style, note=note)
+    t2 = render_records_table(
+        "Table. Recommended Prediction Model Sample Size Summary",
+        sum_records,
+        style=style,
+    )
+    return t1 + "\n\n" + t2

@@ -32,3 +32,17 @@ class DualFigureResult(FigureResult):
         d = super().to_dict()
         d["has_interactive"] = bool(self.plotly_json)
         return d
+
+    @property
+    def plotly_spec(self) -> dict[str, Any] | None:
+        """Returns the dictionary specification of the Plotly figure."""
+        if self.plotly_fig is not None and hasattr(self.plotly_fig, "to_dict"):
+            return self.plotly_fig.to_dict()
+        if self.plotly_json is not None:
+            import json
+
+            try:
+                return json.loads(self.plotly_json)
+            except Exception:
+                pass
+        return None

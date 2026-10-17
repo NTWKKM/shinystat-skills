@@ -26,6 +26,10 @@ from medstat.diagnostic.roc import (
     compare_diagnostic_models,
     compute_time_dependent_roc,
 )
+from medstat.diagnostic.validation import (
+    bootstrap_internal_validation,
+    recalibrate_prediction_model,
+)
 from medstat.models.firth import fit_firth_logistic
 from medstat.models.glm import fit_linear_regression, fit_standard_logistic
 from medstat.models.sensitivity import calculate_e_value
@@ -36,8 +40,10 @@ from medstat.models.survival import (
 )
 from medstat.reporting.narrative import (
     generate_competing_risks_narrative,
+    generate_internal_validation_narrative,
     generate_iptw_narrative,
     generate_narrative,
+    generate_recalibration_narrative,
     generate_reclassification_narrative,
     generate_time_dependent_roc_narrative,
 )
@@ -46,6 +52,8 @@ from medstat.reporting.tables import (
     EstimateTable,
     ModelMeta,
     PublicationRenderer,
+    format_internal_validation_table,
+    format_recalibration_table,
     format_reclassification_table,
     format_time_dependent_roc_table,
     render_competing_risks_table,
@@ -283,6 +291,9 @@ class AnalysisPlan:
                 "score_col",
                 "time_col",
                 "event_col",
+                "p_recal",
+                "p_pred",
+                "score",
             ):
                 val = model_spec.options.get(opt_key)
                 if val and isinstance(val, str) and val in current_df.columns:
@@ -466,7 +477,19 @@ class AnalysisPlan:
                         f"Binary outcome column '{model_spec.outcome}' contains values outside {{0, 1}}: {set(u_y)}"
                     )
 
-                covar_cols = [c for c in req_cols if c != model_spec.outcome]
+                raw_covars = (
+                    [model_spec.exposure] if model_spec.exposure else []
+                ) + list(model_spec.covariates)
+                recal_opts = {
+                    model_spec.options.get(k)
+                    for k in ("p_recal", "p_pred")
+                    if model_spec.options.get(k)
+                }
+                covar_cols = [
+                    c
+                    for c in dict.fromkeys(raw_covars)
+                    if c and c != model_spec.outcome and c not in recal_opts
+                ]
                 if is_pooled:
                     if model_spec.options.get("method") == "firth":
                         raise NotImplementedError(
@@ -606,6 +629,38 @@ class AnalysisPlan:
                     )
                     e_val = calculate_e_value(est_val, ci_lo, ci_hi, estimate_type="OR")
                     fit_res["e_value"] = e_val
+
+                if model_spec.options.get("internal_validation") and not is_pooled:
+                    n_boot = int(model_spec.options.get("n_bootstrap", 200))
+                    val_res = bootstrap_internal_validation(
+                        df=clean_df,
+                        outcome=model_spec.outcome,
+                        predictors=covar_cols,
+                        n_bootstrap=n_boot,
+                    )
+                    fit_res["internal_validation"] = val_res
+
+                if model_spec.options.get("recalibration"):
+                    p_recal_col = model_spec.options.get(
+                        "p_recal"
+                    ) or model_spec.options.get("p_pred")
+                    if not p_recal_col or p_recal_col not in clean_df.columns:
+                        raise ValueError(
+                            f"Recalibration requires a valid predicted probability column via options 'p_recal' or 'p_pred'. "
+                            f"Resolved '{p_recal_col}', which was not found in dataset columns: {list(clean_df.columns)}."
+                        )
+                    recal_m = model_spec.options.get("recalibration_method", "logistic")
+                    recal_res = recalibrate_prediction_model(
+                        y_true=clean_df[model_spec.outcome].values,
+                        p_pred=clean_df[p_recal_col].values,
+                        method=recal_m,
+                    )
+                    fit_res["recalibration"] = {
+                        k: v
+                        for k, v in recal_res.items()
+                        if not str(k).startswith("p_recal")
+                        and k not in ("y_true", "p_orig")
+                    }
 
             elif mod_type in (
                 "competing_risks",
@@ -885,6 +940,81 @@ class AnalysisPlan:
                     style=self.reporting.style.upper(),
                 )
                 narrative = generate_time_dependent_roc_narrative(fit_res)
+
+            elif mod_type in ("internal_validation", "validation", "tripod") or (
+                mod_type in ("diagnostic", "diag")
+                and (
+                    model_spec.options.get("internal_validation")
+                    or model_spec.options.get("validation")
+                )
+            ):
+                raw_covars = (
+                    [model_spec.exposure] if model_spec.exposure else []
+                ) + list(model_spec.covariates)
+                opt_preds = model_spec.options.get("predictors")
+                if opt_preds:
+                    if isinstance(opt_preds, list):
+                        raw_covars.extend(opt_preds)
+                    elif isinstance(opt_preds, str):
+                        raw_covars.extend(
+                            [p.strip() for p in opt_preds.split(",") if p.strip()]
+                        )
+                recal_opts = {
+                    model_spec.options.get(k)
+                    for k in ("p_recal", "p_pred")
+                    if model_spec.options.get(k)
+                }
+                covar_cols = [
+                    c
+                    for c in dict.fromkeys(raw_covars)
+                    if c and c != model_spec.outcome and c not in recal_opts
+                ]
+                n_boot = int(model_spec.options.get("n_bootstrap", 200))
+                fit_res = bootstrap_internal_validation(
+                    df=clean_df,
+                    outcome=model_spec.outcome,
+                    predictors=covar_cols,
+                    n_bootstrap=n_boot,
+                )
+                mod_meta.estimator = "TRIPOD+AI Bootstrap Internal Validation"
+                html_table = format_internal_validation_table(
+                    fit_res,
+                    title=f"Table. {model_spec.description or model_spec.name}",
+                    style=self.reporting.style.upper(),
+                )
+                narrative = generate_internal_validation_narrative(fit_res)
+
+            elif mod_type in ("recalibration", "recalibrate") or (
+                mod_type in ("diagnostic", "diag")
+                and model_spec.options.get("recalibration")
+            ):
+                p_recal_col = model_spec.options.get(
+                    "p_recal"
+                ) or model_spec.options.get("p_pred")
+                if not p_recal_col or p_recal_col not in clean_df.columns:
+                    raise ValueError(
+                        f"Recalibration requires a valid predicted probability column via options 'p_recal' or 'p_pred'. "
+                        f"Resolved '{p_recal_col}', which was not found in dataset columns: {list(clean_df.columns)}."
+                    )
+                recal_method = model_spec.options.get("method", "logistic")
+                fit_res_raw = recalibrate_prediction_model(
+                    y_true=clean_df[model_spec.outcome].values,
+                    p_pred=clean_df[p_recal_col].values,
+                    method=recal_method,
+                )
+                fit_res = {
+                    k: v
+                    for k, v in fit_res_raw.items()
+                    if not str(k).startswith("p_recal")
+                    and k not in ("y_true", "p_orig")
+                }
+                mod_meta.estimator = "Prediction Model Recalibration"
+                html_table = format_recalibration_table(
+                    fit_res_raw,
+                    title=f"Table. {model_spec.description or model_spec.name}",
+                    style=self.reporting.style.upper(),
+                )
+                narrative = generate_recalibration_narrative(fit_res_raw)
             else:
                 fit_res = {"error": f"Unsupported model type: {mod_type}"}
 

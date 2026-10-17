@@ -262,6 +262,57 @@ def run_all_recipes(ns: dict[str, Any]) -> dict[str, Any]:
         "auroc_180": _serialize_val(r17_res["results_by_horizon"][180.0]["auroc"]),
     }
 
+    # Recipe 18: TRIPOD+AI Bootstrap Internal Validation & Uniform Shrinkage
+    r18_res = ns["bootstrap_internal_validation"](
+        df=df,
+        outcome="gold_standard_ami",
+        predictors=["age", "bmi", "troponin_level"],
+        n_bootstrap=10,
+        random_state=42,
+    )
+    results["recipe_18_validation"] = {
+        "shrinkage_factor": _serialize_val(r18_res["shrinkage_factor"]),
+        "apparent_auroc": _serialize_val(r18_res["apparent_metrics"]["auroc"]),
+        "corrected_auroc": _serialize_val(
+            r18_res["metrics"]["auroc"]["optimism_corrected"]
+        ),
+    }
+
+    # Recipe 19: Prediction Model Recalibration
+    r19_res = ns["recalibrate_prediction_model"](
+        y_true=gold.to_numpy(),
+        p_pred=pred_probs.to_numpy(),
+        method="logistic",
+    )
+    results["recipe_19_recalibration"] = {
+        "alpha": _serialize_val(r19_res["recalibration_parameters"]["alpha"]),
+        "beta": _serialize_val(r19_res["recalibration_parameters"]["beta"]),
+        "post_brier": _serialize_val(r19_res["post"]["brier_score"]),
+    }
+
+    # Recipe 20: Riley Prediction & Diagnostic AUROC Sample Size
+    r20_riley = ns["calculate_riley_sample_size"](
+        n_parameters=10,
+        prevalence=0.20,
+        cox_snell_r2=0.15,
+        shrinkage_target=0.90,
+    )
+    r20_auroc = ns["calculate_diagnostic_auroc_sample_size"](
+        auroc_expected=0.85,
+        auroc_null=0.50,
+        prevalence=0.30,
+        alpha=0.05,
+        power=0.80,
+    )
+    results["recipe_20_sample_size"] = {
+        "riley_n_total": _serialize_val(r20_riley["n_total"]),
+        "riley_criterion3_n": _serialize_val(
+            r20_riley["criteria"]["criterion3_shrinkage"]["n"]
+        ),
+        "auroc_total_n": _serialize_val(r20_auroc["total_n"]),
+        "auroc_n_cases": _serialize_val(r20_auroc["n_cases"]),
+    }
+
     return results
 
 
@@ -347,3 +398,34 @@ def test_capture_or_verify_baseline_snapshot():
     )
     assert "trajectory" in r17_raw
     assert "results_by_horizon" in r17_raw
+
+    r18_raw = ns["bootstrap_internal_validation"](
+        pd.DataFrame({"y": [0, 1, 0, 1] * 10, "x1": np.linspace(0, 1, 40)}),
+        outcome="y",
+        predictors=["x1"],
+        n_bootstrap=10,
+        random_state=42,
+    )
+    assert "apparent_metrics" in r18_raw
+    assert "shrinkage_factor" in r18_raw
+    assert "shrunk_coefficients" in r18_raw
+
+    r19_raw = ns["recalibrate_prediction_model"](
+        [0, 1, 0, 1] * 10,
+        np.clip(np.linspace(0.1, 0.9, 40), 0.01, 0.99),
+        method="both",
+    )
+    assert "post_intercept_only" in r19_raw
+    assert "post_logistic" in r19_raw
+
+    r20_riley = ns["calculate_riley_sample_size"](
+        n_parameters=5, prevalence=0.20, cox_snell_r2=0.10
+    )
+    assert "binding_criterion" in r20_riley
+    assert "criterion3_shrinkage" in r20_riley["criteria"]
+
+    r20_auroc = ns["calculate_diagnostic_auroc_sample_size"](
+        auroc_expected=0.80, auroc_null=0.50, prevalence=0.30
+    )
+    assert "n_cases" in r20_auroc
+    assert "n_controls" in r20_auroc

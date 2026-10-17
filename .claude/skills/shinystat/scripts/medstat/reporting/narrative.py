@@ -94,6 +94,10 @@ def generate_methods_narrative(
     has_reclassification: bool = False,
     has_td_roc: bool = False,
     time_horizons: list[float] | None = None,
+    has_internal_validation: bool = False,
+    has_recalibration: bool = False,
+    has_riley_sample_size: bool = False,
+    has_diagnostic_auroc_sample_size: bool = False,
     **kwargs: Any,
 ) -> str:
     """
@@ -245,6 +249,31 @@ def generate_methods_narrative(
                 diag_parts.append(
                     "Model calibration was evaluated using the Brier score, calibration slope and intercept, and the Integrated Calibration Index (ICI)."
                 )
+
+        if has_internal_validation:
+            diag_parts.append(
+                "Internal validation and optimism adjustment were conducted via bootstrap resampling in accordance with the TRIPOD+AI guideline. "
+                "Apparent performance metrics were optimism-corrected, and predictor coefficients were adjusted using the empirical uniform shrinkage factor."
+            )
+
+        if has_recalibration:
+            diag_parts.append(
+                "Model updating and recalibration were evaluated using calibration-in-the-large (intercept-only adjustment) "
+                "and logistic recalibration (simultaneous intercept and slope updating) to adjust predicted risks while preserving "
+                "rank-order discrimination (AUROC); post-update calibration intercept and slope represent apparent in-sample estimates fixed by construction."
+            )
+
+        if has_riley_sample_size:
+            diag_parts.append(
+                "Minimum required sample size and candidate parameter capacity were calculated using the criteria proposed by Riley et al. (BMJ 2020), "
+                "evaluating precision of mean risk estimation, uniform shrinkage factor targets, and minimal optimism in Cox-Snell and Nagelkerke R²."
+            )
+
+        if has_diagnostic_auroc_sample_size:
+            diag_parts.append(
+                "Sample size requirements for prospective diagnostic test evaluation against the null hypothesis were determined per Obuchowski (1998, 2004) "
+                "and Hanley & McNeil (1982)."
+            )
 
         diag_parts.append(
             f"All statistical tests were two-tailed (alpha = {alpha}), and analyses were conducted using {software_name}."
@@ -763,4 +792,171 @@ def generate_time_dependent_roc_narrative(
                 f"Longitudinal comparison between baseline and updated models showed discrimination differences at {'; '.join(comp_desc)}."
             )
 
+    return " ".join(parts)
+
+
+def generate_internal_validation_narrative(
+    val_res: dict[str, Any],
+    software_name: str = "medstat-core",
+) -> str:
+    """
+    Generate an academic Results narrative for TRIPOD+AI bootstrap internal validation and model shrinkage.
+    """
+    metrics = val_res.get("metrics", {})
+    s_hat = val_res.get("shrinkage_factor", 1.0)
+    n_boot = val_res.get("n_bootstrap", 200)
+    n_succ = val_res.get("n_successful_replicates", n_boot)
+    epp = val_res.get("events_per_predictor", 0.0)
+
+    auc_m = metrics.get("auroc", {})
+    slope_m = metrics.get("calibration_slope", {})
+    brier_m = metrics.get("brier_score", {})
+    r2_m = metrics.get("nagelkerke_r2", {})
+
+    app_auc = auc_m.get("apparent", float("nan"))
+    corr_auc = auc_m.get("optimism_corrected", float("nan"))
+    app_slope = slope_m.get("apparent", float("nan"))
+    corr_slope = slope_m.get("optimism_corrected", float("nan"))
+    app_brier = brier_m.get("apparent", float("nan"))
+    corr_brier = brier_m.get("optimism_corrected", float("nan"))
+    app_r2 = r2_m.get("apparent", float("nan"))
+    corr_r2 = r2_m.get("optimism_corrected", float("nan"))
+
+    parts = [
+        f"In accordance with TRIPOD+AI recommendations, internal validation of the prediction model was performed "
+        f"using {n_succ} successful bootstrap resamples ({n_boot} iterations specified; events per candidate predictor: {epp:.1f}).",
+        f"The model demonstrated an apparent C-statistic of {app_auc:.3f}, with an estimated optimism of {auc_m.get('optimism', 0.0):.3f}, "
+        f"yielding an optimism-corrected C-statistic of {corr_auc:.3f}.",
+        f"Apparent Nagelkerke R² was {app_r2:.3f} (optimism-corrected R²: {corr_r2:.3f}).",
+        f"The apparent calibration slope was {app_slope:.3f}, with an optimism-corrected calibration slope of {corr_slope:.3f}. "
+        f"The Brier score was {app_brier:.3f} (apparent) and {corr_brier:.3f} (optimism-corrected).",
+        f"To adjust for prospective overfitting, regression coefficients were shrunk by a uniform shrinkage factor of ŝ = {s_hat:.3f}, "
+        f"and the model intercept was re-estimated to maintain calibration-in-the-large on the derivation cohort.",
+    ]
+
+    warnings = val_res.get("warnings", [])
+    if warnings:
+        parts.append(f"Validation diagnostic alerts: {' '.join(warnings)}")
+
+    return " ".join(parts)
+
+
+def generate_recalibration_narrative(
+    recal_res: dict[str, Any],
+    software_name: str = "medstat-core",
+) -> str:
+    """
+    Generate an academic Results narrative for model recalibration and updating.
+    """
+    pre = recal_res.get("pre", {})
+    method = recal_res.get("method", "logistic")
+
+    if method == "both":
+        desc_method = "both intercept-only (calibration-in-the-large) and logistic recalibration updating"
+    else:
+        desc_method = f"{method.replace('_', ' ')} updating"
+
+    parts = [
+        f"Model recalibration was performed using {desc_method}.",
+        f"Prior to recalibration, the model exhibited a calibration intercept of {pre.get('calibration_intercept', float('nan')):.3f}, "
+        f"calibration slope of {pre.get('calibration_slope', float('nan')):.3f}, and Brier score of {pre.get('brier_score', float('nan')):.3f} "
+        f"(ICI: {pre.get('ici', float('nan')):.3f}).",
+    ]
+
+    if method == "both":
+        p_int = recal_res.get("parameters_intercept_only", {})
+        p_log = recal_res.get("parameters_logistic", {})
+        post_int = recal_res.get("post_intercept_only", {})
+        post_log = recal_res.get("post_logistic", {})
+        alpha_i = p_int.get("alpha")
+        alpha_l = p_log.get("alpha")
+        beta_l = p_log.get("beta", 1.0)
+
+        parts.append(
+            f"Intercept-only updating adjusted the linear predictor by α = {alpha_i:.3f} (slope fixed at β = 1.000), "
+            f"yielding apparent in-sample Brier score of {post_int.get('brier_score', float('nan')):.3f} and ICI of {post_int.get('ici', float('nan')):.3f}. "
+            f"Logistic recalibration updated both parameters (α = {alpha_l:.3f}, β = {beta_l:.3f}), "
+            f"yielding apparent in-sample Brier score of {post_log.get('brier_score', float('nan')):.3f} and ICI of {post_log.get('ici', float('nan')):.3f}."
+        )
+        parts.append(
+            f"Post-recalibration calibration metrics are apparent in-sample estimates evaluated on the updating cohort, "
+            f"where post-update calibration intercept (0.000) and slope (1.000 under logistic recalibration) are fixed by construction "
+            f"rather than independent evidence of external calibration improvement, while identically preserving model discrimination (AUROC = {post_log.get('auroc', float('nan')):.3f})."
+        )
+    else:
+        post = recal_res.get("post", {})
+        params = recal_res.get("recalibration_parameters", {})
+        alpha = params.get("alpha")
+        beta = params.get("beta", 1.0)
+
+        if alpha is not None:
+            parts.append(
+                f"Recalibration updated the linear predictor with an intercept adjustment of α = {alpha:.3f} "
+                f"and slope multiplier of β = {beta:.3f}."
+            )
+
+        parts.append(
+            f"Post-recalibration calibration metrics are apparent in-sample estimates: intercept = {post.get('calibration_intercept', float('nan')):.3f}, "
+            f"slope = {post.get('calibration_slope', float('nan')):.3f}, Brier score = {post.get('brier_score', float('nan')):.3f}, "
+            f"and Integrated Calibration Index (ICI) = {post.get('ici', float('nan')):.3f}, "
+            f"while identically preserving model discrimination (AUROC = {post.get('auroc', float('nan')):.3f}). "
+            f"Note that post-update calibration intercept (0.000) and slope (1.000 under logistic recalibration) are fixed by construction in the updating sample rather than independent evidence of external calibration improvement."
+        )
+
+    return " ".join(parts)
+
+
+def generate_riley_sample_size_narrative(
+    riley_res: dict[str, Any],
+    software_name: str = "medstat-core",
+) -> str:
+    """
+    Generate an academic Statistical Methods narrative for Riley et al. prediction model sample size.
+    """
+    n_tot = riley_res.get("n_total")
+    n_ev = riley_res.get("n_events")
+    p_params = riley_res.get("n_parameters")
+    prev = riley_res.get("prevalence", 0.0)
+    epp = riley_res.get("events_per_parameter", 0.0)
+    binding = riley_res.get("binding_criterion")
+    cs_r2 = riley_res.get("cox_snell_r2", 0.0)
+    nag_r2 = riley_res.get("nagelkerke_r2", 0.0)
+    s_target = riley_res.get("shrinkage_target", 0.90)
+
+    parts = [
+        "The minimum required sample size for developing the multivariable prediction model was calculated using the "
+        "methodology proposed by Riley et al. (BMJ 2020; 368:m441).",
+        f"Targeting {p_params} candidate predictor parameters with an anticipated outcome prevalence of {prev * 100:.1f}%, "
+        f"an expected Cox-Snell R² of {cs_r2:.3f} (Nagelkerke R²: {nag_r2:.3f}), and a uniform shrinkage factor target of S ≥ {s_target:.2f}, "
+        f"the study requires a minimum sample size of N = {n_tot} participants (including at least {n_ev} outcome events).",
+        f"This ensures an expected events-per-candidate-parameter (EPP) of {epp:.1f}, with the required sample size governed by {binding}.",
+    ]
+    return " ".join(parts)
+
+
+def generate_diagnostic_auroc_sample_size_narrative(
+    auroc_res: dict[str, Any],
+    software_name: str = "medstat-core",
+) -> str:
+    """
+    Generate an academic Statistical Methods narrative for Obuchowski / Hanley-McNeil diagnostic AUROC sample size.
+    """
+    n_tot = auroc_res.get("n_total")
+    n_cases = auroc_res.get("n_cases")
+    n_ctrls = auroc_res.get("n_controls")
+    theta1 = auroc_res.get("auroc_expected")
+    theta0 = auroc_res.get("auroc_null", 0.50)
+    prev = auroc_res.get("prevalence", 0.50)
+    alpha = auroc_res.get("alpha", 0.05)
+    power = auroc_res.get("power", 0.80)
+    is_two_sided = auroc_res.get("two_sided", True)
+    sided_str = "two-sided" if is_two_sided else "one-sided"
+
+    parts = [
+        "Sample size requirements for prospective diagnostic test evaluation were determined using the Obuchowski (1998) "
+        "and Hanley-McNeil (1982) formulation for receiver operating characteristic curves.",
+        f"To detect a statistically significant difference between an anticipated AUROC of {theta1:.3f} and null AUROC of {theta0:.2f} "
+        f"with {power * 100:.0f}% statistical power at a {sided_str} significance level of alpha = {alpha:.2f} under an anticipated case prevalence of {prev * 100:.1f}%, "
+        f"the study requires a total of N = {n_tot} participants ({n_cases} cases and {n_ctrls} controls).",
+    ]
     return " ".join(parts)
