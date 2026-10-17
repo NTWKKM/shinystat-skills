@@ -2,8 +2,9 @@
 
 In cloud sandboxes (e.g. Claude Web Artifacts), `medstat` is not installed as an external package. This reference provides self-contained, pure-Python reporting recipes that assemble biostatistical findings into publication-grade documents (Markdown, self-contained HTML, Word `.docx`, and PowerPoint `.pptx`) with zero custom dependencies.
 
-> [!IMPORTANT]
-> **Output Format Alignment Gate**: When the user prompt does not explicitly specify a deliverable format, **proactively ask the user upfront** before finalizing the deliverable, recommending **(Dual / Toggle View) Self-Contained HTML (`generate_html_report`, `.html`)** where interactive Plotly.js charts serve as the primary view, paired with a tab/button to switch to "Publication 300 DPI Figure (Static)" for journal submission and downloads.
+**Load conditions:**
+- When generating Markdown or HTML reports, read [§1–§2.B](#1-cloud-report-generation-architecture) and [§3 (`verify_standalone_integrity`)](#3-standalone-reporting-integrity-verification); confirm format first via **Output Format Alignment Gate** (`SKILL.md` §2.5).
+- Read [§2.B.1 (`build_plotly_*_spec`)](#b1-standalone-pure-python-plotly-spec-generators-zero-dependencies) only when `plotly_figs` is needed; read [§2.C (`generate_docx_report`)](#c-standalone-word-docx-report-when-python-docx-is-installed) only when `.docx` is chosen.
 
 ---
 

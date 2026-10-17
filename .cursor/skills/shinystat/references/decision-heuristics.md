@@ -57,6 +57,7 @@ Audit Missingness Pattern & Mechanism
 
 ├── Total Missing < 5% and Clinically Uninformative ──▶ Complete-case analysis with documented justification
 ├── Missing 5%–40% under Missing at Random (MAR) ──▶ Multiple Imputation by Chained Equations (MICE)
+├── Non-Primary Missing > 40% (Not MNAR) ──▶ Halt at Grilling Gate: (a) drop auxiliary covariate, (b) high-M MICE (M ≥ 40, tracking FMI) under MAR, or (c) pattern-mixture modeling (or missing-indicator adjustment restricted to randomized-trial baseline covariates or explicitly labeled sensitivity analyses)
 ├── Primary Outcome Missing ──▶ Never impute outcome; check protocol disposition (e.g., ITT vs per-protocol vs sensitivity); if unestablished, halt at Grilling Gate for explicit clinical disposition
 └── Missingness Informative / Missing Not at Random (MNAR) ──▶ Halt at Grilling Gate for clinical review
 ```
@@ -160,4 +161,4 @@ Determining Required Sample Size for Multivariable Prediction Model Development
 - **JAMA Style**: Clean minimal dividers, $P$-values formatted without leading zero: $P = .04$ or $P < .001$.
 - **APA 7th Style**: Standard psychological and behavioral format with exact degrees of freedom.
 - **Reporting Checklists**: Consult STROBE (observational cohorts), CONSORT (trials), TRIPOD (prediction models), STARD (diagnostic accuracy), or PRISMA (systematic reviews).
-- **Figures & Visualizations**: Consult [figures.md](figures.md) for 300 DPI publication plots and [report-builder.md](report-builder.md) for HTML Dual / Toggle View (interactive Plotly + 300 DPI static).
+- **Figures & Visualizations**: When generating 300 DPI publication plots, read [figures.md](figures.md#2-available-plot-recipes); when rendering HTML Dual / Toggle View or multi-format reports, read [report-builder.md](report-builder.md#2-multi-format-renderers).

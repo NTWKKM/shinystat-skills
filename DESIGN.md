@@ -1167,9 +1167,30 @@ In clinical prediction modeling and prognostic biomarker development:
 - **Zero New Dependencies**: Accomplished with existing `scipy`, `numpy`, `pandas`, `statsmodels`.
 - **Methodological Standards**: Full alignment with TRIPOD+AI guidelines for prediction model development and validation, and state-of-the-art power planning via Riley et al. and Obuchowski.
 
-[MEMORY_LEARN: For clinical prediction models, TRIPOD+AI bootstrap internal validation computes honest optimism-corrected AUROC, Brier score, and uniform shrinkage factors (ŝ) to mitigate overfitting. For sample size planning, Riley et al. (2020) 4-criteria formulation replaces fragile EPP heuristics by tying required N directly to target shrinkage and expected R².]
+[MEMORY_LEARN: For clinical prediction models, TRIPOD+AI bootstrap internal validation computes honest optimism-corrected AUROC, Brier score, and uniform shrinkage factors (ŝ) to mitigate overfitting. For sample size planning, Riley et al. (BMJ 2020) 4-criteria formulation replaces fragile EPP heuristics by tying required N directly to target shrinkage and expected R².]
 
+---
 
+## ADR 43: `/writing-for-agents` Skill Architecture Elevation & PR #17 Statistical Rigor Hardening
 
+### Context
+In PR #17 (`docs/elevate-skills-writing-for-agents`), both canonical skills (`skills/shinystat/` and `skills/shinystat-cloud/`) were refactored using `/writing-for-agents` levers (front-loaded context pointers, progressive disclosure with anchor links, leading words `pre-flight`, `reconciled`, and `traceable`, positive framing, and checkable/exhaustive Completion Criteria). CodeRabbit assertive review on PR #17 identified three statistical and verification refinements:
+1. **Scale-Aware Low-EPV Cox Penalization**: `Recipe 11` (`fit_survival_analysis_suite`) previously passed unstandardized predictors to `CoxPHFitter(penalizer=0.1)` under a fixed penalty recommendation. Because L2 ridge shrinkage depends on predictor scale, equivalent predictors in different measurement units receive unequal effective shrinkage unless continuous predictors are standardized or the penalty is data-validated.
+2. **Design-Scoped Missing-Indicator Modeling**: High non-primary missingness (`> 40%`) previously offered `missing-indicator / pattern-mixture modeling` as a general option. In non-randomized observational studies, the missing-indicator method can introduce bias even under MCAR or MAR (Groenwold et al., *CMAJ* 2012), whereas its valid primary use is narrower (such as baseline-covariate adjustment in randomized trials).
+3. **Exhaustive Numerical Traceability Completion Gate**: Both `SKILL.md` completion criteria previously inherited the raw `<= 1` / `15%` unmatched allowance without requiring manual verification of remaining unmatched numbers, which could permit a report with a single incorrect estimate or $P$-value to satisfy the completion gate.
 
+### Decision
+1. **Scale-Aware Cox Shrinkage (`Recipe 11`, `SKILL.md`, `decision-heuristics.md`)**:
+   - Updated `fit_survival_analysis_suite` in `skills/shinystat-cloud/references/python-recipes.md` with optional `standardize_continuous: bool = False` and explicit `continuous_covariates: list[str] | None = None` metadata, z-score standardizing only explicitly declared continuous covariates (`(x - mean) / sd`, `ddof=1`), recording transformations in `cox_standardization` (`{"mean", "sd", "scale": "per 1 SD increase"}`), and rejecting unencoded or numeric-coded multi-level categorical covariates unless pre-encoded as binary `0/1` indicators.
+   - Updated low-EPV and monotone-likelihood Cox guidance in `skills/shinystat-cloud/SKILL.md` and `skills/shinystat-cloud/references/decision-heuristics.md` to require scale-aware, data-validated L2 penalization (standardizing continuous predictors and reporting the transformation, or selecting and validating `penalizer` on the supported data), alongside clinical risk score reduction.
+2. **Design-Scoped Missing-Indicator Guidance (`SKILL.md` & `decision-heuristics.md`)**:
+   - Restricted missing-indicator modeling in the `> 40%` non-primary missingness branch across `skills/shinystat/` and `skills/shinystat-cloud/` to randomized-trial baseline-covariate adjustment or explicitly labeled sensitivity analyses alongside pattern-mixture modeling.
+3. **Exhaustive Numerical Traceability Gate (`SKILL.md`)**:
+   - Tightened Pillar 5 Numerical Traceability in the Completion Criteria of both `skills/shinystat/SKILL.md` and `skills/shinystat-cloud/SKILL.md` to require `len(untraced_numbers) == 0` or manual verification of every remaining value in `untraced_numbers` as a non-statistical token, ensuring any unverified estimate, CI bound, or $P$-value blocks completion.
 
+### Consequences
+- **Status**: Accepted & Verified.
+- **Unit Invariance & Categorical Safety**: Verified via unit tests (`test_survival_analysis_suite_penalizer_options`) that 10x rescaling of continuous covariates yields identical hazard ratios under `standardize_continuous=True` with explicit `continuous_covariates` and `penalizer=0.1`, while numeric-coded multi-level categorical covariates are explicitly rejected unless pre-encoded as binary `0/1` indicators.
+- **Mirror Parity**: Synchronized across all 4 multi-agent mirrors (`.agent/`, `.agents/`, `.claude/`, `.cursor/`) and `packaging/cloud/shinystat-cloud/`.
+
+[MEMORY_LEARN: L2-penalized Cox regression requires explicit continuous-covariate metadata for standardization (never inferring continuity from nunique() > 2, which misclassifies numeric-coded categorical covariates); missing-indicator adjustment in high-missingness routing must be restricted to RCT baseline covariates or labeled sensitivity analyses; and agent completion gates must require manual verification of any remaining untraced numbers.]

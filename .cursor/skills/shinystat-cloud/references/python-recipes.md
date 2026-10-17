@@ -2,6 +2,31 @@
 
 Reference implementations for standalone execution in standard data science environments (such as Claude Web Analysis Tool, Jupyter, Google Colab) where standard libraries (`pandas`, `numpy`, `scipy`, `statsmodels`, `lifelines`, `scikit-learn`) are available **without** requiring custom external packages (zero `medstat` imports).
 
+## Recipe Index
+
+| # | Topic & Heading Anchor | Trigger Branch |
+| :--- | :--- | :--- |
+| **Recipe 1** | [Table 1 & Austin (2009) SMD](#1-table-1-baseline-characteristics--standardized-mean-difference-smd) | Baseline cohort summary, Fisher fallback, zero-variance guard |
+| **Recipe 2** | [2x2 Diagnostic Accuracy](#2-2x2-diagnostic-accuracy-with-wilson-score--log-scale-95-cis) | Sens, Spec, PPV, NPV, LR+/LR-, DOR (Wilson & Haldane CIs) |
+| **Recipe 3** | [Empirical ROC & DeLong CIs](#3-empirical-roc-optimal-cutoff--single--paired-delong-95-cis) | AUROC, Youden cutoff, single/paired DeLong test |
+| **Recipe 4** | [Calibration & Vickers DCA](#4-model-calibration--vickers-decision-curve-analysis-dca) | Brier score, calibration slope/intercept, ICI, net benefit |
+| **Recipe 5** | [Bland-Altman & Shrout-Fleiss ICC](#5-observer-agreement-bland-altman--shrout-fleiss-1979-icc) | Continuous LoA (1999 SEs) & ANOVA rater ICC (exact F CIs) |
+| **Recipe 6** | [Propensity Score Matching (PSM)](#6-propensity-score-matching-psm-with-pair-ids--covariate-balance) | 1:1 nearest-neighbor matching (0.2 SD caliper), pair IDs, SMD |
+| **Recipe 7** | [Firth Penalized Logistic Regression](#7-firths-penalized-likelihood-logistic-regression) | Sparse binary data ($\text{EPV}_{\text{binary}} < 10$) or separation (profile CIs) |
+| **Recipe 8** | [Little's (1988) MCAR Test](#8-littles-1988-mcar-multivariate-missingness-test) | Pre-flight multivariate missingness pattern audit ($H_0: \text{MCAR}$) |
+| **Recipe 9** | [VanderWeele & Ding E-Value](#9-vanderweele--ding-2017-sensitivity-e-value) | Unmeasured confounding sensitivity for observational OR/RR/HR |
+| **Recipe 10** | [Multivariable Logistic Table](#10-multivariable-binary-logistic-regression-table) | Binary outcome regression ($\text{EPV}_{\text{binary}} \ge 10$, crude & adjusted ORs) |
+| **Recipe 11** | [Survival Suite (KM, Log-Rank, Cox)](#11-survival-analysis-kaplan-meier-log-rank--cox-proportional-hazards) | Time-to-event survival, Schoenfeld PH check, L2-penalized Cox |
+| **Recipe 12** | [MICE & Rubin's Rules Pooling](#12-multiple-imputation-by-chained-equations-mice--rubins-rules) | $5\%\text{--}40\%$ MAR covariate missingness (Bayesian draws, continuous targets) |
+| **Recipe 13** | [Publication HTML Table Renderer](#13-publication-grade-html-table-renderer-nejm--jama-standards) | NEJM / JAMA 3-horizontal-rule HTML table formatting |
+| **Recipe 14** | [IPTW & Weighted Balance](#14-inverse-probability-of-treatment-weighting-iptw--weighted-balance) | ATE/ATT/ATC/ATO weights, Kish $N_{\text{eff}}$, Bessel SMD, Huber-White SEs |
+| **Recipe 15** | [Competing Risks (CIF & Fine-Gray)](#15-competing-risks-survival-analysis-aalen-johansen-cif--fine-gray-model) | Aalen-Johansen CIF, Naive $1-\text{KM}$ audit, csHR, Fine-Gray SHR |
+| **Recipe 16** | [Diagnostic Reclassification](#16-diagnostic-risk-reclassification-continuous--categorical-nri-and-idi) | Incremental value via Continuous & Categorical NRI (event/non-event) & IDI |
+| **Recipe 17** | [Time-Dependent ROC ($\text{AUROC}(t)$)](#17-time-dependent-roc-cumulativedynamic-ipcw-estimator-auroct) | Longitudinal discrimination across horizons under right-censoring |
+| **Recipe 18** | [TRIPOD+AI Bootstrap Validation](#18-tripodai-optimism-corrected-bootstrap-internal-validation--uniform-shrinkage) | Optimism correction ($B \ge 200$), uniform shrinkage $\hat{s}$, intercept $\alpha_0$ |
+| **Recipe 19** | [Prediction Model Recalibration](#19-prediction-model-recalibration-and-updating-logistic--intercept-only) | Intercept-only and logistic model updating in external cohorts |
+| **Recipe 20** | [Sample Size (Riley & Obuchowski)](#20-sample-size-determination-for-clinical-prediction-models-riley-et-al-2020--diagnostic-auroc-obuchowski-1998) | Prediction model 4-criteria sample size & diagnostic AUROC power |
+
 ---
 
 ## 1. Table 1 Baseline Characteristics & Standardized Mean Difference (SMD)
@@ -1577,8 +1602,10 @@ def fit_survival_analysis_suite(
     strata_col: str | None = None,
     covariates: list[str] | None = None,
     penalizer: float = 0.0,
+    standardize_continuous: bool = False,
+    continuous_covariates: list[str] | None = None,
 ) -> dict:
-    """Run Kaplan-Meier, Log-Rank, and Cox PH modeling with per-covariate Schoenfeld test."""
+    """Run Kaplan-Meier, Log-Rank, and Cox PH modeling with per-covariate Schoenfeld test and optional scale-aware standardization."""
     n_initial = len(df)
 
     # 1. Unadjusted Kaplan-Meier cohort: subset duration, event, and strata (preserves KM cohort)
@@ -1670,6 +1697,7 @@ def fit_survival_analysis_suite(
     cox_table = pd.DataFrame()
     schoenfeld_summary = {}
     forest_items = []
+    cox_standardization = {}
     n_analyzed_cox = 0
     if covariates:
         cox_cols = [duration_col, event_col] + covariates
@@ -1683,8 +1711,45 @@ def fit_survival_analysis_suite(
 
         if penalizer < 0:
             raise ValueError("penalizer must be >= 0")
+        cox_data = clean_cox[cox_cols].copy()
+        for var in covariates:
+            col_s = cox_data[var]
+            if not pd.api.types.is_numeric_dtype(col_s) or pd.api.types.is_bool_dtype(col_s):
+                raise ValueError(
+                    f"Covariate '{var}' must be numeric; encode categorical covariates as binary 0/1 indicators before Cox fitting."
+                )
+        if standardize_continuous:
+            if continuous_covariates is None:
+                raise ValueError(
+                    "continuous_covariates must be specified explicitly when standardize_continuous=True."
+                )
+            cont_set = set(continuous_covariates)
+            unknown_cont = cont_set - set(covariates)
+            if unknown_cont:
+                raise ValueError(
+                    f"continuous_covariates {sorted(unknown_cont)} must be present in covariates."
+                )
+            for var in covariates:
+                col_s = cox_data[var]
+                if var in cont_set:
+                    mean_v = float(col_s.mean())
+                    sd_v = float(col_s.std(ddof=1))
+                    if sd_v <= 0:
+                        raise ValueError(
+                            f"Continuous covariate '{var}' has zero variance and cannot be standardized."
+                        )
+                    cox_data[var] = (col_s - mean_v) / sd_v
+                    cox_standardization[var] = {
+                        "mean": mean_v,
+                        "sd": sd_v,
+                        "scale": "per 1 SD increase",
+                    }
+                else:
+                    if not np.all(np.isin(col_s.to_numpy(), [0, 1])):
+                        raise ValueError(
+                            f"Non-continuous covariate '{var}' must be pre-encoded as binary 0/1 indicator(s) before Cox fitting."
+                        )
         cph = CoxPHFitter(penalizer=penalizer)
-        cox_data = clean_cox[cox_cols]
         cph.fit(cox_data, duration_col=duration_col, event_col=event_col)
 
         summary = cph.summary
@@ -1741,6 +1806,7 @@ def fit_survival_analysis_suite(
         "risk_table": risk_table,
         "cox_table": cox_table,
         "cox_penalizer": penalizer if covariates else None,
+        "cox_standardization": cox_standardization if covariates else None,
         "forest_data": forest_items,
         "schoenfeld_diagnostics": schoenfeld_summary,
         "retention_km": {
