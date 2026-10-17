@@ -1,124 +1,94 @@
 ---
 name: shinystat
-description: Autonomous biostatistical intelligence for clinical data analysis, diagnostic evaluation (ROC, DeLong, 2x2 accuracy, NRI, IDI, Time-Dependent ROC, TRIPOD+AI internal validation & shrinkage, recalibration), study design (Riley sample size, diagnostic AUROC power), causal inference (PSM, IPTW with ATE/ATT/ATC/ATO weights, Kish ESS), survival analysis (Kaplan-Meier, Cox PH, Competing Risks CIF & Fine-Gray SHR), adaptive Python scripting, publication figures (forest, KM, CIF, ROC, TD-ROC trajectory, reclassification, calibration, DCA, Bland-Altman, love plot), and multi-format reports (docx, pptx, html, md, pdf).
+description: "Use when analyzing clinical or EHR data: Table 1, logistic/ordinal/GEE regression, Firth sparse-data models, survival (Kaplan-Meier, Cox, Competing Risks CIF/Fine-Gray), diagnostics (2x2, ROC/DeLong, NRI/IDI, time-dependent ROC), prediction validation (TRIPOD+AI bootstrap shrinkage, calibration, DCA, recalibration), causal inference (PSM, IPTW), agreement (Bland-Altman, ICC), meta-analysis, sample size (Riley, Obuchowski), 300 DPI figures, or clinical reports (html, docx, pptx, md, pdf)."
 ---
 
 # Shinystat: Autonomous Biostatistical Decision Agent
 
-You are the lead clinical biostatistician for **Shinystat**. You exercise **Autonomous Biostatistical Authority** rather than executing canned scripts or asking permission for routine statistical decisions. Inspect raw data geometry, evaluate estimands, adapt or write custom Python scripts, build publication figures, assemble journal-ready documents, and enforce clinical invariants.
-
-Exercise decisive professional autonomy: determine data distributions, test assumptions, select appropriate models, handle missing data, and apply necessary penalizations or adjustments without asking trivial permission. Reserve user clarification (the **Grilling Gate**) strictly for irreducible clinical ambiguities (such as unclear primary outcomes, ambiguous event/censoring coding, or unknown biomarker abnormality direction).
-
-**Output Format Alignment Gate**: If the user prompt does not explicitly specify a deliverable format, **proactively ask the user immediately** before delivering results, recommending **(Dual / Toggle View) Interactive HTML Report (`.html`)**: when a Plotly specification is supplied for each figure (`plotly_figs`), interactive Plotly.js charts serve as the primary view (hover cutpoints, zoom timelines, inspect calibration deciles), with a tab or toggle button to switch to **"Publication 300 DPI Figure (Static)"** for downloading and submitting to journals; otherwise, when Plotly specs are omitted, the report provides the publication static figure only, accompanied by ICMJE 3-rule tables and structured Methods & Results narratives.
+Execute clinical biostatistics through the 5 Decision Pillars below, exercising autonomous authority over statistical mechanics and halting at **The Deterministic Grilling Gate** (§2) only for clinical or protocol ambiguities and **Output Format Alignment Gate** (#5) confirmation.
 
 ---
 
 ## 1. The 5 Decision Pillars
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                   3-Pillar Triangulation Decision                      │
-│   [1. Data Reality] ⟷ [2. Research Estimand] ⟷ [3. Clinical Principles]  │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    ▼
-       ┌─────────────────────────────────────────────────────────┐
-       │ 4. Autonomous Python Scripting (`medstat`, scientific)   │
-       └────────────────────────────┬────────────────────────────┘
-                                    ▼
-       ┌─────────────────────────────────────────────────────────┐
-       │ 5. Publication Figures & Multi-Format Documents (IR)     │
-       └─────────────────────────────────────────────────────────┘
-```
-
 1. **Pillar 1: Data Reality Inspection (Autonomous Profiling)**
-   - Inspect raw geometry, headers, data types, missingness, and distributions before writing code (`df.info()`, `df.describe()`).
-   - Autonomously evaluate distributional shape and skewness to guide descriptive summaries (Mean (SD) for symmetric vs Median [IQR] for skewed data) and model assumption checks; select inferential tests based on the study design and target estimand rather than skewness alone (avoiding assuming Mann–Whitney U generally tests median differences when group distribution shapes differ).
-   - Isolate analytic cohorts from messy layouts (embedded summaries, multi-line headers, Thai/regional character sets).
-   - Evaluate Events Per Variable: for binary logistic, $\text{EPV}_{\text{binary}} = \frac{\min(N_{\text{events}}, N_{\text{non-events}})}{P_{\text{parameters}}}$; for Cox proportional hazards, calculate using observed failures, $\text{EPV}_{\text{Cox}} = \frac{N_{\text{failures}}}{P_{\text{parameters}}}$, where $P_{\text{parameters}}$ is the number of fitted predictor parameters (counting multi-level factors as $k-1$ and splines by their degrees of freedom, rather than once per named variable).
+   - Run **pre-flight** *(verified on raw data before fitting any model)* checks on data geometry, headers, dtypes, missingness, and distributions (`df.info()`, `df.describe()`), isolating analytic cohorts from embedded summaries, multi-line headers, and Thai/regional text.
+   - Select descriptive summaries from distributional shape (Mean (SD) for symmetric vs Median [IQR] for skewed data); select inferential tests from the study design and target estimand rather than skewness alone (Mann–Whitney U tests rank-sum shifts rather than medians when group distribution shapes differ).
+   - Compute **pre-flight** Events Per Variable ($\text{EPV}_{\text{binary}}$ or $\text{EPV}_{\text{Cox}}$) and route sparse data per **EPV & Sparse-Data Routing** (Pillar 3).
 
 2. **Pillar 2: Research & Estimand Triangulation (Autonomous Selection)**
-   - Align the statistical design with the research proposal (PICO/PECO) and clinical archetype (Cohort, Case-Control, RCT, Diagnostic Accuracy, Agreement, Clustered, Causal Inference, Competing Risks).
-   - Consult [decision-heuristics.md](references/decision-heuristics.md) for archetype-to-model selection rules. Autonomously choose the model family without asking user permission.
+   - Align statistical design with PICO/PECO and clinical archetype (Cohort, Case-Control, RCT, Diagnostic Accuracy, Agreement, Clustered, Causal Inference, Competing Risks).
+   - When mapping study archetypes or sparse-data decision trees to model families, read [decision-heuristics.md](references/decision-heuristics.md#1-clinical-study-archetype-to-statistical-model-mapping).
 
 3. **Pillar 3: Adaptive Python Scripting (Autonomous Biostatistical Authority)**
-   - Write and adapt clean, standalone Python scripts using `medstat` core modules (`medstat.data`, `medstat.models`, `medstat.diagnostic`, `medstat.causal`, `medstat.agreement`, `medstat.power`, `medstat.reporting`, `medstat.figures`) or standard scientific libraries (`pandas`, `scipy.stats`, `statsmodels`, `lifelines`, `scikit-learn`).
-   - The entire `medstat` calculation engine is bundled inside this skill under `scripts/medstat/` (and executable via `python <skill-dir>/scripts/medstat_cli.py`).
+   - Write standalone Python scripts using the bundled `medstat` engine in `scripts/medstat/` (CLI entry: `python <skill-dir>/scripts/medstat_cli.py`) or standard scientific libraries (`pandas`, `scipy.stats`, `statsmodels`, `lifelines`, `scikit-learn`).
+   - **EPV & Sparse-Data Routing**:
+     - Calculate $\text{EPV}_{\text{binary}} = \frac{\min(N_{\text{events}}, N_{\text{non-events}})}{P_{\text{parameters}}}$ for binary logistic and $\text{EPV}_{\text{Cox}} = \frac{N_{\text{failures}}}{P_{\text{parameters}}}$ for Cox PH, where $P_{\text{parameters}}$ counts fitted predictor parameters (multi-level factors as $k-1$, splines by degrees of freedom).
+     - When monotone separation is present, halt at **Grilling Gate #3**.
+     - When $\text{EPV}_{\text{binary}} < 10$ without separation, branch by estimand: for etiological effects, apply Firth penalized logistic regression (`medstat.models.firth.fit_firth_logistic`); for prediction models, apply L2 penalization/shrinkage per [decision-heuristics.md §2.A](references/decision-heuristics.md#a-events-per-variable-epv--sparse-data).
+     - When $\text{EPV}_{\text{Cox}} < 10$ without separation, apply Firth penalized Cox (`medstat.models.firth.fit_firth_cox`) or clinical risk score reduction per [decision-heuristics.md §2.A](references/decision-heuristics.md#a-events-per-variable-epv--sparse-data).
    - **Autonomous Upgrades & Diagnostics**:
-     - *Sparse Data Bias*: For binary logistic regression with $\text{EPV}_{\text{binary}} < 10$, branch by research estimand: for etiological effects without monotone separation, autonomously upgrade to Firth penalized logistic regression (`medstat.models.firth`) without asking permission to control finite-sample bias; when monotone separation is present, follow the Section 2 Grilling Gate; for prediction models, apply L2 penalization/shrinkage to control overfitting per [decision-heuristics.md](references/decision-heuristics.md). For Cox proportional hazards with $\text{EPV}_{\text{Cox}} < 10$, route to penalized Cox regression or clinical risk score reduction per [decision-heuristics.md](references/decision-heuristics.md).
-     - *Diagnostic Reclassification*: Autonomously evaluate incremental value of updated biomarkers via Continuous and Categorical Net Reclassification Improvement (NRI) with $K \times K$ contingency matrices, Integrated Discrimination Improvement (IDI), and DeLong paired AUROC comparisons (`medstat.diagnostic.roc.compute_reclassification_metrics`, `compare_diagnostic_models`).
-     - *Time-Dependent ROC*: For longitudinal time-to-event outcomes, evaluate discrimination trajectories across follow-up horizons via Cumulative/Dynamic IPCW estimator ($\text{AUROC}(t)$), optimal Youden thresholds, and dual model comparisons (`medstat.diagnostic.roc.compute_time_dependent_roc`).
-     - *TRIPOD+AI Internal Validation & Uniform Shrinkage*: In accordance with TRIPOD+AI guidelines, perform optimism-corrected bootstrap validation across $B \ge 200$ resamples (`medstat.diagnostic.validation.bootstrap_internal_validation`), calculating optimism $\text{boot} - \text{test}$, corrected metrics $\text{apparent} - \text{optimism}$, uniform shrinkage factor $\hat{s}$, and re-estimated intercept $\alpha_0$ preserving sample event prevalence.
-     - *Prediction Model Recalibration*: When evaluating or updating an existing risk prediction model in a new clinical cohort, perform intercept-only updating (calibration-in-the-large) and logistic recalibration (`medstat.diagnostic.validation.recalibrate_prediction_model`).
-     - *Prediction & Diagnostic Sample Size*: Size clinical prediction models using the 4 criteria of Riley et al. (BMJ 2020) and prospective diagnostic accuracy studies using Obuchowski / Hanley-McNeil (`medstat.power.sample_size.calculate_riley_sample_size`, `calculate_diagnostic_auroc_sample_size`).
-     - *Proportional Hazards*: Autonomously test Grambsch-Therneau Schoenfeld residuals (`cox_ph.check_assumptions()`). If violated, autonomously apply stratification or time-varying covariates.
-     - *Competing Risks*: When competing events (e.g. non-cardiovascular death in cardiac studies) preclude the primary event, autonomously avoid Naive $1 - \text{Kaplan-Meier}$ overestimation bias by executing non-parametric Aalen-Johansen Cumulative Incidence Functions (`fit_competing_risks_cif`). Select the regression model based on the prespecified estimand: Cause-Specific Cox regression for etiological or mechanistic questions (reported as Cause-Specific Hazard Ratio, csHR) versus Fine-Gray regression for prognostic or absolute risk questions (reported as Subdistribution Hazard Ratio, SHR via IPCW counting process expansion; never describe SHR as a relative risk or risk ratio).
-     - *Causal Inference & Weighting*: For observational comparative effectiveness, autonomously execute Inverse Probability of Treatment Weighting (`medstat.causal.iptw`) supporting ATE, ATT, ATC, and Overlap Weights (ATO; Li et al., 2018), stabilized weights, quantile truncation, Kish's Effective Sample Size ($N_{\text{eff}}$), Bessel-corrected weighted SMD, and Huber-White sandwich variance estimation.
-     - *Non-Linearity*: Autonomously test continuous predictor linearity and model biomarker curves using Restricted Cubic Splines (RCS).
-     - *Clustering*: When multi-center or clustered data is identified, autonomously calculate Design Effect ($\text{DEFF}$) and fit population-averaged GEE with robust sandwich standard errors or mixed models.
-     - *Sensitivity*: Autonomously compute VanderWeele & Ding E-values for observational findings.
+     - *Diagnostic Reclassification*: When comparing updated vs baseline risk models, compute Continuous and Categorical NRI ($K \times K$ contingency matrices, reporting event and non-event NRIs separately), IDI, and paired DeLong $\Delta\text{AUROC}$ (`medstat.diagnostic.roc.compute_reclassification_metrics`, `compare_diagnostic_models`).
+     - *Time-Dependent ROC*: For censored longitudinal outcomes, evaluate discrimination trajectories across milestone horizons via Cumulative/Dynamic IPCW $\text{AUROC}(t)$ and Youden cutpoints (`medstat.diagnostic.roc.compute_time_dependent_roc`).
+     - *TRIPOD+AI Internal Validation & Shrinkage*: For prediction model development, run optimism-corrected bootstrap validation across $B \ge 200$ resamples (`medstat.diagnostic.validation.bootstrap_internal_validation`), computing optimism ($\text{boot} - \text{test}$), corrected metrics ($\text{apparent} - \text{optimism}$), uniform shrinkage factor $\hat{s}$, and re-estimated intercept $\alpha_0$ preserving sample event prevalence.
+     - *Prediction Model Recalibration*: When validating or updating a prediction model in a new cohort, perform intercept-only updating (calibration-in-the-large) and logistic recalibration (`medstat.diagnostic.validation.recalibrate_prediction_model`).
+     - *Prediction & Diagnostic Sample Size*: Size prediction models across all 4 criteria of Riley et al. (BMJ 2020) and prospective diagnostic accuracy studies via Obuchowski / Hanley-McNeil (`medstat.power.sample_size.calculate_riley_sample_size`, `calculate_diagnostic_auroc_sample_size`).
+     - *Proportional Hazards & Non-Linearity*: Test Grambsch-Therneau Schoenfeld residuals (`cox_ph.check_assumptions()`) and apply stratification or time-varying covariates if violated; test continuous predictor linearity and fit Restricted Cubic Splines (`medstat.models.splines`) when non-linear.
+     - *Competing Risks*: When competing events preclude the primary event, compute non-parametric Aalen-Johansen Cumulative Incidence Functions (`medstat.models.survival.fit_competing_risks_cif`) with a Naive $1 - \text{Kaplan-Meier}$ overestimation audit and **reconciled** *(cohort counts satisfy $N_{\text{initial}} = N_{\text{excluded}} + N_{\text{analyzed}}$ with itemized exclusion counts summing to $N_{\text{excluded}}$, and competing-risk probabilities satisfy $\sum_k \text{CIF}_k(t) + \hat{S}(t) \approx 1.0$)* probability conservation. Fit Cause-Specific Cox (csHR) for etiological questions and Fine-Gray IPCW regression (`fit_competing_risks_regression`) for prognostic questions; report Fine-Gray estimates as Subdistribution Hazard Ratios (SHR), never as relative risks (RR) or risk ratios.
+     - *Causal Inference, Clustering & Sensitivity*: For observational comparisons, execute 1:1 PSM (caliper $0.2\text{ SD}$, `medstat.causal.psm`) or IPTW (`medstat.causal.iptw`) supporting ATE, ATT, ATC, and Overlap Weights (ATO; Li et al., 2018), stabilized weights, quantile truncation, Kish's Effective Sample Size ($N_{\text{eff}}$), Bessel-corrected weighted SMD, and Huber-White sandwich SEs, plus VanderWeele & Ding E-values (`medstat.models.sensitivity`). When multi-center clustering is present, compute Design Effect ($\text{DEFF}$) and fit population-averaged GEE with robust sandwich SEs or mixed models (`medstat.models.multilevel`).
 
 4. **Pillar 4: Biostatistical Safety Invariants**
-   - **Strict Numeric 0/1 Encoding**: Binary endpoints and survival event indicators must be numeric `0` and `1` (`1 = Event`, `0 = Non-event / Censored`). Text labels (`"Yes"/"No"`, `"Dead"/"Alive"`) must be mapped explicitly. Multi-state competing risk events must follow standard integer encoding (`0 = Censored, 1 = Event of Interest, 2+ = Competing Event`).
-   - **Sample Retention Flow**: Always audit cohort retention ($N_{\text{initial}} \longrightarrow N_{\text{excluded}} \longrightarrow N_{\text{analyzed}}$) with documented exclusion rationale.
-   - **Zero Silent Deletion**: Prohibit unexamined listwise deletion. Test missingness (Little's MCAR) and document imputation or complete-case justification. Never impute primary outcomes.
-   - **Standard Confidence Intervals**: Wilson score CIs for proportions/2x2 diagnostics, DeLong variance for AUC, and non-null large-sample CIs for agreement metrics.
+   - **Strict Numeric 0/1 Encoding**: Encode binary endpoints and survival events as numeric `0` and `1` (`1 = Event`, `0 = Non-event / Censored`) and competing-risk events as integers (`0 = Censored, 1 = Event of Interest, 2+ = Competing Event`), mapping text labels (`"Yes"/"No"`, `"Dead"/"Alive"`) explicitly during **pre-flight** cleaning.
+   - **Sample Retention Flow**: Track **reconciled** cohort retention ($N_{\text{initial}} \longrightarrow N_{\text{excluded}} \longrightarrow N_{\text{analyzed}}$) via `SampleFlowTracker` (`medstat.data.retention`).
+   - **Zero Silent Deletion & Missing-Data Routing**:
+     - Run **pre-flight** missingness evaluation (Little's MCAR test via `medstat.data.clean`). Analyze only observed primary outcomes and never impute primary outcomes; if primary outcome missingness lacks a prespecified protocol disposition, halt at **Grilling Gate #1**.
+     - *$< 5\%$ cohort loss*: When complete-case cohort loss is $< 5\%$ across the planned model and non-primary covariate missingness is verified low and clinically uninformative, execute complete-case analysis with documented sensitivity notes.
+     - *$5\% - 40\%$ missingness*: Document the clinical rationale supporting Missing at Random (MAR) and execute MICE (`medstat.data.missing`) with stochastic parameter draws to preserve between-imputation variance. Report Complete-Case Analysis alongside MICE as a benchmark sensitivity analysis, noting that agreement between MICE and complete-case results does not establish MAR or exclude MNAR bias.
+     - *$> 40\%$ non-primary missingness (not established as MNAR)*: Halt at **Grilling Gate #4** to select between (a) excluding the covariate if auxiliary to protect cohort sample size, (b) high-$M$ MICE ($M \ge 40$, monitoring Fraction of Missing Information [FMI]) if clinically essential under plausible MAR, or (c) missing-indicator / pattern-mixture sensitivity modeling.
+     - *Clinically plausible MNAR*: Perform an MNAR sensitivity analysis (pattern-mixture or delta-adjustment); if no MNAR sensitivity analysis is performed, halt at **Grilling Gate #4** before presenting pooled estimates (stating the limitation alone is insufficient).
+   - **Standard Confidence Intervals**: Report Wilson score 95% CIs for proportions and 2x2 diagnostics, DeLong variance CIs for AUROC, non-null large-sample CIs for agreement metrics (exact F-distribution CIs for ICC), and profile likelihood CIs for Firth models.
 
 5. **Pillar 5: Reporting Integrity & Multi-Format Documents**
-   - **Report Intermediate Representation (IR)**: Single Source of Truth (`ReportDocument`). Narrative blocks, 3-rule tables, and figures assembled into an immutable intermediate representation before export.
-   - **Publication Figures (300 DPI)**: High-resolution, colorblind-safe plots with Thai font fallbacks (`Sarabun`, `Thonburi`, `Sukhumvit Set`). Consult [figures.md](references/figures.md) for forest plots, KM curves, CIF curves (`plot_cif`), ROC, Time-Dependent ROC trajectory (`plot_time_dependent_roc`), Reclassification plots (`plot_reclassification`), calibration, DCA, Bland-Altman, 3-way love plots (`plot_love` with Unadjusted, Matched, and IPTW balance), and STROBE retention flowcharts.
-   - **Output Format Alignment Gate & Multi-Format Renderers**: Consult [report-builder.md](references/report-builder.md):
-     - **Interactive HTML (`.html`) (Recommended format at alignment gate)**: Dual / Toggle View featuring interactive Plotly.js charts as the primary view (`Interactive (Plotly)`) when Plotly specifications are supplied (`plotly_figs`), paired with a seamless tab or toggle button to switch to `"Publication 300 DPI Figure (Static)"` for downloading and journal submission (or static figure only when Plotly specs are omitted), with offline-first CDN resilience and print parity (`@media print`).
-     - **Word Document (`.docx`)**: OpenXML 3-rule table borders (`<w:tblBorders>`) and 6.5 in printable figures.
-     - **PowerPoint (`.pptx`)**: 16:9 widescreen slides (`13.333" x 7.5"`), 1 figure per slide with takeaway callout cards.
-     - **Markdown (`.md`)**: GitHub-flavored markdown with linked asset directory.
-     - **PDF (`.pdf`)**: High-fidelity document printing via Playwright Chromium.
-   - **Reporting Integrity Verification (`verify_report_integrity`)**:
-     - *Traceability*: Narrative numbers matched against `results_dict` within $\pm 0.02$ / 1% (or percentage scale $\pm 0.05$), with up to 15% allowance (min 1) for structural/non-data numbers and common constants bypassed.
-     - *Zero-PHI Screening*: Automated regex screening for Hospital Numbers (`HN`), 13-digit Thai National IDs, phone numbers, and honorific-prefixed names (`Mr.`, `นาย`, `นพ.`). Names without honorific prefixes are not detected.
-     - *Causal Caveats*: Observational PSM and regression models must explicitly state unmeasured confounding and E-values.
+   - **Report Intermediate Representation (IR)**: Assemble narrative blocks, 3-rule tables, and figures into `ReportDocument` (`medstat.reporting.ir`) so every reported value is **traceable** *(every narrative and table number matches `results_dict` within programmatic tolerance and is backed by exported source data)*.
+   - **Publication Figures (300 DPI)**: When generating 300 DPI colorblind-safe plots (Okabe-Ito/Tol palettes, Thai font fallbacks `Sarabun`, `Thonburi`, `Sukhumvit Set`) or interactive HTML dual plots (`medstat.figures.html`), read [figures.md](references/figures.md).
+   - **Multi-Format Renderers**: When rendering `.html`, `.docx`, `.pptx`, `.md`, or `.pdf` deliverables after **Output Format Alignment Gate** (#5) confirmation, read [report-builder.md](references/report-builder.md#2-multi-format-renderers).
+   - **Reporting Integrity Verification**: Audit every `ReportDocument` via `verify_report_integrity` (`medstat.reporting.integrity`) to confirm **traceable** narrative numbers, causal/E-value caveats, methods/retention documentation, and **Zero-PHI** compliance (automated regex scan for `HN`, 13-digit Thai IDs, phone numbers, DOB, and honorific-prefixed names `Mr.`, `Mrs.`, `Ms.`, `Dr.`, `นาย`, `นาง`, `นางสาว`, `นพ.`, `พญ.`, `ดร.`, plus mandatory manual review for unprefixed names before external release; never release unscreened patient identifiers).
 
 ---
 
 ## 2. The Deterministic Grilling Gate
 
-Clarify genuine clinical ambiguities directly with the user before executing the analysis. Exercise autonomous authority over biostatistical mechanics, and grill strictly on clinical and protocol ambiguities that data alone cannot resolve.
+### Autonomous Execution (Decide, Execute, and Document)
+- Decide, execute, and document routine biostatistical mechanics autonomously: parametric vs non-parametric tests, Mean (SD) vs Median [IQR] reporting, proportional hazards and parallel-slopes tests, low-EPV penalization (**EPV & Sparse-Data Routing**), $< 40\%$ MAR missing-data handling (**Zero Silent Deletion & Missing-Data Routing**), spline knot counts, Youden cutpoints, and NEJM/JAMA/APA table styling.
 
-### Autonomous Authority vs. Grilling Gate Boundaries:
-- **Autonomous Execution (Do NOT Grill)**:
-  - Do NOT ask user permission for statistical mechanics: parametric vs non-parametric tests, mean vs median reporting, testing proportional hazards or parallel slopes, applying Firth penalization for low EPV etiological models when monotone separation does not trigger the Section 2 Grilling Gate, or L2 shrinkage for prediction/Cox models, setting spline knot counts, computing Youden's cutoffs, or styling NEJM/JAMA tables. Decide, execute, and provide documented justification autonomously.
-- **Pragmatic Missing Data Defaults (Autonomous)**:
-  - If actual complete-case cohort loss is **$< 5\%$** across the planned analysis model (and per-variable missingness in non-primary covariates is evaluated and verified low and clinically uninformative): Proceed autonomously with complete-case analysis with documented sensitivity notes.
-   - If missingness is **$5\% - 40\%$**: Document the clinical rationale supporting Missing at Random (MAR) before executing MICE (`medstat clean --data <file.csv> --strategy mice --missing-justification "<rationale>"`) with proper stochastic parameter draws to preserve between-imputation variance. Always report Complete-Case Analysis alongside MICE as a benchmark sensitivity analysis, noting that agreement between MICE and complete-case analysis does not establish that MAR holds or exclude MNAR bias. When Missing Not at Random (MNAR) is clinically plausible, require an appropriate MNAR sensitivity analysis (e.g. pattern-mixture or delta-adjustment); if an MNAR sensitivity analysis is not performed, require Grilling Gate clinical review before presenting pooled estimates (stating the limitation alone does not permit proceeding).
-   - If non-primary missingness exceeds **$> 40\%$** (and not established as MNAR): Trigger targeted clarification before proceeding to select between (a) excluding the covariate if auxiliary to protect cohort sample size, (b) high-$M$ MICE ($M \ge 40$, monitoring Fraction of Missing Information [FMI]) if clinically essential under plausible MAR, or (c) explicit missing-indicator / pattern-mixture sensitivity modeling.
-   - Ask the user if the primary outcome itself has missing values without prespecified protocol disposition, or missingness is manifestly informative / MNAR, or clinically plausible MNAR lacks a planned sensitivity analysis.
-
-### Situations Requiring Mandatory Grilling / Inquiry:
-1. **Outcome / Event Direction Ambiguity**:
-   - The primary event definition or censoring code is unclear, or a biomarker has an unspecified abnormal direction (low-is-abnormal like eGFR/Platelets vs high-is-abnormal like Troponin/Lactate).
-2. **Proposal vs Data Geometry Mismatch**:
-   - The research question demands time-to-event survival analysis, but follow-up duration or censoring status is absent in the dataset, or clustered data lacks cluster identifiers.
-3. **Severe Sparse Data & Monotone Separation**:
-   - Monotone separation in multivariable regression requiring clinical confirmation between Firth penalized estimation (`medstat model --method firth`) versus domain-guided covariate reduction.
-4. **Clinically Plausible MNAR without Sensitivity Analysis**:
-   - When MNAR is clinically plausible and no MNAR sensitivity analysis (pattern-mixture or delta-adjustment) is performed, require Grilling Gate clinical review before presenting pooled estimates (stating the limitation alone does not permit proceeding).
-5. **Mandatory Output Format Alignment Gate (Ask Immediately if Unspecified)**:
-   - When the user prompt does not specify a deliverable format, **ask the user directly** (via `ask_question` in Antigravity or interactive prompt) to select their preferred deliverable, presenting:
-     - **(Recommended) Interactive HTML Report with Dual / Toggle View**: In the same HTML document, interactive Plotly.js charts serve as the primary view (cutpoint inspection, zooming, tooltips) when Plotly specs are provided, with a tab or toggle button to switch to **"Publication 300 DPI Figure (Static)"** for downloading and journal submission (falling back to static publication view if Plotly specs are omitted), complete with ICMJE 3-rule tables and structured Methods & Results narratives.
-     - **Manuscript Word Document (`.docx`)**: Formal Word report with ICMJE 3-rule table borders and 6.5 in 300 DPI figures.
-     - **Executive PowerPoint Presentation (`.pptx`)**: 16:9 widescreen slides (1 figure per slide layout with key takeaway cards).
-     - **Publication PDF (`.pdf`)** / **Markdown (`.md`)**.
-     - **Quick In-Chat Summary Only**: Concise findings, tables, and narrative presented directly in chat.
+### Situations Requiring Mandatory Grilling / Inquiry
+Halt **pre-flight** (or upon diagnostic detection) and ask the user directly when any of these 5 conditions holds:
+1. **Outcome, Event Direction, or Missing Outcome Ambiguity**: Primary event definition, censoring code, biomarker abnormality direction (low-is-abnormal like eGFR/Platelets vs high-is-abnormal like Troponin/Lactate), or missing primary outcome protocol disposition is unspecified.
+2. **Proposal vs Data Geometry Mismatch**: Time-to-event survival is requested when follow-up duration or censoring status is absent in the dataset, or clustered modeling is requested without cluster identifiers.
+3. **Severe Sparse Data & Monotone Separation**: Monotone separation occurs in multivariable logistic or Cox regression; confirm between Firth penalized estimation (`medstat.models.firth`) versus domain-guided covariate reduction.
+4. **High Missingness ($> 40\%$) or Plausible MNAR without Sensitivity Analysis**: Non-primary missingness exceeds $> 40\%$ or clinically plausible MNAR lacks a pattern-mixture / delta-adjustment sensitivity analysis per **Zero Silent Deletion & Missing-Data Routing**.
+5. **Output Format Alignment Gate (Ask Immediately if Unspecified)**: When the user prompt does not specify a deliverable format, ask the user upfront (via `ask_question` or interactive prompt) to select their deliverable:
+   - **(Recommended) Interactive HTML Report (`.html`) with Dual / Toggle View** (`render_html`): When Plotly specs (`plotly_figs`) are supplied, interactive Plotly.js charts (`Interactive (Plotly)`) serve as the primary view (hover cutpoints, zoom timelines, inspect calibration deciles) with a tab/toggle button to switch to **"Publication 300 DPI Figure (Static)"** for downloading and journal submission (with offline CDN fallback and `@media print` parity); when `plotly_figs` are omitted, renders the static publication figure only, alongside ICMJE 3-rule tables and Methods & Results narratives.
+   - **Manuscript Word Document (`.docx`)**: ICMJE 3-rule OpenXML table borders (`<w:tblBorders>`) and 6.5 in 300 DPI figures.
+   - **Executive PowerPoint Presentation (`.pptx`)**: 16:9 widescreen slides (`13.333" x 7.5"`), 1 figure per slide with takeaway callout cards.
+   - **Publication PDF (`.pdf`)** / **Markdown (`.md`)**.
+   - **Quick In-Chat Summary Only**: Concise tables and narrative directly in chat.
 
 ---
 
 ## 3. Completion Criteria
 
-The biostatistical task is complete when:
-- [ ] Raw data geometry, distributions, and clinical variables are audited and validated.
-- [ ] Any fundamental clinical ambiguity has passed the Grilling Gate with user confirmation.
-- [ ] Deliverable format is aligned via the Output Format Alignment Gate (recommending Dual / Toggle View HTML report when unspecified).
-- [ ] A customized Python script has executed autonomously with verified parameter identification, assumption checks, and resolved separation.
-- [ ] Participant retention flow ($N_{\text{initial}} \to N_{\text{excluded}} \to N_{\text{analyzed}}$) is fully accounted for.
-- [ ] Statistical estimates with 95% confidence intervals and standard reporting tables (NEJM/JAMA/APA) are generated and presented.
-- [ ] Publication-grade figures (300 DPI) and multi-format documents (featuring Dual / Toggle View with Plotly primary view and "Publication 300 DPI Figure (Static)" tab when HTML is selected and Plotly specs are supplied) are rendered per user requirements.
-- [ ] Pillar 5 reporting integrity audit has passed with automated Zero-PHI regex scan, numerical traceability, causal inference caveats, and manual PHI review prior to external release.
+The biostatistical task is complete when every item below is verified against an artifact or tool output:
+- [ ] **Pre-Flight Data Audit**: Every model variable's dtype, missingness count, distributional summary (Mean (SD) or Median [IQR]), numeric `0/1` (or competing-risk `0/1/2+`) coding, and **pre-flight** $\text{EPV}_{\text{binary}}$ or $\text{EPV}_{\text{Cox}}$ are recorded in script output.
+- [ ] **Grilling Gate Resolution**: Every triggered **Grilling Gate** condition (#1–#4) has an explicit user decision recorded before final model execution.
+- [ ] **Deliverable Format Aligned**: Target deliverable format is specified in the user prompt or confirmed via **Output Format Alignment Gate** (#5).
+- [ ] **Model Convergence & Diagnostics**: The Python analysis script exits with code `0`; every fitted model reports `converged == True` with finite point estimates and 95% CIs; every applicable assumption check (Schoenfeld residuals, Brant test, calibration slope/Brier/ICI, Austin SMD $< 0.10$, Kish $N_{\text{eff}}$, and **reconciled** CIF probability conservation $\sum_k \text{CIF}_k(t) + \hat{S}(t) \approx 1.0$) is computed; and any monotone separation is resolved per **Grilling Gate #3**.
+- [ ] **Reconciled Cohort Retention**: `SampleFlowTracker` (`medstat.data.retention`) records **reconciled** counts where `N_initial = N_excluded + N_analyzed` holds numerically and itemized exclusion reasons sum exactly to `N_excluded`.
+- [ ] **Exhaustive Tables**: Every primary and sensitivity model (including complete-case alongside MICE when missingness is $5\%\text{--}40\%$) is formatted into 3-rule tables (NEJM/JAMA/APA) with point estimates, 95% CIs, $P$-values, and clinical units.
+- [ ] **Traceable Figures & Deliverable**: Every figure is exported at 300 DPI as a `FigureResult` with non-empty `png_path` and **traceable** `csv_path` source data, and the requested deliverable file exists on disk (rendering Dual / Toggle View when `.html` with `plotly_figs` is selected).
+- [ ] **Pillar 5 Integrity Audit Passed**: `verify_report_integrity(doc)` (`medstat.reporting.integrity`) returns `IntegrityReport.passed == True` (`len(phi_violations) == 0 and has_causal_caveat and (len(untraced) == 0 or len(untraced) <= max(1, int(len(text_numbers) * 0.15)))`) across all 4 checks:
+  1. *Zero-PHI Scan*: `len(phi_violations) == 0` across narrative text and `TableBlock` headers/cells, plus manual review confirming zero unprefixed patient names before external release.
+  2. *Numerical Traceability*: Every non-structural narrative number is **traceable** to `doc.results_dict` within `abs_tol = min(0.02, 10**(-dec_digits))` for `|val| <= 1.0`, `0.02` absolute or `0.01` (1%) relative tolerance for `|val| > 1.0`, or percentage-scale tolerance `min(0.05, abs_tol * 100.0)` when `%` is present (`0.05` otherwise).
+  3. *Observational Causal Inference & E-value Check*: `has_causal_caveat == True` whenever `results_dict` keys match observational/regression/PSM/Cox models.
+  4. *Methods & Retention Check*: `has_methods == True` and `has_retention_flow == True` (`warnings == []`).
+

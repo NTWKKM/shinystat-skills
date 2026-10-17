@@ -2,6 +2,31 @@
 
 Reference implementations for standalone execution in standard data science environments (such as Claude Web Analysis Tool, Jupyter, Google Colab) where standard libraries (`pandas`, `numpy`, `scipy`, `statsmodels`, `lifelines`, `scikit-learn`) are available **without** requiring custom external packages (zero `medstat` imports).
 
+## Recipe Index
+
+| Recipe | Topic | Trigger Branch | Anchor |
+| :--- | :--- | :--- | :--- |
+| **Recipe 1** | Table 1 & Austin (2009) SMD | Baseline cohort characteristics & group SMD | [`#1-table-1-baseline-characteristics--standardized-mean-difference-smd`](#1-table-1-baseline-characteristics--standardized-mean-difference-smd) |
+| **Recipe 2** | 2x2 Diagnostic Accuracy | Sensitivity, specificity, PPV, NPV, LR+/LR-, DOR (Wilson & Haldane CIs) | [`#2-2x2-diagnostic-accuracy-with-wilson-score--log-scale-95-cis`](#2-2x2-diagnostic-accuracy-with-wilson-score--log-scale-95-cis) |
+| **Recipe 3** | Empirical ROC & DeLong CIs | AUROC, Youden cutoff, single/paired DeLong test | [`#3-empirical-roc-optimal-cutoff--single--paired-delong-95-cis`](#3-empirical-roc-optimal-cutoff--single--paired-delong-95-cis) |
+| **Recipe 4** | Calibration & Vickers DCA | Brier score, calibration slope/intercept, ICI, decision curve net benefit | [`#4-model-calibration--vickers-decision-curve-analysis-dca`](#4-model-calibration--vickers-decision-curve-analysis-dca) |
+| **Recipe 5** | Bland-Altman & Shrout-Fleiss ICC | Continuous method agreement (1999 LoA CIs) & rater reliability (ICC1–3k) | [`#5-observer-agreement-bland-altman--shrout-fleiss-1979-icc`](#5-observer-agreement-bland-altman--shrout-fleiss-1979-icc) |
+| **Recipe 6** | Propensity Score Matching (PSM) | 1:1 nearest-neighbor matching (0.2 SD caliper), pair IDs, balance table | [`#6-propensity-score-matching-psm-with-pair-ids--covariate-balance`](#6-propensity-score-matching-psm-with-pair-ids--covariate-balance) |
+| **Recipe 7** | Firth Penalized Logistic Regression | Sparse binary data ($\text{EPV}_{\text{binary}} < 10$) or monotone separation (profile CIs) | [`#7-firths-penalized-likelihood-logistic-regression`](#7-firths-penalized-likelihood-logistic-regression) |
+| **Recipe 8** | Little's (1988) MCAR Test | Pre-flight multivariate missingness pattern audit | [`#8-littles-1988-mcar-multivariate-missingness-test`](#8-littles-1988-mcar-multivariate-missingness-test) |
+| **Recipe 9** | VanderWeele & Ding E-Value | Unmeasured confounding sensitivity for observational OR, RR, or HR | [`#9-vanderweele--ding-2017-sensitivity-e-value`](#9-vanderweele--ding-2017-sensitivity-e-value) |
+| **Recipe 10** | Multivariable Logistic Table | Binary outcome regression ($\text{EPV}_{\text{binary}} \ge 10$) with crude & adjusted ORs | [`#10-multivariable-binary-logistic-regression-table`](#10-multivariable-binary-logistic-regression-table) |
+| **Recipe 11** | Survival Suite (KM, Log-Rank, Cox) | Time-to-event survival, Schoenfeld PH diagnostics, L2-penalized Cox | [`#11-survival-analysis-kaplan-meier-log-rank--cox-proportional-hazards`](#11-survival-analysis-kaplan-meier-log-rank--cox-proportional-hazards) |
+| **Recipe 12** | MICE & Rubin's Rules Pooling | $5\%\text{--}40\%$ MAR covariate missingness with Bayesian posterior draws | [`#12-multiple-imputation-by-chained-equations-mice--rubins-rules`](#12-multiple-imputation-by-chained-equations-mice--rubins-rules) |
+| **Recipe 13** | Publication HTML Table Renderer | NEJM / JAMA 3-horizontal-rule table formatting | [`#13-publication-grade-html-table-renderer-nejm--jama-standards`](#13-publication-grade-html-table-renderer-nejm--jama-standards) |
+| **Recipe 14** | IPTW & Weighted Balance | ATE/ATT/ATC/ATO propensity weighting, Kish $N_{\text{eff}}$, Huber-White SEs | [`#14-inverse-probability-of-treatment-weighting-iptw--weighted-balance`](#14-inverse-probability-of-treatment-weighting-iptw--weighted-balance) |
+| **Recipe 15** | Competing Risks (CIF & Fine-Gray) | Mutually exclusive failure events (Aalen-Johansen CIF, csHR, Fine-Gray SHR) | [`#15-competing-risks-survival-analysis-aalen-johansen-cif--fine-gray-model`](#15-competing-risks-survival-analysis-aalen-johansen-cif--fine-gray-model) |
+| **Recipe 16** | Diagnostic Reclassification | Incremental model value via Continuous & Categorical NRI and IDI | [`#16-diagnostic-risk-reclassification-continuous--categorical-nri-and-idi`](#16-diagnostic-risk-reclassification-continuous--categorical-nri-and-idi) |
+| **Recipe 17** | Time-Dependent ROC ($\text{AUROC}(t)$) | Longitudinal discrimination across follow-up horizons under right-censoring | [`#17-time-dependent-roc-cumulativedynamic-ipcw-estimator-auroct`](#17-time-dependent-roc-cumulativedynamic-ipcw-estimator-auroct) |
+| **Recipe 18** | TRIPOD+AI Bootstrap Validation | Prediction model optimism correction ($B \ge 200$) & uniform shrinkage $\hat{s}$ | [`#18-tripodai-optimism-corrected-bootstrap-internal-validation--uniform-shrinkage`](#18-tripodai-optimism-corrected-bootstrap-internal-validation--uniform-shrinkage) |
+| **Recipe 19** | Prediction Model Recalibration | Intercept-only and logistic model updating in external/validation cohorts | [`#19-prediction-model-recalibration-and-updating-logistic--intercept-only`](#19-prediction-model-recalibration-and-updating-logistic--intercept-only) |
+| **Recipe 20** | Sample Size (Riley & Obuchowski) | Prediction model 4-criteria sample size & prospective diagnostic AUROC power | [`#20-sample-size-determination-for-clinical-prediction-models-riley-et-al-2020--diagnostic-auroc-obuchowski-1998`](#20-sample-size-determination-for-clinical-prediction-models-riley-et-al-2020--diagnostic-auroc-obuchowski-1998) |
+
 ---
 
 ## 1. Table 1 Baseline Characteristics & Standardized Mean Difference (SMD)
