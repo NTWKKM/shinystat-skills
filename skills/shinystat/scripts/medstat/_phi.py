@@ -31,7 +31,9 @@ PHI_PATTERNS: list[tuple[re.Pattern, str]] = [
         "Personal Name Marker",
     ),
     (
-        re.compile(r"(?:นาย(?!ก)|นางสาว|นาง(?!พยาบาล)|นพ\.?|พญ\.?|ดร\.?)\s*[ก-๙]{2,}"),
+        re.compile(
+            r"(?:นาย(?!กรัฐมนตรี)|นางสาว|นาง(?!พยาบาล)|นพ\.?|พญ\.?|ดร\.?)\s*[ก-๙]{2,}"
+        ),
         "Personal Name Marker",
     ),
     (

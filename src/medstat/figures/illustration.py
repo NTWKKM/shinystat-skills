@@ -946,6 +946,9 @@ class Scene:
             self.poly(poly_s(s_, 0 * th), c_, None, alpha=a_)
         cum, bounds = 0.0, [poly_s(1.0, 0 * th)]
         for k, name in enumerate(order[:-1]):
+            if fr[name] == 0.0:
+                bounds.append(bounds[-1].copy())
+                continue
             cum += fr[name]
             target = A * (1 - cum)
             lo_s, hi_s = 0.0, 1.0

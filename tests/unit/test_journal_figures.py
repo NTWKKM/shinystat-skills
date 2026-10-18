@@ -105,6 +105,9 @@ def test_assert_zero_phi_text_raises_on_violations():
         assert_zero_phi_text(["นายสมชาย"])
 
     with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        assert_zero_phi_text(["นายก้อง"])
+
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
         assert_zero_phi_text(["ผู้ป่วยนางสาวสมศรี"])
 
 
@@ -583,14 +586,14 @@ def test_skill_reference_ssot_and_palette_parity():
 
 def test_forest_non_contiguous_index_and_cif_validation(tmp_path):
     from medstat.figures.forest import plot_forest
-    from medstat.figures.survival import plot_cif
+    from medstat.figures.survival import plot_cif, plot_kaplan_meier
 
     # 1. Forest plot with non-contiguous index
     forest_df = pd.DataFrame(
         {
             "term": ["Overall", "Age >= 65", "Male Sex", "Diabetes", "Hypertension"],
             "estimate": [1.45, 1.62, 1.15, 1.88, 1.30],
-            "ci_lower": [1.12, 1.20, -0.20, 1.35, 0.98],
+            "ci_lower": [1.12, 1.20, 0.88, 1.35, 0.98],
             "ci_upper": [1.88, 2.18, 1.50, 2.62, 1.72],
             "p_value": [0.004, 0.001, 0.312, 0.0002, 0.068],
             "events_text": ["120/500", "65/220", "55/260", "48/150", "72/310"],
@@ -606,6 +609,19 @@ def test_forest_non_contiguous_index_and_cif_validation(tmp_path):
         out_path=str(tmp_path / "forest_non_contig.png"),
     )
     assert res_fr.qa["passed"] is True
+
+    # Ratio scale strictly positive validation raises ValueError on non-positive CI
+    bad_forest = forest_df.copy()
+    bad_forest.loc[2, "ci_lower"] = -0.20
+    with pytest.raises(
+        ValueError, match="Ratio scale 'HR' requires strictly positive ci_lower"
+    ):
+        plot_forest(
+            bad_forest,
+            scale="HR",
+            journal="NEJM",
+            out_path=str(tmp_path / "bad_forest.png"),
+        )
 
     # 2. Inverted CIF lower CI check raises ValueError
     bad_cif_df = pd.DataFrame(
@@ -623,6 +639,39 @@ def test_forest_non_contiguous_index_and_cif_validation(tmp_path):
         ValueError, match="Primary CIF lower confidence bound exceeds point estimate"
     ):
         plot_cif(bad_cif_df, out_path=str(tmp_path / "bad_cif.png"))
+
+    # Inverted CIF upper CI check raises ValueError
+    bad_cif_upper = pd.DataFrame(
+        {
+            "time": [0, 10],
+            "cif_primary": [0.10, 0.20],
+            "cif_primary_ci_lower": [0.05, 0.10],
+            "cif_primary_ci_upper": [0.08, 0.15],  # ci_upper < cif
+            "cif_competing": [0.05, 0.10],
+            "cif_competing_ci_lower": [0.02, 0.05],
+            "cif_competing_ci_upper": [0.08, 0.15],
+        }
+    )
+    with pytest.raises(
+        ValueError, match="Primary CIF upper confidence bound is below point estimate"
+    ):
+        plot_cif(bad_cif_upper, out_path=str(tmp_path / "bad_cif_upper.png"))
+
+    # 3. Kaplan-Meier time_unit PHI gate check
+    km_phi_dict = {
+        "Group A": {
+            "timeline": np.array([0, 10, 20]),
+            "survival": np.array([1.0, 0.9, 0.8]),
+            "ci_lower": np.array([1.0, 0.85, 0.75]),
+            "ci_upper": np.array([1.0, 0.95, 0.85]),
+        }
+    }
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        plot_kaplan_meier(
+            km_phi_dict,
+            time_unit="Patient HN 98765432",
+            out_path=str(tmp_path / "km_phi.png"),
+        )
 
 
 def test_bland_altman_and_love_phi_gates_and_fallback(tmp_path):
@@ -716,20 +765,55 @@ def test_consort_rct_and_cohort_flow_validation(tmp_path):
         )
 
 
-def test_wound_topdown_and_artery_validation(tmp_path):
+def test_wound_topdown_and_artery_validation(monkeypatch):
     from medstat.figures.illustration import Scene
 
     sc = Scene(width="single_col", seed=42)
-    # Invalid stenosis
-    with pytest.raises(ValueError, match="stenosis must be a finite float in"):
-        sc.artery_cross_section(cx=50, cy=50, stenosis=1.2)
-    with pytest.raises(ValueError, match="stenosis must be a finite float in"):
-        sc.artery_cross_section(cx=50, cy=50, stenosis=-0.1)
+    try:
+        # Invalid stenosis
+        with pytest.raises(ValueError, match="stenosis must be a finite float in"):
+            sc.artery_cross_section(cx=50, cy=50, stenosis=1.2)
+        with pytest.raises(ValueError, match="stenosis must be a finite float in"):
+            sc.artery_cross_section(cx=50, cy=50, stenosis=-0.1)
+        with pytest.raises(ValueError, match="stenosis must be a finite float in"):
+            sc.artery_cross_section(cx=50, cy=50, stenosis=float("nan"))
 
-    # Invalid wound fractions
-    with pytest.raises(ValueError, match="Unknown tissue fraction keys"):
-        sc.wound_topdown(cx=50, cy=50, r=10, fractions={"unknown_tissue": 0.5})
-    with pytest.raises(ValueError, match="Invalid tissue fraction"):
-        sc.wound_topdown(cx=50, cy=50, r=10, fractions={"granulation": -0.5})
-    with pytest.raises(ValueError, match="Total fraction must be positive"):
-        sc.wound_topdown(cx=50, cy=50, r=10, fractions={"granulation": 0.0})
+        # Invalid wound fractions
+        with pytest.raises(ValueError, match="Unknown tissue fraction keys"):
+            sc.wound_topdown(cx=50, cy=50, r=10, fractions={"unknown_tissue": 0.5})
+        with pytest.raises(ValueError, match="Invalid tissue fraction"):
+            sc.wound_topdown(cx=50, cy=50, r=10, fractions={"granulation": -0.5})
+        with pytest.raises(ValueError, match="Total fraction must be positive"):
+            sc.wound_topdown(cx=50, cy=50, r=10, fractions={"granulation": 0.0})
+
+        # Boundary crossing check
+        with monkeypatch.context() as m:
+            m.setattr(
+                "medstat.figures.illustration.MplPath.contains_points",
+                lambda self, pts: np.array([False]),
+            )
+            with pytest.raises(ValueError, match="crosses outer boundary"):
+                sc.wound_topdown(
+                    cx=50, cy=50, r=10, fractions={"granulation": 0.5, "slough": 0.5}
+                )
+
+        # Tolerance mismatch check
+        with pytest.raises(ValueError, match="Wound tissue area mismatch"):
+            sc.wound_topdown(
+                cx=50,
+                cy=50,
+                r=10,
+                fractions={"granulation": 0.5, "slough": 0.5},
+                tol=0.0,
+            )
+
+        # Valid wound with zero-fraction tissues (epithelial and necrotic = 0.0)
+        ach = sc.wound_topdown(
+            cx=50, cy=50, r=10, fractions={"granulation": 0.7, "slough": 0.3}
+        )
+        assert abs(ach["epithelial"]) < 1e-4
+        assert abs(ach["necrotic"]) < 1e-4
+        assert abs(ach["granulation"] - 0.7) < 0.05
+        assert abs(ach["slough"] - 0.3) < 0.05
+    finally:
+        plt.close(sc.fig)

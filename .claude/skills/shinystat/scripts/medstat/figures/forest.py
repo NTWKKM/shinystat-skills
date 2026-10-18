@@ -65,6 +65,14 @@ def plot_forest(
     is_ratio = scale.upper() in {"OR", "HR", "RR", "SHR", "CSHR", "IRR"}
     ref_val = (1.0 if is_ratio else 0.0) if null_value is None else null_value
 
+    if is_ratio:
+        for col in ["estimate", "ci_lower", "ci_upper"]:
+            vals = pd.to_numeric(df[col], errors="coerce").dropna()
+            if (vals <= 0).any():
+                raise ValueError(
+                    f"Ratio scale '{scale}' requires strictly positive {col} values (> 0)"
+                )
+
     if journal is not None:
         spec = apply_journal_theme(journal, canvas, target)
         primary_color = spec["palette"][0]

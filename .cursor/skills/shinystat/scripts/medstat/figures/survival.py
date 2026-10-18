@@ -295,7 +295,7 @@ def plot_kaplan_meier(
     if not (has_risk_table and ax_risk is not None):
         fig.tight_layout()
 
-    assert_zero_phi_text([title] + groups)
+    assert_zero_phi_text([title, time_unit] + groups)
     qa = qa_layout(fig, check_outside=False)
 
     source_df = pd.DataFrame(curve_rows)
@@ -415,9 +415,17 @@ def plot_cif(
         raise ValueError(
             "Primary CIF lower confidence bound exceeds point estimate (ci_lower > cif)"
         )
+    if np.any(cif1_u < cif1 - 1e-6):
+        raise ValueError(
+            "Primary CIF upper confidence bound is below point estimate (ci_upper < cif)"
+        )
     if np.any(cif2_l > cif2 + 1e-6):
         raise ValueError(
             "Competing CIF lower confidence bound exceeds point estimate (ci_lower > cif)"
+        )
+    if np.any(cif2_u < cif2 - 1e-6):
+        raise ValueError(
+            "Competing CIF upper confidence bound is below point estimate (ci_upper < cif)"
         )
 
     # Primary CIF
