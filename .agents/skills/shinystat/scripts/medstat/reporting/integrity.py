@@ -81,38 +81,7 @@ def _flatten_numbers(val: Any) -> list[float]:
     return numbers
 
 
-# PHI detection patterns (HIPAA 18 Identifiers + Thai PDPA)
-PHI_PATTERNS = [
-    (
-        re.compile(
-            r"\b(?:HN|hn|H\.N\.)\s*[:#/-]?\s*\d{2,}(?:[-/]\d{2,})+\b|\b(?:HN|hn|H\.N\.)\s*[:#/-]?\s*\d{4,}\b"
-        ),
-        "Hospital Number (HN)",
-    ),
-    (
-        re.compile(r"\b\d{1}[-\s]?\d{4}[-\s]?\d{5}[-\s]?\d{2}[-\s]?\d{1}\b"),
-        "Thai Citizen ID (13 digits)",
-    ),
-    (
-        re.compile(
-            r"\b(?:0[689]\d{1}[-\s]?\d{3}[-\s]?\d{4}|0[2-57]\d{1}[-\s]?\d{3}[-\s]?\d{3})\b"
-        ),
-        "Phone Number",
-    ),
-    (
-        re.compile(
-            r"\b(?:Mr\.?|Mrs\.?|Ms\.?|Dr\.?|นาย|นาง|นางสาว|นพ\.?|พญ\.?|ดร\.?)\s+[A-Za-zก-๙]{2,}\b"
-        ),
-        "Personal Name Marker",
-    ),
-    (
-        re.compile(
-            r"\b(?:DOB|dob|Date of Birth|วันเกิด)\s*[:#-]?\s*\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}\b",
-            re.IGNORECASE,
-        ),
-        "Date of Birth",
-    ),
-]
+from medstat._phi import PHI_PATTERNS
 
 _MONTHS_PATTERN = r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
 _DATE_PREFIX_PATTERN = re.compile(
