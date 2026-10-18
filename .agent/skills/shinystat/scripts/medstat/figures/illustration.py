@@ -818,7 +818,7 @@ class Scene:
                 for q in self.inside_points(bed, 140, 0.02, min_dist=1.2)
                 if inc.contains_point(q)
             ]
-            self.dots(np.array(gr), 0.28, "#B8383C", 0.55)
+            self.dots(np.array(gr).reshape(-1, 2), 0.28, "#B8383C", 0.55)
             for q in self.inside_points(bed, 3, 0.2, min_dist=6.0):
                 self.fibroblast(q[0], q[1], 3.6, self.rng.uniform(-0.5, 0.5))
             for sgn in (-1, 1):
@@ -905,10 +905,20 @@ class Scene:
         tol: float = 0.01,
     ) -> dict[str, float]:
         """Top-down wound bed; ring areas match fractions (verified & logged)."""
-        fr = {k: float(fractions.get(k, 0)) for k in order}
-        tot = sum(fr.values())
-        assert tot > 0, "Total fraction must be positive"
-        fr = {k: v / tot for k, v in fr.items()}
+        unknown = set(fractions.keys()) - set(order)
+        if unknown:
+            raise ValueError(
+                f"Unknown tissue fraction keys: {sorted(unknown)}; allowed keys are {order}"
+            )
+        for k, v in fractions.items():
+            if not np.isfinite(v) or v < 0:
+                raise ValueError(
+                    f"Invalid tissue fraction for '{k}': {v} (must be finite and non-negative)"
+                )
+        tot = sum(fractions.values())
+        if tot <= 0 or not np.isfinite(tot):
+            raise ValueError(f"Total fraction must be positive and finite, got {tot}")
+        fr = {k: float(fractions.get(k, 0)) / tot for k in order}
         th = np.linspace(0, 2 * np.pi, 360, endpoint=False)
         base = self.harmonic(th, irregularity)
         eps = [self.harmonic(th, 0.06, (2, 3, 5)) - 1 for _ in order]
@@ -945,14 +955,21 @@ class Scene:
                     hi_s = mid
                 else:
                     lo_s = mid
-            bounds.append(poly_s((lo_s + hi_s) / 2, eps[k + 1]))
+            new_bound = poly_s((lo_s + hi_s) / 2, eps[k + 1])
+            outer_path = MplPath(bounds[k])
+            if not outer_path.contains_points(new_bound).all():
+                raise ValueError(
+                    f"Generated inner boundary for '{name}' crosses outer boundary"
+                )
+            bounds.append(new_bound)
         ach: dict[str, float] = {}
         for k, name in enumerate(order):
             self.poly(bounds[k], SEM[name], SEM["outline"], 0.4, hatch=hmap.get(name))
             inner = shoelace(bounds[k + 1]) if k + 1 < len(bounds) else 0.0
             ach[name] = (shoelace(bounds[k]) - inner) / A
         err = max(abs(ach[k] - fr[k]) for k in order)
-        assert err <= tol, f"Wound tissue area mismatch: {err:.3f}"
+        if err > tol:
+            raise ValueError(f"Wound tissue area mismatch: {err:.3f} > tol {tol}")
         self.line(np.r_[bounds[0], bounds[0][:1]], SEM["outline"], 0.9)
         self.note(
             "wound_topdown",
@@ -975,6 +992,10 @@ class Scene:
         thrombus: float = 0.0,
     ) -> dict[str, Any]:
         """Eccentric plaque. Area stenosis is exact by geometric construction."""
+        if not np.isfinite(stenosis) or not (0.0 <= stenosis < 1.0):
+            raise ValueError(
+                f"stenosis must be a finite float in [0.0, 1.0), got {stenosis}"
+            )
         Rl = R * 0.62
         rr = Rl * np.sqrt(1 - stenosis)
         d = Rl - rr
@@ -1206,10 +1227,8 @@ class Scene:
         )
         self.texts.append(label)
         self.font_sizes.append(size)
-        self.fig.canvas.draw()
-        bb = t.get_window_extent(self.fig.canvas.get_renderer()).transformed(
-            self.ax.transData.inverted()
-        )
+        renderer = self.fig.canvas.get_renderer()
+        bb = t.get_window_extent(renderer).transformed(self.ax.transData.inverted())
         w, h = bb.width + 2 * pad[0], bb.height + 2 * pad[1]
         box = FancyBboxPatch(
             (xy[0] - w / 2, xy[1] - h / 2),
@@ -1325,7 +1344,11 @@ class Scene:
         - _source.csv log
         Validates Zero-PHI and Layout collision QA.
         """
-        assert_zero_phi_text(self.texts + [caption_title, alt_text])
+        ax_texts = [t.get_text() for t in self.ax.texts]
+        fig_texts = [t.get_text() for t in self.fig.texts]
+        assert_zero_phi_text(
+            list(self.texts) + ax_texts + fig_texts + [caption_title, alt_text, notes]
+        )
         q = self.qa()
         if strict and not q["passed"]:
             raise RuntimeError(f"Layout QA failed for illustration: {q}")
@@ -1334,17 +1357,17 @@ class Scene:
         out_p.parent.mkdir(parents=True, exist_ok=True)
         base = out_p.with_suffix("")
 
-        png_path = str(base.with_suffix(".png"))
+        png_path = str(base.with_name(f"{base.name}.png"))
         self.fig.savefig(png_path, dpi=dpi)
 
         vp: str | None = None
         if export_vector:
-            vp = str(base.with_suffix(".pdf"))
+            vp = str(base.with_name(f"{base.name}.pdf"))
             self.fig.savefig(vp)
 
         sp: str | None = None
         if export_svg:
-            sp = str(base.with_suffix(".svg"))
+            sp = str(base.with_name(f"{base.name}.svg"))
             self.fig.savefig(sp)
 
         plt.close(self.fig)

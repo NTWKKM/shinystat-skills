@@ -65,7 +65,9 @@ def plot_love(
             if k in love_data:
                 var_col = love_data[k]
                 break
-        data_dict: dict[str, Any] = {"Variable": var_col if var_col is not None else []}
+        data_dict: dict[str, Any] = {}
+        if var_col is not None:
+            data_dict["Variable"] = var_col
         for k in [
             "smd_raw",
             "Pre_Match_SMD",
@@ -264,8 +266,9 @@ def plot_love(
 
     fig.tight_layout()
 
-    from medstat.figures.qa import qa_layout
+    from medstat.figures.qa import assert_zero_phi_text, qa_layout
 
+    assert_zero_phi_text([title, *vars_list])
     qa = qa_layout(fig, check_outside=False)
 
     source_df = df.iloc[::-1].reset_index(drop=True)

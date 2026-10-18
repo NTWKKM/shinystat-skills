@@ -27,9 +27,11 @@ PHI_PATTERNS: list[tuple[re.Pattern, str]] = [
         "Phone Number",
     ),
     (
-        re.compile(
-            r"\b(?:Mr\.?|Mrs\.?|Ms\.?|Dr\.?|นาย|นาง|นางสาว|นพ\.?|พญ\.?|ดร\.?)\s+[A-Za-zก-๙]{2,}\b"
-        ),
+        re.compile(r"\b(?:Mr\.?|Mrs\.?|Ms\.?|Dr\.?)\s+[A-Za-z]{2,}\b"),
+        "Personal Name Marker",
+    ),
+    (
+        re.compile(r"(?:นาย(?!ก)|นางสาว|นาง(?!พยาบาล)|นพ\.?|พญ\.?|ดร\.?)\s*[ก-๙]{2,}"),
         "Personal Name Marker",
     ),
     (

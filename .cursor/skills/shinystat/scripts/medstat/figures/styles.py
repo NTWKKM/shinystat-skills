@@ -138,23 +138,27 @@ def save_figure_bundle(
         facecolor=fig.get_facecolor(),
     )
 
+    vector_rc = {"pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none"}
+
     pdf_path = None
     if export_vector:
         pdf_path = str(stem.with_suffix(".pdf"))
-        fig.savefig(
-            pdf_path,
-            bbox_inches="tight",
-            facecolor=fig.get_facecolor(),
-        )
+        with matplotlib.rc_context(vector_rc):
+            fig.savefig(
+                pdf_path,
+                bbox_inches="tight",
+                facecolor=fig.get_facecolor(),
+            )
 
     svg_path = None
     if export_svg:
         svg_path = str(stem.with_suffix(".svg"))
-        fig.savefig(
-            svg_path,
-            bbox_inches="tight",
-            facecolor=fig.get_facecolor(),
-        )
+        with matplotlib.rc_context(vector_rc):
+            fig.savefig(
+                svg_path,
+                bbox_inches="tight",
+                facecolor=fig.get_facecolor(),
+            )
 
     if close:
         plt.close(fig)

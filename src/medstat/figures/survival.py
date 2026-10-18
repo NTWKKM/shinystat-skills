@@ -208,7 +208,6 @@ def plot_kaplan_meier(
         import matplotlib as mpl
 
         ax_risk.axis("off")
-        ax_km.set_xlabel("")  # Omit x label on main plot when table is present
 
         time_cols = [c for c in risk_table.columns if c != "Group"]
         n_grps = len(risk_table)
@@ -292,10 +291,8 @@ def plot_kaplan_meier(
                         m_val, y_pos, count_val, fontsize=9, ha="center", va="center"
                     )
 
-            # Set time axis on the lower risk table
-            ax_risk.set_xlabel(f"Time ({time_unit})", labelpad=4)
-    else:
-        ax_km.set_xlabel(f"Time ({time_unit})", labelpad=6)
+    ax_km.set_xlabel(f"Time ({time_unit})", labelpad=6)
+    if not (has_risk_table and ax_risk is not None):
         fig.tight_layout()
 
     assert_zero_phi_text([title] + groups)
@@ -315,14 +312,14 @@ def plot_kaplan_meier(
         risk_table.to_csv(os.path.splitext(png_path)[0] + "_risktable.csv", index=False)
 
     alt_text = f"Kaplan-Meier survival curves comparing {len(groups)} groups over time."
-    caption = f"Figure. {title}. Step lines indicate cumulative survival probabilities with shaded 95% Greenwood confidence intervals. '+' markers denote censored observations."
+    cens_desc = "Vertical ticks ('|')" if journal is not None else "'+' markers"
+    caption = f"Figure. {title}. Step lines indicate cumulative survival probabilities with shaded 95% Greenwood confidence intervals. {cens_desc} denote censored observations."
     if log_rank_p is not None:
-        p_str = (
-            format_p_value(log_rank_p, journal)
-            if journal is not None
-            else (f"{log_rank_p:.3f}" if log_rank_p >= 0.001 else "< 0.001")
-        )
-        caption += f" Log-rank test p-value: {p_str}."
+        if journal is not None:
+            caption += f" Log-rank test {format_p_value(log_rank_p, journal)}."
+        else:
+            p_str = f"{log_rank_p:.3f}" if log_rank_p >= 0.001 else "< 0.001"
+            caption += f" Log-rank test p-value: {p_str}."
 
     return FigureResult(
         png_path=png_path,
@@ -413,6 +410,15 @@ def plot_cif(
         cif1_l, cif1_u = 1.0 - cif1_u, 1.0 - cif1_l
     if len(cif2_l) > 0 and np.nanmean(cif2_l) > 0.5 and np.nanmean(cif2) < 0.5:
         cif2_l, cif2_u = 1.0 - cif2_u, 1.0 - cif2_l
+
+    if np.any(cif1_l > cif1 + 1e-6):
+        raise ValueError(
+            "Primary CIF lower confidence bound exceeds point estimate (ci_lower > cif)"
+        )
+    if np.any(cif2_l > cif2 + 1e-6):
+        raise ValueError(
+            "Competing CIF lower confidence bound exceeds point estimate (ci_lower > cif)"
+        )
 
     # Primary CIF
     ax.step(

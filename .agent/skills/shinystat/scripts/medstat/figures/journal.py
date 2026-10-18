@@ -175,11 +175,13 @@ def apply_journal_theme(
     elif target in ("web", "docx"):
         base_font = 10.0
 
+    mpl.rcdefaults()
     mpl.rcParams.update(
         {
             "font.family": "sans-serif",
             "font.sans-serif": font_chain,
             "axes.unicode_minus": False,
+            "axes.grid": False,
             "axes.edgecolor": "#222222",
             "axes.linewidth": spec["spine_lw"],
             "axes.facecolor": bg,
@@ -236,23 +238,27 @@ def format_p_value(p: float, journal: str = "NEJM", bare: bool = False) -> str:
             s_ = "<0\u00b70001"
         elif p < 0.001:
             s_ = f"{p:.4f}".replace(".", "\u00b7")
-        elif p < 0.01:
+        elif p < 0.01 or (0.045 <= p < 0.05):
             s_ = f"{p:.3f}".replace(".", "\u00b7")
+        elif p > 0.99:
+            s_ = ">0\u00b799"
         else:
             s_ = f"{p:.2f}".replace(".", "\u00b7")
         if bare:
             return s_
-        return f"p{s_}" if s_.startswith("<") else f"p={s_}"
+        if s_[0] in "<>":
+            return f"p{s_}"
+        return f"p={s_}"
 
     if j == "JAMA":
         if p < 0.001:
             s_ = "<.001"
-        elif p < 0.01:
+        elif p < 0.01 or (0.045 <= p < 0.05):
             s_ = format_num(p, 3, "JAMA", drop_leading_zero=True)
+        elif p > 0.99:
+            s_ = ">.99"
         else:
             s_ = format_num(p, 2, "JAMA", drop_leading_zero=True)
-        if p > 0.99:
-            s_ = ">.99"
         if bare:
             return s_
         if s_[0] in "<>":
@@ -263,7 +269,10 @@ def format_p_value(p: float, journal: str = "NEJM", bare: bool = False) -> str:
         if p < 0.001:
             s_ = "< 0.001"
             return s_ if bare else f"P {s_}"
-        if p < 0.01:
+        if p > 0.99:
+            s_ = "> 0.99"
+            return s_ if bare else f"P {s_}"
+        if p < 0.01 or (0.045 <= p < 0.05):
             s_ = f"{p:.3f}"
         else:
             s_ = f"{p:.2f}"
@@ -272,13 +281,17 @@ def format_p_value(p: float, journal: str = "NEJM", bare: bool = False) -> str:
     # NEJM and CLINICAL / DEFAULT
     if p < 0.001:
         s_ = "<0.001"
-    elif p < 0.01:
+    elif p > 0.99:
+        s_ = ">0.99"
+    elif p < 0.01 or (0.045 <= p < 0.05):
         s_ = f"{p:.3f}"
     else:
         s_ = f"{p:.2f}"
     if bare:
         return s_
-    return f"P{s_}" if s_.startswith("<") else f"P={s_}"
+    if s_[0] in "<>":
+        return f"P{s_}"
+    return f"P={s_}"
 
 
 def format_estimate(

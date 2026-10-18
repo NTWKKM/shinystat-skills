@@ -33,6 +33,10 @@ def plot_bland_altman(
     Renders Bland-Altman difference plot with mean bias, 95% Limits of Agreement,
     and Bland-Altman (1999) large-sample confidence interval bands.
     """
+    from medstat.figures.qa import assert_zero_phi_text, qa_layout
+
+    assert_zero_phi_text([title, units])
+
     if journal is not None:
         from medstat.figures.journal import apply_journal_theme, style_axis
 
@@ -163,8 +167,6 @@ def plot_bland_altman(
     ax.set_title(title, loc="left", pad=10)
 
     fig.tight_layout()
-
-    from medstat.figures.qa import qa_layout
 
     qa = qa_layout(fig, check_outside=False)
 

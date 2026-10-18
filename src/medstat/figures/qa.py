@@ -87,14 +87,17 @@ def cvd_check(
     if pairs is None:
         pairs = TISSUE_MUST_DIFFER
     if palette is None:
-        from medstat.figures.styles import CLINICAL_PALETTE
+        from medstat.figures.illustration import SEM
 
-        palette = CLINICAL_PALETTE
+        palette = SEM
 
     rows: list[dict[str, Any]] = []
     for a, b in pairs:
-        if a not in palette or b not in palette:
-            continue
+        missing = [k for k in (a, b) if k not in palette]
+        if missing:
+            raise ValueError(
+                f"CVD check pair ('{a}', '{b}') contains missing colors in palette: {missing}"
+            )
         c_a = _hex_to_rgb(palette[a])
         c_b = _hex_to_rgb(palette[b])
 
@@ -151,7 +154,10 @@ def qa_layout(
                 texts.extend(ax.yaxis.get_majorticklabels())
                 texts.extend(ax.yaxis.get_minorticklabels())
                 texts.append(ax.yaxis.label)
-            texts.append(ax.title)
+            for t_attr in ("title", "_left_title", "_right_title"):
+                t_obj = getattr(ax, t_attr, None)
+                if t_obj is not None:
+                    texts.append(t_obj)
         leg = ax.get_legend()
         if leg is not None:
             texts.extend(leg.get_texts())

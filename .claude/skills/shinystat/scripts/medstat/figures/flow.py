@@ -347,8 +347,12 @@ def consort_rct(
     Invariants: assessed = excluded + randomized; randomized = sum(allocated);
     allocated = received + not received = analysed + excluded from analysis.
     """
-    assert len(arms) == 2, "CONSORT layout requires exactly two trial arms"
-    assert version in ("2025", "2010"), "version must be '2025' or '2010'"
+    if len(arms) != 2:
+        raise ValueError("CONSORT layout requires exactly two trial arms")
+    if version not in ("2025", "2010"):
+        raise ValueError("version must be '2025' or '2010'")
+
+    arms = [dict(a) for a in arms]
 
     v25 = version == "2025"
     po = " for primary outcome" if v25 else ""
@@ -883,12 +887,26 @@ def cohort_flow_from_tracker(
 
     for stage in tracker.stages:
         if stage.n_excluded > 0:
-            if stage.reasons:
-                for r in stage.reasons:
-                    r_text = r.reason or stage.stage_name
-                    steps.append((r_text, r.count if r.count > 0 else stage.n_excluded))
+            itemized = (
+                [r for r in stage.reasons if r.count > 0] if stage.reasons else []
+            )
+            if itemized:
+                item_sum = sum(r.count for r in itemized)
+                if item_sum != stage.n_excluded:
+                    raise ValueError(
+                        f"Sum of itemized exclusion reasons ({item_sum}) does not match stage.n_excluded ({stage.n_excluded}) for stage '{stage.stage_name}'"
+                    )
+                for r in itemized:
+                    steps.append((r.reason or stage.stage_name, r.count))
             else:
                 steps.append((stage.stage_name, stage.n_excluded))
+
+    total_excluded = sum(cnt for _, cnt in steps)
+    final_expected = getattr(tracker, "final_n", source - total_excluded)
+    if source - total_excluded != final_expected:
+        raise ValueError(
+            f"Cohort flow reconciliation mismatch: source ({source}) - exclusions ({total_excluded}) = {source - total_excluded}, expected final_n ({final_expected})"
+        )
 
     return cohort_flow(
         source=source,

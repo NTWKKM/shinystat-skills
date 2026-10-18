@@ -48,6 +48,7 @@ def plot_forest(
         df = pd.DataFrame(data)
     else:
         df = data.copy()
+    df = df.reset_index(drop=True)
 
     # Map column aliases to 'term'
     if "term" not in df.columns:
@@ -158,7 +159,11 @@ def plot_forest(
 
         for idx, row in df.iterrows():
             y = n_terms - idx - 0.5
-            is_hdr = bool(row.get("is_header", False))
+            is_hdr = (
+                bool(row["is_header"])
+                if ("is_header" in row and pd.notna(row["is_header"]))
+                else False
+            )
             if idx % 2 == 1:
                 for a in (ax_left, ax_mid, ax_right):
                     a.axhspan(
@@ -202,7 +207,17 @@ def plot_forest(
                     zorder=4,
                 )
 
-                est_txt = f"{format_num(est, 2, journal)} ({format_num(lo, 2, journal)}-{format_num(hi, 2, journal)})"
+                j_upper = journal.upper() if journal else "NEJM"
+                if lo < 0:
+                    sep = " to "
+                elif j_upper in ("NEJM", "BMJ"):
+                    sep = " to "
+                elif j_upper == "JAMA":
+                    sep = "-"
+                else:
+                    sep = "–"
+
+                est_txt = f"{format_num(est, 2, journal)} ({format_num(lo, 2, journal)}{sep}{format_num(hi, 2, journal)})"
                 ax_right.text(
                     0.02, y, est_txt, fontsize=fs - 0.3, va="center", ha="left"
                 )
@@ -347,7 +362,7 @@ def plot_forest(
     )
 
     # X-axis configuration
-    if scale in ("OR", "HR", "RR", "SHR", "CSHR"):
+    if is_ratio:
         ax_plot.set_xscale("log")
         ax_plot.set_xlabel(f"{scale} (log scale)", labelpad=6)
     else:

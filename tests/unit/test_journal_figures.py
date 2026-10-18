@@ -54,6 +54,16 @@ def test_format_p_value_rules():
     # CLINICAL: P=0.03, P<0.001
     assert format_p_value(0.031, "CLINICAL") == "P=0.03"
 
+    # Boundaries 0.0496 (just below .05 -> 3 dp) and 0.996 (> .99)
+    assert format_p_value(0.0496, "NEJM") == "P=0.050"
+    assert format_p_value(0.996, "NEJM") == "P>0.99"
+    assert format_p_value(0.0496, "JAMA") == "P = .050"
+    assert format_p_value(0.996, "JAMA") == "P > .99"
+    assert format_p_value(0.0496, "BMJ") == "P = 0.050"
+    assert format_p_value(0.996, "BMJ") == "P > 0.99"
+    assert format_p_value(0.0496, "LANCET") == "p=0·050"
+    assert format_p_value(0.996, "LANCET") == "p>0·99"
+
 
 def test_format_estimate_rules():
     # HR 1.45 (1.12 to 1.88)
@@ -73,8 +83,10 @@ def test_format_estimate_rules():
 
 
 def test_assert_zero_phi_text_raises_on_violations():
-    # Valid clinical terms
+    # Valid clinical terms & Thai false-positive safety checks
     assert_zero_phi_text(["Survival Probability", "Cohort (n = 120)", "Stage 2"])
+    assert_zero_phi_text(["นายกรัฐมนตรีแถลงนโยบาย"])
+    assert_zero_phi_text(["นางพยาบาลประจำวอร์ด"])
 
     # Violations
     with pytest.raises(ValueError, match="Zero-PHI Violation"):
@@ -88,6 +100,12 @@ def test_assert_zero_phi_text_raises_on_violations():
 
     with pytest.raises(ValueError, match="Zero-PHI Violation"):
         assert_zero_phi_text(["นพ. สมชาย"])
+
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        assert_zero_phi_text(["นายสมชาย"])
+
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        assert_zero_phi_text(["ผู้ป่วยนางสาวสมศรี"])
 
 
 def test_qa_layout_gate():
@@ -106,6 +124,16 @@ def test_qa_layout_gate():
     qa_col = qa_layout(fig)
     assert qa_col["passed"] is False
     assert len(qa_col["text_overlaps"]) > 0
+    plt.close(fig)
+
+    # Collision with left-aligned title
+    fig, ax = plt.subplots(figsize=(4, 3))
+    ax.set_title("Left-Aligned Main Title", loc="left")
+    ax.text(0.0, 1.0, "Overlapping Label Over Title", transform=ax.transAxes)
+    fig.canvas.draw()
+    qa_title_col = qa_layout(fig)
+    assert qa_title_col["passed"] is False
+    assert len(qa_title_col["text_overlaps"]) > 0
     plt.close(fig)
 
 
@@ -551,3 +579,157 @@ def test_skill_reference_ssot_and_palette_parity():
     # 3. Cloud illustration.md SEM dict must match medstat.figures.illustration.SEM
     for sem_key, sem_hex in SEM.items():
         assert f'"{sem_key}": "{sem_hex}"' in il_cloud
+
+
+def test_forest_non_contiguous_index_and_cif_validation(tmp_path):
+    from medstat.figures.forest import plot_forest
+    from medstat.figures.survival import plot_cif
+
+    # 1. Forest plot with non-contiguous index
+    forest_df = pd.DataFrame(
+        {
+            "term": ["Overall", "Age >= 65", "Male Sex", "Diabetes", "Hypertension"],
+            "estimate": [1.45, 1.62, 1.15, 1.88, 1.30],
+            "ci_lower": [1.12, 1.20, -0.20, 1.35, 0.98],
+            "ci_upper": [1.88, 2.18, 1.50, 2.62, 1.72],
+            "p_value": [0.004, 0.001, 0.312, 0.0002, 0.068],
+            "events_text": ["120/500", "65/220", "55/260", "48/150", "72/310"],
+            "is_header": [False, np.nan, False, True, False],
+        }
+    )
+    forest_non_contig = forest_df.iloc[[0, 2, 4]].copy()
+    forest_non_contig.index = [10, 25, 42]
+    res_fr = plot_forest(
+        forest_non_contig,
+        scale="HR",
+        journal="NEJM",
+        out_path=str(tmp_path / "forest_non_contig.png"),
+    )
+    assert res_fr.qa["passed"] is True
+
+    # 2. Inverted CIF lower CI check raises ValueError
+    bad_cif_df = pd.DataFrame(
+        {
+            "time": [0, 10],
+            "cif_primary": [0.10, 0.20],
+            "cif_primary_ci_lower": [0.15, 0.25],  # ci_lower > cif
+            "cif_primary_ci_upper": [0.20, 0.30],
+            "cif_competing": [0.05, 0.10],
+            "cif_competing_ci_lower": [0.02, 0.05],
+            "cif_competing_ci_upper": [0.08, 0.15],
+        }
+    )
+    with pytest.raises(
+        ValueError, match="Primary CIF lower confidence bound exceeds point estimate"
+    ):
+        plot_cif(bad_cif_df, out_path=str(tmp_path / "bad_cif.png"))
+
+
+def test_bland_altman_and_love_phi_gates_and_fallback(tmp_path):
+    from medstat.figures.agreement import plot_bland_altman
+    from medstat.figures.balance import plot_love
+
+    ba_data = {
+        "means": [10.0, 12.0],
+        "diffs": [0.5, -0.2],
+        "mean_diff": 0.15,
+        "loa_upper": 1.2,
+        "loa_lower": -0.9,
+    }
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        plot_bland_altman(
+            ba_data,
+            title="Patient HN 98765432 Agreement",
+            out_path=str(tmp_path / "ba_phi.png"),
+        )
+
+    love_data = {"covariates": ["Age", "นายสมชาย"], "smd_raw": [0.2, 0.4]}
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        plot_love(love_data, title="Love Plot", out_path=str(tmp_path / "love_phi.png"))
+
+    # Test dict-input handling without Variable alias (Var_i fallback)
+    no_var_dict = {"smd_raw": [0.2, 0.4], "smd_matched": [0.05, 0.08]}
+    res_love = plot_love(
+        no_var_dict,
+        title="Clean Love Plot",
+        out_path=str(tmp_path / "love_novar.png"),
+    )
+    assert res_love.qa["passed"] is True
+    assert "Var_1" in res_love.source_df["Variable"].values
+
+
+def test_consort_rct_and_cohort_flow_validation(tmp_path):
+    from medstat.data.retention import SampleFlowTracker
+    from medstat.figures.flow import cohort_flow_from_tracker, consort_rct
+
+    # Exactly 2 arms required
+    with pytest.raises(
+        ValueError, match="CONSORT layout requires exactly two trial arms"
+    ):
+        consort_rct(
+            assessed=100,
+            excluded={"refused": 10},
+            arms=[{"name": "Arm 1", "allocated": 45, "received": 45}],
+            out_path=str(tmp_path / "consort_1arm.png"),
+        )
+
+    # Invalid version
+    with pytest.raises(ValueError, match="version must be '2025' or '2010'"):
+        consort_rct(
+            assessed=100,
+            excluded={"refused": 10},
+            arms=[
+                {"name": "Arm 1", "allocated": 45, "received": 45},
+                {"name": "Arm 2", "allocated": 45, "received": 45},
+            ],
+            version="2000",
+            out_path=str(tmp_path / "consort_badver.png"),
+        )
+
+    # Caller arm dictionary is copied and preserved
+    original_arm = {
+        "name": "Arm 1",
+        "allocated": 45,
+        "received": 45,
+        "analyzed": 45,
+    }
+    arms_input = [
+        original_arm,
+        {"name": "Arm 2", "allocated": 45, "received": 45, "analyzed": 45},
+    ]
+    consort_rct(
+        assessed=100,
+        excluded={"refused": 10},
+        arms=arms_input,
+        out_path=str(tmp_path / "consort_ok.png"),
+    )
+    assert "analysed" not in original_arm, "Caller input dict was mutated"
+
+    # Cohort tracker reconciliation check
+    tracker = SampleFlowTracker(initial_n=500, initial_name="All Enrolled")
+    tracker.record_stage("Stage 1", 450, 50, reason="Ineligible")
+    # Tamper stage to cause itemized reason mismatch
+    tracker.stages[0].reasons[0].count = 40  # 40 != 50
+    with pytest.raises(ValueError, match="Sum of itemized exclusion reasons"):
+        cohort_flow_from_tracker(
+            tracker, out_path=str(tmp_path / "tracker_mismatch.png")
+        )
+
+
+def test_wound_topdown_and_artery_validation(tmp_path):
+    from medstat.figures.illustration import Scene
+
+    sc = Scene(width="single_col", seed=42)
+    # Invalid stenosis
+    with pytest.raises(ValueError, match="stenosis must be a finite float in"):
+        sc.artery_cross_section(cx=50, cy=50, stenosis=1.2)
+    with pytest.raises(ValueError, match="stenosis must be a finite float in"):
+        sc.artery_cross_section(cx=50, cy=50, stenosis=-0.1)
+
+    # Invalid wound fractions
+    with pytest.raises(ValueError, match="Unknown tissue fraction keys"):
+        sc.wound_topdown(cx=50, cy=50, r=10, fractions={"unknown_tissue": 0.5})
+    with pytest.raises(ValueError, match="Invalid tissue fraction"):
+        sc.wound_topdown(cx=50, cy=50, r=10, fractions={"granulation": -0.5})
+    with pytest.raises(ValueError, match="Total fraction must be positive"):
+        sc.wound_topdown(cx=50, cy=50, r=10, fractions={"granulation": 0.0})
