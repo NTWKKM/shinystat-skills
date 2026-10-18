@@ -711,6 +711,33 @@ def test_forest_non_contiguous_index_and_cif_validation(tmp_path):
             out_path=str(tmp_path / "forest_phi_events.png"),
         )
 
+    # 7. Forest plot p_value text PHI gate check (both default and journal branches)
+    forest_phi_pval = forest_non_contig.copy()
+    forest_phi_pval["p_value"] = forest_phi_pval["p_value"].astype(object)
+    forest_phi_pval.loc[10, "p_value"] = "HN 87654321"
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        plot_forest(
+            forest_phi_pval,
+            journal="NEJM",
+            out_path=str(tmp_path / "forest_phi_pval.png"),
+        )
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        plot_forest(
+            forest_phi_pval,
+            journal=None,
+            out_path=str(tmp_path / "forest_phi_pval_def.png"),
+        )
+
+    # 8. Forest plot arbitrary df column text PHI gate check
+    forest_phi_col = forest_non_contig.copy()
+    forest_phi_col["patient_id"] = "HN 55443322"
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        plot_forest(
+            forest_phi_col,
+            journal="NEJM",
+            out_path=str(tmp_path / "forest_phi_col.png"),
+        )
+
 
 def test_bland_altman_and_love_phi_gates_and_fallback(tmp_path):
     from medstat.figures.agreement import plot_bland_altman

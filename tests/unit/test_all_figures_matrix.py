@@ -461,6 +461,7 @@ def test_causal_balance_and_agreement_matrix(
     monkeypatch.setattr(plt.Axes, "axhspan", spy_axhspan)
 
     for jnl in JOURNALS:
+        captured_spans.clear()
         out_ba = tmp_path / f"ba_{jnl}.png"
         res_ba = plot_bland_altman(
             ba_data,
@@ -469,11 +470,10 @@ def test_causal_balance_and_agreement_matrix(
             out_path=str(out_ba),
         )
         _assert_bundle_intact(res_ba, expect_vector=True)
-
-    # Assert that axhspan was called with all three fixture confidence intervals
-    assert (ci_mean[0], ci_mean[1]) in captured_spans
-    assert (ci_upper[0], ci_upper[1]) in captured_spans
-    assert (ci_lower[0], ci_lower[1]) in captured_spans
+        # Assert each journal independently draws all three confidence interval spans
+        assert (ci_mean[0], ci_mean[1]) in captured_spans
+        assert (ci_upper[0], ci_upper[1]) in captured_spans
+        assert (ci_lower[0], ci_lower[1]) in captured_spans
 
 
 # ==============================================================================

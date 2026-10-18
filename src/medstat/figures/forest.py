@@ -73,11 +73,23 @@ def plot_forest(
                     f"Ratio scale '{scale}' requires strictly positive {col} values (> 0)"
                 )
 
-    phi_texts = [title, favor_left_label, favor_right_label] + df["term"].astype(
-        str
-    ).tolist()
-    if "events_text" in df.columns:
-        phi_texts.extend(df["events_text"].dropna().astype(str).tolist())
+    phi_texts = [
+        title,
+        favor_left_label,
+        favor_right_label,
+        *df.columns.astype(str),
+        *df["term"].astype(str),
+    ]
+    for col in df.columns:
+        if col == "term":
+            continue
+        if (
+            df[col].dtype == object
+            or pd.api.types.is_string_dtype(df[col])
+            or isinstance(df[col].dtype, pd.CategoricalDtype)
+            or col in ("events_text", "p_value")
+        ):
+            phi_texts.extend(df[col].dropna().astype(str).tolist())
     assert_zero_phi_text(phi_texts)
 
     if journal is not None:
