@@ -111,6 +111,61 @@ def set_clinical_figure_style(
     return dim["width"], dim["height"], dim["dpi"]
 
 
+def save_figure_bundle(
+    fig: plt.Figure,
+    out_path: str | Path,
+    dpi: int = 300,
+    export_vector: bool = True,
+    export_svg: bool = False,
+    close: bool = True,
+) -> tuple[str, str | None, str | None]:
+    """
+    Saves figure bundle cleanly ensuring parent directories exist:
+    - Primary PNG at requested DPI (default 300)
+    - Optional vector PDF with TrueType fonts (fonttype=42)
+    - Optional SVG
+    Returns (png_path, vector_pdf_path, svg_path).
+    """
+    p = Path(out_path).resolve()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    stem = p.with_suffix("")
+    png_path = str(stem.with_suffix(".png"))
+
+    fig.savefig(
+        png_path,
+        dpi=dpi,
+        bbox_inches="tight",
+        facecolor=fig.get_facecolor(),
+    )
+
+    vector_rc = {"pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none"}
+
+    pdf_path = None
+    if export_vector:
+        pdf_path = str(stem.with_suffix(".pdf"))
+        with matplotlib.rc_context(vector_rc):
+            fig.savefig(
+                pdf_path,
+                bbox_inches="tight",
+                facecolor=fig.get_facecolor(),
+            )
+
+    svg_path = None
+    if export_svg:
+        svg_path = str(stem.with_suffix(".svg"))
+        with matplotlib.rc_context(vector_rc):
+            fig.savefig(
+                svg_path,
+                bbox_inches="tight",
+                facecolor=fig.get_facecolor(),
+            )
+
+    if close:
+        plt.close(fig)
+
+    return png_path, pdf_path, svg_path
+
+
 def save_publication_figure(
     fig: plt.Figure,
     out_path: str | Path,

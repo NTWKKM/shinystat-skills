@@ -17,6 +17,7 @@ from medstat.figures.html.calibration import (
 )
 from medstat.figures.html.dca import plot_dual_dca
 from medstat.figures.html.forest import plot_dual_forest
+from medstat.figures.html.journal import sync_plotly_to_journal
 from medstat.figures.html.roc import (
     plot_dual_reclassification,
     plot_dual_roc_curve,
@@ -26,6 +27,7 @@ from medstat.figures.html.survival import plot_dual_cif, plot_dual_kaplan_meier
 
 __all__ = [
     "DualFigureResult",
+    "sync_plotly_to_journal",
     "plot_dual_roc_curve",
     "plot_dual_time_dependent_roc",
     "plot_dual_reclassification",

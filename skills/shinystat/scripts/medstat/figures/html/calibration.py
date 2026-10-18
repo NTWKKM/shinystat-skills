@@ -21,6 +21,7 @@ from medstat.figures.calibration import (
     plot_recalibration_comparison as plot_recalibration_comparison_static,
 )
 from medstat.figures.html.base import DualFigureResult
+from medstat.figures.journal import JOURNAL_SPECS
 
 
 def plot_dual_calibration(
@@ -31,6 +32,9 @@ def plot_dual_calibration(
     title: str = "Model Calibration Curve",
     out_path: str | Path = "figures/calibration_plot.png",
     target: Literal["docx", "pptx", "web"] = "docx",
+    journal: str | None = None,
+    canvas: str = "manuscript",
+    export_vector: bool = True,
 ) -> DualFigureResult:
     """
     Renders both publication-grade 300 DPI Matplotlib figure and interactive Plotly calibration curve.
@@ -43,12 +47,26 @@ def plot_dual_calibration(
         title=title,
         out_path=out_path,
         target=target,
+        journal=journal,
+        canvas=canvas,
+        export_vector=export_vector,
     )
 
     p_means = np.asarray(calib_bins["pred_mean"], dtype=float)
     o_rates = np.asarray(calib_bins["obs_rate"], dtype=float)
     ci_low = np.asarray(calib_bins.get("ci_lower", o_rates), dtype=float)
     ci_high = np.asarray(calib_bins.get("ci_upper", o_rates), dtype=float)
+
+    if journal is not None:
+        j_key = journal.upper() if journal.upper() in JOURNAL_SPECS else "NEJM"
+        palette = JOURNAL_SPECS[j_key]["palette"]
+        primary_color = palette[0]
+        secondary_color = palette[1] if len(palette) > 1 else "#0284C7"
+        neutral_color = "#666666"
+    else:
+        primary_color = "#0F172A"
+        secondary_color = "#0284C7"
+        neutral_color = "#94A3B8"
 
     fig = go.Figure()
 
@@ -58,7 +76,7 @@ def plot_dual_calibration(
             x=[0, 1],
             y=[0, 1],
             mode="lines",
-            line=dict(dash="dash", color="#94A3B8", width=1.5),
+            line=dict(dash="dash", color=neutral_color, width=1.5),
             name="Ideal Calibration",
             hoverinfo="skip",
         )
@@ -73,7 +91,7 @@ def plot_dual_calibration(
                 x=p_smooth,
                 y=o_smooth,
                 mode="lines",
-                line=dict(color="#0284C7", width=2),
+                line=dict(color=secondary_color, width=2),
                 name="Smoothed Calibration",
                 hovertemplate="Pred: %{x:.3f}<br>Obs: %{y:.3f}<extra></extra>",
             )
@@ -89,13 +107,13 @@ def plot_dual_calibration(
             y=o_rates,
             customdata=np.column_stack([ci_low, ci_high]).tolist(),
             mode="markers",
-            marker=dict(size=9, color="#0F172A", symbol="circle"),
+            marker=dict(size=9, color=primary_color, symbol="circle"),
             error_y=dict(
                 type="data",
                 symmetric=False,
                 array=error_y_plus,
                 arrayminus=error_y_minus,
-                color="#0F172A",
+                color=primary_color,
                 width=1.5,
             ),
             name="Decile Bins (95% CI)",
@@ -147,6 +165,9 @@ def plot_dual_calibration(
 
     return DualFigureResult(
         png_path=res.png_path,
+        vector_path=res.vector_path,
+        svg_path=res.svg_path,
+        qa=res.qa,
         alt_text=res.alt_text,
         caption=res.caption,
         source_df=res.source_df,
@@ -164,6 +185,9 @@ def plot_dual_recalibration_comparison(
     out_path: str | Path | None = None,
     output_path: str | Path | None = None,
     target: Literal["docx", "pptx", "web"] = "docx",
+    journal: str | None = None,
+    canvas: str = "manuscript",
+    export_vector: bool = True,
 ) -> DualFigureResult:
     """
     Renders publication 300 DPI Matplotlib figure and interactive Plotly recalibration comparison.
@@ -177,7 +201,21 @@ def plot_dual_recalibration_comparison(
         out_path=out_path,
         output_path=output_path,
         target=target,
+        journal=journal,
+        canvas=canvas,
+        export_vector=export_vector,
     )
+
+    if journal is not None:
+        j_key = journal.upper() if journal.upper() in JOURNAL_SPECS else "NEJM"
+        palette = JOURNAL_SPECS[j_key]["palette"]
+        primary_color = palette[0]
+        secondary_color = "#64748B"
+        neutral_color = "#666666"
+    else:
+        primary_color = "#0F172A"
+        secondary_color = "#64748B"
+        neutral_color = "#94A3B8"
 
     fig = go.Figure()
 
@@ -187,7 +225,7 @@ def plot_dual_recalibration_comparison(
             x=[0, 1],
             y=[0, 1],
             mode="lines",
-            line=dict(dash="dash", color="#94A3B8", width=1.5),
+            line=dict(dash="dash", color=neutral_color, width=1.5),
             name="Ideal Calibration",
             hoverinfo="skip",
         )
@@ -200,9 +238,9 @@ def plot_dual_recalibration_comparison(
             x=df_src["Pre_Pred_Mean"],
             y=df_src["Pre_Obs_Rate"],
             mode="lines+markers",
-            line=dict(dash="dash", color="#64748B", width=2),
+            line=dict(dash="dash", color=secondary_color, width=2),
             marker=dict(
-                symbol="circle-open", size=9, color="#64748B", line=dict(width=2)
+                symbol="circle-open", size=9, color=secondary_color, line=dict(width=2)
             ),
             name="Pre-Recalibration",
             hovertemplate="Pred Mean: %{x:.3f}<br>Obs Rate: %{y:.3f}<extra>Pre-Recalibration</extra>",
@@ -216,8 +254,8 @@ def plot_dual_recalibration_comparison(
             x=df_src_r["Post_Pred_Mean"],
             y=df_src_r["Post_Obs_Rate"],
             mode="lines+markers",
-            line=dict(color="#0F172A", width=2.5),
-            marker=dict(symbol="square", size=9, color="#0F172A"),
+            line=dict(color=primary_color, width=2.5),
+            marker=dict(symbol="square", size=9, color=primary_color),
             name="Post-Recalibration",
             hovertemplate="Pred Mean: %{x:.3f}<br>Obs Rate: %{y:.3f}<extra>Post-Recalibration</extra>",
         )
@@ -253,6 +291,9 @@ def plot_dual_recalibration_comparison(
 
     return DualFigureResult(
         png_path=res.png_path,
+        vector_path=res.vector_path,
+        svg_path=res.svg_path,
+        qa=res.qa,
         alt_text=res.alt_text,
         caption=res.caption,
         source_df=res.source_df,
@@ -267,6 +308,9 @@ def plot_dual_bootstrap_optimism(
     out_path: str | Path | None = None,
     output_path: str | Path | None = None,
     target: Literal["docx", "pptx", "web"] = "docx",
+    journal: str | None = None,
+    canvas: str = "manuscript",
+    export_vector: bool = True,
 ) -> DualFigureResult:
     """
     Renders publication 300 DPI Matplotlib figure and interactive Plotly bootstrap optimism chart.
@@ -277,10 +321,22 @@ def plot_dual_bootstrap_optimism(
         out_path=out_path,
         output_path=output_path,
         target=target,
+        journal=journal,
+        canvas=canvas,
+        export_vector=export_vector,
     )
 
     df_src = res.source_df
     s_hat = float(validation_res.get("shrinkage_factor", 1.0))
+
+    if journal is not None:
+        j_key = journal.upper() if journal.upper() in JOURNAL_SPECS else "NEJM"
+        palette = JOURNAL_SPECS[j_key]["palette"]
+        primary_color = palette[0]
+        secondary_color = palette[1] if len(palette) > 1 else "#94A3B8"
+    else:
+        primary_color = "#0F172A"
+        secondary_color = "#94A3B8"
 
     fig = go.Figure()
 
@@ -290,7 +346,7 @@ def plot_dual_bootstrap_optimism(
             x=df_src["Apparent"],
             orientation="h",
             name="Apparent Performance",
-            marker=dict(color="#94A3B8"),
+            marker=dict(color=secondary_color),
             hovertemplate="%{y}<br>Apparent: %{x:.3f}<extra></extra>",
         )
     )
@@ -301,7 +357,7 @@ def plot_dual_bootstrap_optimism(
             x=df_src["Optimism_Corrected"],
             orientation="h",
             name="Optimism-Corrected",
-            marker=dict(color="#0F172A"),
+            marker=dict(color=primary_color),
             hovertemplate="%{y}<br>Optimism-Corrected: %{x:.3f}<extra></extra>",
         )
     )
@@ -337,6 +393,9 @@ def plot_dual_bootstrap_optimism(
 
     return DualFigureResult(
         png_path=res.png_path,
+        vector_path=res.vector_path,
+        svg_path=res.svg_path,
+        qa=res.qa,
         alt_text=res.alt_text,
         caption=res.caption,
         source_df=res.source_df,

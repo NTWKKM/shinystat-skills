@@ -58,3 +58,6 @@ htmlcov/
 # OS artifacts
 .DS_Store
 Thumbs.db
+
+# Generated example figures
+examples/out/

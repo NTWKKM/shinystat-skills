@@ -25,64 +25,100 @@ def plot_love(
     title: str = "Covariate Balance Before and After Propensity Score Matching",
     out_path: str | Path = "figures/love_plot.png",
     target: Literal["docx", "pptx", "web"] = "docx",
+    journal: str | None = None,
+    canvas: str = "manuscript",
+    export_vector: bool = True,
 ) -> FigureResult:
     """
     Renders Austin (2009) Love Plot displaying Standardized Mean Differences
     before versus after propensity score matching relative to the 0.10 balance threshold.
     """
-    w, h, dpi = set_clinical_figure_style(target)
+    if journal is not None:
+        from medstat.figures.journal import apply_journal_theme
+
+        spec = apply_journal_theme(journal, canvas, target)
+        palette = spec["palette"]
+        color_unadj = palette[1 % len(palette)]
+        color_match = palette[0]
+        color_weight = palette[2 % len(palette)]
+        w = 6.5
+        h = 5.0
+        dpi = 300
+    else:
+        w, h, dpi = set_clinical_figure_style(target)
+        color_unadj = CLINICAL_PALETTE["warning"]
+        color_match = CLINICAL_PALETTE["accent"]
+        color_weight = CLINICAL_PALETTE["primary"]
 
     if isinstance(love_data, dict):
-        var_col = (
-            love_data.get("covariates")
-            or love_data.get("Variable")
-            or love_data.get("Covariate")
-        )
-        data_dict: dict[str, Any] = {"Variable": var_col}
-        if (
-            "smd_raw" in love_data
-            or "Pre_Match_SMD" in love_data
-            or "Unadjusted_SMD" in love_data
-        ):
-            data_dict["Pre_Match_SMD"] = (
-                love_data.get("smd_raw")
-                if "smd_raw" in love_data
-                else love_data.get("Pre_Match_SMD", love_data.get("Unadjusted_SMD"))
-            )
-        if (
-            "smd_matched" in love_data
-            or "Post_Match_SMD" in love_data
-            or "Matched_SMD" in love_data
-        ):
-            data_dict["Post_Match_SMD"] = (
-                love_data.get("smd_matched")
-                if "smd_matched" in love_data
-                else love_data.get("Post_Match_SMD", love_data.get("Matched_SMD"))
-            )
-        if (
-            "smd_weighted" in love_data
-            or "Weighted_SMD" in love_data
-            or "Post_Weight_SMD" in love_data
-        ):
-            data_dict["Weighted_SMD"] = (
-                love_data.get("smd_weighted")
-                if "smd_weighted" in love_data
-                else love_data.get("Weighted_SMD", love_data.get("Post_Weight_SMD"))
-            )
+        var_col = None
+        for k in [
+            "covariates",
+            "Variable",
+            "Covariate",
+            "variable",
+            "covariate",
+            "term",
+            "feature",
+            "var",
+        ]:
+            if k in love_data:
+                var_col = love_data[k]
+                break
+        data_dict: dict[str, Any] = {}
+        if var_col is not None:
+            data_dict["Variable"] = var_col
+        for k in [
+            "smd_raw",
+            "Pre_Match_SMD",
+            "Unadjusted_SMD",
+            "smd_unadjusted",
+            "raw_smd",
+            "unadjusted",
+        ]:
+            if k in love_data:
+                data_dict["Pre_Match_SMD"] = love_data[k]
+                break
+        for k in [
+            "smd_matched",
+            "Post_Match_SMD",
+            "Matched_SMD",
+            "smd_post",
+            "matched",
+        ]:
+            if k in love_data:
+                data_dict["Post_Match_SMD"] = love_data[k]
+                break
+        for k in ["smd_weighted", "Weighted_SMD", "Post_Weight_SMD", "weighted"]:
+            if k in love_data:
+                data_dict["Weighted_SMD"] = love_data[k]
+                break
         df = pd.DataFrame(data_dict)
     else:
         df = love_data.copy()
 
     # Map variable column
     if "Variable" not in df.columns:
-        if "Covariate" in df.columns:
-            df["Variable"] = df["Covariate"]
-        else:
+        found_var = False
+        for c in ["Covariate", "covariate", "variable", "term", "feature", "var"]:
+            if c in df.columns:
+                df["Variable"] = df[c]
+                found_var = True
+                break
+        if not found_var:
             df["Variable"] = [f"Var_{i + 1}" for i in range(len(df))]
 
     # Map Pre-match SMD
     if "Pre_Match_SMD" not in df.columns:
-        for c in ["Unadjusted_SMD", "Pre_SMD", "smd_raw", "Unadjusted_Abs_SMD"]:
+        for c in [
+            "Unadjusted_SMD",
+            "Pre_SMD",
+            "smd_raw",
+            "Unadjusted_Abs_SMD",
+            "smd_unadjusted",
+            "raw_smd",
+            "unadjusted",
+        ]:
             if c in df.columns:
                 df["Pre_Match_SMD"] = df[c]
                 break
@@ -92,7 +128,13 @@ def plot_love(
     if "Post_Match_SMD" in df.columns:
         has_matched = True
     else:
-        for c in ["Matched_SMD", "Post_SMD", "smd_matched", "Matched_Abs_SMD"]:
+        for c in [
+            "Matched_SMD",
+            "Post_SMD",
+            "smd_matched",
+            "Matched_Abs_SMD",
+            "matched",
+        ]:
             if c in df.columns and df[c].notna().any():
                 df["Post_Match_SMD"] = df[c]
                 has_matched = True
@@ -103,11 +145,16 @@ def plot_love(
     if "Weighted_SMD" in df.columns:
         has_weighted = True
     else:
-        for c in ["Post_Weight_SMD", "Weighted_Abs_SMD", "smd_weighted"]:
+        for c in ["Post_Weight_SMD", "Weighted_Abs_SMD", "smd_weighted", "weighted"]:
             if c in df.columns and df[c].notna().any():
                 df["Weighted_SMD"] = df[c]
                 has_weighted = True
                 break
+
+    if "Pre_Match_SMD" not in df.columns and not has_matched and not has_weighted:
+        raise ValueError(
+            "Could not identify any SMD columns in love_data. Checked Pre_Match_SMD, Post_Match_SMD, Weighted_SMD and aliases."
+        )
 
     # Invert so top variable appears at top of plot
     df = df.iloc[::-1].reset_index(drop=True)
@@ -171,7 +218,7 @@ def plot_love(
     ax.scatter(
         pre_smd,
         y_pos,
-        color=CLINICAL_PALETTE["warning"],
+        color=color_unadj,
         s=55,
         zorder=4,
         label="Raw Cohort",
@@ -181,7 +228,7 @@ def plot_love(
         ax.scatter(
             post_smd,
             y_pos,
-            color=CLINICAL_PALETTE["accent"],
+            color=color_match,
             s=55,
             zorder=5,
             label="Matched Cohort",
@@ -191,7 +238,7 @@ def plot_love(
         ax.scatter(
             weight_smd,
             y_pos,
-            color=CLINICAL_PALETTE["primary"],
+            color=color_weight,
             s=55,
             zorder=6,
             label="IPTW Weighted Cohort",
@@ -219,8 +266,21 @@ def plot_love(
 
     fig.tight_layout()
 
+    from medstat.figures.qa import assert_zero_phi_text, qa_layout
+
+    assert_zero_phi_text([title, *vars_list])
+    qa = qa_layout(fig, check_outside=False)
+
     source_df = df.iloc[::-1].reset_index(drop=True)
-    png_path = save_publication_figure(fig, out_path, dpi=dpi)
+    if export_vector:
+        from medstat.figures.styles import save_figure_bundle
+
+        png_path, vec_path, _ = save_figure_bundle(
+            fig, out_path, dpi=dpi, export_vector=True
+        )
+    else:
+        png_path = save_publication_figure(fig, out_path, dpi=dpi)
+        vec_path = None
     csv_path = export_source_data(source_df, png_path)
 
     alt_text = "Love plot showing covariate standardized mean differences before and after adjustment."
@@ -232,4 +292,6 @@ def plot_love(
         caption=caption,
         source_df=source_df,
         csv_path=csv_path,
+        vector_path=vec_path,
+        qa=qa,
     )

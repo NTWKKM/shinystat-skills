@@ -86,19 +86,27 @@ System architecture and structural specifications for `medstat-core` and the `me
 ### `medstat.power`
 - **`sample_size.py`**: Sample size determinations for clinical trials and observational prediction models. Implements Riley et al. (BMJ 2020;368:m441) 4-criteria sample size for multivariable prediction model development (`calculate_riley_sample_size`: global shrinkage factor $\ge 0.90$, small margin in apparent vs adjusted $R^2$, precise intercept estimation, small MAPE) with automated numerical transformation of C-statistic or Nagelkerke $R^2$ to Cox-Snell $R^2_{CS}$ and max possible $R^2_{CS,\max}$. Diagnostic AUROC sample size (`calculate_diagnostic_auroc_sample_size`) per Obuchowski (1998, 2004) and Hanley & McNeil (1982) with case-to-control prevalence allocation.
 
+### `medstat._phi`
+- **`_phi.py`**: SSOT for HIPAA/PDPA Protected Health Information detection. Defines compiled regular expressions (`PHI_PATTERNS`) for Hospital Numbers (`HN: ...`), 13-digit Thai National Citizen IDs, telephone numbers, birth dates, and honorific-prefixed names (`Mr.`, `Mrs.`, `Ms.`, `Dr.`, `นาย`, `นาง`, `นางสาว`, `นพ.`, `พญ.`, `ดร.`), exposed via `assert_zero_phi_text`.
+
 ### `medstat.figures`
-- **`base.py`**: `FigureResult(png_path, alt_text, caption, source_df, csv_path)` contract and automated CSV source data export for auditability.
-- **`styles.py`**: Publication styling (300 DPI, Okabe-Ito/Tol colorblind palettes, Thai typography fallback chain: `Sarabun`, `Thonburi`, `Sukhumvit Set`, `Arial`).
-- **`forest.py`**: Forest plots for OR/HR/RR multivariable models and meta-analyses.
-- **`survival.py`**: Stratified Kaplan-Meier survival curves with aligned Numbers at Risk table and log-rank p-value; Cumulative Incidence Function (`plot_cif`) step curves under competing risks with Greenwood 95% CIs and Naive $1 - \text{KM}$ overestimation overlay.
+- **`base.py`**: Extended `FigureResult(png_path, alt_text, caption, source_df, csv_path, vector_path, svg_path, qa)` contract supporting automated multi-format bundle export (300/600 DPI PNG, TrueType vector PDF, SVG, CSV).
+- **`journal.py`**: Journal House Styles engine defining target specifications for **NEJM**, **JAMA**, **LANCET**, **BMJ**, and **CLINICAL/Nature** (`JOURNAL_SPECS`). Provides canvas geometry mapping (`TARGET_WIDTHS`: single, 1.5, double column), `apply_journal_theme` (setting TrueType `pdf.fonttype=42`), L-frame axis spines with outward ticks (`style_axis`), and clinical report formatters (`format_estimate`, `format_p_value`).
+- **`flow.py`**: Top-down programmatic layout cursor (`Flow`) for publication-grade study flowcharts with strict mathematical reconciliation (raises on count mismatches). Implements templates for CONSORT 2025 (reporting participants analyzed for primary outcome per Item 13c) and 2010 (`consort_rct`), PRISMA 2020 single- and dual-stream (`prisma_2020`), STARD 2015 diagnostic accuracy with $2 \times 2$ cells (`stard_flow`), STROBE observational cohort flow (`cohort_flow`, `cohort_flow_from_tracker` linked directly to `SampleFlowTracker`), and analytical methods pipelines (`methods_pipeline`). Exports 600 DPI PNG, vector PDF, SVG, and coordinate CSV.
+- **`illustration.py`**: Vector-first scientific schematic engine (`Scene`) powered by semantic art palette (`SEM`: erythrocyte red, platelet amber, neutrophil red, macrophage purple, fibroblast green, stratified tissue colors, wound beds). Generates biological cells, tissue cross-sections, wound healing phases, pressure injury staging (NPUAP/EPUAP Stages 1–4), vascular stenosis % calculations, and signaling pathways. Automatically enforces conceptual schematic disclaimer, 600 DPI, vector PDF, SVG, and coordinate CSV.
+- **`qa.py`**: Publication quality assurance gate module: text layout collision detection (`qa_layout`), color vision deficiency simulation (`cvd_check` for deuteranopia/protanopia/tritanopia), and Zero-PHI verification (`assert_zero_phi_text`).
+- **`matrix_testing`**: Matrix test suite (`tests/unit/test_all_figures_matrix.py`, `scripts/test_all_figures_matrix.py`) validating all 7 figure categories across 5 journal house styles, geometry profiles, 4 QA gates, and complete multi-format bundle outputs (PNG 300/600 DPI, TrueType PDF `fonttype=42`, SVG, audited `_source.csv`, Dual View Plotly HTML).
+- **`styles.py`**: Baseline publication styling (300 DPI, Okabe-Ito/Tol colorblind palettes, Thai typography fallback chain: `Sarabun`, `Thonburi`, `Sukhumvit Set`, `Arial`) and `save_figure_bundle`.
+- **`forest.py`**: Forest plots for OR/HR/RR multivariable models and meta-analyses with 3-zone layout and journal styling.
+- **`survival.py`**: Stratified Kaplan-Meier survival curves with aligned Numbers at Risk table and log-rank p-value, optional NEJM low-event zoomed inset (`nejm_inset_ylim`), and risk table CSV export; Cumulative Incidence Function (`plot_cif`) step curves under competing risks with Greenwood 95% CIs and Naive $1 - \text{KM}$ overestimation overlay.
 - **`roc.py`**: ROC curves with 45-degree chance diagonal, Youden optimal cutpoint, DeLong 95% CIs, paired overlay, Risk Reclassification scatter plots (`plot_reclassification`, `plot_dual_reclassification`), and Time-Dependent ROC trajectory and multi-horizon curve plots (`plot_time_dependent_roc`, `plot_dual_time_dependent_roc`).
 - **`calibration.py`**: Decile calibration plots with Wilson CIs, LOESS curves, Brier score, and ICI; Model Recalibration comparison plots (`plot_recalibration_comparison`, `plot_dual_recalibration_comparison`) with 45-degree ideal diagonal; Bootstrap Optimism grouped bar/dumbbell plots (`plot_bootstrap_optimism`, `plot_dual_bootstrap_optimism`).
-- **`dca.py`**: Decision Curve Analysis with Net Benefit comparison against Treat All and Treat None.
-- **`agreement.py`**: Bland-Altman agreement plots with mean bias, 95% Limits of Agreement, and 1999 large-sample CIs.
-- **`balance.py`**: Austin 2009 Love plots for PSM and IPTW covariate balance with 0.10 SMD threshold.
+- **`dca.py`**: Decision Curve Analysis with Net Benefit comparison against Treat All and Treat None with journal styling.
+- **`agreement.py`**: Bland-Altman agreement plots with mean bias, 95% Limits of Agreement, and 1999 large-sample CIs with journal styling.
+- **`balance.py`**: Austin 2009 Love plots for PSM and IPTW covariate balance with 0.10 SMD threshold and flexible column alias mapping.
 - **`retention.py`**: Pure-Matplotlib STROBE / CONSORT participant retention flowcharts.
 - **`diagnostics.py`**: Missingness heatmaps, Schoenfeld proportional hazards residuals, and MICE density overlays.
-- **`html/`**: Dedicated mirror submodule for Dual / Toggle View (`DualFigureResult`, `plot_dual_roc_curve`, `plot_dual_reclassification`, `plot_dual_time_dependent_roc`, `plot_dual_kaplan_meier`, `plot_dual_cif`, `plot_dual_calibration`, `plot_dual_recalibration_comparison`, `plot_dual_bootstrap_optimism`, `plot_dual_dca`, `plot_dual_bland_altman`, `plot_dual_forest`, `plot_dual_love`). Produces companion Plotly interactive visualizations (primary view) alongside "Publication 300 DPI Figure (Static)" Matplotlib images with instant toggle switching and direct journal download links.
+- **`html/`**: Dedicated mirror submodule for Dual / Toggle View (`DualFigureResult`, `plot_dual_roc_curve`, `plot_dual_reclassification`, `plot_dual_time_dependent_roc`, `plot_dual_kaplan_meier`, `plot_dual_cif`, `plot_dual_calibration`, `plot_dual_recalibration_comparison`, `plot_dual_bootstrap_optimism`, `plot_dual_dca`, `plot_dual_bland_altman`, `plot_dual_forest`, `plot_dual_love`) and pure-Python Plotly spec styling synchronization with journal styles (`sync_plotly_to_journal`). Produces companion Plotly interactive visualizations (primary view) alongside "Publication 300 DPI Figure (Static)" Matplotlib images with instant toggle switching and direct journal download links.
 
 ### `medstat.reporting`
 - **`tables.py`**: Journal-compliant polymorphic HTML table rendering (NEJM, JAMA, APA 7) with strict border rules, no vertical dividers, and support for Table 1, Regression, Diagnostic accuracy, Reclassification tables (`format_reclassification_table`), Time-Dependent ROC tables (`format_time_dependent_roc_table`), Bland-Altman, ICC, Covariate balance (unadjusted, matched, weighted), Competing Risks (`render_competing_risks_table`), Bootstrap internal validation (`format_internal_validation_table`), Recalibration (`format_recalibration_table`), and Riley sample size (`format_riley_sample_size_table`).
@@ -160,3 +168,18 @@ All subcommands and renderers emit structured contracts allowing deterministic c
 - **SSOT Integrity**: `src/medstat/` is the single source of truth for the biostatistical calculation engine.
 - **Automated Parity Gate**: `test_src_medstat_and_skills_bundled_medstat_byte_identical()` in `tests/unit/test_shinystat_skill.py` ensures 100% byte-for-byte fidelity across all 78 engine modules between `src/medstat/` and `skills/shinystat/scripts/medstat/`.
 - **Zero-Setup Mirrors**: Multi-agent workspace directories (`.agent/`, `.agents/`, `.claude/`, `.cursor/`) are maintained in lockstep via `./scripts/install-skills.sh --sync` to support instant out-of-the-box discovery without manual installation.
+
+---
+
+## 5. Multi-Agent Subagents & Autonomous Verification
+
+Specialized subagents are registered under `~/.gemini/config/agents/` and mirrored into workspace `.agent/agents/` and `.agents/agents/` to provide autonomous verification, peer review, and domain validation:
+
+- **`figure-tester`** (*Lead Figure QA & Verification Specialist*):
+  - **Purpose**: Autonomous, exhaustive validation of clinical figures across all 7 figure families (Survival/CIF, Forest, Diagnostic/Prediction, Causal/Agreement, Study Flow, Vector Scientific Schematics, Diagnostics/Missingness), 5 journal house styles (`NEJM`, `JAMA`, `LANCET`, `BMJ`, `CLINICAL`), canvas column geometries (`single_col`, `one_half_col`, `double_col`, `docx`, `pptx`), and export bundle formats (PNG 300/600 DPI, TrueType PDF `fonttype=42`, SVG, audited `_source.csv`, Dual View Plotly HTML).
+  - **QA Gates Enforced**:
+    1. `qa_layout`: Automated bounding-box collision detection and axis label clipping prevention.
+    2. `cvd_check`: Color Vision Deficiency contrast simulation across Deuteranopia, Protanopia, and Tritanopia.
+    3. `assert_zero_phi_text`: Strict regex audit screening for patient identifiers (HN, Thai National ID, phone, DOB, honorific names).
+    4. Mathematical flow reconciliation: Strict node count conservation for CONSORT 2025, PRISMA 2020 dual-stream, and STARD 2015.
+  - **Execution Mode**: Runs both pytest suites (`tests/unit/test_all_figures_matrix.py`) and standalone figure generator matrices (`scripts/test_all_figures_matrix.py`), auditing artifact existence, byte sizes, vector conformance, and generating structured markdown audit reports.

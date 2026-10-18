@@ -20,15 +20,25 @@ class FigureResult:
     caption: str
     source_df: pd.DataFrame
     csv_path: str
+    vector_path: str | None = None
+    svg_path: str | None = None
+    qa: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "png_path": self.png_path,
             "alt_text": self.alt_text,
             "caption": self.caption,
             "csv_path": self.csv_path,
             "rows": len(self.source_df),
         }
+        if self.vector_path:
+            d["vector_path"] = self.vector_path
+        if self.svg_path:
+            d["svg_path"] = self.svg_path
+        if self.qa is not None:
+            d["qa"] = self.qa
+        return d
 
 
 def export_source_data(df: pd.DataFrame, out_png_path: str | Path) -> str:

@@ -59,6 +59,14 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
 | **Model Recalibration** | `recalibrate_prediction_model` | Model updating methodology (Steyerberg 2019) for validating prediction rules on new populations: Intercept-only updating (calibration-in-the-large, fixing slope $\beta=1.0$) vs Logistic recalibration (estimating updated $\alpha$ and $\beta$). |
 | **Riley Sample Size Criteria** | `riley_sample_size` | Riley et al. (BMJ 2020; 368:m441) 4-criteria formulation for clinical prediction models: Criterion 1 (small margin in intercept), Criterion 2 (small MAPE $\le 0.05$), Criterion 3 (global shrinkage $\ge 0.90$), and Criterion 4 (small difference in apparent vs adjusted $R^2$). |
 | **Obuchowski AUROC Power** | `diagnostic_auroc_sample_size` | Non-parametric sample size formulation for diagnostic ROC curves per Obuchowski (1998, 2004) and Hanley & McNeil (1982), accounting for case prevalence $\phi$ and control-to-case allocation ratio $R$. |
+| **Reconciled** | `reconciled` | Mandatory mathematical integrity in flow diagrams: cohort participant counts must satisfy $N_{\text{parent}} - \sum N_{\text{excluded}} = \sum N_{\text{branches}}$ at every transition; any mismatch raises an immediate programmatic error. |
+| **Traceable** | `traceable` | Numerical transparency invariant: every plotted point, error bar, and narrative figure coordinate originates from an audited `_source.csv` or `results_dict` within numerical tolerance ($\pm 0.02$). |
+| **Schematic** | `schematic` | Conceptual medical and scientific illustrations (cells, tissues, wound stages, vessels, pathways) that depict biological principles without claiming to be diagnostic or patient-derived imaging. Mandates an automated conceptual disclaimer banner. |
+| **House Style** | `house_style` | Publication-specific artwork and typography engines (`NEJM`, `JAMA`, `LANCET`, `BMJ`, `CLINICAL`, `OKABE_ITO`) using `ggsci`-inspired palettes, calibrated `TARGET_WIDTHS` (`single_col` 3.5", `one_half_col` 5.0", `double_col` 7.0", `docx` 6.5", `pptx` 11.5", `web` 7.5"), TrueType vector fonts (`pdf.fonttype=42`), and L-frame spines. |
+| **Zero-PHI Compliance** | `zero_phi` | Complete prohibition of Protected Health Information (Hospital Numbers, Thai National IDs, telephone numbers, birth dates, and unmasked patient names) enforced via SSOT regex patterns (`medstat._phi.PHI_PATTERNS`) across tables, narratives, and figure annotations. |
+| **Figure Verification Subagent** | `figure-tester` | Specialized autonomous subagent enforcing publication standards across all figure families, journal house styles, bundle formats, and multi-format outputs. |
+| **Layout QA Collision Gate** | `qa_layout` | Automated post-render bounding-box collision detection evaluating overlapping text elements, legend encroachments, and margin clipping. |
+| **Color Vision Deficiency Gate** | `cvd_check` | Contrast ratio and color discernibility verification simulating Deuteranopia, Protanopia, and Tritanopia color blindness on figure palettes. |
 
 ---
 
@@ -98,11 +106,14 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
   - `ppv: float`, `npv: float`
   - `lr_pos: float`, `lr_neg: float`, `dor: float`
 - **`FigureResult`**:
-  - `png_path: str` (path to 300 DPI exported image)
+  - `png_path: str` (path to 300/600 DPI exported image)
   - `alt_text: str` (accessibility text for web/markdown)
   - `caption: str` (publication caption with clinical/statistical notes)
-  - `source_df: pd.DataFrame` (exact plotted data coordinates)
+  - `source_df: pd.DataFrame` (exact plotted data coordinates or flow/scene manifest)
   - `csv_path: str` (audit trail data export)
+  - `vector_path: str | None` (path to TrueType PDF `fonttype=42` vector export)
+  - `svg_path: str | None` (path to SVG vector export)
+  - `qa: dict[str, Any] | None` (layout collision, clipping, and font-size QA results)
 - **`ReportDocument` (Report IR)**:
   - `title: str`, `authors: list[str]`, `date: str`, `institution: str`
   - `blocks: list[Block]` (`HeadingBlock`, `ParagraphBlock`, `TableBlock`, `FigureBlock`, `CalloutBlock`)
