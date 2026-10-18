@@ -619,7 +619,7 @@ def plot_reclassification(
             ax.axhline(y=th, color="#CBD5E1", ls=":", lw=1.0)
 
     # Summary metrics annotation
-    if reclass_data:
+    if reclass_data is not None and isinstance(reclass_data, dict):
         nri_c = reclass_data.get("nri_continuous", {}).get("total", {})
         idi_d = reclass_data.get("idi", {})
         txt_lines = []

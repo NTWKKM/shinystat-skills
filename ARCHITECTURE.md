@@ -95,6 +95,7 @@ System architecture and structural specifications for `medstat-core` and the `me
 - **`flow.py`**: Top-down programmatic layout cursor (`Flow`) for publication-grade study flowcharts with strict mathematical reconciliation (raises on count mismatches). Implements templates for CONSORT 2025 (reporting participants analyzed for primary outcome per Item 13c) and 2010 (`consort_rct`), PRISMA 2020 single- and dual-stream (`prisma_2020`), STARD 2015 diagnostic accuracy with $2 \times 2$ cells (`stard_flow`), STROBE observational cohort flow (`cohort_flow`, `cohort_flow_from_tracker` linked directly to `SampleFlowTracker`), and analytical methods pipelines (`methods_pipeline`). Exports 600 DPI PNG, vector PDF, SVG, and coordinate CSV.
 - **`illustration.py`**: Vector-first scientific schematic engine (`Scene`) powered by semantic art palette (`SEM`: erythrocyte red, platelet amber, neutrophil red, macrophage purple, fibroblast green, stratified tissue colors, wound beds). Generates biological cells, tissue cross-sections, wound healing phases, pressure injury staging (NPUAP/EPUAP Stages 1–4), vascular stenosis % calculations, and signaling pathways. Automatically enforces conceptual schematic disclaimer, 600 DPI, vector PDF, SVG, and coordinate CSV.
 - **`qa.py`**: Publication quality assurance gate module: text layout collision detection (`qa_layout`), color vision deficiency simulation (`cvd_check` for deuteranopia/protanopia/tritanopia), and Zero-PHI verification (`assert_zero_phi_text`).
+- **`matrix_testing`**: Matrix test suite (`tests/unit/test_all_figures_matrix.py`, `scripts/test_all_figures_matrix.py`) validating all 7 figure categories across 5 journal house styles, geometry profiles, 4 QA gates, and complete multi-format bundle outputs (PNG 300/600 DPI, TrueType PDF `fonttype=42`, SVG, audited `_source.csv`, Dual View Plotly HTML).
 - **`styles.py`**: Baseline publication styling (300 DPI, Okabe-Ito/Tol colorblind palettes, Thai typography fallback chain: `Sarabun`, `Thonburi`, `Sukhumvit Set`, `Arial`) and `save_figure_bundle`.
 - **`forest.py`**: Forest plots for OR/HR/RR multivariable models and meta-analyses with 3-zone layout and journal styling.
 - **`survival.py`**: Stratified Kaplan-Meier survival curves with aligned Numbers at Risk table and log-rank p-value, optional NEJM low-event zoomed inset (`nejm_inset_ylim`), and risk table CSV export; Cumulative Incidence Function (`plot_cif`) step curves under competing risks with Greenwood 95% CIs and Naive $1 - \text{KM}$ overestimation overlay.
@@ -167,3 +168,18 @@ All subcommands and renderers emit structured contracts allowing deterministic c
 - **SSOT Integrity**: `src/medstat/` is the single source of truth for the biostatistical calculation engine.
 - **Automated Parity Gate**: `test_src_medstat_and_skills_bundled_medstat_byte_identical()` in `tests/unit/test_shinystat_skill.py` ensures 100% byte-for-byte fidelity across all 78 engine modules between `src/medstat/` and `skills/shinystat/scripts/medstat/`.
 - **Zero-Setup Mirrors**: Multi-agent workspace directories (`.agent/`, `.agents/`, `.claude/`, `.cursor/`) are maintained in lockstep via `./scripts/install-skills.sh --sync` to support instant out-of-the-box discovery without manual installation.
+
+---
+
+## 5. Multi-Agent Subagents & Autonomous Verification
+
+Specialized subagents are registered under `~/.gemini/config/agents/` and mirrored into workspace `.agent/agents/` and `.agents/agents/` to provide autonomous verification, peer review, and domain validation:
+
+- **`figure-tester`** (*Lead Figure QA & Verification Specialist*):
+  - **Purpose**: Autonomous, exhaustive validation of clinical figures across all 7 figure families (Survival/CIF, Forest, Diagnostic/Prediction, Causal/Agreement, Study Flow, Vector Scientific Schematics, Diagnostics/Missingness), 5 journal house styles (`NEJM`, `JAMA`, `LANCET`, `BMJ`, `CLINICAL`), canvas column geometries (`single_col`, `one_half_col`, `double_col`, `docx`, `pptx`), and export bundle formats (PNG 300/600 DPI, TrueType PDF `fonttype=42`, SVG, audited `_source.csv`, Dual View Plotly HTML).
+  - **QA Gates Enforced**:
+    1. `qa_layout`: Automated bounding-box collision detection and axis label clipping prevention.
+    2. `cvd_check`: Color Vision Deficiency contrast simulation across Deuteranopia, Protanopia, and Tritanopia.
+    3. `assert_zero_phi_text`: Strict regex audit screening for patient identifiers (HN, Thai National ID, phone, DOB, honorific names).
+    4. Mathematical flow reconciliation: Strict node count conservation for CONSORT 2025, PRISMA 2020 dual-stream, and STARD 2015.
+  - **Execution Mode**: Runs both pytest suites (`tests/unit/test_all_figures_matrix.py`) and standalone figure generator matrices (`scripts/test_all_figures_matrix.py`), auditing artifact existence, byte sizes, vector conformance, and generating structured markdown audit reports.

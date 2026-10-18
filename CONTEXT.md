@@ -64,6 +64,9 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
 | **Schematic** | `schematic` | Conceptual medical and scientific illustrations (cells, tissues, wound stages, vessels, pathways) that depict biological principles without claiming to be diagnostic or patient-derived imaging. Mandates an automated conceptual disclaimer banner. |
 | **House Style** | `house_style` | Publication-specific artwork and typography engines (`NEJM`, `JAMA`, `LANCET`, `BMJ`, `CLINICAL`, `OKABE_ITO`) using `ggsci`-inspired palettes, calibrated `TARGET_WIDTHS` (`single_col` 3.5", `one_half_col` 5.0", `double_col` 7.0", `docx` 6.5", `pptx` 11.5", `web` 7.5"), TrueType vector fonts (`pdf.fonttype=42`), and L-frame spines. |
 | **Zero-PHI Compliance** | `zero_phi` | Complete prohibition of Protected Health Information (Hospital Numbers, Thai National IDs, telephone numbers, birth dates, and unmasked patient names) enforced via SSOT regex patterns (`medstat._phi.PHI_PATTERNS`) across tables, narratives, and figure annotations. |
+| **Figure Verification Subagent** | `figure-tester` | Specialized autonomous subagent enforcing publication standards across all figure families, journal house styles, bundle formats, and multi-format outputs. |
+| **Layout QA Collision Gate** | `qa_layout` | Automated post-render bounding-box collision detection evaluating overlapping text elements, legend encroachments, and margin clipping. |
+| **Color Vision Deficiency Gate** | `cvd_check` | Contrast ratio and color discernibility verification simulating Deuteranopia, Protanopia, and Tritanopia color blindness on figure palettes. |
 
 ---
 

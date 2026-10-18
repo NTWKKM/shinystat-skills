@@ -515,7 +515,7 @@ def plot_bootstrap_optimism(
     ax.set_xlabel("Metric Value", labelpad=6)
     ax.set_title(title, loc="left", pad=12)
     max_val = max([v for v in apparent_vals + corrected_vals if np.isfinite(v)] + [1.0])
-    ax.set_xlim(0.0, max_val * 1.22)
+    ax.set_xlim(0.0, max_val * 1.35)
     ax.legend(
         loc="lower right",
         framealpha=0.9 if journal is None else None,
