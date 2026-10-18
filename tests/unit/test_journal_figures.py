@@ -673,6 +673,34 @@ def test_forest_non_contiguous_index_and_cif_validation(tmp_path):
             out_path=str(tmp_path / "km_phi.png"),
         )
 
+    # 4. CIF time_unit PHI gate check
+    valid_cif_df = pd.DataFrame(
+        {
+            "time": [0, 10],
+            "cif_primary": [0.10, 0.20],
+            "cif_primary_ci_lower": [0.05, 0.10],
+            "cif_primary_ci_upper": [0.15, 0.25],
+            "cif_competing": [0.05, 0.10],
+            "cif_competing_ci_lower": [0.02, 0.05],
+            "cif_competing_ci_upper": [0.08, 0.15],
+        }
+    )
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        plot_cif(
+            valid_cif_df,
+            time_unit="Patient HN 98765432",
+            out_path=str(tmp_path / "cif_phi.png"),
+        )
+
+    # 5. Forest plot favor labels PHI gate check
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        plot_forest(
+            forest_non_contig,
+            journal="NEJM",
+            favor_left_label="Favors นายสมชาย",
+            out_path=str(tmp_path / "forest_phi.png"),
+        )
+
 
 def test_bland_altman_and_love_phi_gates_and_fallback(tmp_path):
     from medstat.figures.agreement import plot_bland_altman

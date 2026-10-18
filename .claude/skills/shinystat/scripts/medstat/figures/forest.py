@@ -289,7 +289,10 @@ def plot_forest(
             linespacing=1.0,
         )
 
-        assert_zero_phi_text([title] + df["term"].astype(str).tolist())
+        assert_zero_phi_text(
+            [title, favor_left_label, favor_right_label]
+            + df["term"].astype(str).tolist()
+        )
         qa = qa_layout(fig, check_outside=False)
 
         if export_vector:

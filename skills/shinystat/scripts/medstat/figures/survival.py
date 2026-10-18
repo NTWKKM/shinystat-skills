@@ -476,7 +476,7 @@ def plot_cif(
 
     fig.tight_layout()
 
-    assert_zero_phi_text([title, primary_label, competing_label])
+    assert_zero_phi_text([title, time_unit, primary_label, competing_label])
     qa = qa_layout(fig, check_outside=False)
 
     source_df = df.copy()
