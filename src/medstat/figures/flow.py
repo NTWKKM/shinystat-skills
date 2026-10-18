@@ -367,6 +367,21 @@ def consort_rct(
     f.sc.note("template", f"CONSORT {version}", version=version)
 
     for a in arms:
+        if "analysed" not in a and "analyzed" in a:
+            a["analysed"] = a["analyzed"]
+        for field, default_lbl in [
+            ("not_received", "Did not receive intervention"),
+            ("lost", "Lost to follow-up"),
+            ("discontinued", "Discontinued intervention"),
+            ("excluded_analysis", "Excluded from analysis"),
+        ]:
+            val = a.get(field, {})
+            if isinstance(val, (int, float)):
+                val_int = int(val)
+                a[field] = {default_lbl: val_int} if val_int > 0 else {}
+            elif val is None:
+                a[field] = {}
+
         nr = sum(a.get("not_received", {}).values())
         lo = sum(a.get("lost", {}).values())
         di = sum(a.get("discontinued", {}).values())
