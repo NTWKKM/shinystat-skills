@@ -31,6 +31,9 @@ def plot_dual_calibration(
     title: str = "Model Calibration Curve",
     out_path: str | Path = "figures/calibration_plot.png",
     target: Literal["docx", "pptx", "web"] = "docx",
+    journal: str | None = None,
+    canvas: str = "manuscript",
+    export_vector: bool = True,
 ) -> DualFigureResult:
     """
     Renders both publication-grade 300 DPI Matplotlib figure and interactive Plotly calibration curve.
@@ -43,6 +46,9 @@ def plot_dual_calibration(
         title=title,
         out_path=out_path,
         target=target,
+        journal=journal,
+        canvas=canvas,
+        export_vector=export_vector,
     )
 
     p_means = np.asarray(calib_bins["pred_mean"], dtype=float)
@@ -164,6 +170,9 @@ def plot_dual_recalibration_comparison(
     out_path: str | Path | None = None,
     output_path: str | Path | None = None,
     target: Literal["docx", "pptx", "web"] = "docx",
+    journal: str | None = None,
+    canvas: str = "manuscript",
+    export_vector: bool = True,
 ) -> DualFigureResult:
     """
     Renders publication 300 DPI Matplotlib figure and interactive Plotly recalibration comparison.
@@ -177,6 +186,9 @@ def plot_dual_recalibration_comparison(
         out_path=out_path,
         output_path=output_path,
         target=target,
+        journal=journal,
+        canvas=canvas,
+        export_vector=export_vector,
     )
 
     fig = go.Figure()
@@ -267,6 +279,9 @@ def plot_dual_bootstrap_optimism(
     out_path: str | Path | None = None,
     output_path: str | Path | None = None,
     target: Literal["docx", "pptx", "web"] = "docx",
+    journal: str | None = None,
+    canvas: str = "manuscript",
+    export_vector: bool = True,
 ) -> DualFigureResult:
     """
     Renders publication 300 DPI Matplotlib figure and interactive Plotly bootstrap optimism chart.
@@ -277,6 +292,9 @@ def plot_dual_bootstrap_optimism(
         out_path=out_path,
         output_path=output_path,
         target=target,
+        journal=journal,
+        canvas=canvas,
+        export_vector=export_vector,
     )
 
     df_src = res.source_df

@@ -19,7 +19,24 @@ from medstat.figures.diagnostics import (
     plot_missingness_map,
     plot_schoenfeld_residuals,
 )
+from medstat.figures.flow import (
+    Flow,
+    cohort_flow,
+    cohort_flow_from_tracker,
+    consort_rct,
+    methods_pipeline,
+    n_,
+    prisma_2020,
+    stard_flow,
+)
 from medstat.figures.forest import plot_forest
+from medstat.figures.illustration import (
+    SEM,
+    Scene,
+    ellipse_pts,
+    shoelace,
+    shrink,
+)
 from medstat.figures.journal import (
     JOURNAL_SPECS,
     TARGET_WIDTHS,
@@ -69,6 +86,19 @@ __all__ = [
     "set_clinical_figure_style",
     "save_publication_figure",
     "save_figure_bundle",
+    "Flow",
+    "consort_rct",
+    "prisma_2020",
+    "cohort_flow",
+    "cohort_flow_from_tracker",
+    "stard_flow",
+    "methods_pipeline",
+    "n_",
+    "Scene",
+    "SEM",
+    "shoelace",
+    "ellipse_pts",
+    "shrink",
     "plot_forest",
     "plot_kaplan_meier",
     "plot_cif",

@@ -25,13 +25,27 @@ def plot_bland_altman(
     title: str = "Bland-Altman Limits of Agreement",
     out_path: str | Path = "figures/bland_altman.png",
     target: Literal["docx", "pptx", "web"] = "docx",
+    journal: str | None = None,
+    canvas: str = "manuscript",
+    export_vector: bool = True,
 ) -> FigureResult:
     """
     Renders Bland-Altman difference plot with mean bias, 95% Limits of Agreement,
     and Bland-Altman (1999) large-sample confidence interval bands.
     """
-    w, h, dpi = set_clinical_figure_style(target)
+    if journal is not None:
+        from medstat.figures.journal import apply_journal_theme, style_axis
+
+        apply_journal_theme(journal, canvas, target)
+        w = 6.5
+        h = 4.8
+        dpi = 300
+    else:
+        w, h, dpi = set_clinical_figure_style(target)
+
     fig, ax = plt.subplots(figsize=(w, h))
+    if journal is not None:
+        style_axis(ax, journal)
 
     means = np.asarray(ba_data["means"], dtype=float)
     diffs = np.asarray(ba_data["diffs"], dtype=float)
@@ -130,16 +144,40 @@ def plot_bland_altman(
     )
 
     unit_str = f" ({units})" if units else ""
-    ax.set_xlabel(f"Mean of Paired Measurements{unit_str}", labelpad=6)
-    ax.set_ylabel(f"Difference (Method 1 – Method 2){unit_str}", labelpad=6)
+    if journal is not None:
+        ax.set_xlabel(f"Mean{unit_str}", labelpad=6)
+        ax.set_ylabel(f"Difference{unit_str}", labelpad=6)
+        ax.legend(
+            loc="lower center",
+            bbox_to_anchor=(0.5, 1.02),
+            ncol=1,
+            frameon=False,
+            fontsize=7.8,
+        )
+    else:
+        ax.set_xlabel(f"Mean of Paired Measurements{unit_str}", labelpad=6)
+        ax.set_ylabel(f"Difference (Method 1 – Method 2){unit_str}", labelpad=6)
+        ax.legend(loc="upper left", bbox_to_anchor=(0.02, 0.98))
+
     ax.set_xlim(x_range[0], x_range[1] + x_pad * 2.0)
     ax.set_title(title, loc="left", pad=10)
-    ax.legend(loc="upper left", bbox_to_anchor=(0.02, 0.98))
 
     fig.tight_layout()
 
+    from medstat.figures.qa import qa_layout
+
+    qa = qa_layout(fig, check_outside=False)
+
     source_df = pd.DataFrame({"Mean": means, "Difference": diffs})
-    png_path = save_publication_figure(fig, out_path, dpi=dpi)
+    if export_vector:
+        from medstat.figures.styles import save_figure_bundle
+
+        png_path, vec_path, _ = save_figure_bundle(
+            fig, out_path, dpi=dpi, export_vector=True
+        )
+    else:
+        png_path = save_publication_figure(fig, out_path, dpi=dpi)
+        vec_path = None
     csv_path = export_source_data(source_df, png_path)
 
     alt_text = f"Bland-Altman plot indicating mean bias of {mean_diff:+.2f} with limits of agreement."
@@ -151,4 +189,6 @@ def plot_bland_altman(
         caption=caption,
         source_df=source_df,
         csv_path=csv_path,
+        vector_path=vec_path,
+        qa=qa,
     )

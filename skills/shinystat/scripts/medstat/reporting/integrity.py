@@ -16,6 +16,7 @@ from typing import Any, NamedTuple
 
 import pandas as pd
 
+from medstat._phi import PHI_PATTERNS
 from medstat.reporting.ir import (
     ReportDocument,
     TableBlock,
@@ -80,8 +81,6 @@ def _flatten_numbers(val: Any) -> list[float]:
                 numbers.append(float(v))
     return numbers
 
-
-from medstat._phi import PHI_PATTERNS
 
 _MONTHS_PATTERN = r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
 _DATE_PREFIX_PATTERN = re.compile(

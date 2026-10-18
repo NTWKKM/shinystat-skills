@@ -11,9 +11,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from medstat._phi import assert_zero_phi_text
 from medstat.figures.base import FigureResult, export_source_data
+from medstat.figures.journal import (
+    apply_journal_theme,
+    format_num,
+    format_p_value,
+    style_axis,
+)
+from medstat.figures.qa import qa_layout
 from medstat.figures.styles import (
     CLINICAL_PALETTE,
+    save_figure_bundle,
     save_publication_figure,
     set_clinical_figure_style,
 )
@@ -26,13 +35,31 @@ def plot_roc_curve(
     title: str = "Receiver Operating Characteristic (ROC) Curve",
     out_path: str | Path = "figures/roc_curve.png",
     target: Literal["docx", "pptx", "web"] = "docx",
+    journal: str | None = None,
+    canvas: str = "manuscript",
+    export_vector: bool = True,
 ) -> FigureResult:
     """
     Renders an empirical ROC curve with 45-degree chance diagonal, Youden's J optimal
     cutpoint marker, DeLong 95% CI label, and optional paired comparison overlay.
     """
-    w, h, dpi = set_clinical_figure_style(target)
-    fig, ax = plt.subplots(figsize=(w, h))
+    if journal is not None:
+        spec = apply_journal_theme(journal, canvas, target)
+        w, h = 4.5, 4.5
+        dpi = 300
+        primary_color = spec["palette"][0]
+        secondary_color = spec["palette"][1]
+        neutral_color = "#888888"
+    else:
+        w, h, dpi = set_clinical_figure_style(target)
+        primary_color = CLINICAL_PALETTE["secondary"]
+        secondary_color = CLINICAL_PALETTE["accent"]
+        neutral_color = CLINICAL_PALETTE["neutral"]
+
+    fig, ax = plt.subplots(figsize=(w, h), dpi=dpi)
+    if journal is not None:
+        style_axis(ax, journal)
+        ax.set_aspect("equal", adjustable="box")
 
     # Primary model curve
     fpr = np.asarray(roc_data["fpr"], dtype=float)
@@ -42,12 +69,19 @@ def plot_roc_curve(
     ci_u = roc_data.get("ci_upper")
 
     model_name = str(roc_data.get("name", "Model 1"))
-    if ci_l is not None and ci_u is not None:
-        label_1 = f"{model_name}: AUC = {auc:.3f} (95% CI, {ci_l:.3f}–{ci_u:.3f})"
+    if journal is not None:
+        auc_s = format_num(auc, 3, journal)
+        if ci_l is not None and ci_u is not None:
+            label_1 = f"{model_name}: AUROC {auc_s} ({format_num(ci_l, 3, journal)}–{format_num(ci_u, 3, journal)})"
+        else:
+            label_1 = f"{model_name}: AUROC {auc_s}"
     else:
-        label_1 = f"{model_name}: AUC = {auc:.3f}"
+        if ci_l is not None and ci_u is not None:
+            label_1 = f"{model_name}: AUC = {auc:.3f} (95% CI, {ci_l:.3f}–{ci_u:.3f})"
+        else:
+            label_1 = f"{model_name}: AUC = {auc:.3f}"
 
-    ax.plot(fpr, tpr, color=CLINICAL_PALETTE["secondary"], lw=2.2, label=label_1)
+    ax.plot(fpr, tpr, color=primary_color, lw=2.0, label=label_1)
 
     # Optimal cutoff annotation
     opt_pt = roc_data.get("optimal_point")
@@ -58,27 +92,50 @@ def plot_roc_curve(
         opt_sens = float(roc_data.get("sensitivity", opt_tpr))
         opt_spec = float(roc_data.get("specificity", 1.0 - opt_fpr))
 
+        marker_color = "#DC2626" if journal is None else primary_color
         ax.scatter(
             [opt_fpr],
             [opt_tpr],
-            color=CLINICAL_PALETTE["danger"],
+            color=marker_color,
             s=55,
             zorder=6,
             label=f"Optimal Cutpoint ({opt_cut:.2f})",
         )
-        ax.annotate(
-            f"Cutoff: {opt_cut:.2f}\nSens: {opt_sens:.1%}\nSpec: {opt_spec:.1%}",
-            xy=(opt_fpr, opt_tpr),
-            xytext=(opt_fpr + 0.12, opt_tpr - 0.18),
-            fontsize=9,
-            arrowprops=dict(arrowstyle="->", color=CLINICAL_PALETTE["primary"], lw=1.0),
-            bbox=dict(
-                boxstyle="round,pad=0.3",
-                facecolor="#FFFBEB",
-                edgecolor="#FDE68A",
-                alpha=0.95,
-            ),
-        )
+        if journal is not None:
+            annot_txt = (
+                f"Youden cutoff {format_num(opt_cut, 2, journal)}\n"
+                f"Sens {format_num(opt_sens, 2, journal)}, Spec {format_num(opt_spec, 2, journal)}"
+            )
+            ax.annotate(
+                annot_txt,
+                xy=(opt_fpr, opt_tpr),
+                xytext=(min(opt_fpr + 0.12, 0.60), max(opt_tpr - 0.18, 0.30)),
+                fontsize=7.8,
+                arrowprops=dict(arrowstyle="->", color=primary_color, lw=0.9),
+                bbox=dict(
+                    boxstyle="round,pad=0.3",
+                    facecolor="#FFFBEB",
+                    edgecolor="#FDE68A",
+                    alpha=0.95,
+                ),
+                zorder=7,
+            )
+        else:
+            ax.annotate(
+                f"Cutoff: {opt_cut:.2f}\nSens: {opt_sens:.1%}\nSpec: {opt_spec:.1%}",
+                xy=(opt_fpr, opt_tpr),
+                xytext=(opt_fpr + 0.12, opt_tpr - 0.18),
+                fontsize=9,
+                arrowprops=dict(
+                    arrowstyle="->", color=CLINICAL_PALETTE["primary"], lw=1.0
+                ),
+                bbox=dict(
+                    boxstyle="round,pad=0.3",
+                    facecolor="#FFFBEB",
+                    edgecolor="#FDE68A",
+                    alpha=0.95,
+                ),
+            )
 
     # Optional paired model
     if paired_roc_data is not None:
@@ -89,45 +146,68 @@ def plot_roc_curve(
         ci_u2 = paired_roc_data.get("ci_upper")
         name_2 = str(paired_roc_data.get("name", "Model 2"))
 
-        if ci_l2 is not None and ci_u2 is not None:
-            label_2 = f"{name_2}: AUC = {auc_2:.3f} (95% CI, {ci_l2:.3f}–{ci_u2:.3f})"
+        if journal is not None:
+            auc_2_s = format_num(auc_2, 3, journal)
+            if ci_l2 is not None and ci_u2 is not None:
+                label_2 = f"{name_2}: AUROC {auc_2_s} ({format_num(ci_l2, 3, journal)}–{format_num(ci_u2, 3, journal)})"
+            else:
+                label_2 = f"{name_2}: AUROC {auc_2_s}"
         else:
-            label_2 = f"{name_2}: AUC = {auc_2:.3f}"
+            if ci_l2 is not None and ci_u2 is not None:
+                label_2 = (
+                    f"{name_2}: AUC = {auc_2:.3f} (95% CI, {ci_l2:.3f}–{ci_u2:.3f})"
+                )
+            else:
+                label_2 = f"{name_2}: AUC = {auc_2:.3f}"
 
         ax.plot(
             fpr_2,
             tpr_2,
-            color=CLINICAL_PALETTE["accent"],
+            color=secondary_color,
             lw=2.0,
             ls="--",
             label=label_2,
         )
 
         if paired_p_value is not None:
-            diff_text = (
-                f"Paired DeLong ΔAUC P = {paired_p_value:.3f}"
-                if paired_p_value >= 0.001
-                else "Paired DeLong P < 0.001"
-            )
-            ax.text(
-                0.04,
-                0.20,
-                diff_text,
-                transform=ax.transAxes,
-                fontsize=9.5,
-                fontweight="600",
-                bbox=dict(
-                    boxstyle="round,pad=0.3", facecolor="#F8FAFC", edgecolor="#CBD5E1"
-                ),
-            )
+            if journal is not None:
+                diff_text = f"Paired DeLong {format_p_value(paired_p_value, journal)}"
+                ax.text(
+                    0.96,
+                    0.20,
+                    diff_text,
+                    transform=ax.transAxes,
+                    fontsize=8.0,
+                    fontweight="600",
+                    ha="right",
+                )
+            else:
+                diff_text = (
+                    f"Paired DeLong ΔAUC P = {paired_p_value:.3f}"
+                    if paired_p_value >= 0.001
+                    else "Paired DeLong P < 0.001"
+                )
+                ax.text(
+                    0.04,
+                    0.20,
+                    diff_text,
+                    transform=ax.transAxes,
+                    fontsize=9.5,
+                    fontweight="600",
+                    bbox=dict(
+                        boxstyle="round,pad=0.3",
+                        facecolor="#F8FAFC",
+                        edgecolor="#CBD5E1",
+                    ),
+                )
 
     # 45-degree reference diagonal
     ax.plot(
         [0, 1],
         [0, 1],
-        color=CLINICAL_PALETTE["neutral"],
-        ls=":",
-        lw=1.2,
+        color=neutral_color,
+        ls=":" if journal is None else "--",
+        lw=1.0 if journal is not None else 1.2,
         label="Chance (AUC = 0.500)",
     )
 
@@ -136,9 +216,18 @@ def plot_roc_curve(
     ax.set_xlabel("1 – Specificity (False Positive Rate)", labelpad=6)
     ax.set_ylabel("Sensitivity (True Positive Rate)", labelpad=6)
     ax.set_title(title, loc="left", pad=10)
-    ax.legend(loc="lower right")
+    if journal is not None:
+        ax.legend(loc="lower right", frameon=False, fontsize=7.8)
+    else:
+        ax.legend(loc="lower right")
 
     fig.tight_layout()
+
+    assert_zero_phi_text(
+        [title, model_name]
+        + ([str(paired_roc_data.get("name"))] if paired_roc_data else [])
+    )
+    qa = qa_layout(fig, check_outside=False)
 
     if paired_roc_data is not None:
         primary_name = model_name
@@ -169,7 +258,13 @@ def plot_roc_curve(
                 "Threshold": roc_data.get("thresholds", np.full_like(fpr, np.nan)),
             }
         )
-    png_path = save_publication_figure(fig, out_path, dpi=dpi)
+    if export_vector:
+        png_path, vec_path, _ = save_figure_bundle(
+            fig, out_path, dpi=dpi, export_vector=True
+        )
+    else:
+        png_path = save_publication_figure(fig, out_path, dpi=dpi)
+        vec_path = None
     csv_path = export_source_data(source_df, png_path)
 
     alt_text = f"ROC curve showing discrimination accuracy with AUC of {auc:.3f}."
@@ -181,6 +276,8 @@ def plot_roc_curve(
         caption=caption,
         source_df=source_df,
         csv_path=csv_path,
+        vector_path=vec_path,
+        qa=qa,
     )
 
 
@@ -190,6 +287,9 @@ def plot_time_dependent_roc(
     title: str | None = None,
     out_path: str | Path = "figures/td_roc.png",
     target: Literal["docx", "pptx", "web"] = "docx",
+    journal: str | None = None,
+    canvas: str = "manuscript",
+    export_vector: bool = True,
 ) -> FigureResult:
     """
     Renders publication-grade Time-Dependent ROC curves or AUROC(t) discrimination trajectories.
@@ -198,20 +298,28 @@ def plot_time_dependent_roc(
     - "curves": Multi-horizon cumulative/dynamic ROC curves at t_1, t_2, ... with 95% CIs in legend.
     - "auroc_trajectory": Longitudinal AUROC(t) trajectory curve across time with 95% CI bands.
     """
-    w, h, dpi = set_clinical_figure_style(target)
-    fig, ax = plt.subplots(figsize=(w, h))
+    if journal is not None:
+        spec = apply_journal_theme(journal, canvas, target)
+        w, h = 6.0, 4.8
+        dpi = 300
+        palette = spec["palette"]
+    else:
+        w, h, dpi = set_clinical_figure_style(target)
+        palette = [
+            CLINICAL_PALETTE["secondary"],
+            CLINICAL_PALETTE["primary"],
+            CLINICAL_PALETTE["accent"],
+            "#0D9488",  # Teal
+            "#8B5CF6",  # Purple
+            "#DC2626",  # Red
+        ]
+
+    fig, ax = plt.subplots(figsize=(w, h), dpi=dpi)
+    if journal is not None:
+        style_axis(ax, journal)
 
     horizons = td_roc_data.get("time_horizons", [])
     results_by_horizon = td_roc_data.get("results_by_horizon", {})
-
-    palette = [
-        CLINICAL_PALETTE["secondary"],
-        CLINICAL_PALETTE["primary"],
-        CLINICAL_PALETTE["accent"],
-        "#0D9488",  # Teal
-        "#8B5CF6",  # Purple
-        "#DC2626",  # Red
-    ]
 
     if mode == "curves":
         fig_title = title or "Time-Dependent Receiver Operating Characteristic Curves"
@@ -381,7 +489,17 @@ def plot_time_dependent_roc(
         caption = f"Figure. {fig_title}. Longitudinal cumulative/dynamic discrimination performance (AUROC(t)) plotted across follow-up time."
 
     fig.tight_layout()
-    png_path = save_publication_figure(fig, out_path, dpi=dpi)
+
+    assert_zero_phi_text([fig_title])
+    qa = qa_layout(fig, check_outside=False)
+
+    if export_vector:
+        png_path, vec_path, _ = save_figure_bundle(
+            fig, out_path, dpi=dpi, export_vector=True
+        )
+    else:
+        png_path = save_publication_figure(fig, out_path, dpi=dpi)
+        vec_path = None
     csv_path = export_source_data(source_df, png_path)
 
     return FigureResult(
@@ -390,6 +508,8 @@ def plot_time_dependent_roc(
         caption=caption,
         source_df=source_df,
         csv_path=csv_path,
+        vector_path=vec_path,
+        qa=qa,
     )
 
 
@@ -402,14 +522,32 @@ def plot_reclassification(
     title: str = "Risk Reclassification (Baseline vs Updated Model)",
     out_path: str | Path = "figures/reclassification.png",
     target: Literal["docx", "pptx", "web"] = "docx",
+    journal: str | None = None,
+    canvas: str = "manuscript",
+    export_vector: bool = True,
 ) -> FigureResult:
     """
     Renders publication-grade Risk Reclassification scatter and calibration-shift plot.
     Displays p_old on x-axis vs p_new on y-axis, colored by Y=1 Events vs Y=0 Non-events,
     with diagonal equality line and optional risk strata threshold grid lines.
     """
-    w, h, dpi = set_clinical_figure_style(target)
-    fig, ax = plt.subplots(figsize=(w, h))
+    if journal is not None:
+        spec = apply_journal_theme(journal, canvas, target)
+        w, h = 5.0, 5.0
+        dpi = 300
+        color_non_events = spec["palette"][1]
+        color_events = spec["palette"][0]
+        neutral_color = "#888888"
+    else:
+        w, h, dpi = set_clinical_figure_style(target)
+        color_non_events = CLINICAL_PALETTE["secondary"]
+        color_events = CLINICAL_PALETTE["danger"]
+        neutral_color = CLINICAL_PALETTE["neutral"]
+
+    fig, ax = plt.subplots(figsize=(w, h), dpi=dpi)
+    if journal is not None:
+        style_axis(ax, journal)
+        ax.set_aspect("equal", adjustable="box")
 
     # Extract arrays
     if p_old is None or p_new is None or y_true is None:
@@ -442,7 +580,7 @@ def plot_reclassification(
     ax.scatter(
         p_0[idx_0],
         p_1[idx_0],
-        color=CLINICAL_PALETTE["secondary"],
+        color=color_non_events,
         alpha=0.50,
         s=26,
         edgecolors="none",
@@ -454,11 +592,11 @@ def plot_reclassification(
     ax.scatter(
         p_0[idx_1],
         p_1[idx_1],
-        color=CLINICAL_PALETTE["danger"],
+        color=color_events,
         alpha=0.75,
         s=36,
         marker="^",
-        edgecolors="#991B1B",
+        edgecolors="#991B1B" if journal is None else "none",
         linewidths=0.5,
         label=f"Events (Y=1, n={int(np.sum(idx_1))})",
     )
@@ -467,7 +605,7 @@ def plot_reclassification(
     ax.plot(
         [0, 1],
         [0, 1],
-        color=CLINICAL_PALETTE["neutral"],
+        color=neutral_color,
         ls="--",
         lw=1.2,
         label="No Shift (p_new = p_old)",
@@ -487,22 +625,32 @@ def plot_reclassification(
         txt_lines = []
         if "estimate" in nri_c:
             p_nri = nri_c.get("p_value", 1.0)
-            p_nri_str = f"P={p_nri:.3f}" if p_nri >= 0.001 else "P<0.001"
-            txt_lines.append(f"Continuous NRI: {nri_c['estimate']:.3f} ({p_nri_str})")
+            if journal is not None:
+                p_nri_str = format_p_value(p_nri, journal)
+                est_nri_s = format_num(nri_c["estimate"], 3, journal)
+            else:
+                p_nri_str = f"P={p_nri:.3f}" if p_nri >= 0.001 else "P<0.001"
+                est_nri_s = f"{nri_c['estimate']:.3f}"
+            txt_lines.append(f"Continuous NRI: {est_nri_s} ({p_nri_str})")
         if "estimate" in idi_d:
             p_idi = idi_d.get("p_value", 1.0)
-            p_idi_str = f"P={p_idi:.3f}" if p_idi >= 0.001 else "P<0.001"
-            txt_lines.append(f"IDI: {idi_d['estimate']:.3f} ({p_idi_str})")
+            if journal is not None:
+                p_idi_str = format_p_value(p_idi, journal)
+                est_idi_s = format_num(idi_d["estimate"], 3, journal)
+            else:
+                p_idi_str = f"P={p_idi:.3f}" if p_idi >= 0.001 else "P<0.001"
+                est_idi_s = f"{idi_d['estimate']:.3f}"
+            txt_lines.append(f"IDI: {est_idi_s} ({p_idi_str})")
         if txt_lines:
             ax.text(
                 0.04,
                 0.86,
                 "\n".join(txt_lines),
                 transform=ax.transAxes,
-                fontsize=9.0,
+                fontsize=8.5 if journal is not None else 9.0,
                 fontweight="600",
                 bbox=dict(
-                    boxstyle="round,pad=0.4",
+                    boxstyle="round,pad=0.35",
                     facecolor="#F8FAFC",
                     edgecolor="#CBD5E1",
                     alpha=0.92,
@@ -514,9 +662,16 @@ def plot_reclassification(
     ax.set_xlabel("Baseline Model Predicted Risk (p_old)", labelpad=6)
     ax.set_ylabel("Updated Model Predicted Risk (p_new)", labelpad=6)
     ax.set_title(title, loc="left", pad=10)
-    ax.legend(loc="lower right", fontsize=8.5)
+    ax.legend(
+        loc="lower right",
+        fontsize=8.0 if journal is not None else 8.5,
+        frameon=journal is None,
+    )
 
     fig.tight_layout()
+
+    assert_zero_phi_text([title])
+    qa = qa_layout(fig, check_outside=False)
 
     source_df = pd.DataFrame(
         {
@@ -527,7 +682,13 @@ def plot_reclassification(
             "Risk_Difference": p_1 - p_0,
         }
     )
-    png_path = save_publication_figure(fig, out_path, dpi=dpi)
+    if export_vector:
+        png_path, vec_path, _ = save_figure_bundle(
+            fig, out_path, dpi=dpi, export_vector=True
+        )
+    else:
+        png_path = save_publication_figure(fig, out_path, dpi=dpi)
+        vec_path = None
     csv_path = export_source_data(source_df, png_path)
 
     alt_text = f"Risk reclassification scatter plot comparing p_old vs p_new across {len(p_0)} patients."
@@ -539,4 +700,6 @@ def plot_reclassification(
         caption=caption,
         source_df=source_df,
         csv_path=csv_path,
+        vector_path=vec_path,
+        qa=qa,
     )

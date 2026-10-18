@@ -12,13 +12,17 @@ import numpy as np
 import pandas as pd
 from sklearn.calibration import calibration_curve
 
+from medstat._phi import assert_zero_phi_text
 from medstat.diagnostic.calibration import (
     calculate_brier_score,
     calculate_calibration_slope_and_intercept,
 )
 from medstat.figures.base import FigureResult, export_source_data
+from medstat.figures.journal import apply_journal_theme, format_num, style_axis
+from medstat.figures.qa import qa_layout
 from medstat.figures.styles import (
     CLINICAL_PALETTE,
+    save_figure_bundle,
     save_publication_figure,
     set_clinical_figure_style,
 )
@@ -32,13 +36,30 @@ def plot_calibration(
     title: str = "Model Calibration Curve",
     out_path: str | Path = "figures/calibration_plot.png",
     target: Literal["docx", "pptx", "web"] = "docx",
+    journal: str | None = None,
+    canvas: str = "manuscript",
+    export_vector: bool = True,
 ) -> FigureResult:
     """
     Renders decile calibration points with 95% Wilson confidence intervals,
     45-degree ideal diagonal, smoothed calibration trajectory, and goodness metrics.
     """
-    w, h, dpi = set_clinical_figure_style(target)
-    fig, ax = plt.subplots(figsize=(w, h))
+    if journal is not None:
+        spec = apply_journal_theme(journal, canvas, target)
+        w, h = 4.5, 4.2
+        dpi = 300
+        primary_color = spec["palette"][0]
+        secondary_color = spec["palette"][1]
+        neutral_color = "#666666"
+    else:
+        w, h, dpi = set_clinical_figure_style(target)
+        primary_color = CLINICAL_PALETTE["primary"]
+        secondary_color = CLINICAL_PALETTE["secondary"]
+        neutral_color = CLINICAL_PALETTE["neutral"]
+
+    fig, ax = plt.subplots(figsize=(w, h), dpi=dpi)
+    if journal is not None:
+        style_axis(ax, journal)
 
     p_means = np.asarray(calib_bins["pred_mean"], dtype=float)
     o_rates = np.asarray(calib_bins["obs_rate"], dtype=float)
@@ -50,7 +71,7 @@ def plot_calibration(
     ax.plot(
         [0, 1],
         [0, 1],
-        color=CLINICAL_PALETTE["neutral"],
+        color=neutral_color,
         ls="--",
         lw=1.2,
         label="Perfect Calibration",
@@ -63,7 +84,7 @@ def plot_calibration(
         ax.plot(
             p_smooth,
             o_smooth,
-            color=CLINICAL_PALETTE["secondary"],
+            color=secondary_color,
             lw=2.0,
             label="Loess Recalibration",
         )
@@ -78,8 +99,8 @@ def plot_calibration(
         o_rates[valid],
         yerr=[yerr_lower, yerr_upper],
         fmt="o",
-        color=CLINICAL_PALETTE["primary"],
-        ecolor=CLINICAL_PALETTE["neutral"],
+        color=primary_color,
+        ecolor=neutral_color,
         elinewidth=1.2,
         capsize=3.0,
         markersize=6.0,
@@ -90,19 +111,27 @@ def plot_calibration(
     # Metrics callout box
     metrics_lines = []
     if brier_score is not None:
-        metrics_lines.append(f"Brier Score: {brier_score:.3f}")
+        val_brier = (
+            format_num(brier_score, 3, journal)
+            if journal is not None
+            else f"{brier_score:.3f}"
+        )
+        metrics_lines.append(f"Brier Score: {val_brier}")
     if ici is not None:
-        metrics_lines.append(f"ICI: {ici:.3f}")
+        val_ici = format_num(ici, 3, journal) if journal is not None else f"{ici:.3f}"
+        metrics_lines.append(f"ICI: {val_ici}")
 
     if metrics_lines:
+        y_pos = 0.68 if journal is not None else 0.82
+        f_size = 8.0 if journal is not None else 9.5
         ax.text(
-            0.05,
-            0.82,
+            0.04,
+            y_pos,
             "\n".join(metrics_lines),
             transform=ax.transAxes,
-            fontsize=9.5,
+            fontsize=f_size,
             bbox=dict(
-                boxstyle="round,pad=0.4",
+                boxstyle="round,pad=0.35",
                 facecolor="#F8FAFC",
                 edgecolor="#CBD5E1",
                 alpha=0.9,
@@ -114,9 +143,15 @@ def plot_calibration(
     ax.set_xlabel("Predicted Probability", labelpad=6)
     ax.set_ylabel("Observed Proportion", labelpad=6)
     ax.set_title(title, loc="left", pad=10)
-    ax.legend(loc="lower right")
+    if journal is not None:
+        ax.legend(loc="upper left", frameon=False, fontsize=8.0)
+    else:
+        ax.legend(loc="lower right")
 
     fig.tight_layout()
+
+    assert_zero_phi_text([title])
+    qa = qa_layout(fig, check_outside=False)
 
     source_df = pd.DataFrame(
         {
@@ -127,7 +162,13 @@ def plot_calibration(
             "Bin_Count": counts,
         }
     )
-    png_path = save_publication_figure(fig, out_path, dpi=dpi)
+    if export_vector:
+        png_path, vec_path, _ = save_figure_bundle(
+            fig, out_path, dpi=dpi, export_vector=True
+        )
+    else:
+        png_path = save_publication_figure(fig, out_path, dpi=dpi)
+        vec_path = None
     csv_path = export_source_data(source_df, png_path)
 
     alt_text = "Model calibration curve comparing predicted risk deciles against observed event rates."
@@ -139,6 +180,8 @@ def plot_calibration(
         caption=caption,
         source_df=source_df,
         csv_path=csv_path,
+        vector_path=vec_path,
+        qa=qa,
     )
 
 
@@ -151,6 +194,9 @@ def plot_recalibration_comparison(
     out_path: str | Path | None = None,
     output_path: str | Path | None = None,
     target: Literal["docx", "pptx", "web"] = "docx",
+    journal: str | None = None,
+    canvas: str = "manuscript",
+    export_vector: bool = True,
 ) -> FigureResult:
     """
     Plot calibration curves pre- vs post-recalibration.
@@ -164,8 +210,20 @@ def plot_recalibration_comparison(
     if save_target is None:
         save_target = "figures/recalibration_comparison.png"
 
-    w, h, dpi = set_clinical_figure_style(target)
-    fig, ax = plt.subplots(figsize=(w, h))
+    if journal is not None:
+        spec = apply_journal_theme(journal, canvas, target)
+        w, h = 4.5, 4.2
+        dpi = 300
+        primary_color = spec["palette"][0]
+        neutral_color = "#666666"
+    else:
+        w, h, dpi = set_clinical_figure_style(target)
+        primary_color = CLINICAL_PALETTE["primary"]
+        neutral_color = CLINICAL_PALETTE["neutral"]
+
+    fig, ax = plt.subplots(figsize=(w, h), dpi=dpi)
+    if journal is not None:
+        style_axis(ax, journal)
 
     if isinstance(y_true, dict):
         d = y_true
@@ -224,16 +282,24 @@ def plot_recalibration_comparison(
     ax.plot(
         [0, 1],
         [0, 1],
-        color=CLINICAL_PALETTE["neutral"],
+        color=neutral_color,
         ls="--",
         lw=1.2,
         label="Ideal Calibration",
     )
 
     # Pre-recalibration curve
+    if journal is not None:
+        p_c_int = format_num(pre_cal["calibration_intercept"], 2, journal)
+        p_c_slp = format_num(pre_cal["calibration_slope"], 2, journal)
+        p_c_br = format_num(pre_br, 3, journal)
+    else:
+        p_c_int = f"{pre_cal['calibration_intercept']:.2f}"
+        p_c_slp = f"{pre_cal['calibration_slope']:.2f}"
+        p_c_br = f"{pre_br:.3f}"
+
     lbl_pre = (
-        f"Pre-Recalibration (Intercept={pre_cal['calibration_intercept']:.2f}, "
-        f"Slope={pre_cal['calibration_slope']:.2f}, Brier={pre_br:.3f})"
+        f"Pre-Recalibration (Intercept={p_c_int}, Slope={p_c_slp}, Brier={p_c_br})"
     )
     ax.plot(
         prob_pred_o,
@@ -247,15 +313,23 @@ def plot_recalibration_comparison(
     )
 
     # Post-recalibration curve
+    if journal is not None:
+        po_c_int = format_num(post_cal["calibration_intercept"], 2, journal)
+        po_c_slp = format_num(post_cal["calibration_slope"], 2, journal)
+        po_c_br = format_num(post_br, 3, journal)
+    else:
+        po_c_int = f"{post_cal['calibration_intercept']:.2f}"
+        po_c_slp = f"{post_cal['calibration_slope']:.2f}"
+        po_c_br = f"{post_br:.3f}"
+
     lbl_post = (
-        f"Post-Recalibration (Intercept={post_cal['calibration_intercept']:.2f}, "
-        f"Slope={post_cal['calibration_slope']:.2f}, Brier={post_br:.3f})"
+        f"Post-Recalibration (Intercept={po_c_int}, Slope={po_c_slp}, Brier={po_c_br})"
     )
     ax.plot(
         prob_pred_r,
         prob_true_r,
         "s-",
-        color=CLINICAL_PALETTE["primary"],
+        color=primary_color,
         lw=2.2,
         markersize=7.0,
         label=lbl_post,
@@ -266,9 +340,16 @@ def plot_recalibration_comparison(
     ax.set_xlabel("Predicted Probability", labelpad=6)
     ax.set_ylabel("Observed Proportion", labelpad=6)
     ax.set_title(title, loc="left", pad=10)
-    ax.legend(loc="lower right", framealpha=0.9)
+    ax.legend(
+        loc="lower right",
+        framealpha=0.9 if journal is None else None,
+        frameon=journal is None,
+    )
 
     fig.tight_layout()
+
+    assert_zero_phi_text([title])
+    qa = qa_layout(fig, check_outside=False)
 
     # Create coordinate table
     max_len = max(len(prob_pred_o), len(prob_pred_r))
@@ -285,7 +366,13 @@ def plot_recalibration_comparison(
         )
     source_df = pd.DataFrame(df_rows)
 
-    png_path = save_publication_figure(fig, save_target, dpi=dpi)
+    if export_vector:
+        png_path, vec_path, _ = save_figure_bundle(
+            fig, save_target, dpi=dpi, export_vector=True
+        )
+    else:
+        png_path = save_publication_figure(fig, save_target, dpi=dpi)
+        vec_path = None
     csv_path = export_source_data(source_df, png_path)
 
     alt_text = "Model recalibration comparison comparing pre- and post-recalibration calibration curves against ideal diagonal."
@@ -300,6 +387,8 @@ def plot_recalibration_comparison(
         caption=caption,
         source_df=source_df,
         csv_path=csv_path,
+        vector_path=vec_path,
+        qa=qa,
     )
 
 
@@ -309,6 +398,9 @@ def plot_bootstrap_optimism(
     out_path: str | Path | None = None,
     output_path: str | Path | None = None,
     target: Literal["docx", "pptx", "web"] = "docx",
+    journal: str | None = None,
+    canvas: str = "manuscript",
+    export_vector: bool = True,
 ) -> FigureResult:
     """
     Renders grouped horizontal bar chart or dumbbell plot comparing
@@ -318,8 +410,20 @@ def plot_bootstrap_optimism(
     if save_target is None:
         save_target = "figures/bootstrap_optimism.png"
 
-    w, h, dpi = set_clinical_figure_style(target)
-    fig, ax = plt.subplots(figsize=(w, max(h, 4.2)))
+    if journal is not None:
+        spec = apply_journal_theme(journal, canvas, target)
+        w, h = 6.0, 4.5
+        dpi = 300
+        primary_color = spec["palette"][0]
+        secondary_color = spec["palette"][1]
+    else:
+        w, h, dpi = set_clinical_figure_style(target)
+        primary_color = CLINICAL_PALETTE["primary"]
+        secondary_color = "#94A3B8"
+
+    fig, ax = plt.subplots(figsize=(w, max(h, 4.2)), dpi=dpi)
+    if journal is not None:
+        style_axis(ax, journal)
 
     metrics = validation_res.get("metrics", {})
     s_hat = float(validation_res.get("shrinkage_factor", 1.0))
@@ -365,7 +469,7 @@ def plot_bootstrap_optimism(
         y_pos + bar_height / 2,
         apparent_vals,
         height=bar_height,
-        color="#94A3B8",
+        color=secondary_color,
         label="Apparent Performance",
         zorder=3,
     )
@@ -373,7 +477,7 @@ def plot_bootstrap_optimism(
         y_pos - bar_height / 2,
         corrected_vals,
         height=bar_height,
-        color=CLINICAL_PALETTE["primary"],
+        color=primary_color,
         label="Optimism-Corrected",
         zorder=3,
     )
@@ -381,19 +485,25 @@ def plot_bootstrap_optimism(
     # Annotate value labels on bars
     for idx, (app, corr) in enumerate(zip(apparent_vals, corrected_vals)):
         if np.isfinite(app):
+            app_str = (
+                format_num(app, 3, journal) if journal is not None else f"{app:.3f}"
+            )
             ax.text(
                 app + 0.02,
                 idx + bar_height / 2,
-                f"{app:.3f}",
+                app_str,
                 va="center",
                 fontsize=8.5,
                 color="#475569",
             )
         if np.isfinite(corr):
+            corr_str = (
+                format_num(corr, 3, journal) if journal is not None else f"{corr:.3f}"
+            )
             ax.text(
                 corr + 0.02,
                 idx - bar_height / 2,
-                f"{corr:.3f}",
+                corr_str,
                 va="center",
                 fontsize=8.5,
                 color="#0F172A",
@@ -406,13 +516,20 @@ def plot_bootstrap_optimism(
     ax.set_title(title, loc="left", pad=12)
     max_val = max([v for v in apparent_vals + corrected_vals if np.isfinite(v)] + [1.0])
     ax.set_xlim(0.0, max_val * 1.22)
-    ax.legend(loc="lower right", framealpha=0.9)
-    ax.grid(axis="x", ls=":", alpha=0.6, zorder=0)
+    ax.legend(
+        loc="lower right",
+        framealpha=0.9 if journal is None else None,
+        frameon=journal is None,
+    )
+    if journal is None:
+        ax.grid(axis="x", ls=":", alpha=0.6, zorder=0)
 
     # Callout annotation for shrinkage factor and replicates
-    callout_text = f"Uniform Shrinkage Factor (ŝ): {s_hat:.3f}"
+    s_hat_str = format_num(s_hat, 3, journal) if journal is not None else f"{s_hat:.3f}"
+    callout_text = f"Uniform Shrinkage Factor (ŝ): {s_hat_str}"
     if np.isfinite(epp):
-        callout_text += f"\nEvents Per Predictor (EPP): {epp:.1f}"
+        epp_str = format_num(epp, 1, journal) if journal is not None else f"{epp:.1f}"
+        callout_text += f"\nEvents Per Predictor (EPP): {epp_str}"
     callout_text += f"\nSuccessful Replicates: {n_succ}/{n_boot}"
 
     ax.text(
@@ -432,6 +549,9 @@ def plot_bootstrap_optimism(
 
     fig.tight_layout()
 
+    assert_zero_phi_text([title])
+    qa = qa_layout(fig, check_outside=False)
+
     source_df = pd.DataFrame(
         {
             "Metric": labels,
@@ -442,7 +562,13 @@ def plot_bootstrap_optimism(
         }
     )
 
-    png_path = save_publication_figure(fig, save_target, dpi=dpi)
+    if export_vector:
+        png_path, vec_path, _ = save_figure_bundle(
+            fig, save_target, dpi=dpi, export_vector=True
+        )
+    else:
+        png_path = save_publication_figure(fig, save_target, dpi=dpi)
+        vec_path = None
     csv_path = export_source_data(source_df, png_path)
 
     alt_text = "Grouped horizontal bar chart comparing apparent versus optimism-corrected prediction performance metrics."
@@ -457,4 +583,6 @@ def plot_bootstrap_optimism(
         caption=caption,
         source_df=source_df,
         csv_path=csv_path,
+        vector_path=vec_path,
+        qa=qa,
     )
