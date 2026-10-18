@@ -701,6 +701,16 @@ def test_forest_non_contiguous_index_and_cif_validation(tmp_path):
             out_path=str(tmp_path / "forest_phi.png"),
         )
 
+    # 6. Forest plot events_text PHI gate check
+    forest_phi_events = forest_non_contig.copy()
+    forest_phi_events.loc[10, "events_text"] = "HN 12345678"
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        plot_forest(
+            forest_phi_events,
+            journal="NEJM",
+            out_path=str(tmp_path / "forest_phi_events.png"),
+        )
+
 
 def test_bland_altman_and_love_phi_gates_and_fallback(tmp_path):
     from medstat.figures.agreement import plot_bland_altman
