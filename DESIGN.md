@@ -1194,3 +1194,43 @@ In PR #17 (`docs/elevate-skills-writing-for-agents`), both canonical skills (`sk
 - **Mirror Parity**: Synchronized across all 4 multi-agent mirrors (`.agent/`, `.agents/`, `.claude/`, `.cursor/`) and `packaging/cloud/shinystat-cloud/`.
 
 [MEMORY_LEARN: L2-penalized Cox regression requires explicit continuous-covariate metadata for standardization (never inferring continuity from nunique() > 2, which misclassifies numeric-coded categorical covariates); missing-indicator adjustment in high-missingness routing must be restricted to RCT baseline covariates or labeled sensitivity analyses; and agent completion gates must require manual verification of any remaining untraced numbers.]
+
+---
+
+## ADR 44: Integration of Journal-Grade Figures, Study Flow Diagrams, and Scientific Schematics
+
+### Context
+Clinical research manuscripts submitted to high-impact journals (*New England Journal of Medicine*, *JAMA*, *The Lancet*, *The BMJ*) require strict visual standards, vector TrueType fonts, L-frame axis styling, low-event inset zooms, and mathematically reconciled study flowcharts (CONSORT 2025/2010, PRISMA 2020 single/dual stream, STARD 2015, STROBE cohort flow). Pathophysiological mechanisms also require vector-first conceptual schematics (cellular biology, tissue cross-sections, ulcer craters, pressure injuries, vessel stenosis) without relying on heavy external software or cloud dependencies. The separate `journal-figures` skill contained valuable prototypes, but lacked integration with `shinystat`'s core computational pipeline, statistical models, and `SampleFlowTracker`.
+
+### Decision
+Merge and elevate all capabilities into `medstat-core` (`src/medstat/figures/`), `skills/shinystat/`, and `skills/shinystat-cloud/`:
+1. **Core Architecture & SSOT**:
+   - `medstat._phi`: SSOT regular expression engine for HIPAA/PDPA Zero-PHI compliance across reporting and figures (`assert_zero_phi_text`).
+   - `FigureResult`: Extended with `vector_path` (TrueType PDF), `svg_path`, and `qa` dictionary alongside existing `png_path`, `caption`, and `csv_path`.
+   - `medstat.figures.journal`: Five publication house styles (**NEJM**, **JAMA**, **LANCET**, **BMJ**, **CLINICAL/Nature**) with calibrated column widths (`single_col` 3.25", `one_and_half_col` 5.0", `double_col` 6.8"), TrueType vector fonts (`pdf.fonttype=42`), L-frame spines (`style_axis`), and clinical report formatters (`format_estimate`, `format_p_value`).
+   - `medstat.figures.qa`: Automated layout collision detection (`qa_layout`), CVD simulation (`cvd_check`), and Zero-PHI gate (`assert_zero_phi_text`).
+2. **Study Flow Diagrams (`medstat.figures.flow`)**:
+   - Top-down layout cursor `Flow` with strict mathematical reconciliation: raises `ValueError` if branch counts do not balance.
+   - Implemented templates: CONSORT 2025 (reporting participants analyzed for primary outcome per Item 13c) & 2010 (`consort_rct`), PRISMA 2020 single- and dual-stream (`prisma_2020`), STARD 2015 diagnostic accuracy with $2 \times 2$ cells (`stard_flow`), STROBE cohort retention (`cohort_flow`, `cohort_flow_from_tracker` linked directly to `SampleFlowTracker`), and methods pipeline (`methods_pipeline`).
+   - Automated export at 600 DPI PNG, vector PDF, SVG, and coordinate `_source.csv`.
+3. **Vector Scientific Schematics (`medstat.figures.illustration`)**:
+   - Vector canvas `Scene` powered by semantic art palette (`SEM`).
+   - Anatomical elements: biological cells (RBC, platelet, neutrophil, macrophage, fibroblast, bacteria, eukaryote), skin layers, wound healing phases, pressure injury staging (NPUAP/EPUAP Stages 1–4), vessel stenosis % calculation, and signaling cascades.
+   - Mandatory conceptual schematic disclaimer banner: `"Schematic illustration for conceptual mechanism only; not diagnostic patient imaging."`
+   - Automated export at 600 DPI PNG, vector PDF, SVG, and coordinate `_source.csv`.
+4. **Statistical Graph Upgrades & 100% Backward Compatibility**:
+   - Upgraded `plot_kaplan_meier` (aligned risk tables, NEJM zoomed inset with `//` axis break, fixed-inch label offset avoiding tick collisions), `plot_cif`, `plot_roc_curve`, `plot_calibration`, `plot_forest` (3-zone JAMA/BMJ layout), `plot_dca`, `plot_love`, and `plot_bland_altman`.
+   - Default `journal=None` preserves 100% backward compatibility with all existing snapshots and tests.
+5. **Skill Integration & Grilling Gate #5**:
+   - Added reference guides: `references/house-styles.md`, `references/flows.md`, `references/illustration.md` in both `shinystat` and `shinystat-cloud`.
+   - Updated Grilling Gate #5 to provide explicit choices: **NEJM (Recommended)**, JAMA, Lancet, BMJ, Clinical.
+   - Cloud recipes maintain pure Python execution with zero `medstat` imports.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Traceability & Integrity**: Every statistical plot exports coordinate CSVs (`_source.csv`, `_risktable.csv`); every flow diagram verifies count reconciliation.
+- **Publication Grade**: Generates 600 DPI PNG + TrueType vector PDF + SVG with zero glyph distortion or font rasterization.
+- **Backward Compatibility**: All 408 baseline unit tests pass with zero regressions.
+
+[MEMORY_LEARN: For clinical publications, flow diagrams must enforce mathematical count reconciliation (N_parent - sum(N_excluded) == sum(N_branches)) at runtime; Kaplan-Meier low-event insets require explicit yticks and fixed-inch offsets to avoid risk-table tick collision; and scientific illustrations must carry an automated schematic disclosure banner.]
+
