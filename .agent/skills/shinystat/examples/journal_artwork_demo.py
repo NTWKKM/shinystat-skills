@@ -11,11 +11,12 @@ Comprehensive demonstration of journal-grade clinical artwork in shinystat:
 """
 
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
 from medstat.data.retention import SampleFlowTracker
-from medstat.figures.flow import consort_rct, cohort_flow_from_tracker
+from medstat.figures.flow import cohort_flow_from_tracker, consort_rct
 from medstat.figures.forest import plot_forest
 from medstat.figures.illustration import Scene
 from medstat.figures.survival import plot_kaplan_meier
