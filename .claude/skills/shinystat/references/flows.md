@@ -1,33 +1,27 @@
-# Clinical Study Flow Diagrams Reference (CONSORT, PRISMA, STARD, STROBE)
+# Clinical Study Flow Diagrams Reference (`medstat.figures.flow`)
 
-This reference documents the automated, mathematically reconciled flow diagram generator (`medstat.figures.flow`).
+Reached from `SKILL.md` Pillar 5. Every flow template is **reconciled**: participant counts are checked before drawing, any mismatch raises `ValueError` naming the violated equation, and every count and equation check is exported to `_source.csv`.
 
 ---
 
 ## 1. Core Engineering Principles
 
 1. **Strict Mathematical Reconciliation**:
-   - Every split and branch is checked programmatically:
-     $$\sum N_{\text{branches}} = N_{\text{parent}} - N_{\text{excluded}}$$
-   - Any mathematical mismatch immediately raises an explicit error detailing the discrepancy (no silent number drift).
+   - Every split and branch is verified programmatically ($\sum N_{\text{branches}} = N_{\text{parent}} - N_{\text{excluded}}$).
+   - Any mismatch raises `ValueError("Unreconciled counts: ...")` immediately.
 2. **Top-Down Layout Cursor (`Flow`)**:
-   - Layout coordinates are automatically computed using vertical cursor advances and horizontal centering.
-   - Text boxes automatically wrap with proper indentation for bullet items.
-3. **Publication-Grade Export**:
-   - **600 DPI** PNG for high-definition micro-typography.
-   - Vector PDF with TrueType fonts (`pdf.fonttype = 42`).
-   - Clean vector SVG for responsive web embedding.
-   - Machine-auditable `_source.csv` recording bounding boxes, text, counts, and reconciliation status.
+   - Places boxes via `row(items)`, `gap(from_key, side=...)`, `link(a, b)`, and `mark(phase)` (rotated phase bars; boxes start right of `x = 6.8`, verified in `finish()`), wrapping text to fit and using `n_()` non-breaking spaces so `(n = 62)` never splits across lines.
+3. **Publication-Grade Bundle (`FigureResult`)**:
+   - **600 DPI** PNG (`png_path`), TrueType PDF (`vector_path`, `pdf.fonttype = 42`), SVG (`svg_path`), layout/Zero-PHI gate (`qa["passed"] == True`), and **traceable** `_source.csv` (`csv_path`).
 
 ---
 
 ## 2. CONSORT 2025 & 2010 Flow Diagrams (`consort_rct`)
 
-Complies with the latest CONSORT guidelines:
-- **CONSORT 2025**: Explicitly reports randomized participants analyzed for primary outcome (Item 13c) and itemizes attrition/discontinuation reasons.
-- **CONSORT 2010**: Classic 4-phase trial flow (Enrollment $\to$ Allocation $\to$ Follow-up $\to$ Analysis).
+- **CONSORT 2025** (`version="2025"`, default; BMJ 2025;389:e081123): labels follow-up and analysis boxes `"for primary outcome"` and lists intervention discontinuation before loss to follow-up (check box wording against the target journal's current CONSORT figure template before submission).
+- **CONSORT 2010** (`version="2010"`): classic 4-phase trial wording.
+- **Equations enforced**: `assessed = sum(excluded) + randomized`; `randomized = sum(allocated)`; per arm: `allocated = received + sum(not_received) = analysed + sum(excluded_analysis)`.
 
-### Python Usage
 ```python
 from medstat.figures.flow import consort_rct
 
@@ -43,25 +37,25 @@ res = consort_rct(
             "name": "Intervention (Drug A + SOC)",
             "allocated": 460,
             "received": 452,
-            "not_received": 8,
-            "lost": 12,
-            "discontinued": 18,
-            "analyzed": 430,
-            "excluded_analysis": 0,
+            "not_received": {"Declined infusion": 8},
+            "lost": {"Moved away": 12},
+            "discontinued": {"Adverse event": 18},
+            "analysed": 430,
+            "excluded_analysis": {"Missing primary endpoint": 30},
         },
         {
             "name": "Control (Placebo + SOC)",
             "allocated": 460,
             "received": 458,
-            "not_received": 2,
-            "lost": 15,
-            "discontinued": 20,
-            "analyzed": 425,
-            "excluded_analysis": 0,
+            "not_received": {"Withdrew consent": 2},
+            "lost": {"Unreachable": 15},
+            "discontinued": {"Protocol withdrawal": 20},
+            "analysed": 425,
+            "excluded_analysis": {"Missing primary endpoint": 35},
         },
     ],
     version="2025",  # or "2010"
-    journal="NEJM",  # "NEJM", "JAMA", "LANCET", "BMJ", or "CLINICAL"
+    journal="NEJM",
     out_path="figures/consort_flow.png",
 )
 ```
@@ -70,32 +64,32 @@ res = consort_rct(
 
 ## 3. PRISMA 2020 Systematic Review Flow (`prisma_2020`)
 
-Supports both single-stream (databases and registers only) and dual-stream (incorporating previous review search results or other methods like websites, citations, and trial registries).
+Supports single-stream (databases and registers) or dual-stream (`other={"sources": {...}, "not_retrieved": n, "fulltext_excluded": {...}}`).
+- **Equations enforced**: `identified - removed = screened`; `screened - screened_excluded = sought`; `sought - not_retrieved = assessed`; `assessed - sum(fulltext_excluded) = included_reports` (summed across both streams when `other` is provided); `included_studies <= included_reports`.
 
-### Python Usage (Dual-Stream)
 ```python
 from medstat.figures.flow import prisma_2020
 
 res = prisma_2020(
-    identification={
-        "databases": 4200,
-        "registers": 350,
-        "other": 85,
-    },
-    duplicates=1200,
-    automation_excluded=450,
-    records_screened=2985,  # (4200 + 350 + 85) - 1200 - 450 = 2985
-    records_excluded=2450,
-    reports_sought=535,
-    reports_not_retrieved=35,
-    reports_assessed=500,
-    reasons_excluded={
+    databases={"PubMed": 2800, "Embase": 1400},
+    registers={"ClinicalTrials.gov": 350},
+    removed_duplicates=1200,
+    removed_automation=450,
+    removed_other=0,
+    screened_excluded=2365,
+    not_retrieved=35,
+    fulltext_excluded={
         "Ineligible patient population": 220,
         "Wrong intervention / dosing": 140,
-        "No primary clinical endpoint reported": 65,
+        "No primary clinical endpoint": 65,
     },
-    studies_included=75,
-    previous_studies=25,    # Triggers dual-stream flow
+    included_studies=90,
+    included_reports=105,  # 75 from databases/registers + 30 from other methods
+    other={
+        "sources": {"Websites": 35, "Citation searching": 50},
+        "not_retrieved": 10,
+        "fulltext_excluded": {"Duplicate cohort": 45},
+    },
     journal="LANCET",
     out_path="figures/prisma_flow.png",
 )
@@ -105,27 +99,23 @@ res = prisma_2020(
 
 ## 4. STARD 2015 Diagnostic Accuracy Flow (`stard_flow`)
 
-Documents participant recruitment, index test execution, reference standard verification, indeterminate/inconclusive results, and final $2 \times 2$ diagnostic cross-tabulation.
+- **Equations enforced**: `enrolled = eligible - sum(excluded) = index_pos + index_neg + index_inconclusive`; `index_pos = tp + fp + ref_not_done_pos`; `index_neg = fn + tn + ref_not_done_neg`.
 
-### Python Usage
 ```python
 from medstat.figures.flow import stard_flow
 
 res = stard_flow(
-    enrolled=600,
-    excluded={"Did not meet clinical suspicion criteria": 45, "Consent withdrawn": 15},
-    index_name="Novel Point-of-Care Biomarker",
-    index_positive=210,
-    index_negative=310,
+    eligible=600,
+    excluded={"Did not meet suspicion criteria": 45, "Consent withdrawn": 15},
+    index_pos=210,
+    index_neg=310,
     index_inconclusive=20,
-    ref_name="Composite Gold Standard (Biopsy / PCR)",
-    cells={
-        "TP": 185,
-        "FP": 25,
-        "FN": 15,
-        "TN": 295,
-        "ref_missing": 20,
-    },
+    tp=185,
+    fp=25,
+    fn=15,
+    tn=295,
+    ref_not_done_pos=0,
+    ref_not_done_neg=0,
     journal="JAMA",
     out_path="figures/stard_flow.png",
 )
@@ -133,11 +123,11 @@ res = stard_flow(
 
 ---
 
-## 5. STROBE Observational Cohort Flow (`cohort_flow` & `SampleFlowTracker`)
+## 5. STROBE Observational Cohort Flow (`cohort_flow` & `cohort_flow_from_tracker`)
 
-Visualizes sequential inclusion/exclusion stages in clinical cohorts and links seamlessly with `medstat.data.retention.SampleFlowTracker`.
+Links directly to `SampleFlowTracker` (`medstat.data.retention`) or takes explicit `(reason, n_excluded)` steps.
+- **Equations enforced**: `source - sum(steps) = analysed`; `sum(groups.values()) = analysed`.
 
-### Direct Integration with `SampleFlowTracker`
 ```python
 from medstat.data.retention import SampleFlowTracker
 from medstat.figures.flow import cohort_flow_from_tracker
@@ -157,21 +147,30 @@ res = cohort_flow_from_tracker(
 
 ---
 
-## 6. Methods & ML Pipeline Architecture (`methods_pipeline`)
+## 6. Methods & ML Pipeline Overview (`methods_pipeline`)
 
-Renders linear or branching analytical workflows (data extraction, preprocessing, feature engineering, model training, cross-validation, and external testing).
+Audits step counts (`n_in - sum(excluded) = n_out`, chained across steps), flags untraced numbers (`qa["untraced_numbers"]`), and checks citations (`qa["uncited_steps"]`; `strict_numbers=True` / `require_cite=True` raise `ValueError`).
 
 ```python
 from medstat.figures.flow import methods_pipeline
 
 res = methods_pipeline(
-    stages=[
-        {"title": "EHR Extraction", "desc": "12,450 ICU admissions (MIMIC-IV)"},
-        {"title": "Preprocessing", "desc": "MICE imputation (M=20), outlier truncation"},
-        {"title": "Feature Engineering", "desc": "RCS splines (4 knots), time-varying shock index"},
-        {"title": "Model Training", "desc": "Firth penalized logistic & Fine-Gray CIF"},
-        {"title": "Validation", "desc": "Bootstrap (B=500), Calibration, Decision Curve Analysis"},
+    steps=[
+        {
+            "title": "EHR Cohort Extraction",
+            "body": "Adult ICU admissions (2022–2024)",
+            "side": "Source: Tertiary HIS",
+            "cite": "STROBE",
+            "counts": {"n_in": 2500, "excluded": {"Age < 18": 100}, "n_out": 2400},
+        },
+        {
+            "title": "Biomarker Quality Gate",
+            "body": "Valid baseline arterial lactate",
+            "cite": "Surviving Sepsis 2021",
+            "counts": {"n_in": 2400, "excluded": {"Missing/hemolyzed": 420}, "n_out": 1980},
+        },
     ],
+    strict_numbers=True,
     journal="NEJM",
     out_path="figures/methods_workflow.png",
 )

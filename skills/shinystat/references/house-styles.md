@@ -1,96 +1,80 @@
 # Journal House Styles & Artwork Engineering Reference
 
-This reference documents the journal-grade styling engine (`medstat.figures.journal`), vector typography rules, canvas targets, and publication quality assurance gates integrated into `shinystat`.
+Reached from `SKILL.md` Pillar 5 and **Output Format & House Style Alignment Gate** (#5). Values and formatters live in `medstat.figures.journal` (`JOURNAL_SPECS`, `TARGET_WIDTHS`, `apply_journal_theme`, `style_axis`, `format_estimate`, `format_p_value`, `format_num`) and `medstat.figures.qa` (`qa_layout`, `cvd_check`, `assert_zero_phi_text`).
 
 ---
 
-## 1. Supported Journal House Styles
+## 1. Supported Journal House Styles (`JOURNAL_SPECS`)
 
-| Style Code | Journal Target | Primary Palette (First 4) | Typography Spines | Inset / Feature Support |
+> **Provenance**: The color palettes follow the widely used `ggsci` journal-inspired sets (plus Okabe-Ito for universal color-vision-deficiency accessibility), not official publisher color mandates. Journals specify resolution, vector typography, column widths, and file formats rather than fixed hex palettes; check the target journal's current author artwork guidelines for hard submission requirements.
+
+| Style Code | Target / Inspiration | Palette (`JOURNAL_SPECS[style]["palette"]`) | Frame & Grid (`style_axis`) | Number & P-Value Rules (`format_estimate`, `format_p_value`) |
 | :--- | :--- | :--- | :--- | :--- |
-| **`"NEJM"`** | *New England Journal of Medicine* | `#941100` (Burgundy), `#1A365D` (Navy), `#2D3748`, `#4A5568` | Crisp L-frame (left/bottom only), tick outward 3.5 pt, top-aligned metrics | Inset zoom for low-event curves (`//` axis break, 0–20% range) |
-| **`"JAMA"`** | *Journal of the American Medical Association* | `#002D62` (Deep Navy), `#BA0C2F` (Crimson), `#5C768D`, `#C59B27` | Bold headers, 3-zone structured forest layout, uppercase column titles | Direct odds annotations, zero gridlines |
-| **`"LANCET"`** | *The Lancet* | `#D62728` (Lancet Red), `#1F77B4` (Slate Blue), `#FF7F0E`, `#2CA02C` | Compact risk tables, explicit tick bounds, scientific neutral spines | Multi-panel cohort panel sync, zero-origin |
-| **`"BMJ"`** | *The BMJ* (British Medical Journal) | `#004F9F` (BMJ Blue), `#E05A47` (Coral Red), `#2E8B57`, `#F4A261` | Minimalist L-frame, centered effect direction labels, sans-serif Sarabun | Clear favors headers, wrapped forest headers |
-| **`"CLINICAL"`** | *Nature / General Clinical* | `#0072B2` (Okabe Blue), `#D55E00` (Vermilion), `#009E73`, `#CC79A7` | High-accessibility CVD-safe Okabe-Ito, clean neutral frame | Universal fallback, high-contrast |
+| **`"NEJM"`** | *New England Journal of Medicine* | `#BC3C29`, `#0072B5`, `#E18727`, `#20854E`, `#7876B1`, `#6F99AD`, `#FFDC91`, `#EE4C97` | L-frame (`spine_lw=0.8`), outward ticks 3.5 pt, `grid_y=False`; zoomed inset (`nejm_inset_ylim`, `//` break) for low-event curves | `HR, 1.45 (95% CI, 1.12 to 1.88)`; `P=0.03`, `P<0.001` (keeps leading zero) |
+| **`"JAMA"`** | *JAMA* / AMA style | `#374E55`, `#DF8F44`, `#00A1D5`, `#B24745`, `#79AF97`, `#6A6599`, `#80796B`, `#0073C2` | L-frame (`spine_lw=0.8`), outward ticks 3.5 pt, dotted horizontal y-grid (`grid_y=True`, `#D9D9D9`, 0.6 pt), 3-zone forest layout | `HR, 1.45 (95% CI, 1.12-1.88)`; drops leading zero for bounded values: `P = .03`, `P < .001`, `P > .99` |
+| **`"LANCET"`** | *The Lancet* | `#00468B`, `#ED0000`, `#42B540`, `#0099B4`, `#925E9F`, `#FDAF91`, `#AD002A`, `#ADB6B6` | L-frame (`spine_lw=0.8`), outward ticks 3.5 pt, `grid_y=False`, mid-dot axis tick formatter | Raised mid-dot decimal (`\u00b7`): `HR 1·45 (95% CI 1·12–1·88)`; lowercase `p`: `p=0·01`, `p=0·0004`, `p<0·0001` |
+| **`"BMJ"`** | *The BMJ* | `#003366`, `#D52B1E`, `#008080`, `#E87722`, `#6F2C91`, `#2D68C4`, `#708090`, `#118AB2` | L-frame (`spine_lw=0.8`), outward ticks 3.5 pt, `grid_y=False`, 3-zone forest layout | `HR 1.45 (95% CI 1.12 to 1.88)`; spaced `P = 0.03`, `P < 0.001` |
+| **`"CLINICAL"`** | `shinystat` canonical clinical | `#2563EB`, `#DC2626`, `#059669`, `#D97706`, `#7C3AED`, `#0891B2`, `#475569`, `#0F172A` | L-frame (`spine_lw=0.8`), outward ticks 3.5 pt, dotted horizontal y-grid (`grid_y=True`, `#D9D9D9`, 0.6 pt) | `HR 1.45 (95% CI: 1.12–1.88)`; `P=0.03`, `P<0.001` |
+| **`"OKABE_ITO"`** | Universal CVD-safe | `#0072B2`, `#D55E00`, `#009E73`, `#CC79A7`, `#E69F00`, `#56B4E9`, `#F0E442`, `#000000` | L-frame (`spine_lw=0.8`), outward ticks 3.5 pt, `grid_y=False` | `HR 1.45 (95% CI: 1.12–1.88)`; `P=0.03`, `P<0.001` |
 
 ---
 
-## 2. Canvas Geometry & Target Dimensions
+## 2. Canvas Geometry & Target Dimensions (`TARGET_WIDTHS`)
 
-Figures are calibrated to standard journal print grids using `TARGET_WIDTHS`:
+ Lock once per manuscript via `apply_journal_theme(journal="NEJM", canvas="manuscript", target="double_col")`:
 
 ```python
 TARGET_WIDTHS = {
-    "single_col": 3.25,        # 1 column (82 mm) — ROC, calibration, univariate KM
-    "one_and_half_col": 5.0,   # 1.5 column (127 mm) — Bland-Altman, 2-panel KM
-    "double_col": 6.8,         # 2 columns / full width (173 mm) — Forest plots, CONSORT/PRISMA flows
-    "slide_16_9": 11.5,        # Executive PowerPoint presentation (16:9 widescreen)
+    "single_col": 3.5,     # 1 column (89 mm) — ROC, calibration, single-panel KM
+    "one_half_col": 5.0,   # 1.5 column (127 mm) — Bland-Altman, cohort flow, methods pipeline
+    "double_col": 7.0,     # 2 columns / full width (178 mm) — 3-zone forest, CONSORT/PRISMA/STARD
+    "docx": 6.5,           # Word manuscript figure width (base_font = 10.0 pt)
+    "pptx": 11.5,          # 16:9 widescreen slide width (base_font = 13.0 pt)
+    "web": 7.5,            # Interactive HTML report width (base_font = 10.0 pt)
 }
 ```
 
 ### Canvas Modes
-- **`"manuscript"`** (default): Pure white background (`#FFFFFF`), standard black ink (`#222222`), suitable for direct submission to publisher peer review and printing.
-- **`"editorial"`**: Warm off-white background (`#FDFBF7` for NEJM, `#F8F9FA` for BMJ), designed for online article previews, interactive HTML dashboards, and executive slides.
+- **`"manuscript"`** (default): Pure white background (`#FFFFFF`), `#222222` ink, calibrated for journal submission and print.
+- **`"editorial"`**: Warm ivory background for `"NEJM"` (`#FBF7F0`, `#FFFFFF` for other styles), suited for slides and editorial previews.
 
 ---
 
 ## 3. Vector Typography & Export Standards
 
-All journal figures produce multi-format bundles:
-1. **High-DPI Raster (PNG)**:
+Every journal figure exports a synchronized bundle (`FigureResult`):
+1. **High-DPI Raster (`png_path`)**:
    - Statistical graphs: **300 DPI**.
-   - Flow diagrams & medical illustrations: **600 DPI**.
-2. **Vector Formats (PDF & SVG)**:
-   - PDF exported with `matplotlib.rcParams["pdf.fonttype"] = 42` (TrueType / Type 42), guaranteeing text remains editable paths without font rasterization or substitution.
-   - SVG generated for responsive web presentation and interactive web reports.
-3. **Traceability CSV (`_source.csv`)**:
-   - Statistical figures export all underlying plotted coordinates and 95% CIs.
-   - Flow diagrams export bounding box coordinates `[x, y, w, h]`, text contents, sample counts, and reconciliation status.
-   - Illustrations export semantic element IDs, types, anatomical coordinates, and seed metadata.
+   - Study flow diagrams & **schematic** illustrations: **600 DPI**.
+2. **Editable Vector Formats (`vector_path`, `svg_path`)**:
+   - PDF exported with `mpl.rcParams["pdf.fonttype"] = 42` and `ps.fonttype = 42` (TrueType), plus `svg.fonttype = "none"` and Thai-capable sans-serif fallback chain (`Arial`, `Helvetica`, `DejaVu Sans`, `Sarabun`, `Thonburi`, `Sukhumvit Set`, `Tahoma`).
+3. **Traceable Source CSV (`csv_path`)**:
+   - Statistical figures export plotted coordinates and 95% CIs (plus `_risktable.csv` for survival).
+   - Flow diagrams export **reconciled** step counts and equation checks (`_source.csv`).
+   - **Schematic** illustrations export drawn element parameters and seed (`_source.csv`).
 
 ---
 
-## 4. Standardized Medical Formatting Rules
+## 4. Standardized Medical Formatting (`medstat.figures.journal`)
 
-The journal engine enforces consistent clinical reporting standards via `medstat.figures.journal`:
-
-### Effect Estimates (`format_estimate`)
 ```python
-from medstat.figures.journal import format_estimate
+from medstat.figures.journal import format_estimate, format_num, format_p_value
 
-# Odds ratio with 95% CI
-text = format_estimate(1.42, 1.12, 1.81, metric="OR", journal="NEJM")
-# Returns: "OR, 1.42 (95% CI, 1.12-1.81)"
-```
-- In Lancet style: uses comma separators `"OR 1·42 (95% CI 1·12–1·81)"` (middle dot where required).
-- In NEJM style: uses standard comma spacing `"OR, 1.42 (95% CI, 1.12-1.81)"`.
+format_estimate(1.42, 1.12, 1.81, metric="OR", journal="NEJM")    # "OR, 1.42 (95% CI, 1.12 to 1.81)"
+format_estimate(1.42, 1.12, 1.81, metric="OR", journal="JAMA")    # "OR, 1.42 (95% CI, 1.12-1.81)"
+format_estimate(1.42, 1.12, 1.81, metric="OR", journal="LANCET")  # "OR 1·42 (95% CI 1·12–1·81)"
+format_estimate(1.42, 1.12, 1.81, metric="OR", journal="BMJ")     # "OR 1.42 (95% CI 1.12 to 1.81)"
 
-### P-Values (`format_p_value`)
-```python
-from medstat.figures.journal import format_p_value
-
-format_p_value(0.00003, journal="NEJM")  # "P<0.001"
-format_p_value(0.042, journal="NEJM")    # "P=0.04"
-format_p_value(0.891, journal="JAMA")    # "P = .89" (JAMA omits leading zero)
+format_p_value(0.00003, journal="NEJM")    # "P<0.001"
+format_p_value(0.031, journal="JAMA")      # "P = .03" (bare=True -> ".03")
+format_p_value(0.0004, journal="LANCET")   # "p=0·0004"
+format_p_value(0.031, journal="BMJ")       # "P = 0.03"
 ```
 
 ---
 
-## 5. Automated Publication Quality Assurance Gates
+## 5. Automated Publication Quality Assurance Gates (`medstat.figures.qa`)
 
-Every journal-grade figure is checked through `medstat.figures.qa`:
-
-### Layout Collision Gate (`qa_layout`)
-- Computes pixel bounding boxes across all text elements, tick labels, axis labels, legends, and annotations.
-- Automatically calculates pairwise intersection-over-minimum (IoM). If overlap exceeds 5%, an issue is flagged.
-- Flags unconstrained legend boxes or overlapping tick numbers.
-
-### CVD Accessibility Gate (`cvd_check`)
-- Simulates deuteranopia, protanopia, and tritanopia using Brettel (1997) / Machado (2009) LMS transformation matrices.
-- Checks minimum Euclidean $\Delta E$ color difference across all distinct plotted series in CVD color space.
-- Warns if contrast is insufficient for red-green color-blind reviewers.
-
-### Zero-PHI Gate (`assert_zero_phi_text`)
-- Automated regex audit of all title strings, axis labels, legend items, and text annotations against Hospital Numbers (HN), 13-digit Thai National IDs, phone numbers, and patient names.
-- Raises immediate exception if unmasked patient data appears in figure text.
+1. **Layout Collision Gate (`qa_layout`)**: Checks rendered text bounding boxes for pairwise overlap (`IoM > 0.05`), canvas clipping (`check_outside=True`), and unreadable text (`min_font=6.0`), returning `FigureResult.qa["passed"]`. Inspect the rendered PNG visually after `qa["passed"] == True`, as bounding-box checks catch text collisions rather than aesthetic composition.
+2. **CVD Accessibility Gate (`cvd_check`)**: Simulates deuteranopia, protanopia, and tritanopia (Machado 2009 matrices) and flags pairs with $\Delta E < 12.0$ (`needs_cue == True`) so hatches or direct labels can be added.
+3. **Zero-PHI Gate (`assert_zero_phi_text`)**: Screens all titles, labels, annotations, and captions against `medstat._phi.PHI_PATTERNS` (`HN`, 13-digit Thai IDs, phone numbers, DOB, honorific-prefixed names) and raises `ValueError` on any match.

@@ -1207,7 +1207,7 @@ Merge and elevate all capabilities into `medstat-core` (`src/medstat/figures/`),
 1. **Core Architecture & SSOT**:
    - `medstat._phi`: SSOT regular expression engine for HIPAA/PDPA Zero-PHI compliance across reporting and figures (`assert_zero_phi_text`).
    - `FigureResult`: Extended with `vector_path` (TrueType PDF), `svg_path`, and `qa` dictionary alongside existing `png_path`, `caption`, and `csv_path`.
-   - `medstat.figures.journal`: Five publication house styles (**NEJM**, **JAMA**, **LANCET**, **BMJ**, **CLINICAL/Nature**) with calibrated column widths (`single_col` 3.25", `one_and_half_col` 5.0", `double_col` 6.8"), TrueType vector fonts (`pdf.fonttype=42`), L-frame spines (`style_axis`), and clinical report formatters (`format_estimate`, `format_p_value`).
+   - `medstat.figures.journal`: Six publication house styles (**NEJM**, **JAMA**, **LANCET**, **BMJ**, **CLINICAL**, **OKABE_ITO**) using `ggsci`-inspired and CVD-safe palettes (`JOURNAL_SPECS`), calibrated target widths (`single_col` 3.5", `one_half_col` 5.0", `double_col` 7.0", `docx` 6.5", `pptx` 11.5", `web` 7.5"), TrueType vector fonts (`pdf.fonttype=42`), L-frame spines (`style_axis`), and clinical report formatters (`format_estimate`, `format_p_value`, `format_num`).
    - `medstat.figures.qa`: Automated layout collision detection (`qa_layout`), CVD simulation (`cvd_check`), and Zero-PHI gate (`assert_zero_phi_text`).
 2. **Study Flow Diagrams (`medstat.figures.flow`)**:
    - Top-down layout cursor `Flow` with strict mathematical reconciliation: raises `ValueError` if branch counts do not balance.
@@ -1215,15 +1215,15 @@ Merge and elevate all capabilities into `medstat-core` (`src/medstat/figures/`),
    - Automated export at 600 DPI PNG, vector PDF, SVG, and coordinate `_source.csv`.
 3. **Vector Scientific Schematics (`medstat.figures.illustration`)**:
    - Vector canvas `Scene` powered by semantic art palette (`SEM`).
-   - Anatomical elements: biological cells (RBC, platelet, neutrophil, macrophage, fibroblast, bacteria, eukaryote), skin layers, wound healing phases, pressure injury staging (NPUAP/EPUAP Stages 1–4), vessel stenosis % calculation, and signaling cascades.
-   - Mandatory conceptual schematic disclaimer banner: `"Schematic illustration for conceptual mechanism only; not diagnostic patient imaging."`
+   - Anatomical elements: biological cells (RBC, platelet, neutrophil, lymphocyte, macrophage, fibroblast, bacterium, eukaryote), skin layers (`skin`, `crater`), wound healing phases (`wound_phase`, `wound_topdown` with shoelace area verification), pressure injury staging (`pressure_injury`, Stages 1–4), vessel stenosis (`artery_cross_section`, `vessel_longitudinal`, `selectin_lollipop`), and signaling cascades (`node`, `edge`, `cascade`).
+   - Mandatory conceptual schematic disclaimer caption: `"Schematic illustration; not to scale; not derived from patient images."`
    - Automated export at 600 DPI PNG, vector PDF, SVG, and coordinate `_source.csv`.
 4. **Statistical Graph Upgrades & 100% Backward Compatibility**:
    - Upgraded `plot_kaplan_meier` (aligned risk tables, NEJM zoomed inset with `//` axis break, fixed-inch label offset avoiding tick collisions), `plot_cif`, `plot_roc_curve`, `plot_calibration`, `plot_forest` (3-zone JAMA/BMJ layout), `plot_dca`, `plot_love`, and `plot_bland_altman`.
    - Default `journal=None` preserves 100% backward compatibility with all existing snapshots and tests.
-5. **Skill Integration & Grilling Gate #5**:
-   - Added reference guides: `references/house-styles.md`, `references/flows.md`, `references/illustration.md` in both `shinystat` and `shinystat-cloud`.
-   - Updated Grilling Gate #5 to provide explicit choices: **NEJM (Recommended)**, JAMA, Lancet, BMJ, Clinical.
+5. **Skill Integration, Single Source of Truth & Grilling Gate #5 (`/writing-for-agents`)**:
+   - Added reference guides: `references/house-styles.md`, `references/flows.md`, `references/illustration.md` in both `shinystat` and `shinystat-cloud` with 100% palette, width, and API parity against `medstat.figures`.
+   - Updated Grilling Gate #5 (`Output Format & House Style Alignment Gate`) to list house-style choices (`NEJM` recommended, `JAMA`, `LANCET`, `BMJ`, `CLINICAL` / `OKABE_ITO`) while disclosing hex palettes, `TARGET_WIDTHS`, and formatting specifications in `references/house-styles.md` (single source of truth, avoiding `SKILL.md` sprawl).
    - Cloud recipes maintain pure Python execution with zero `medstat` imports.
 
 ### Consequences

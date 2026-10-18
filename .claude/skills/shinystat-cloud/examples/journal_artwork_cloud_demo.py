@@ -18,14 +18,14 @@ import numpy as np
 from matplotlib.patches import FancyBboxPatch, Polygon
 
 SEM = {
-    "rbc": "#D9534F",
-    "rbc_pallor": "#F9D5D3",
-    "neutrophil": "#E74C3C",
-    "epidermis": "#E8C4A2",
-    "dermis": "#F4A261",
-    "hypodermis": "#FCE8A6",
-    "muscle": "#C0392B",
-    "outline": "#222222",
+    "rbc": "#D9433C",
+    "rbc_pallor": "#EE8A84",
+    "neutrophil": "#F0E6F3",
+    "epidermis": "#E9B99D",
+    "dermis": "#F3D3BC",
+    "hypodermis": "#F7E7B0",
+    "muscle": "#B8504F",
+    "outline": "#3A2E2E",
 }
 
 
@@ -208,8 +208,8 @@ def demo_cloud_nejm_km(out_dir: Path) -> Path:
     s2 = np.exp(-0.0028 * t)
 
     fig, ax = plt.subplots(figsize=(6.0, 4.5), dpi=300)
-    ax.step(t, s1, label="Targeted Therapy", color="#941100", lw=1.8, where="post")
-    ax.step(t, s2, label="Standard of Care", color="#1A365D", lw=1.8, where="post")
+    ax.step(t, s1, label="Targeted Therapy", color="#BC3C29", lw=1.8, where="post")
+    ax.step(t, s2, label="Standard of Care", color="#0072B5", lw=1.8, where="post")
     ax.set_ylim(0, 1.02)
     ax.set_xlim(0, 370)
     ax.set_xlabel("Days Since Randomization", fontsize=9, fontweight="bold")

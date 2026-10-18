@@ -506,3 +506,48 @@ def test_statistical_plots_journal_styles_and_backward_compatibility(tmp_path):
     assert res_fr_none.png_path.endswith(".png")
     res_dca_none = plot_dca(dca_df, out_path=str(tmp_path / "dca_none.png"))
     assert res_dca_none.png_path.endswith(".png")
+
+
+def test_skill_reference_ssot_and_palette_parity():
+    from medstat.figures.illustration import SEM
+    from medstat.figures.journal import TARGET_WIDTHS
+
+    repo_root = Path(__file__).resolve().parents[2]
+    skill_main = (repo_root / "skills/shinystat/SKILL.md").read_text(encoding="utf-8")
+    skill_cloud = (repo_root / "skills/shinystat-cloud/SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    hs_main = (repo_root / "skills/shinystat/references/house-styles.md").read_text(
+        encoding="utf-8"
+    )
+    hs_cloud = (
+        repo_root / "skills/shinystat-cloud/references/house-styles.md"
+    ).read_text(encoding="utf-8")
+    il_cloud = (
+        repo_root / "skills/shinystat-cloud/references/illustration.md"
+    ).read_text(encoding="utf-8")
+
+    # 1. SKILL.md files must not inline hex palettes (disclosed in house-styles.md)
+    for stale_or_inlined in ("#941100", "#1A365D", "#BC3C29", "#002D62", "#00468B"):
+        assert stale_or_inlined not in skill_main
+        assert stale_or_inlined not in skill_cloud
+
+    # 2. Both house-styles.md files must match JOURNAL_SPECS and TARGET_WIDTHS
+    for j_name, spec in JOURNAL_SPECS.items():
+        assert j_name in hs_main
+        assert j_name in hs_cloud
+        for hex_col in spec["palette"]:
+            assert hex_col in hs_main, (
+                f"{j_name} color {hex_col} missing in shinystat/references/house-styles.md"
+            )
+            assert hex_col in hs_cloud, (
+                f"{j_name} color {hex_col} missing in shinystat-cloud/references/house-styles.md"
+            )
+
+    for w_key, w_val in TARGET_WIDTHS.items():
+        assert f'"{w_key}": {w_val}' in hs_main
+        assert f'"{w_key}": {w_val}' in hs_cloud
+
+    # 3. Cloud illustration.md SEM dict must match medstat.figures.illustration.SEM
+    for sem_key, sem_hex in SEM.items():
+        assert f'"{sem_key}": "{sem_hex}"' in il_cloud

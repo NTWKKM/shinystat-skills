@@ -5,7 +5,7 @@ description: "Use when analyzing clinical or EHR data: Table 1, logistic/ordinal
 
 # Shinystat: Autonomous Biostatistical Decision Agent
 
-Execute clinical biostatistics through the 5 Decision Pillars below, exercising autonomous authority over statistical mechanics and halting at **The Deterministic Grilling Gate** (§2) only for clinical or protocol ambiguities and **Output Format Alignment Gate** (#5) confirmation.
+Execute clinical biostatistics through the 5 Decision Pillars below, exercising autonomous authority over statistical mechanics and halting at **The Deterministic Grilling Gate** (§2) only for clinical or protocol ambiguities and **Output Format & House Style Alignment Gate** (#5) confirmation.
 
 ---
 
@@ -42,7 +42,11 @@ Execute clinical biostatistics through the 5 Decision Pillars below, exercising 
 
 5. **Pillar 5: Reporting Integrity & Multi-Format Documents**
    - **Report Intermediate Representation (IR)**: Assemble narrative blocks, 3-rule tables, and figures into `ReportDocument` (`medstat.reporting.ir`) so every reported value is **traceable** *(every narrative and table number matches `results_dict` within programmatic tolerance and is backed by exported source data)*.
-   - **Publication Figures & Journal House Styles (300/600 DPI)**: When generating 300 DPI statistical plots, read [figures.md](references/figures.md). When generating journal-specific house styles (NEJM, JAMA, Lancet, BMJ, Clinical), vector PDF/SVG exports, or QA collision checks, read [house-styles.md](references/house-styles.md). When generating study flow diagrams (CONSORT 2025/2010, PRISMA 2020 single/dual stream, STARD 2015, STROBE cohort flow from `SampleFlowTracker`, methods pipelines) with strict mathematical reconciliation, read [flows.md](references/flows.md). When generating vector-first medical/scientific illustrations (SEM semantic palette, cells, skin/crater cross-sections, wound healing phases, pressure injuries, vessel stenosis, signaling pathways), read [illustration.md](references/illustration.md).
+   - **Publication Figures & Journal House Styles (300/600 DPI)**:
+     - *Statistical plots (300 DPI)*: Read [figures.md](references/figures.md).
+     - ***House style** (`NEJM`, `JAMA`, `LANCET`, `BMJ`, `CLINICAL`, `OKABE_ITO`), TrueType vector exports (`pdf.fonttype=42`), & layout/CVD/Zero-PHI gates*: Read [house-styles.md](references/house-styles.md).
+     - ***Reconciled** study flows (CONSORT 2025/2010, PRISMA 2020, STARD 2015, STROBE cohort flow from `SampleFlowTracker`, methods pipeline, 600 DPI)*: Read [flows.md](references/flows.md).
+     - ***Schematic** *(conceptual vector mechanism, not to scale or patient imagery, carrying an explicit schematic disclaimer)* illustrations (cells, skin/crater cross-sections, wound phases, pressure injuries, vessel stenosis, signaling pathways, 600 DPI)*: Read [illustration.md](references/illustration.md).
    - **Multi-Format Renderers**: When rendering `.html`, `.docx`, `.pptx`, `.md`, or `.pdf` deliverables after **Output Format Alignment Gate** (#5) confirmation, read [report-builder.md](references/report-builder.md#2-multi-format-renderers).
    - **Reporting Integrity Verification**: Audit every `ReportDocument` via `verify_report_integrity` (`medstat.reporting.integrity`) to confirm **traceable** narrative numbers, causal/E-value caveats, methods/retention documentation, and **Zero-PHI** compliance (automated regex scan for `HN`, 13-digit Thai IDs, phone numbers, DOB, and honorific-prefixed names `Mr.`, `Mrs.`, `Ms.`, `Dr.`, `นาย`, `นาง`, `นางสาว`, `นพ.`, `พญ.`, `ดร.`, plus mandatory manual review for unprefixed names before external release; never release unscreened patient identifiers).
 
@@ -59,18 +63,13 @@ Halt **pre-flight** (or upon diagnostic detection) and ask the user directly whe
 2. **Proposal vs Data Geometry Mismatch**: Survival modeling is requested without follow-up time or censoring status, or clustered modeling without cluster IDs.
 3. **Severe Sparse Data & Monotone Separation**: Monotone separation occurs in logistic or Cox regression; confirm between Firth penalized estimation (`medstat.models.firth`) vs domain-guided covariate reduction.
 4. **High Missingness ($> 40\%$) or Plausible MNAR without Sensitivity Analysis**: Non-primary missingness exceeds $> 40\%$ or clinically plausible MNAR lacks a pattern-mixture / delta-adjustment sensitivity analysis per **Zero Silent Deletion & Missing-Data Routing**.
-5. **Output Format & Journal Style Alignment Gate (Ask Immediately if Unspecified)**: When the user prompt omits a deliverable format or figure style, ask upfront (via `ask_question` or interactive prompt):
+5. **Output Format & House Style Alignment Gate (Ask Immediately if Unspecified)**: When the user prompt omits a deliverable format or figure **house style**, ask upfront (via `ask_question` or interactive prompt):
    - **Deliverable Format**:
-     - **(Recommended) Interactive HTML Report (`.html`) with Dual / Toggle View** (`render_html`): Interactive Plotly.js charts (`Interactive (Plotly)`) serve as the primary view (hover cutpoints, zoom timelines, inspect calibration deciles) with a toggle to **"Publication Figure (Static)"** for download and journal submission (offline CDN fallback and `@media print` parity); when `plotly_figs` are omitted, renders the static figure alongside ICMJE 3-rule tables and Methods/Results narratives.
+     - **(Recommended) Interactive HTML Report (`.html`) with Dual / Toggle View** (`render_html`): Interactive Plotly.js charts (`Interactive (Plotly)`) serve as the primary view with a toggle to **"Publication Figure (Static)"** for download and journal submission (offline CDN fallback and `@media print` parity); when `plotly_figs` are omitted, renders the static figure alongside ICMJE 3-rule tables and Methods/Results narratives.
      - **Manuscript Word Document (`.docx`)**: ICMJE 3-rule OpenXML table borders (`<w:tblBorders>`) and 6.5 in publication figures.
      - **Executive PowerPoint Presentation (`.pptx`)**: 16:9 widescreen slides (`13.333" x 7.5"`), 1 figure per slide with takeaway callout cards.
      - **Publication PDF (`.pdf`)** / **Markdown (`.md`)** / **Quick In-Chat Summary Only**.
-   - **Figure & Artwork House Style (When Journal Figures / Artwork Requested)**:
-     - **(Recommended) NEJM**: Burgundy/Navy palette (`#941100`, `#1A365D`), L-frame spines, ticks pointing outward 3.5 pt, top-aligned metrics, low-event inset zoom (`nejm_inset_ylim`).
-     - **JAMA**: Crimson/Deep Navy palette (`#002D62`, `#BA0C2F`), 3-zone structured forest tables with uppercase bold column headers, direct annotations, zero gridlines.
-     - **Lancet**: British medical palette (`#D62728`, `#1F77B4`), compact risk table, explicit tick bounds, scientific neutral spines.
-     - **BMJ**: Crisp BMJ Blue/Coral palette (`#004F9F`, `#E05A47`), minimalist spines, centered effect labels, wrapped forest headers.
-     - **Clinical / Nature**: Okabe-Ito CVD-safe palette (`#0072B2`, `#D55E00`), high-contrast universal accessibility.
+   - **Figure & Artwork House Style** (when figures or artwork are requested; palettes, widths, and formatting rules in [house-styles.md](references/house-styles.md)): **(Recommended) `NEJM`**, `JAMA`, `LANCET`, `BMJ`, or `CLINICAL` / `OKABE_ITO`.
 
 ---
 
@@ -79,14 +78,13 @@ Halt **pre-flight** (or upon diagnostic detection) and ask the user directly whe
 The biostatistical task is complete when every item below is verified against an artifact or tool output:
 - [ ] **Pre-Flight Data Audit**: Every model variable's dtype, missingness count, distributional summary (Mean (SD) or Median [IQR]), numeric `0/1` (`0/1/2+`) coding, and **pre-flight** $\text{EPV}_{\text{binary}}$ or $\text{EPV}_{\text{Cox}}$ are recorded in script output.
 - [ ] **Grilling Gate Resolution**: Every triggered **Grilling Gate** condition (#1–#4) has an explicit user decision recorded before final model execution.
-- [ ] **Deliverable Format Aligned**: Target deliverable format is specified in the prompt or confirmed via **Output Format Alignment Gate** (#5).
+- [ ] **Deliverable Format & House Style Aligned**: Target deliverable format and figure **house style** are specified in the prompt or confirmed via **Output Format & House Style Alignment Gate** (#5).
 - [ ] **Model Convergence & Diagnostics**: The Python script exits with code `0`; every fitted model reports `converged == True` with finite estimates and 95% CIs; every applicable check (Schoenfeld residuals, Brant test, calibration slope/Brier/ICI, Austin SMD $< 0.10$, Kish $N_{\text{eff}}$, and **reconciled** CIF probability conservation) is computed; and monotone separation is resolved per **Grilling Gate #3**.
 - [ ] **Reconciled Cohort Retention**: `SampleFlowTracker` (`medstat.data.retention`) records **reconciled** cohort counts across every step.
 - [ ] **Exhaustive Tables**: Every primary and sensitivity model (including complete-case alongside MICE for $5\%\text{--}40\%$ missingness) is formatted into 3-rule tables (NEJM/JAMA/APA) with point estimates, 95% CIs, $P$-values, and units.
-- [ ] **Traceable Figures & Deliverable**: Every statistical figure is exported at 300 DPI, every flow diagram/illustration at 600 DPI, as a `FigureResult` with non-empty `png_path`, vector `vector_path` (TrueType PDF) / `svg_path`, `qa["passed"] == True`, Zero-PHI compliance, and **traceable** `csv_path` source data (with `_risktable.csv` for survival and `_source.csv` with bounding coordinates for flows and illustrations); and the deliverable file exists on disk (with Dual / Toggle View when `.html` with `plotly_figs` is selected).
+- [ ] **Traceable Figures & Deliverable**: Every statistical figure is exported at 300 DPI and every **reconciled** flow diagram or **schematic** illustration at 600 DPI under the locked **house style** as a `FigureResult` with existing `png_path`, TrueType `vector_path` (`.pdf`, `fonttype=42`) / `svg_path`, `qa["passed"] == True`, **Zero-PHI** text, **schematic** disclaimer on illustrations, and **traceable** `csv_path` source data (`_risktable.csv` for survival; `_source.csv` for flows and illustrations); and the deliverable file exists on disk (with Dual / Toggle View when `.html` with `plotly_figs` is selected).
 - [ ] **Pillar 5 Integrity Audit Passed**: `verify_report_integrity(doc)` (`medstat.reporting.integrity`) returns `IntegrityReport.passed == True` with `len(phi_violations) == 0`, `has_causal_caveat == True`, and every non-structural narrative number verified (`len(untraced_numbers) == 0`, or every remaining value in `untraced_numbers` manually verified as a non-statistical annotation so any unverified estimate, CI bound, or $P$-value blocks completion), gated by Checks 1–3 below while Check 4 (`Methods & Retention Check`) is a warning-only check (`warnings == []`, does not gate `passed`):
   1. *Zero-PHI Scan (gates `passed`)*: `len(phi_violations) == 0` across narrative text and `TableBlock` headers/cells, plus manual review confirming zero unprefixed patient names before external release.
   2. *Numerical Traceability (gates completion)*: Every non-structural narrative number is **traceable** to `doc.results_dict` (`len(untraced_numbers) == 0`, or every remaining unmatched value in `untraced_numbers` is manually verified as a non-statistical token; any unverified estimate, CI bound, or $P$-value blocks completion) within `abs_tol = min(0.02, 10**(-dec_digits))` for `|val| <= 1.0`, `0.02` absolute or `0.01` (1%) relative tolerance for `|val| > 1.0`, or percentage-scale tolerance `min(0.05, abs_tol * 100.0)` when `%` is present (`0.05` otherwise).
   3. *Observational Causal Inference & E-value Check (gates `passed`)*: `has_causal_caveat == True` whenever `results_dict` keys match observational/regression/PSM/Cox models.
   4. *Methods & Retention Check (warning-only, does not gate `passed`)*: `has_methods == True` and `has_retention_flow == True` (`warnings == []`).
-

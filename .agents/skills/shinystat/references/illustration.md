@@ -1,88 +1,100 @@
-# Vector Medical & Scientific Illustration Reference
+# Vector Medical & Scientific Illustration Reference (`medstat.figures.illustration`)
 
-This reference documents the vector-first scientific schematic engine (`medstat.figures.illustration`), designed to generate high-resolution anatomical structures, cellular biology, tissue cross-sections, and pathophysiological pathways using pure matplotlib and numpy without cloud dependencies.
-
----
-
-## 1. Architectural Philosophy & Safety Standard
-
-1. **Semantic Color Palette (`SEM`)**:
-   - Every anatomical and pathological structure has a persistent semantic color:
-     - `erythrocyte` / `rbc`: `#D9534F` (Erythrocyte red)
-     - `platelet`: `#F0AD4E` (Thrombocyte amber)
-     - `neutrophil`: `#E74C3C` (Multilobed granulocyte red)
-     - `macrophage`: `#8E44AD` (Large phagocytic purple)
-     - `fibroblast`: `#27AE60` (Spindle matrix green)
-     - `bacteria`: `#2C3E50` (Dark rod/coccus navy)
-     - `epidermis`: `#E8C4A2` (Stratified squamous keratin)
-     - `dermis`: `#F4A261` (Vascular collagen matrix)
-     - `hypodermis` / `adipose`: `#FCE8A6` (Adipose lipid yellow)
-     - `muscle`: `#C0392B` (Striated myofiber deep red)
-     - `bone`: `#E0E0E0` (Cortical osseous light gray)
-     - `granulation`: `#E67E22` (Budding capillary orange-red)
-     - `slough`: `#F4D03F` (Fibrinous exudative yellow)
-     - `eschar`: `#1C1C1C` (Necrotic devitalized black)
-2. **Schematic Disclaimer Invariant**:
-   - Every exported illustration automatically displays an explicit disclaimer:
-     `"Schematic illustration for conceptual mechanism only; not diagnostic patient imaging."`
-3. **Traceability & Zero-PHI**:
-   - Zero patient identifiers are permitted.
-   - Vector PDF (Type 42 fonts), SVG, 600 DPI PNG, and element bounding coordinate CSV are automatically bundled.
+Reached from `SKILL.md` Pillar 5. Generates deterministic, seeded vector-first **schematic** illustrations (`Scene`, `SEM`) using `matplotlib` and `numpy` without cloud dependencies.
 
 ---
 
-## 2. Anatomical & Pathological Components
+## 1. Semantic Palette (`SEM`) & Safety Invariants
 
-### Cellular Elements (`draw_cell`)
-Renders biological cells with harmonic membrane noise, nuclei, and internal granules:
+1. **Semantic Color Palette (`SEM`)** (one biological meaning = one persistent color across figures):
+   - **Tissue & Wound**: `epidermis` (`#E9B99D`), `dermis` (`#F3D3BC`), `hypodermis` (`#F7E7B0`), `muscle` (`#B8504F`), `bone` (`#EFE9DA`), `skin_surface` (`#F6DCC8`), `epithelial` (`#F2BDB5`), `granulation` (`#D8575A`), `slough` (`#E4CF74`), `necrotic` (`#3C302B`), `erythema` (`#F0B7A6`), `collagen` (`#E8DCC0`), `scar` (`#EADFD6`).
+   - **Cells & Microbes**: `rbc` (`#D9433C`), `rbc_pallor` (`#EE8A84`), `platelet` (`#B58BD6`), `neutrophil` (`#F0E6F3`), `lymphocyte` (`#DCE6F4`), `macrophage` (`#EBCBA6`), `bacteria` (`#3E8E5B`), `nucleus` (`#5A4A9C`), `nucleus_dark` (`#3F3480`), `cyto` (`#F4DDEA`).
+   - **Vessels & Fluid**: `blood` (`#B5282E`), `plasma` (`#F9E6DC`), `fibrin` (`#8A7F72`), `clot` (`#8E2B31`), `lipid` (`#F1D88A`), `cap` (`#E9DCCB`), `lumen` (`#FBEDEA`), `vessel_wall` (`#E7A2A0`), `adventitia` (`#EFE3CF`), `endothelium` (`#E8B0A8`), `outline` (`#3A2E2E`).
+2. **Schematic Disclaimer & Geometric Verifiability**:
+   - Every quantitative visual feature (`artery_cross_section` area stenosis, `wound_topdown` tissue ring fractions via `shoelace`) is verified by construction and logged to `_source.csv`.
+   - `scene.save(...)` appends the default **schematic** disclosure (`"Schematic illustration; not to scale; not derived from patient images."`), enforces `assert_zero_phi_text` and `qa_layout(strict=True)`, and exports 600 DPI PNG + TrueType PDF (`fonttype=42`) + SVG + `_source.csv`. Check `cvd_check()` pairs (`TISSUE_MUST_DIFFER`) and add hatches (`hatch=True`) or direct callouts where `needs_cue == True`.
+
+---
+
+## 2. `Scene` API & Anatomical Primitives
+
+Initialize canvas (`x in [0, 100]`, `y in [0, 100 * aspect]`):
 ```python
-from medstat.figures.illustration import Scene
+from medstat.figures.illustration import SEM, Scene
 
-scene = Scene(width=6.5, height=4.5, journal="NEJM")
-# Red blood cell (biconcave disc appearance)
-scene.draw_cell("rbc", cx=1.5, cy=2.0, r=0.4)
-# Activated neutrophil with multilobed nucleus & granules
-scene.draw_cell("neutrophil", cx=3.0, cy=2.0, r=0.6, lobes=3, granules=12)
-# Phagocytosing macrophage with pseudopodia
-scene.draw_cell("macrophage", cx=5.0, cy=2.0, r=0.8, irregularity=0.25)
+sc = Scene(width="double_col", aspect=0.55, journal="NEJM", canvas="manuscript", seed=7)
 ```
 
-### Tissue Cross-Sections & Wound Healing (`draw_skin_cross_section`, `draw_wound_phase`)
-Renders full layered anatomical cross-sections (stratum corneum, epidermis, papillary/reticular dermis, subcutaneous adipose, fascia, muscle, and periosteum):
+### Cells (`rbc`, `platelet`, `neutrophil`, `lymphocyte`, `macrophage`, `fibroblast`, `bacterium`, `eukaryote`)
 ```python
-from medstat.figures.illustration import Scene
+sc.rbc(cx=12.0, cy=20.0, r=1.3, rot=0.0, tilt=0.55)
+sc.platelet(cx=18.0, cy=20.0, r=0.7)
+sc.neutrophil(cx=26.0, cy=20.0, r=2.2, lobes=3, squeeze=1.0, rot=0.0)
+sc.lymphocyte(cx=34.0, cy=20.0, r=1.8)
+sc.macrophage(cx=44.0, cy=20.0, r=3.2, vacuoles=4, engulfed=2)
+sc.fibroblast(cx=56.0, cy=20.0, L=5.0, rot=0.1)
+sc.bacterium(cx=66.0, cy=20.0, L=1.6, kind="bacillus")  # "bacillus"|"coccus"|"diplococcus"|"chain"|"cluster"
+sc.eukaryote(cx=82.0, cy=20.0, r=9.0, organelles=True)
+```
 
-scene = Scene(width=6.5, height=5.0, journal="LANCET")
-# Cutaneous tissue cross section with ulcer crater
-scene.draw_skin_cross_section(
-    x0=0.5,
-    x1=6.0,
-    crater_depth="dermis",  # "epidermis", "dermis", "subcutis", "muscle", "bone"
-    wound_bed=["granulation", "slough"],
+### Tissue Cross-Sections, Wound Phases & Pressure Injury Staging
+```python
+# Layered skin block: thick = (epidermis, dermis, hypodermis, muscle)
+geo = sc.skin(x0=5.0, x1=95.0, ytop=46.0, thick=(3.0, 11.0, 9.0, 9.0), rete=0.9)
+
+# Ulcer crater & wound healing phase ("hemostasis" | "inflammation" | "proliferation" | "remodeling")
+cr = sc.crater(geo, xc=35.0, width=18.0, depth=10.0)
+sc.wound_phase(geo, cr, xc=35.0, width=18.0, depth=10.0, phase="proliferation")
+
+# NPIAP/EPUAP pressure injury stage (stage in {1, 2, 3, 4})
+sc.pressure_injury(geo, xc=72.0, stage=3)
+
+# Top-down wound bed with shoelace-verified tissue area fractions (tol=0.01)
+ach = sc.wound_topdown(
+    cx=80.0, cy=25.0, r=10.0,
+    fractions={"epithelial": 0.15, "granulation": 0.50, "slough": 0.25, "necrotic": 0.10},
+    hatch=True,
 )
 ```
 
-### Pressure Injury Staging (NPUAP / EPUAP)
-Visualizes standardized pressure injuries from Stage 1 (non-blanchable erythema) through Stage 4 (full thickness with exposed bone/tendon/muscle), Unstageable (slough/eschar obscured), and Deep Tissue Pressure Injury (DTPI).
-
-### Vascular Anatomy & Hemodynamics (`draw_vessel_stenosis`, `draw_vessel_longitudinal`)
-- **Stenosis Cross-Section**: Calculates lumen area reduction percentage and residual luminal diameter with eccentric/concentric atherosclerotic plaque.
-- **Longitudinal Venule**: Demonstrates endothelial lining, selectin-mediated leukocyte rolling, adhesion, and trans-endothelial migration (diapedesis).
-
+### Vessels & Hemodynamics (`artery_cross_section`, `vessel_longitudinal`, `selectin_lollipop`)
 ```python
-from medstat.figures.illustration import Scene
-
-scene = Scene(width=6.5, height=4.0, journal="JAMA")
-# 75% luminal stenosis cross section
-scene.draw_vessel_stenosis(
-    cx=3.25,
-    cy=2.0,
-    radius=1.5,
-    stenosis_pct=75.0,
-    calcified=True,
-    title="Left Anterior Descending (LAD) Stenosis",
+# Eccentric atherosclerotic plaque with exact geometric area stenosis
+info = sc.artery_cross_section(
+    cx=30.0, cy=28.0, R=14.0, stenosis=0.70, lipid_core=True, rupture=True, thrombus=0.4
 )
+
+# Post-capillary venule longitudinal wall & lumen (for leukocyte extravasation)
+ven = sc.vessel_longitudinal(x0=55.0, x1=95.0, y_floor=20.0, lumen_h=14.0, wall=3.0, tissue_h=12.0)
+sc.selectin_lollipop(x=68.0, y=ven["floor"], h=1.8)
 ```
 
-### Signaling & Mechanistic Pathways (`draw_pathway`)
-Assembles multi-step cellular cascades with receptor activation arrows (`->`), competitive inhibition bars (`-|`), phosphorylation badges, and downstream gene transcription boxes.
+### Signaling & Mechanistic Pathways (`node`, `edge`, `cascade`)
+```python
+# kind in {"stimulus", "molecule", "cell", "process", "outcome"}
+sc.cascade(
+    rows=[
+        [("lps", "Endotoxin (LPS)", "stimulus")],
+        [("tlr4", "TLR4 / NF-κB", "molecule"), ("il6", "IL-6 / TNF-α", "molecule")],
+        [("shock", "Endothelial Barrier Failure", "outcome")],
+    ],
+    y_top=46.0,
+    y_bot=12.0,
+)
+sc.edge("lps", "tlr4", kind="activate", label="MyD88")
+sc.edge("tlr4", "il6", kind="activate")
+sc.edge("il6", "shock", kind="activate")
+```
+
+### Annotations & Bundle Export (`callout`, `label_column`, `legend_swatches`, `scale_bar`, `badge`, `save`)
+```python
+sc.badge(2.0, 52.0, "A")
+sc.callout("Fibrous cap rupture", target=info["plaque_center"], text_xy=(48.0, 38.0))
+res = sc.save(
+    out_path="figures/mechanism_schematic.png",
+    caption_title="Pathophysiological Mechanism Schematic",
+    alt_text="Vector schematic of plaque rupture and inflammatory cascade",
+    dpi=600,
+    strict=True,
+)
+```
