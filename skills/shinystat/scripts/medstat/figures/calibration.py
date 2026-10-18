@@ -57,6 +57,7 @@ def plot_calibration(
         secondary_color = CLINICAL_PALETTE["secondary"]
         neutral_color = CLINICAL_PALETTE["neutral"]
 
+    assert_zero_phi_text([title])
     fig, ax = plt.subplots(figsize=(w, h), dpi=dpi)
     if journal is not None:
         style_axis(ax, journal)
@@ -150,7 +151,6 @@ def plot_calibration(
 
     fig.tight_layout()
 
-    assert_zero_phi_text([title])
     qa = qa_layout(fig, check_outside=False)
 
     source_df = pd.DataFrame(
@@ -221,6 +221,7 @@ def plot_recalibration_comparison(
         primary_color = CLINICAL_PALETTE["primary"]
         neutral_color = CLINICAL_PALETTE["neutral"]
 
+    assert_zero_phi_text([title])
     fig, ax = plt.subplots(figsize=(w, h), dpi=dpi)
     if journal is not None:
         style_axis(ax, journal)
@@ -348,7 +349,6 @@ def plot_recalibration_comparison(
 
     fig.tight_layout()
 
-    assert_zero_phi_text([title])
     qa = qa_layout(fig, check_outside=False)
 
     # Create coordinate table
@@ -421,6 +421,7 @@ def plot_bootstrap_optimism(
         primary_color = CLINICAL_PALETTE["primary"]
         secondary_color = "#94A3B8"
 
+    assert_zero_phi_text([title])
     fig, ax = plt.subplots(figsize=(w, max(h, 4.2)), dpi=dpi)
     if journal is not None:
         style_axis(ax, journal)
@@ -549,7 +550,6 @@ def plot_bootstrap_optimism(
 
     fig.tight_layout()
 
-    assert_zero_phi_text([title])
     qa = qa_layout(fig, check_outside=False)
 
     source_df = pd.DataFrame(

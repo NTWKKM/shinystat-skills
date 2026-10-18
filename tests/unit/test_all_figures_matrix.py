@@ -236,7 +236,7 @@ def test_forest_plot_matrix_all_scales_and_journals(tmp_path: Path):
     # Fine-Gray Subdistribution HR label test
     res_fg = plot_forest(
         forest_df,
-        scale="Subdistribution HR",
+        scale="SHR",
         journal="LANCET",
         target="double_col",
         out_path=str(tmp_path / "forest_fg_lancet.png"),
@@ -399,7 +399,9 @@ def test_diagnostic_and_prediction_matrix(tmp_path: Path):
 # ==============================================================================
 
 
-def test_causal_balance_and_agreement_matrix(tmp_path: Path):
+def test_causal_balance_and_agreement_matrix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     # Love Plot (Austin 2009)
     love_df = pd.DataFrame(
         {
@@ -429,25 +431,35 @@ def test_causal_balance_and_agreement_matrix(tmp_path: Path):
     np.random.seed(42)
     m1 = np.random.normal(120, 15, 100)
     m2 = m1 + np.random.normal(2.5, 4.0, 100)
+    diffs = m1 - m2
+    mean_diff = float(np.mean(diffs))
+    sd_diff = float(np.std(diffs, ddof=1))
+    loa_upper = float(mean_diff + 1.96 * sd_diff)
+    loa_lower = float(mean_diff - 1.96 * sd_diff)
+    ci_mean = (mean_diff - 0.8, mean_diff + 0.8)
+    ci_upper = (loa_upper - 1.2, loa_upper + 1.2)
+    ci_lower = (loa_lower - 1.2, loa_lower + 1.2)
+
     ba_data = {
         "means": (m1 + m2) / 2.0,
-        "diffs": m1 - m2,
-        "mean_diff": float(np.mean(m1 - m2)),
-        "loa_upper": float(np.mean(m1 - m2) + 1.96 * np.std(m1 - m2)),
-        "loa_lower": float(np.mean(m1 - m2) - 1.96 * np.std(m1 - m2)),
-        "ci_mean": (
-            float(np.mean(m1 - m2) - 0.8),
-            float(np.mean(m1 - m2) + 0.8),
-        ),
-        "ci_upper": (
-            float(np.mean(m1 - m2) + 1.96 * np.std(m1 - m2) - 1.2),
-            float(np.mean(m1 - m2) + 1.96 * np.std(m1 - m2) + 1.2),
-        ),
-        "ci_lower": (
-            float(np.mean(m1 - m2) - 1.96 * np.std(m1 - m2) - 1.2),
-            float(np.mean(m1 - m2) - 1.96 * np.std(m1 - m2) + 1.2),
-        ),
+        "diffs": diffs,
+        "mean_diff": mean_diff,
+        "loa_upper": loa_upper,
+        "loa_lower": loa_lower,
+        "ci_mean_diff": ci_mean,
+        "ci_loa_upper": ci_upper,
+        "ci_loa_lower": ci_lower,
     }
+
+    captured_spans: list[tuple[float, float]] = []
+    orig_axhspan = plt.Axes.axhspan
+
+    def spy_axhspan(self, ymin, ymax, *args, **kwargs):
+        captured_spans.append((ymin, ymax))
+        return orig_axhspan(self, ymin, ymax, *args, **kwargs)
+
+    monkeypatch.setattr(plt.Axes, "axhspan", spy_axhspan)
+
     for jnl in JOURNALS:
         out_ba = tmp_path / f"ba_{jnl}.png"
         res_ba = plot_bland_altman(
@@ -457,6 +469,11 @@ def test_causal_balance_and_agreement_matrix(tmp_path: Path):
             out_path=str(out_ba),
         )
         _assert_bundle_intact(res_ba, expect_vector=True)
+
+    # Assert that axhspan was called with all three fixture confidence intervals
+    assert (ci_mean[0], ci_mean[1]) in captured_spans
+    assert (ci_upper[0], ci_upper[1]) in captured_spans
+    assert (ci_lower[0], ci_lower[1]) in captured_spans
 
 
 # ==============================================================================

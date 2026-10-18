@@ -73,6 +73,13 @@ def plot_forest(
                     f"Ratio scale '{scale}' requires strictly positive {col} values (> 0)"
                 )
 
+    phi_texts = [title, favor_left_label, favor_right_label] + df["term"].astype(
+        str
+    ).tolist()
+    if "events_text" in df.columns:
+        phi_texts.extend(df["events_text"].dropna().astype(str).tolist())
+    assert_zero_phi_text(phi_texts)
+
     if journal is not None:
         spec = apply_journal_theme(journal, canvas, target)
         primary_color = spec["palette"][0]
@@ -289,12 +296,6 @@ def plot_forest(
             linespacing=1.0,
         )
 
-        phi_texts = [title, favor_left_label, favor_right_label] + df["term"].astype(
-            str
-        ).tolist()
-        if "events_text" in df.columns:
-            phi_texts.extend(df["events_text"].dropna().astype(str).tolist())
-        assert_zero_phi_text(phi_texts)
         qa = qa_layout(fig, check_outside=False)
 
         if export_vector:
@@ -436,7 +437,6 @@ def plot_forest(
 
     fig.tight_layout()
 
-    assert_zero_phi_text([title] + terms)
     qa = qa_layout(fig, check_outside=False)
 
     rev_df = df_rev.iloc[::-1].reset_index(drop=True)

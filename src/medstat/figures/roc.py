@@ -223,10 +223,14 @@ def plot_roc_curve(
 
     fig.tight_layout()
 
-    assert_zero_phi_text(
-        [title, model_name]
-        + ([str(paired_roc_data.get("name"))] if paired_roc_data else [])
-    )
+    try:
+        assert_zero_phi_text(
+            [title, model_name]
+            + ([str(paired_roc_data.get("name"))] if paired_roc_data else [])
+        )
+    except Exception:
+        plt.close(fig)
+        raise
     qa = qa_layout(fig, check_outside=False)
 
     if paired_roc_data is not None:
@@ -490,7 +494,11 @@ def plot_time_dependent_roc(
 
     fig.tight_layout()
 
-    assert_zero_phi_text([fig_title])
+    try:
+        assert_zero_phi_text([fig_title])
+    except Exception:
+        plt.close(fig)
+        raise
     qa = qa_layout(fig, check_outside=False)
 
     if export_vector:
@@ -670,7 +678,11 @@ def plot_reclassification(
 
     fig.tight_layout()
 
-    assert_zero_phi_text([title])
+    try:
+        assert_zero_phi_text([title])
+    except Exception:
+        plt.close(fig)
+        raise
     qa = qa_layout(fig, check_outside=False)
 
     source_df = pd.DataFrame(
