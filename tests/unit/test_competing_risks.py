@@ -14,6 +14,7 @@ from medstat.figures.html.survival import plot_dual_cif
 from medstat.figures.survival import plot_cif
 from medstat.models.survival import (
     CompetingRisksCIFResult,
+    check_lifelines_entry_cluster_guard,
     fit_competing_risks_cif,
     fit_competing_risks_regression,
 )
@@ -116,6 +117,14 @@ def test_fit_competing_risks_regression(synthetic_competing_risks: pd.DataFrame)
     # Reference value assertions on deterministic fixture (np.random.seed(42), n=200)
     assert trt_row["fine_gray_shr"] == pytest.approx(1.9883, abs=0.05)
     assert trt_row["cause_specific_hr"] == pytest.approx(1.8725, abs=0.05)
+    assert trt_row["fg_se"] == pytest.approx(0.2092, abs=0.02)
+    assert res["fg_se_method"] == "sandwich"
+    assert res["fg_score_gap"] < 0.05
+
+
+def test_lifelines_entry_cluster_guard():
+    with pytest.warns(UserWarning, match="Upstream lifelines defect detected"):
+        check_lifelines_entry_cluster_guard(entry_col="start", cluster_col="id")
 
 
 def test_plot_cif_and_dual_cif(tmp_path, synthetic_competing_risks: pd.DataFrame):

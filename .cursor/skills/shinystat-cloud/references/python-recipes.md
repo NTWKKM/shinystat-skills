@@ -2675,14 +2675,16 @@ def fit_weighted_outcome_model(
 
 ## 15. Competing Risks Survival Analysis (Aalen-Johansen CIF & Fine-Gray Model)
 
-Standalone implementation for non-parametric Cumulative Incidence Function (Aalen-Johansen) with Naive \$1 - \text{Kaplan-Meier}\$ overestimation audit, Cause-Specific Cox regression (etiological rate ratio), and Fine-Gray Subdistribution Hazard model via IPCW counting process expansion (clinical prognosis).
+Aalen-Johansen CIF with a naive \$1 - \text{KM}\$ overestimation audit, Cause-Specific Cox (etiological rate ratio), and Fine-Gray Subdistribution Hazard (clinical prognosis) via IPCW counting-process expansion. Fine-Gray standard errors come from an *entry-aware* cluster sandwich or a patient bootstrap.
 
 ```python
+import warnings
 from typing import Any
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
 from lifelines import AalenJohansenFitter, CoxPHFitter, KaplanMeierFitter
+from lifelines.exceptions import StatisticalWarning
 
 
 def fit_competing_risks_cif(
@@ -2762,6 +2764,130 @@ def fit_competing_risks_cif(
     }
 
 
+def expand_fine_gray(
+    clean: pd.DataFrame,
+    duration_col: str,
+    event_col: str,
+    covariates: list[str],
+    event_of_interest: int = 1,
+    competing_event: int = 2,
+) -> pd.DataFrame:
+    """IPCW counting-process expansion: a patient with the competing event stays in the risk set, weighted G(t)/G(t_i)."""
+    clean = clean.reset_index(drop=True)
+    km = KaplanMeierFitter().fit(clean[duration_col], event_observed=(clean[event_col] == 0).astype(int))
+    g_t = km.survival_function_.index.to_numpy(dtype=float)
+    g_v = km.survival_function_.iloc[:, 0].to_numpy(dtype=float)
+
+    def _G(t: np.ndarray | float) -> np.ndarray:
+        idx = np.searchsorted(g_t, t, side="left") - 1
+        return np.maximum(np.where(idx >= 0, g_v[np.maximum(idx, 0)], 1.0), 1e-4)
+
+    fail = np.sort(clean.loc[clean[event_col] == event_of_interest, duration_col].unique())
+    main = clean[covariates].astype(float).copy()
+    main["_id"] = np.arange(len(clean))
+    main["_start"] = 0.0
+    main["_stop"] = clean[duration_col].astype(float).to_numpy()
+    main["_event"] = (clean[event_col] == event_of_interest).astype(int).to_numpy()
+    main["_weight"] = 1.0
+    parts = [main]
+    for i in np.flatnonzero((clean[event_col] == competing_event).to_numpy()):
+        t_i = float(clean.at[i, duration_col])
+        later = fail[fail > t_i]
+        if later.size == 0:
+            continue
+        blk = pd.DataFrame(np.repeat(clean.loc[[i], covariates].to_numpy(float), later.size, axis=0), columns=covariates)
+        blk["_id"] = i
+        blk["_start"] = np.r_[t_i, later[:-1]]
+        blk["_stop"] = later
+        blk["_event"] = 0
+        blk["_weight"] = np.maximum(_G(later) / float(_G(t_i)), 1e-4)
+        parts.append(blk)
+    return pd.concat(parts, ignore_index=True)
+
+
+def entry_aware_cluster_sandwich(
+    expanded: pd.DataFrame,
+    covariates: list[str],
+    beta: np.ndarray,
+    bread: np.ndarray,
+) -> tuple[np.ndarray, float]:
+    """Cluster-robust SE for counting-process Cox data: V = bread @ (sum_c U_c U_c') @ bread.
+
+    Score residuals U_i = w_i d_i (x_i - xbar(t_i)) - w_i e^{b'x_i} * integral over (start_i, stop_i] of (x_i - xbar(s)) dLambda0(s),
+    with risk set {start < t <= stop} (Breslow form). `bread` is the model-based covariance of the fitted Cox model.
+    Returns (robust SE, score_gap); score_gap = max_j |sum_c U_cj| / sqrt(sum_c U_cj^2) over clusters is 0 when the fit and the
+    score share the same tie convention, so a large value flags a tie mismatch.
+    """
+    X = expanded[covariates].to_numpy(float)
+    st, sp = expanded["_start"].to_numpy(float), expanded["_stop"].to_numpy(float)
+    ev, w = expanded["_event"].to_numpy(int), expanded["_weight"].to_numpy(float)
+    r = w * np.exp(X @ beta)
+    base = np.column_stack([r, r[:, None] * X])                       # [r | r*x], summed over each risk set
+
+    def _cum(key: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        order = np.argsort(key, kind="stable")
+        return key[order], np.vstack([np.zeros((1, base.shape[1])), np.cumsum(base[order], axis=0)])
+
+    k_in, c_in = _cum(st)
+    k_out, c_out = _cum(sp)
+    t_ev = np.unique(sp[ev == 1])
+    risk = c_in[np.searchsorted(k_in, t_ev, side="left")] - c_out[np.searchsorted(k_out, t_ev, side="left")]
+    s0, s1 = risk[:, 0], risk[:, 1:]
+    xbar = s1 / s0[:, None]
+    d_k = np.bincount(np.searchsorted(t_ev, sp[ev == 1]), weights=w[ev == 1], minlength=len(t_ev))
+    d_lambda = d_k / s0
+    cum_l = np.r_[0.0, np.cumsum(d_lambda)]
+    cum_xl = np.vstack([np.zeros(X.shape[1]), np.cumsum(xbar * d_lambda[:, None], axis=0)])
+    hi, lo = np.searchsorted(t_ev, sp, side="right"), np.searchsorted(t_ev, st, side="right")
+    compensator = X * (cum_l[hi] - cum_l[lo])[:, None] - (cum_xl[hi] - cum_xl[lo])
+    score = -(r[:, None] * compensator)
+    hit = np.flatnonzero(ev == 1)
+    score[hit] += w[hit, None] * (X[hit] - xbar[np.searchsorted(t_ev, sp[hit])])
+
+    _, inv = np.unique(expanded["_id"].to_numpy(), return_inverse=True)
+    by_cluster = np.zeros((inv.max() + 1, X.shape[1]))
+    np.add.at(by_cluster, inv, score)
+    se = np.sqrt(np.diag(bread @ (by_cluster.T @ by_cluster) @ bread))
+    score_gap = float(np.max(np.abs(by_cluster.sum(axis=0)) / np.sqrt((by_cluster**2).sum(axis=0))))
+    return se, score_gap
+
+
+def bootstrap_fine_gray_se(
+    clean: pd.DataFrame,
+    duration_col: str,
+    event_col: str,
+    covariates: list[str],
+    event_of_interest: int = 1,
+    competing_event: int = 2,
+    n_boot: int = 200,
+    seed: int = 0,
+) -> np.ndarray:
+    """Patient-level bootstrap SE of the Fine-Gray coefficients (censoring distribution re-estimated per resample)."""
+    rng = np.random.default_rng(seed)
+    draws = []
+    for _ in range(n_boot):
+        resample = clean.iloc[rng.integers(0, len(clean), len(clean))]
+        try:
+            exp_b = expand_fine_gray(resample, duration_col, event_col, covariates, event_of_interest, competing_event)
+            fit_b = _fit_fine_gray(exp_b, covariates, alpha=0.05)
+            draws.append(fit_b.params_.reindex(covariates).to_numpy())
+        except Exception:  # a resample can be degenerate (no events in a stratum); skip it
+            continue
+    if len(draws) < 0.9 * n_boot:
+        raise RuntimeError(f"bootstrap converged in only {len(draws)}/{n_boot} resamples")
+    return np.std(np.asarray(draws), axis=0, ddof=1)
+
+
+def _fit_fine_gray(expanded: pd.DataFrame, covariates: list[str], alpha: float) -> CoxPHFitter:
+    # No cluster_col: lifelines' cluster sandwich ignores entry times and inflates SE (see entry_aware_cluster_sandwich).
+    cph = CoxPHFitter(alpha=alpha)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", StatisticalWarning)  # non-integer IPCW weights: variance comes from the sandwich/bootstrap
+        cph.fit(expanded[covariates + ["_start", "_stop", "_event", "_weight"]], duration_col="_stop", entry_col="_start",
+                event_col="_event", weights_col="_weight", robust=False)
+    return cph
+
+
 def fit_competing_risks_regression(
     df: pd.DataFrame,
     duration_col: str,
@@ -2770,65 +2896,49 @@ def fit_competing_risks_regression(
     event_of_interest: int = 1,
     competing_event: int = 2,
     alpha: float = 0.05,
+    se_method: str = "sandwich",
+    n_boot: int = 200,
+    seed: int = 0,
+    score_gap_limit: float = 0.20,
 ) -> pd.DataFrame:
-    """Fit dual Cause-Specific Cox and Fine-Gray Subdistribution Hazard models side by side."""
-    clean = df[[duration_col, event_col] + covariates].dropna().copy()
-    clean["_id"] = np.arange(len(clean))
+    """Fit dual Cause-Specific Cox and Fine-Gray Subdistribution Hazard models side by side.
 
-    # 1. Cause-Specific Cox Model
+    se_method: "sandwich" (entry-aware cluster sandwich, fast) or "bootstrap" (patient resampling, slow, covers IPCW uncertainty).
+    """
+    clean = df[[duration_col, event_col] + covariates].dropna().reset_index(drop=True)
+
+    # 1. Cause-Specific Cox Model (one row per patient, so lifelines' robust SE is exact)
     df_cs = clean.copy()
     df_cs["_cs_event"] = (df_cs[event_col] == event_of_interest).astype(int)
     cph_cs = CoxPHFitter(alpha=alpha)
     cph_cs.fit(df_cs[[duration_col, "_cs_event"] + covariates], duration_col=duration_col, event_col="_cs_event", robust=True)
 
     # 2. Fine-Gray Model via IPCW counting process expansion
-    km_censor = KaplanMeierFitter()
-    km_censor.fit(clean[duration_col], event_observed=(clean[event_col] == 0).astype(int))
-    g_sf = km_censor.survival_function_
-
-    fail_times = np.sort(clean.loc[clean[event_col] == event_of_interest, duration_col].unique())
-
-    def _get_G(t: float) -> float:
-        idx = g_sf.index.searchsorted(t, side="left") - 1
-        return max(float(g_sf.iloc[idx, 0]) if idx >= 0 else 1.0, 1e-4)
-
-    exp_rows = []
-    for _, row in clean.iterrows():
-        s_id = row["_id"]
-        t_i = float(row[duration_col])
-        e_i = int(row[event_col])
-        cov_dict = {cov: row[cov] for cov in covariates}
-
-        if e_i == event_of_interest:
-            r = {"_id": s_id, "_start": 0.0, "_stop": t_i, "_event": 1, "_weight": 1.0, **cov_dict}
-            exp_rows.append(r)
-        elif e_i == 0:
-            r = {"_id": s_id, "_start": 0.0, "_stop": t_i, "_event": 0, "_weight": 1.0, **cov_dict}
-            exp_rows.append(r)
-        elif e_i == competing_event:
-            r0 = {"_id": s_id, "_start": 0.0, "_stop": t_i, "_event": 0, "_weight": 1.0, **cov_dict}
-            exp_rows.append(r0)
-            subseq = fail_times[fail_times > t_i]
-            g_ti = _get_G(t_i)
-            prev_t = t_i
-            for tj in subseq:
-                w_ij = max(_get_G(tj) / g_ti, 1e-4)
-                exp_rows.append({"_id": s_id, "_start": prev_t, "_stop": tj, "_event": 0, "_weight": w_ij, **cov_dict})
-                prev_t = tj
-
-    cph_fg = CoxPHFitter(alpha=alpha)
-    cph_fg.fit(pd.DataFrame(exp_rows), duration_col="_stop", entry_col="_start", event_col="_event", weights_col="_weight", cluster_col="_id", robust=True)
+    expanded = expand_fine_gray(clean, duration_col, event_col, covariates, event_of_interest, competing_event)
+    cph_fg = _fit_fine_gray(expanded, covariates, alpha)
+    beta = cph_fg.params_.reindex(covariates).to_numpy()
+    score_gap = float("nan")
+    if se_method == "sandwich":
+        bread = cph_fg.variance_matrix_.loc[covariates, covariates].to_numpy()
+        se, score_gap = entry_aware_cluster_sandwich(expanded, covariates, beta, bread)
+        if score_gap > score_gap_limit:
+            warnings.warn(f"score_gap={score_gap:.3f} > {score_gap_limit}: heavy ties; rerun with se_method='bootstrap'", stacklevel=2)
+    elif se_method == "bootstrap":
+        se = bootstrap_fine_gray_se(clean, duration_col, event_col, covariates, event_of_interest, competing_event, n_boot, seed)
+    else:
+        raise ValueError("se_method must be 'sandwich' or 'bootstrap'")
+    z_crit = float(stats.norm.ppf(1.0 - alpha / 2.0))
 
     # 3. Side-by-side comparison
     comp_rows = []
-    for cov in covariates:
+    for j, cov in enumerate(covariates):
         cs_hr = float(cph_cs.hazard_ratios_[cov])
         cs_ci = cph_cs.confidence_intervals_.loc[cov]
         cs_p = float(cph_cs.summary.loc[cov, "p"])
 
-        fg_shr = float(cph_fg.hazard_ratios_[cov])
-        fg_ci = cph_fg.confidence_intervals_.loc[cov]
-        fg_p = float(cph_fg.summary.loc[cov, "p"])
+        fg_shr = float(np.exp(beta[j]))
+        fg_lo, fg_hi = float(np.exp(beta[j] - z_crit * se[j])), float(np.exp(beta[j] + z_crit * se[j]))
+        fg_p = float(2.0 * stats.norm.sf(abs(beta[j] / se[j])))
 
         comp_rows.append({
             "covariate": cov,
@@ -2836,13 +2946,31 @@ def fit_competing_risks_regression(
             "cs_95_ci": f"{cs_hr:.3f} ({np.exp(cs_ci.iloc[0]):.3f} to {np.exp(cs_ci.iloc[1]):.3f})",
             "cs_p_value": cs_p,
             "fine_gray_shr": round(fg_shr, 3),
-            "fg_95_ci": f"{fg_shr:.3f} ({np.exp(fg_ci.iloc[0]):.3f} to {np.exp(fg_ci.iloc[1]):.3f})",
+            "fg_95_ci": f"{fg_shr:.3f} ({fg_lo:.3f} to {fg_hi:.3f})",
             "fg_p_value": fg_p,
             "profile": "Divergent" if (cs_p < 0.05) != (fg_p < 0.05) else "Concordant",
         })
 
-    return pd.DataFrame(comp_rows)
+    out = pd.DataFrame(comp_rows)
+    out.attrs.update({"fg_se_method": se_method, "fg_score_gap": score_gap})
+    return out
 ```
+
+### Run order and completion criteria
+
+1. **CIF per arm.** `fit_competing_risks_cif(time, event, 1, 2, horizons=[...])` on each arm. Done when `horizon_summary` lists every horizon you report.
+2. **Regression.** `fit_competing_risks_regression(df, time, event, covariates)` returns Cause-Specific HR and Fine-Gray SHR side by side. Done when `out.attrs["fg_se_method"]` is `"sandwich"` with `out.attrs["fg_score_gap"] <= 0.20`, or is `"bootstrap"`.
+3. **Heavy ties.** A `score_gap` warning means rerun with `se_method="bootstrap"`. Done when the reported Fine-Gray CI comes from that rerun.
+4. **Report.** State the SE method in Methods. Done when each reported Fine-Gray CI traces to `fg_95_ci`.
+
+### Why the SE is computed here (single source of truth)
+
+- **lifelines' `cluster_col` is entry-blind.** `_compute_score_within_strata` takes risk sets as every row with `stop >= t` and integrates the compensator from 0 instead of `(start, stop]`. A patient with many expanded rows is counted repeatedly and `groupby(cluster).sum()` compounds it. Measured on lifelines 0.27.8 to 0.30.3: SE inflated 1.3x to 4.8x on the colon trial (37 competing events x ~110 extra rows each; 4,971 rows for 888 patients), 1.1x to 1.4x on shorter expansions. Point estimates are unaffected. Passing `cluster_col` also forces `robust=True`, so `robust=False` does not avoid it.
+- **Invariance is the correctness test.** Re-expressing identical follow-up as more `(start, stop]` pieces must leave the SE unchanged; `entry_aware_cluster_sandwich` satisfies this to 1e-9 (`test_fine_gray_split_invariance.py`).
+- **Ties.** lifelines fits with Efron; the score is Breslow; the bread is lifelines' own `variance_matrix_`. `score_gap` is 0 when the conventions agree. Calibration (one simulation family, n=500; the 0.20 limit keeps the sandwich within about 4% of the bootstrap): gap 0.10 gave sandwich/bootstrap SE ratios of 0.97 to 1.00, gap 0.18 gave 0.96 to 0.99, gap 0.35 gave 0.93 to 0.96, gap 0.48 gave 0.91 to 0.95. The colon trial (day-level ties) gave 0.005.
+- **Censoring weights.** The sandwich treats the censoring KM `G(t)` as known; the bootstrap re-estimates it. On the colon trial the two agree within 0.90x to 1.07x for all 13 covariates.
+- **Cost.** Sandwich: about 1 s for 888 patients (4,971 expanded rows). Bootstrap: about 0.65 s per resample on that dataset.
+
 
 ---
 
