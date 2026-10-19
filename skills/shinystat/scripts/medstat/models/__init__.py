@@ -27,11 +27,19 @@ from medstat.models.sensitivity import bootstrap_confidence_interval, calculate_
 from medstat.models.splines import fit_cox_rcs
 from medstat.models.survival import (
     CompetingRisksCIFResult,
+    bootstrap_fine_gray_se,
+    check_lifelines_entry_cluster_guard,
     compare_survival_curves,
+    entry_aware_cluster_sandwich,
+    expand_fine_gray,
     fit_competing_risks_cif,
     fit_competing_risks_regression,
     fit_cox_ph,
     fit_kaplan_meier,
+    fit_survival_analysis_suite,
+    piecewise_hr,
+    refit_cox_with_strata,
+    schoenfeld_diagnostics,
 )
 
 
@@ -89,7 +97,15 @@ __all__ = [
     "fit_cox_ph",
     "fit_competing_risks_cif",
     "fit_competing_risks_regression",
+    "expand_fine_gray",
+    "entry_aware_cluster_sandwich",
+    "bootstrap_fine_gray_se",
+    "check_lifelines_entry_cluster_guard",
     "CompetingRisksCIFResult",
+    "fit_survival_analysis_suite",
+    "schoenfeld_diagnostics",
+    "refit_cox_with_strata",
+    "piecewise_hr",
     "fit_cox_rcs",
     "fit_proportional_odds",
     "test_proportional_odds",
