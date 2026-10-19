@@ -1612,8 +1612,8 @@ def schoenfeld_diagnostics(
 
     Returns:
         dict containing p_values, test_statistics, bonferroni_alpha,
-        strong_violations, weak_violations, no_ph_violation_detected,
-        PH_Assumptions_Passed, and PH_Note.
+        strong_violations, weak_violations, indeterminate_tests,
+        no_ph_violation_detected, PH_Assumptions_Passed, and PH_Note.
     """
     prop_test = proportional_hazard_test(cph, df, time_transform=time_transform)
     p_values = {k: float(v) for k, v in prop_test.summary["p"].items()}
@@ -1623,18 +1623,30 @@ def schoenfeld_diagnostics(
     k = len(p_values)
     bonferroni_alpha = 0.05 / max(k, 1)
 
-    strong_violations = [var for var, p in p_values.items() if p <= bonferroni_alpha]
-    weak_violations = [
-        var for var, p in p_values.items() if bonferroni_alpha < p <= 0.05
+    indeterminate_tests = [var for var, p in p_values.items() if not np.isfinite(p)]
+    strong_violations = [
+        var for var, p in p_values.items() if np.isfinite(p) and p <= bonferroni_alpha
     ]
-    passed = len(strong_violations) == 0 and len(weak_violations) == 0
-
-    note = (
-        "No proportional hazards violation detected (all p > 0.05)."
-        if passed
-        else f"PH violation detected: {len(strong_violations)} strong (p <= {bonferroni_alpha:.4f}), "
-        f"{len(weak_violations)} weak (0.05 >= p > {bonferroni_alpha:.4f})."
+    weak_violations = [
+        var
+        for var, p in p_values.items()
+        if np.isfinite(p) and bonferroni_alpha < p <= 0.05
+    ]
+    passed = (
+        len(strong_violations) == 0
+        and len(weak_violations) == 0
+        and len(indeterminate_tests) == 0
     )
+
+    if indeterminate_tests:
+        note = f"Indeterminate PH test result: non-finite p-value for {indeterminate_tests}."
+    elif passed:
+        note = "No proportional hazards violation detected (all p > 0.05)."
+    else:
+        note = (
+            f"PH violation detected: {len(strong_violations)} strong (p <= {bonferroni_alpha:.4f}), "
+            f"{len(weak_violations)} weak (0.05 >= p > {bonferroni_alpha:.4f})."
+        )
 
     return {
         "p_values": p_values,
@@ -1642,6 +1654,7 @@ def schoenfeld_diagnostics(
         "bonferroni_alpha": bonferroni_alpha,
         "strong_violations": strong_violations,
         "weak_violations": weak_violations,
+        "indeterminate_tests": indeterminate_tests,
         "no_ph_violation_detected": passed,
         "PH_Assumptions_Passed": passed,
         "PH_Note": note,
@@ -1670,7 +1683,7 @@ def refit_cox_with_strata(
         penalizer: L2 penalty parameter.
 
     Returns:
-        pd.DataFrame containing HR table for non-strata covariates.
+        pd.DataFrame containing HR table for non-strata covariates with retention metadata.
     """
     if exposure in strata_cols:
         raise ValueError(
@@ -1681,7 +1694,13 @@ def refit_cox_with_strata(
     all_needed = list(
         dict.fromkeys([duration_col, event_col] + covariates + strata_cols)
     )
+    n_initial = len(df)
+    missing_by_col = {
+        col: int(df[col].isna().sum()) for col in all_needed if df[col].isna().sum() > 0
+    }
     clean_df = df[all_needed].dropna().copy()
+    n_analyzed = len(clean_df)
+    n_excluded = n_initial - n_analyzed
 
     cph = CoxPHFitter(penalizer=penalizer)
     cph.fit(
@@ -1709,6 +1728,14 @@ def refit_cox_with_strata(
     res_df.attrs["model"] = cph
     res_df.attrs["strata_cols"] = list(strata_cols)
     res_df.attrs["exposure"] = exposure
+    res_df.attrs["retention"] = {
+        "n_initial": n_initial,
+        "n_analyzed": n_analyzed,
+        "n_excluded": n_excluded,
+        "exclusion_reasons": {
+            f"Missing {col}": count for col, count in missing_by_col.items()
+        },
+    }
     return res_df
 
 
@@ -1740,10 +1767,38 @@ def piecewise_hr(
     Returns:
         pd.DataFrame containing period-specific HRs for the exposure.
     """
-    if isinstance(cut_points, (int, float)):
+    if isinstance(cut_points, (int, float, np.integer, np.floating)):
         cuts = [float(cut_points)]
     else:
-        cuts = sorted([float(c) for c in cut_points])
+        cuts = [float(c) for c in cut_points]
+
+    if len(cuts) == 0:
+        raise ValueError("cut_points must contain at least one cut time.")
+    if not np.all(np.isfinite(cuts)):
+        raise ValueError("cut_points must be finite numbers.")
+    if any(c <= 0 for c in cuts):
+        raise ValueError("cut_points must be strictly positive (> 0).")
+    cuts = sorted(list(set(cuts)))
+
+    other_covs = [c for c in (covariates or []) if c != exposure]
+    cols_needed = [duration_col, event_col, exposure] + other_covs
+    clean_df = df[cols_needed].dropna().reset_index(drop=True)
+
+    n_initial = len(clean_df)
+    clean_df = clean_df[clean_df[duration_col] > 0].reset_index(drop=True)
+    n_zero_duration_excluded = n_initial - len(clean_df)
+
+    durations = clean_df[duration_col].to_numpy()
+    if len(durations) == 0:
+        raise ValueError(
+            "No positive duration observations remaining for piecewise Cox model."
+        )
+
+    max_dur = float(durations.max())
+    if any(c >= max_dur for c in cuts):
+        raise ValueError(
+            f"All cut_points must be strictly less than maximum follow-up duration ({max_dur})."
+        )
 
     boundaries = [0.0] + cuts + [np.inf]
     period_names = []
@@ -1751,17 +1806,12 @@ def piecewise_hr(
         lo = boundaries[m]
         hi = boundaries[m + 1]
         if hi == np.inf:
-            period_names.append(f"t >= {lo}")
+            period_names.append(f"t > {lo}")
         elif lo == 0.0:
-            period_names.append(f"t < {hi}")
+            period_names.append(f"t <= {hi}")
         else:
-            period_names.append(f"{lo} <= t < {hi}")
+            period_names.append(f"{lo} < t <= {hi}")
 
-    other_covs = [c for c in (covariates or []) if c != exposure]
-    cols_needed = [duration_col, event_col, exposure] + other_covs
-    clean_df = df[cols_needed].dropna().reset_index(drop=True)
-
-    durations = clean_df[duration_col].to_numpy()
     events = clean_df[event_col].to_numpy()
     exposures = clean_df[exposure].to_numpy()
     other_vals = {c: clean_df[c].to_numpy() for c in other_covs}
@@ -1838,6 +1888,7 @@ def piecewise_hr(
     res_df.attrs["full_summary"] = summary
     res_df.attrs["cut_points"] = cuts
     res_df.attrs["exposure"] = exposure
+    res_df.attrs["n_zero_duration_excluded"] = n_zero_duration_excluded
     return res_df
 
 

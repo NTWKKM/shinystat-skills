@@ -283,5 +283,131 @@ def test_fit_survival_analysis_suite_remedy_integration():
     assert "bonferroni_alpha" in schoen
     assert "strong_violations" in schoen
     assert "weak_violations" in schoen
+    assert "indeterminate_tests" in schoen
     assert "p_values" in schoen
     assert "exposure" in schoen["p_values"]
+
+
+def test_schoenfeld_indeterminate_p_values_prevent_pass(monkeypatch):
+    """Verify non-finite Schoenfeld p-values populate indeterminate_tests, prevent pass, and update note."""
+    df = _generate_piecewise_dataset(n=100, seed=42)
+    cph = CoxPHFitter()
+    cph.fit(df, duration_col="duration", event_col="event")
+
+    # Mock proportional_hazard_test to return a NaN p-value for exposure
+    class MockPropSummary:
+        summary = pd.DataFrame(
+            {
+                "test_statistic": [1.23, 0.45],
+                "p": [np.nan, 0.85],
+            },
+            index=["exposure", "covar2"],
+        )
+
+    def mock_prop_test(*args, **kwargs):
+        return MockPropSummary()
+
+    monkeypatch.setattr(
+        "medstat.models.survival.proportional_hazard_test", mock_prop_test
+    )
+
+    diag = schoenfeld_diagnostics(cph, df)
+
+    assert "exposure" in diag["indeterminate_tests"]
+    assert (
+        diag["passed"] is False
+        if "passed" in diag
+        else diag["no_ph_violation_detected"] is False
+    )
+    assert diag["PH_Assumptions_Passed"] is False
+    assert "Indeterminate PH test result" in diag["PH_Note"]
+    assert "exposure" in diag["PH_Note"]
+
+
+def test_refit_cox_with_strata_retention_records():
+    """Verify refit_cox_with_strata records N_initial, N_excluded, and itemized reasons in attrs."""
+    rng = np.random.default_rng(99)
+    n = 150
+    df = pd.DataFrame(
+        {
+            "time": rng.exponential(10, size=n) + 1,
+            "event": rng.binomial(1, 0.5, size=n),
+            "exposure": rng.binomial(1, 0.5, size=n),
+            "site": rng.choice(["Hospital A", "Hospital B"], size=n),
+            "biomarker": rng.normal(10, 2, size=n),
+        }
+    )
+    # Inject missing values
+    df.loc[0:4, "biomarker"] = np.nan  # 5 missing
+    df.loc[3:7, "site"] = np.nan  # 5 missing (indices 3, 4 overlap)
+
+    res_df = refit_cox_with_strata(
+        df=df,
+        duration_col="time",
+        event_col="event",
+        covariates=["exposure", "biomarker"],
+        strata_cols=["site"],
+        exposure="exposure",
+    )
+
+    retention = res_df.attrs["retention"]
+    assert retention["n_initial"] == 150
+    assert retention["n_analyzed"] == 142
+    assert retention["n_excluded"] == 8
+    assert retention["exclusion_reasons"] == {
+        "Missing biomarker": 5,
+        "Missing site": 5,
+    }
+
+
+def test_piecewise_hr_cut_points_validation_and_period_names():
+    """Verify cut_points validation (positive, finite, unique, < max duration) and (lo, hi] period names."""
+    df = _generate_piecewise_dataset(n=500, seed=42)
+    max_t = float(df["duration"].max())
+
+    # Invalid: empty cut_points
+    with pytest.raises(ValueError, match="at least one cut time"):
+        piecewise_hr(df, "duration", "event", "exposure", cut_points=[])
+
+    # Invalid: non-finite cut_points
+    with pytest.raises(ValueError, match="finite numbers"):
+        piecewise_hr(df, "duration", "event", "exposure", cut_points=[np.nan])
+
+    with pytest.raises(ValueError, match="finite numbers"):
+        piecewise_hr(df, "duration", "event", "exposure", cut_points=[np.inf])
+
+    # Invalid: non-positive cut_points
+    with pytest.raises(ValueError, match="strictly positive"):
+        piecewise_hr(df, "duration", "event", "exposure", cut_points=0.0)
+
+    with pytest.raises(ValueError, match="strictly positive"):
+        piecewise_hr(df, "duration", "event", "exposure", cut_points=[-1.5])
+
+    # Invalid: cut_point >= max duration
+    with pytest.raises(
+        ValueError, match="strictly less than maximum follow-up duration"
+    ):
+        piecewise_hr(df, "duration", "event", "exposure", cut_points=max_t + 1.0)
+
+    with pytest.raises(
+        ValueError, match="strictly less than maximum follow-up duration"
+    ):
+        piecewise_hr(df, "duration", "event", "exposure", cut_points=max_t)
+
+    # Valid multi-cut: verify period names use (lo, hi] notation
+    pw_res = piecewise_hr(df, "duration", "event", "exposure", cut_points=[1.5, 3.0])
+    assert list(pw_res["period"]) == ["t <= 1.5", "1.5 < t <= 3.0", "t > 3.0"]
+
+
+def test_piecewise_hr_zero_duration_filtering():
+    """Verify zero and negative durations are excluded and recorded in attrs."""
+    df = _generate_piecewise_dataset(n=300, seed=42)
+    # Inject 4 zero or negative durations
+    df.loc[0, "duration"] = 0.0
+    df.loc[1, "duration"] = 0.0
+    df.loc[2, "duration"] = -0.5
+    df.loc[3, "duration"] = -2.0
+
+    pw_res = piecewise_hr(df, "duration", "event", "exposure", cut_points=2.0)
+    assert pw_res.attrs["n_zero_duration_excluded"] == 4
+    assert len(pw_res) == 2

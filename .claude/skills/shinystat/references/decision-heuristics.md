@@ -93,11 +93,11 @@ Audit Event Types: Event of Interest vs. Competing Risks (e.g., CV death vs. non
 ├── Single Failure Type (No Competing Risks) ──▶ Standard Kaplan-Meier & Cox Proportional Hazards
 │   └── Proportional Hazards Violation Remedy Rule:
 │       On Schoenfeld P <= 0.05, inspect plot_schoenfeld_residuals (figures.md §9), then:
-│       ├── Nuisance covariate ──▶ refit with strata=[...] (its HR is no longer reported; `refit_cox_with_strata`)
+│       ├── P <= 0.05/k (k = covariates tested) is a strong violation
+│       ├── 0.05/k < P <= 0.05 is a weak violation (plot decides)
+│       ├── Nuisance covariate ──▶ refit with strata=[...] for meaningful categorical or defensibly grouped continuous variables (`refit_cox_with_strata`; its HR is no longer reported); otherwise retain and model non-linearity (RCS)
 │       ├── Exposure ──▶ piecewise/time-varying HR (`piecewise_hr`), or RMST
 │       └── Reporting ──▶ report both models and name the remedy beside each violator
-│       ├── P <= 0.05/k (k = covariates tested) is a strong violation
-│       └── 0.05/k < P <= 0.05 is a weak violation (plot decides)
 └── Multiple / Mutually Exclusive Failures
     ├── Cumulative Event Incidence / Absolute Risk Prediction:
     │   ├── DO NOT use Naive 1 - KM (treats competing events as censoring, estimating risk in a hypothetical world without competing events rather than real-world cumulative incidence; overestimates true risk)
@@ -111,11 +111,11 @@ Audit Event Types: Event of Interest vs. Competing Risks (e.g., CV death vs. non
 ```
 
 #### Proportional Hazards Violation Decision Rule
-On Schoenfeld P <= 0.05, inspect plot_schoenfeld_residuals (figures.md §9), then
-- nuisance covariate -> refit with strata=[...] (its HR is no longer reported);
-- exposure -> piecewise/time-varying HR, or RMST;
+On Schoenfeld P <= 0.05, inspect plot_schoenfeld_residuals (figures.md §9):
+- P <= 0.05/k (k = covariates tested) is a strong violation; between that and 0.05 is weak (plot decides).
+- nuisance covariate -> refit with strata=[...] for meaningful categorical or defensibly grouped continuous variables (`refit_cox_with_strata`; its HR is no longer reported); otherwise retain and model non-linearity (e.g. RCS);
+- exposure -> piecewise/time-varying HR (`piecewise_hr`), or RMST;
 - report both models and name the remedy beside each violator.
-P <= 0.05/k (k = covariates tested) is a strong violation; between that and 0.05 is weak (plot decides).
 
 
 ### F. Diagnostic Risk Reclassification & Incremental Value
