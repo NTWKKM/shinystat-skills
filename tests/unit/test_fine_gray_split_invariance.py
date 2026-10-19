@@ -88,6 +88,30 @@ def test_sandwich_invariant_to_interval_splitting(unsplit, step):
     assert gap_split == pytest.approx(gap_ref, abs=1e-9)
 
 
+def test_sandwich_invariant_split_at_exact_event_time(unsplit):
+    """Verifies (start, stop] boundary condition when an interval is split exactly at an observed event time."""
+    one, beta, bread = unsplit
+    event_times = np.sort(one.loc[one["_event"] == 1, "_stop"].unique())
+    cut_time = event_times[len(event_times) // 2]
+    assert cut_time < one["_stop"].max()
+
+    p1 = one.copy()
+    cut_mask = p1["_stop"] > cut_time
+    p1.loc[cut_mask, "_stop"] = cut_time
+    p1.loc[cut_mask, "_event"] = 0
+    p2 = one[cut_mask].copy()
+    p2["_start"] = cut_time
+    split = pd.concat([p1, p2], ignore_index=True)
+
+    # Confirm split created intervals starting exactly at cut_time
+    assert np.any(split["_start"] == cut_time)
+
+    se_ref, gap_ref = sandwich(one, COVS, beta, bread)
+    se_split, gap_split = sandwich(split, COVS, beta, bread)
+    np.testing.assert_allclose(se_split, se_ref, rtol=1e-9, atol=0)
+    assert gap_split == pytest.approx(gap_ref, abs=1e-9)
+
+
 def test_refit_on_split_data_keeps_se(unsplit):
     one, _, _ = unsplit
     se_ref, _ = sandwich(one, COVS, *_beta_bread(one))
