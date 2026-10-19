@@ -67,6 +67,10 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
 | **Figure Verification Subagent** | `figure-tester` | Specialized autonomous subagent enforcing publication standards across all figure families, journal house styles, bundle formats, and multi-format outputs. |
 | **Layout QA Collision Gate** | `qa_layout` | Automated post-render bounding-box collision detection evaluating overlapping text elements, legend encroachments, and margin clipping. |
 | **Color Vision Deficiency Gate** | `cvd_check` | Contrast ratio and color discernibility verification simulating Deuteranopia, Protanopia, and Tritanopia color blindness on figure palettes. |
+| **Schoenfeld Violator Remedy** | `schoenfeld_violator_remedy` | Mandatory rule (decision-heuristics.md §2.E, ADR 46) requiring that every covariate violating proportional hazards ($P \le 0.05$) carry an actionable remedy: stratification (`refit_cox_with_strata`) for nuisance covariates, or period-specific time-varying HR (`piecewise_hr`) or RMST for exposure. |
+| **Bonferroni PH Multiplicity** | `bonferroni_ph_multiplicity` | Multiple-testing correction threshold $\alpha_{\text{Bonferroni}} = 0.05 / k$ for $k$ tested covariates, partitioning violations into strong ($P \le \alpha_{\text{Bonferroni}}$) and weak ($\alpha_{\text{Bonferroni}} < P \le 0.05$). Known limitation: rank time transform can miss non-monotone effects, requiring residual plot inspection (`plot_schoenfeld_residuals`). |
+| **Piecewise Hazard Ratio** | `piecewise_hr` | Period-specific exposure HR estimation via counting-process episode splitting and lifelines `CoxTimeVaryingFitter`, taking standard errors strictly from model-based variance to avoid entry-time sandwich variance inflation. |
+
 
 ---
 

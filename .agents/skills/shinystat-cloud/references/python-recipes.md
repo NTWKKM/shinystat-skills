@@ -1582,17 +1582,263 @@ def fit_logistic_regression_table(
 
 ## 11. Survival Analysis: Kaplan-Meier, Log-Rank & Cox Proportional Hazards
 
-Computes Kaplan-Meier survival estimates with median survival times, Log-Rank hypothesis test (supports 2 or more groups), and multivariable Cox Proportional Hazards table with per-variable Grambsch-Therneau Schoenfeld residual tests.
+Computes Kaplan-Meier survival estimates with median survival times, Log-Rank hypothesis test (supports 2 or more groups), and multivariable Cox Proportional Hazards table with per-variable Grambsch-Therneau Schoenfeld residual tests. When proportional hazards assumptions are violated, consult [decision-heuristics.md §2.E](decision-heuristics.md#e-time-to-event-analysis-under-competing-risks--proportional-hazards-violations) and apply `refit_cox_with_strata` (for nuisance covariates) or `piecewise_hr` (for exposure).
 
 ```python
+from typing import Any
+
 import numpy as np
 import pandas as pd
-from lifelines import KaplanMeierFitter, CoxPHFitter
+from lifelines import CoxPHFitter, CoxTimeVaryingFitter, KaplanMeierFitter
 from lifelines.statistics import (
     logrank_test,
     multivariate_logrank_test,
     proportional_hazard_test,
 )
+
+
+def schoenfeld_diagnostics(
+    cph: CoxPHFitter,
+    df: pd.DataFrame,
+    time_transform: str = "rank",
+) -> dict[str, Any]:
+    """
+    Evaluate proportional hazards assumption via Schoenfeld residuals with Bonferroni multiplicity control.
+
+    Parameters:
+        cph: Fitted CoxPHFitter model.
+        df: DataFrame containing duration, event, and covariates used for fitting.
+        time_transform: Time transformation for Schoenfeld residuals ('rank', 'km', etc.).
+
+    Returns:
+        dict containing p_values, test_statistics, bonferroni_alpha,
+        strong_violations, weak_violations, no_ph_violation_detected,
+        PH_Assumptions_Passed, and PH_Note.
+    """
+    prop_test = proportional_hazard_test(cph, df, time_transform=time_transform)
+    p_values = {k: float(v) for k, v in prop_test.summary["p"].items()}
+    test_statistics = {
+        k: float(v) for k, v in prop_test.summary["test_statistic"].items()
+    }
+    k = len(p_values)
+    bonferroni_alpha = 0.05 / max(k, 1)
+
+    strong_violations = [var for var, p in p_values.items() if p <= bonferroni_alpha]
+    weak_violations = [
+        var for var, p in p_values.items() if bonferroni_alpha < p <= 0.05
+    ]
+    passed = len(strong_violations) == 0 and len(weak_violations) == 0
+
+    note = (
+        "No proportional hazards violation detected (all p > 0.05)."
+        if passed
+        else f"PH violation detected: {len(strong_violations)} strong (p <= {bonferroni_alpha:.4f}), "
+        f"{len(weak_violations)} weak (0.05 >= p > {bonferroni_alpha:.4f})."
+    )
+
+    return {
+        "p_values": p_values,
+        "test_statistics": test_statistics,
+        "bonferroni_alpha": bonferroni_alpha,
+        "strong_violations": strong_violations,
+        "weak_violations": weak_violations,
+        "no_ph_violation_detected": passed,
+        "PH_Assumptions_Passed": passed,
+        "PH_Note": note,
+    }
+
+
+def refit_cox_with_strata(
+    df: pd.DataFrame,
+    duration_col: str,
+    event_col: str,
+    covariates: list[str],
+    strata_cols: list[str],
+    exposure: str,
+    penalizer: float = 0.0,
+) -> pd.DataFrame:
+    """
+    Refit Cox model with stratified baseline hazards for nuisance covariates violating PH.
+
+    Parameters:
+        df: Input DataFrame.
+        duration_col: Follow-up duration column.
+        event_col: Event indicator column (0/1).
+        covariates: Covariates to include in the model.
+        strata_cols: Covariates to stratify on (baseline hazard varies by stratum).
+        exposure: Primary exposure variable name. Cannot be in strata_cols.
+        penalizer: L2 penalty parameter.
+
+    Returns:
+        pd.DataFrame containing HR table for non-strata covariates.
+    """
+    if exposure in strata_cols:
+        raise ValueError(
+            f"Exposure variable '{exposure}' cannot be in strata_cols; "
+            "stratification eliminates the exposure effect estimate."
+        )
+
+    all_needed = list(
+        dict.fromkeys([duration_col, event_col] + covariates + strata_cols)
+    )
+    clean_df = df[all_needed].dropna().copy()
+
+    cph = CoxPHFitter(penalizer=penalizer)
+    cph.fit(
+        clean_df, duration_col=duration_col, event_col=event_col, strata=strata_cols
+    )
+
+    summary = cph.summary.copy()
+    res_df = pd.DataFrame(
+        {
+            "coef": summary["coef"],
+            "exp(coef)": summary["exp(coef)"],
+            "hazard_ratio": summary["exp(coef)"],
+            "se(coef)": summary["se(coef)"],
+            "se": summary["se(coef)"],
+            "z": summary["z"],
+            "p": summary["p"],
+            "p_value": summary["p"],
+            "exp(coef) lower 95%": summary["exp(coef) lower 95%"],
+            "hr_ci_lower": summary["exp(coef) lower 95%"],
+            "exp(coef) upper 95%": summary["exp(coef) upper 95%"],
+            "hr_ci_upper": summary["exp(coef) upper 95%"],
+        },
+        index=summary.index,
+    )
+    res_df.attrs["model"] = cph
+    res_df.attrs["strata_cols"] = list(strata_cols)
+    res_df.attrs["exposure"] = exposure
+    return res_df
+
+
+def piecewise_hr(
+    df: pd.DataFrame,
+    duration_col: str,
+    event_col: str,
+    exposure: str,
+    covariates: list[str] | None = None,
+    cut_points: float | list[float] = 2.0,
+    penalizer: float = 0.0,
+) -> pd.DataFrame:
+    """
+    Estimate period-specific hazard ratios for an exposure violating proportional hazards.
+
+    Builds episode-split counting-process data and fits via lifelines CoxTimeVaryingFitter.
+    SEs are taken from model-based variance (cluster_col and robust=True omitted to avoid
+    upstream lifelines entry-time variance inflation defect).
+
+    Parameters:
+        df: Input DataFrame.
+        duration_col: Follow-up duration column.
+        event_col: Event indicator column (0/1).
+        exposure: Primary exposure variable name.
+        covariates: Optional additional baseline confounders to adjust for.
+        cut_points: Single cut time or list of cut times defining time periods.
+        penalizer: L2 penalty parameter.
+
+    Returns:
+        pd.DataFrame containing period-specific HRs for the exposure.
+    """
+    if isinstance(cut_points, (int, float)):
+        cuts = [float(cut_points)]
+    else:
+        cuts = sorted([float(c) for c in cut_points])
+
+    boundaries = [0.0] + cuts + [np.inf]
+    period_names = []
+    for m in range(len(boundaries) - 1):
+        lo = boundaries[m]
+        hi = boundaries[m + 1]
+        if hi == np.inf:
+            period_names.append(f"t >= {lo}")
+        elif lo == 0.0:
+            period_names.append(f"t < {hi}")
+        else:
+            period_names.append(f"{lo} <= t < {hi}")
+
+    other_covs = [c for c in (covariates or []) if c != exposure]
+    cols_needed = [duration_col, event_col, exposure] + other_covs
+    clean_df = df[cols_needed].dropna().reset_index(drop=True)
+
+    durations = clean_df[duration_col].to_numpy()
+    events = clean_df[event_col].to_numpy()
+    exposures = clean_df[exposure].to_numpy()
+    other_vals = {c: clean_df[c].to_numpy() for c in other_covs}
+
+    period_term_cols = [f"{exposure}_p{m + 1}" for m in range(len(period_names))]
+
+    dfs = []
+    for m in range(len(period_names)):
+        lo = boundaries[m]
+        hi = boundaries[m + 1]
+        mask = durations > lo
+        if not np.any(mask):
+            continue
+        sub_df = pd.DataFrame(
+            {
+                "_id": clean_df.index[mask],
+                "_start": lo,
+                "_stop": np.minimum(
+                    durations[mask], hi if hi != np.inf else durations[mask]
+                ),
+                "_event": np.where((durations[mask] <= hi) & (events[mask] == 1), 1, 0),
+            }
+        )
+        for k_idx, term in enumerate(period_term_cols):
+            sub_df[term] = np.where(k_idx == m, exposures[mask], 0.0)
+        for c in other_covs:
+            sub_df[c] = other_vals[c][mask]
+        dfs.append(sub_df)
+
+    split_df = pd.concat(dfs, ignore_index=True)
+
+    ctv = CoxTimeVaryingFitter(penalizer=penalizer)
+    ctv.fit(
+        split_df,
+        id_col="_id",
+        start_col="_start",
+        stop_col="_stop",
+        event_col="_event",
+    )
+
+    summary = ctv.summary.copy()
+    rows = []
+    for m, term in enumerate(period_term_cols):
+        if term in summary.index:
+            coef = float(summary.loc[term, "coef"])
+            exp_coef = float(summary.loc[term, "exp(coef)"])
+            se = float(summary.loc[term, "se(coef)"])
+            z = float(summary.loc[term, "z"])
+            p = float(summary.loc[term, "p"])
+            ci_lower = float(summary.loc[term, "exp(coef) lower 95%"])
+            ci_upper = float(summary.loc[term, "exp(coef) upper 95%"])
+        else:
+            coef = exp_coef = se = z = p = ci_lower = ci_upper = np.nan
+        rows.append(
+            {
+                "period": period_names[m],
+                "term": term,
+                "coef": coef,
+                "exp(coef)": exp_coef,
+                "hazard_ratio": exp_coef,
+                "se(coef)": se,
+                "se": se,
+                "z": z,
+                "p": p,
+                "p_value": p,
+                "exp(coef) lower 95%": ci_lower,
+                "hr_ci_lower": ci_lower,
+                "exp(coef) upper 95%": ci_upper,
+                "hr_ci_upper": ci_upper,
+            }
+        )
+    res_df = pd.DataFrame(rows, index=period_term_cols)
+    res_df.attrs["model"] = ctv
+    res_df.attrs["full_summary"] = summary
+    res_df.attrs["cut_points"] = cuts
+    res_df.attrs["exposure"] = exposure
+    return res_df
 
 
 def fit_survival_analysis_suite(
@@ -1604,7 +1850,7 @@ def fit_survival_analysis_suite(
     penalizer: float = 0.0,
     standardize_continuous: bool = False,
     continuous_covariates: list[str] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Run Kaplan-Meier, Log-Rank, and Cox PH modeling with per-covariate Schoenfeld test and optional scale-aware standardization."""
     n_initial = len(df)
 
@@ -1625,8 +1871,8 @@ def fit_survival_analysis_suite(
         )
 
     # Kaplan-Meier curve & median survival
-    km_results = {}
-    km_curves = {}
+    km_results: dict[str, Any] = {}
+    km_curves: dict[str, Any] = {}
     risk_table = pd.DataFrame()
     if strata_col:
         groups = clean_km[strata_col].unique()
@@ -1643,9 +1889,11 @@ def fit_survival_analysis_suite(
                 "ci_lower": np.asarray(ci_df.iloc[:, 0]),
                 "ci_upper": np.asarray(ci_df.iloc[:, 1]),
                 "censored_times": cens_t,
-                "censored_survival": np.asarray(kmf.survival_function_at_times(cens_t))
-                if len(cens_t) > 0
-                else np.array([]),
+                "censored_survival": (
+                    np.asarray(kmf.survival_function_at_times(cens_t))
+                    if len(cens_t) > 0
+                    else np.array([])
+                ),
             }
 
         # Risk table at milestone intervals
@@ -1688,14 +1936,16 @@ def fit_survival_analysis_suite(
             "ci_lower": np.asarray(ci_df.iloc[:, 0]),
             "ci_upper": np.asarray(ci_df.iloc[:, 1]),
             "censored_times": cens_t,
-            "censored_survival": np.asarray(kmf.survival_function_at_times(cens_t))
-            if len(cens_t) > 0
-            else np.array([]),
+            "censored_survival": (
+                np.asarray(kmf.survival_function_at_times(cens_t))
+                if len(cens_t) > 0
+                else np.array([])
+            ),
         }
 
     # 2. Cox Proportional Hazards model on complete-covariate cohort
     cox_table = pd.DataFrame()
-    schoenfeld_summary = {}
+    schoenfeld_summary: dict[str, Any] = {}
     forest_items = []
     cox_standardization = {}
     n_analyzed_cox = 0
@@ -1714,7 +1964,9 @@ def fit_survival_analysis_suite(
         cox_data = clean_cox[cox_cols].copy()
         for var in covariates:
             col_s = cox_data[var]
-            if not pd.api.types.is_numeric_dtype(col_s) or pd.api.types.is_bool_dtype(col_s):
+            if not pd.api.types.is_numeric_dtype(col_s) or pd.api.types.is_bool_dtype(
+                col_s
+            ):
                 raise ValueError(
                     f"Covariate '{var}' must be numeric; encode categorical covariates as binary 0/1 indicators before Cox fitting."
                 )
@@ -1778,27 +2030,13 @@ def fit_survival_analysis_suite(
             )
         cox_table = pd.DataFrame(rows)
 
-        # Proportional hazards test per covariate
+        # Proportional hazards test per covariate with Bonferroni multiplicity control
         try:
-            prop_test = proportional_hazard_test(cph, cox_data, time_transform="rank")
-            schoenfeld_summary["p_values"] = {
-                k: float(v) for k, v in prop_test.summary["p"].items()
-            }
-            schoenfeld_summary["test_statistics"] = {
-                k: float(v) for k, v in prop_test.summary["test_statistic"].items()
-            }
-            passed = bool((prop_test.summary["p"] > 0.05).all())
-            schoenfeld_summary["no_ph_violation_detected"] = passed
-            schoenfeld_summary["PH_Assumptions_Passed"] = (
-                passed  # backward compatibility
-            )
-            schoenfeld_summary["PH_Note"] = (
-                "No proportional hazards violation detected (p > 0.05)."
-                if passed
-                else "Potential PH assumption violation detected (p <= 0.05)."
+            schoenfeld_summary = schoenfeld_diagnostics(
+                cph, cox_data, time_transform="rank"
             )
         except Exception as e:
-            schoenfeld_summary["PH_Note"] = str(e)
+            schoenfeld_summary = {"PH_Note": str(e)}
 
     return {
         "km_summary": km_results,

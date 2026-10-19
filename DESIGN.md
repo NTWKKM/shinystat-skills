@@ -1267,3 +1267,41 @@ Ensuring zero defect across all clinical figures in `shinystat` required validat
 
 [MEMORY_LEARN: Expanding horizontal bar plot xlim to max_val * 1.35 prevents bounding box collisions between bar value labels and lower-right legend elements, ensuring 100% compliance with automated publication QA layout gates.]
 
+---
+
+## ADR 46: Actionable Proportional Hazards (PH) Violation Handling & Remedies
+
+### Context
+`SKILL.md` historically directed agents to "stratify or add time-varying covariates on PH violation", but suffered from four architectural defects:
+1. `Recipe 11` only executed the Schoenfeld test; no executable remedy code existed.
+2. The heuristic lacked operational decision logic: a nuisance covariate can be stratified (its HR disappears from the reporting table); an exposure cannot (requires piecewise/time-varying HR or RMST).
+3. Evaluating $P \le 0.05$ across $k$ covariates ignored multiplicity (with 13 covariates, $\approx 0.65$ false violations are expected by chance).
+4. The Diagnostics criterion was satisfied simply by *computing* Schoenfeld residuals, allowing detected violations to be silently ignored.
+
+### Decision
+1. **Single Source of Truth Rule (`references/decision-heuristics.md §2.E`)**:
+   - Consolidated the decision rule in `references/decision-heuristics.md §2.E`.
+   - `SKILL.md` and `Recipe 11` point to this rule using the canonical terms *violator* and *remedy*.
+   - Updated the Model Convergence & Diagnostics checklist criterion from "Schoenfeld residuals ... computed" to *"every Schoenfeld violator carries a stated remedy"*.
+2. **Operational Decision Logic & Multiplicity Partition**:
+   - For $k$ covariates tested, define Bonferroni threshold $\alpha_{\text{Bonferroni}} = 0.05 / k$.
+   - **Strong Violation** ($P \le \alpha_{\text{Bonferroni}}$): Definite violation requiring remedy.
+   - **Weak Violation** ($\alpha_{\text{Bonferroni}} < P \le 0.05$): Potential violation; inspect `plot_schoenfeld_residuals` (figures.md §9) to decide.
+   - **Nuisance Covariate Violator** $\to$ `refit_cox_with_strata(df, duration_col, event_col, covariates, strata_cols, exposure)`: refits with stratified baseline hazards (`strata=strata_cols`); non-strata HRs match lifelines (rtol 1e-8); strata covariates are omitted from the table; raises `ValueError` if `exposure` is in `strata_cols`.
+   - **Exposure Violator** $\to$ `piecewise_hr(df, duration_col, event_col, exposure, covariates, cut_points)`: fits period-specific HRs via counting-process episode splitting and lifelines `CoxTimeVaryingFitter`.
+   - **Dual Model Reporting**: Report both unadjusted/standard Cox and the remedy model, stating the remedy beside each violator in narrative/tables.
+3. **Lifelines Variance Invariant**:
+   - `piecewise_hr` uses model-based variance (`robust=False`). `cluster_col` and `robust=True` are strictly omitted because lifelines' robust/cluster sandwich estimator mishandles entry times (counting-process start intervals), inflating SEs.
+4. **Known Limitation & Retained Plot Requirement**:
+   - Schoenfeld tests with rank time transform evaluate monotonic correlations between residuals and ranked failure times. They can miss non-monotone effect trajectories (e.g. U-shaped, bathtub, or transient early spikes that average out across ranks).
+   - Therefore, automated test significance is necessary but not sufficient: `plot_schoenfeld_residuals` remains an integral part of the decision rule.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Parity**: Recipe 11 code block is verified 100% identical in AST and normalized source text to `src/medstat/models/survival.py`.
+- **Test Coverage**: Added `tests/unit/test_ph_violation_remedies.py` verifying strata HR equivalence, exposure ValueError guard, simulation recovery within 15% ($N=3000$, true HR 0.5 before $t=2$, 1.0 after), multiplicity list partitioning, and Recipe 11 AST parity.
+- **Mirror Sync**: All workspace mirrors (`.agents`, `.agent`, `.claude`, `.cursor`, `packaging/cloud`) synchronized via `./scripts/install-skills.sh --sync` with zero diff.
+
+[MEMORY_LEARN: In Cox proportional hazards diagnostics, Schoenfeld tests with rank time transform can miss non-monotone time-varying effects; automated Bonferroni P <= 0.05/k partitions strong vs weak violations, while plot_schoenfeld_residuals visual inspection remains mandatory before finalizing remedies.]
+
+

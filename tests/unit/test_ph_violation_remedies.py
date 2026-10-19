@@ -1,0 +1,287 @@
+"""
+tests/unit/test_ph_violation_remedies.py
+
+Unit tests verifying proportional hazards (PH) violation handling and remedy functions:
+1. refit_cox_with_strata matches lifelines strata= HRs for non-strata covariates,
+   omits strata variables, and raises ValueError if exposure is in strata.
+2. Simulated data (n=3000, fixed seed; true HR 0.5 before t=2, 1.0 after):
+   piecewise_hr recovers each period's HR within 15%.
+3. Plain Cox exposure term on same data is flagged (P <= 0.05) and appears in exactly
+   one of strong_violations or weak_violations.
+4. Multiplicity Bonferroni rule: every covariate with P <= 0.05 appears in exactly
+   one of the two lists, and in neither when P > 0.05.
+5. Recipe 11 code block equals src functions (normalized source text and AST).
+"""
+
+import ast
+import re
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+from lifelines import CoxPHFitter
+
+from medstat.models.survival import (
+    fit_survival_analysis_suite,
+    piecewise_hr,
+    refit_cox_with_strata,
+    schoenfeld_diagnostics,
+)
+
+
+def _generate_piecewise_dataset(n: int = 3000, seed: int = 42) -> pd.DataFrame:
+    """Generate survival data with true HR=0.5 before t=2 and HR=1.0 after t=2."""
+    np.random.seed(seed)
+    x = np.random.binomial(1, 0.5, size=n)
+    u = np.random.uniform(0, 1, size=n)
+    neg_log_u = -np.log(u)
+
+    # Base hazard rate h0 = 0.1
+    # x=0: H(t) = 0.1 * t
+    # x=1: H(t) = 0.05 * t for t <= 2 (HR=0.5); H(t) = 0.1 + 0.1 * (t - 2) for t > 2 (HR=1.0)
+    t = np.zeros(n)
+    for i in range(n):
+        if x[i] == 0:
+            t[i] = neg_log_u[i] / 0.1
+        else:
+            if neg_log_u[i] <= 0.1:
+                t[i] = neg_log_u[i] / 0.05
+            else:
+                t[i] = 2.0 + (neg_log_u[i] - 0.1) / 0.1
+
+    censor_time = np.random.uniform(2.5, 6.0, size=n)
+    duration = np.minimum(t, censor_time)
+    event = (t <= censor_time).astype(int)
+
+    return pd.DataFrame({"duration": duration, "event": event, "exposure": x})
+
+
+def test_refit_cox_with_strata_invariants():
+    """Verify refit_cox_with_strata HR equivalence, strata omission, and exposure validation."""
+    rng = np.random.default_rng(123)
+    n = 200
+    df = pd.DataFrame(
+        {
+            "time": rng.exponential(10, size=n) + 1,
+            "event": rng.binomial(1, 0.5, size=n),
+            "exposure": rng.binomial(1, 0.5, size=n),
+            "age": rng.normal(50, 10, size=n),
+            "site": rng.choice(["Hospital A", "Hospital B", "Hospital C"], size=n),
+        }
+    )
+
+    # 1. ValueError when exposure is in strata_cols
+    with pytest.raises(ValueError, match="cannot be in strata_cols"):
+        refit_cox_with_strata(
+            df=df,
+            duration_col="time",
+            event_col="event",
+            covariates=["exposure", "age"],
+            strata_cols=["exposure"],
+            exposure="exposure",
+        )
+
+    # 2. Fit with strata on site
+    res_df = refit_cox_with_strata(
+        df=df,
+        duration_col="time",
+        event_col="event",
+        covariates=["exposure", "age"],
+        strata_cols=["site"],
+        exposure="exposure",
+    )
+
+    # 3. Direct lifelines reference
+    cph_ref = CoxPHFitter()
+    cph_ref.fit(
+        df[["time", "event", "exposure", "age", "site"]],
+        duration_col="time",
+        event_col="event",
+        strata=["site"],
+    )
+
+    # 4. HRs equal lifelines strata= HRs for non-strata covariates (rtol 1e-8)
+    for cov in ["exposure", "age"]:
+        assert cov in res_df.index
+        assert np.isclose(
+            res_df.loc[cov, "hazard_ratio"],
+            cph_ref.summary.loc[cov, "exp(coef)"],
+            rtol=1e-8,
+        )
+        assert np.isclose(
+            res_df.loc[cov, "exp(coef)"],
+            cph_ref.summary.loc[cov, "exp(coef)"],
+            rtol=1e-8,
+        )
+
+    # 5. Strata covariates are absent from the table
+    assert "site" not in res_df.index
+
+
+def test_piecewise_hr_recovers_true_hrs_within_15_percent():
+    """Simulated data (n=3000, seed 42): piecewise_hr recovers each period's HR within 15%."""
+    df = _generate_piecewise_dataset(n=3000, seed=42)
+
+    pw_res = piecewise_hr(
+        df=df,
+        duration_col="duration",
+        event_col="event",
+        exposure="exposure",
+        cut_points=2.0,
+    )
+
+    assert len(pw_res) == 2
+
+    # Period 1 (t < 2.0): true HR = 0.5
+    hr_period_1 = float(pw_res.iloc[0]["hazard_ratio"])
+    rel_error_1 = abs(hr_period_1 - 0.5) / 0.5
+    assert rel_error_1 < 0.15, (
+        f"Period 1 HR {hr_period_1} exceeds 15% error (rel error {rel_error_1:.1%})"
+    )
+
+    # Period 2 (t >= 2.0): true HR = 1.0
+    hr_period_2 = float(pw_res.iloc[1]["hazard_ratio"])
+    rel_error_2 = abs(hr_period_2 - 1.0) / 1.0
+    assert rel_error_2 < 0.15, (
+        f"Period 2 HR {hr_period_2} exceeds 15% error (rel error {rel_error_2:.1%})"
+    )
+
+
+def test_plain_cox_violates_ph_and_flagged_in_exactly_one_list():
+    """On simulated data, plain Cox exposure term is flagged (P <= 0.05) and appears in exactly one of strong/weak violations."""
+    df = _generate_piecewise_dataset(n=3000, seed=42)
+
+    cph = CoxPHFitter()
+    cph.fit(df, duration_col="duration", event_col="event")
+
+    diag = schoenfeld_diagnostics(cph, df)
+
+    p_exposure = diag["p_values"]["exposure"]
+    assert p_exposure <= 0.05, (
+        f"Expected exposure PH violation (p <= 0.05), got {p_exposure}"
+    )
+
+    in_strong = "exposure" in diag["strong_violations"]
+    in_weak = "exposure" in diag["weak_violations"]
+
+    assert in_strong ^ in_weak, (
+        f"Exposure must appear in exactly one list (strong={in_strong}, weak={in_weak})"
+    )
+
+
+def test_schoenfeld_multiplicity_partition_invariant():
+    """Every covariate with P <= 0.05 appears in exactly one list, and in neither when P > 0.05."""
+    df = _generate_piecewise_dataset(n=3000, seed=42)
+    rng = np.random.default_rng(42)
+
+    # Add extra covariates with known varying properties
+    df["z_ph_pass"] = rng.normal(0, 1, size=len(df))
+    df["z_ph_binary"] = rng.binomial(1, 0.4, size=len(df))
+
+    cph = CoxPHFitter()
+    cph.fit(df, duration_col="duration", event_col="event")
+
+    diag = schoenfeld_diagnostics(cph, df)
+    k = len(diag["p_values"])
+    bonferroni_alpha = 0.05 / k
+
+    assert diag["bonferroni_alpha"] == bonferroni_alpha
+
+    for var, p in diag["p_values"].items():
+        in_strong = var in diag["strong_violations"]
+        in_weak = var in diag["weak_violations"]
+
+        if p <= 0.05:
+            # Must appear in exactly one list
+            assert in_strong ^ in_weak, (
+                f"{var} (p={p}) must appear in exactly one violation list"
+            )
+            if p <= bonferroni_alpha:
+                assert in_strong and not in_weak, (
+                    f"{var} (p={p} <= {bonferroni_alpha}) should be strong"
+                )
+            else:
+                assert in_weak and not in_strong, (
+                    f"{var} ({bonferroni_alpha} < p={p} <= 0.05) should be weak"
+                )
+        else:
+            # Must appear in neither list
+            assert not in_strong and not in_weak, (
+                f"{var} (p={p} > 0.05) must not appear in any violation list"
+            )
+
+
+def test_recipe_11_equals_src_functions():
+    """Recipe 11 code block equals src functions (normalized source text and AST)."""
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    recipe_path = (
+        repo_root / "skills" / "shinystat-cloud" / "references" / "python-recipes.md"
+    )
+    src_path = repo_root / "src" / "medstat" / "models" / "survival.py"
+
+    content = recipe_path.read_text(encoding="utf-8")
+    m = re.search(
+        r"## 11\. Survival Analysis.*?```python\n(.*?)\n```", content, re.DOTALL
+    )
+    assert m, "Recipe 11 code block not found in python-recipes.md"
+    recipe_code = m.group(1)
+
+    recipe_tree = ast.parse(recipe_code)
+    recipe_funcs = {
+        node.name: node
+        for node in ast.walk(recipe_tree)
+        if isinstance(node, ast.FunctionDef)
+    }
+
+    src_code = src_path.read_text(encoding="utf-8")
+    src_tree = ast.parse(src_code)
+    src_funcs = {
+        node.name: node
+        for node in ast.walk(src_tree)
+        if isinstance(node, ast.FunctionDef)
+    }
+
+    target_funcs = [
+        "schoenfeld_diagnostics",
+        "refit_cox_with_strata",
+        "piecewise_hr",
+        "fit_survival_analysis_suite",
+    ]
+
+    for func_name in target_funcs:
+        assert func_name in recipe_funcs, f"Function {func_name} missing from Recipe 11"
+        assert func_name in src_funcs, (
+            f"Function {func_name} missing from src/medstat/models/survival.py"
+        )
+
+        # AST equivalence
+        recipe_ast = ast.dump(recipe_funcs[func_name])
+        src_ast = ast.dump(src_funcs[func_name])
+        assert recipe_ast == src_ast, f"AST mismatch for {func_name}"
+
+        # Source text equivalence
+        recipe_text = ast.get_source_segment(
+            recipe_code, recipe_funcs[func_name]
+        ).strip()
+        src_text = ast.get_source_segment(src_code, src_funcs[func_name]).strip()
+        assert recipe_text == src_text, (
+            f"Normalized source text mismatch for {func_name}"
+        )
+
+
+def test_fit_survival_analysis_suite_remedy_integration():
+    """Verify fit_survival_analysis_suite integrates schoenfeld_diagnostics with Bonferroni fields."""
+    df = _generate_piecewise_dataset(n=300, seed=42)
+    res = fit_survival_analysis_suite(
+        df=df,
+        duration_col="duration",
+        event_col="event",
+        covariates=["exposure"],
+    )
+    schoen = res["schoenfeld_diagnostics"]
+    assert "bonferroni_alpha" in schoen
+    assert "strong_violations" in schoen
+    assert "weak_violations" in schoen
+    assert "p_values" in schoen
+    assert "exposure" in schoen["p_values"]
