@@ -104,6 +104,8 @@ def test_sandwich_invariant_split_at_exact_event_time(unsplit):
     split = pd.concat([p1, p2], ignore_index=True)
 
     # Confirm split created intervals starting exactly at cut_time
+    assert len(p2) > 0
+    assert np.any((split["_stop"] == cut_time) & (split["_event"] == 1))
     assert np.any(split["_start"] == cut_time)
 
     se_ref, gap_ref = sandwich(one, COVS, beta, bread)
