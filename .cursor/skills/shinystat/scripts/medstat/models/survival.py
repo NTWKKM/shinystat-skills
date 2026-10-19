@@ -563,6 +563,8 @@ def bootstrap_fine_gray_se(
     seed: int = 0,
 ) -> np.ndarray:
     """Patient-level bootstrap SE of the Fine-Gray coefficients (censoring distribution re-estimated per resample)."""
+    if n_boot < 2:
+        raise ValueError(f"n_boot must be at least 2, got {n_boot}")
     rng = np.random.default_rng(seed)
     draws = []
     for _ in range(n_boot):
@@ -583,7 +585,7 @@ def bootstrap_fine_gray_se(
             Exception
         ):  # a resample can be degenerate (no events in a stratum); skip it
             continue
-    if len(draws) < 0.9 * n_boot:
+    if len(draws) < 2 or len(draws) < 0.9 * n_boot:
         raise RuntimeError(
             f"bootstrap converged in only {len(draws)}/{n_boot} resamples"
         )

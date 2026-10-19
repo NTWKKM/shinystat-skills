@@ -208,3 +208,15 @@ def test_invalid_se_method():
         fit_competing_risks_regression(
             _competing(), "t", "e", COVS, se_method="cluster_col"
         )
+
+
+def test_bootstrap_invalid_n_boot():
+    d = _competing()
+    with pytest.raises(ValueError, match="n_boot must be at least 2"):
+        bootstrap_fine_gray_se(d, "t", "e", COVS, n_boot=1)
+    with pytest.raises(ValueError, match="n_boot must be at least 2"):
+        bootstrap_fine_gray_se(d, "t", "e", COVS, n_boot=0)
+    with pytest.raises(ValueError, match="n_boot must be at least 2"):
+        fit_competing_risks_regression(
+            d, "t", "e", COVS, se_method="bootstrap", n_boot=1
+        )
