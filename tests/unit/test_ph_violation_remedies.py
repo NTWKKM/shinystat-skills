@@ -324,6 +324,40 @@ def test_schoenfeld_indeterminate_p_values_prevent_pass(monkeypatch):
     assert "exposure" in diag["PH_Note"]
 
 
+def test_schoenfeld_indeterminate_and_violations_both_reported(monkeypatch):
+    """Verify PH_Note includes both significant violations and indeterminate tests when co-occurring."""
+    df = _generate_piecewise_dataset(n=100, seed=42)
+    cph = CoxPHFitter()
+    cph.fit(df, duration_col="duration", event_col="event")
+
+    class MockCoOccurringPropSummary:
+        summary = pd.DataFrame(
+            {
+                "test_statistic": [10.5, 1.23, 0.45],
+                "p": [0.001, np.nan, 0.85],
+            },
+            index=["strong_var", "indet_var", "normal_var"],
+        )
+
+    def mock_prop_test(*args, **kwargs):
+        return MockCoOccurringPropSummary()
+
+    monkeypatch.setattr(
+        "medstat.models.survival.proportional_hazard_test", mock_prop_test
+    )
+
+    diag = schoenfeld_diagnostics(cph, df)
+
+    assert "strong_var" in diag["strong_violations"]
+    assert "indet_var" in diag["indeterminate_tests"]
+    assert diag["PH_Assumptions_Passed"] is False
+    assert "PH violation detected: 1 strong" in diag["PH_Note"]
+    assert (
+        "Indeterminate PH test result: non-finite p-value for ['indet_var']."
+        in diag["PH_Note"]
+    )
+
+
 def test_refit_cox_with_strata_retention_records():
     """Verify refit_cox_with_strata records N_initial, N_excluded, and itemized reasons in attrs."""
     rng = np.random.default_rng(99)

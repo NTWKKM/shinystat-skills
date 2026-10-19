@@ -264,15 +264,20 @@ def schoenfeld_diagnostics(
         and len(indeterminate_tests) == 0
     )
 
-    if indeterminate_tests:
-        note = f"Indeterminate PH test result: non-finite p-value for {indeterminate_tests}."
-    elif passed:
+    if passed:
         note = "No proportional hazards violation detected (all p > 0.05)."
     else:
-        note = (
-            f"PH violation detected: {len(strong_violations)} strong (p <= {bonferroni_alpha:.4f}), "
-            f"{len(weak_violations)} weak (0.05 >= p > {bonferroni_alpha:.4f})."
-        )
+        notes = []
+        if strong_violations or weak_violations:
+            notes.append(
+                f"PH violation detected: {len(strong_violations)} strong (p <= {bonferroni_alpha:.4f}), "
+                f"{len(weak_violations)} weak (0.05 >= p > {bonferroni_alpha:.4f})."
+            )
+        if indeterminate_tests:
+            notes.append(
+                f"Indeterminate PH test result: non-finite p-value for {indeterminate_tests}."
+            )
+        note = " ".join(notes)
 
     return {
         "p_values": p_values,
