@@ -175,9 +175,8 @@ Determining Required Sample Size for Multivariable Prediction Model Development
 ```
 Polish Grilling Gate #6 Activation & Routing
 ├── Mandatory Inquiry at Gate #5:
-│   ├── (Recommended) Skip Polish (Direct Fast-Path) ──▶ Standard normal flow without external literature verification
-│   ├── Full Publication Polish (Execute Gate #6) ──▶ Literature grounding & superscript citations
-│   └── Defer Polish (Do Later) ──▶ Standard analysis & draft first; polish available on-demand later
+│   ├── (Recommended) Skip Polish (Direct Fast-Path) ──▶ Standard normal flow without external literature verification (on-demand polish available later)
+│   └── Full Publication Polish (Execute Gate #6) ──▶ Literature grounding & superscript citations
 ├── Polish Execution (Full Polish or On-Demand Trigger):
 │   ├── Step 1: Claim vs Data Reconciliation
 │   │   ├── Prohibit causal claims on unweighted observational data (must report association + E-value)

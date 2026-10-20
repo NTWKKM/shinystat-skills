@@ -1316,9 +1316,8 @@ In automated manuscript preparation and clinical report generation, AI agents ri
 ### Decision
 1. **Mandatory Inquiry at Gate #5 & Polish Grilling Gate #6**:
    - Integrated into the **Mandatory Alignment Gate (#5)** alongside Deliverable Format and House Style, proactively asking the user:
-     - **(Recommended) Skip Polish (Direct Fast-Path)**: Proceeds immediately through the normal analysis workflow to deliver statistical findings, tables, and figures without external literature cross-referencing or reference citations.
+     - **(Recommended) Skip Polish (Direct Fast-Path)**: Proceeds immediately through the normal analysis workflow to deliver statistical findings, tables, and figures without external literature cross-referencing or reference citations (on-demand polish remains available later).
      - **Full Publication Polish (Execute Gate #6)**: Executes empirical literature verification via `search_web` / MCP databases, data claims reconciliation, and Vancouver/ICMJE superscript citations (`<sup>1</sup>`, Word runs).
-     - **Defer Polish (Do Later)**: Completes the standard statistical analysis and draft report now; allows triggering the Polish Gate on-demand afterwards.
    - **Data Grounding**: Audits clinical assertions in Discussion and Results against `results_dict` and study design (prohibits causal claims on unweighted observational data; verifies $P > 0.05$ is reported as "insufficient evidence to reject the null hypothesis").
    - **Empirical Literature Verification**: Cross-audits every cited study/guideline using `search_web` or medical MCP databases (`medical-terminology` LOINC/SNOMED/RxNorm/ICD-10, PubMed). Enforces the **Anti-Phantom Citation Invariant** (zero hallucinated studies).
    - **Superscript Citations & House Style Reference List**: Generates sequential in-text numerical superscript citations (`<sup>1</sup>`, native Word `.docx` superscript runs, Markdown/LaTeX) paired with a complete bibliographic References section formatted in the target Journal House Style (`NEJM`, `JAMA`, `Lancet`, `BMJ`, `Clinical`).
