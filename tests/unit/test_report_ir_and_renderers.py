@@ -303,3 +303,157 @@ def test_render_pptx_empty_columns_table_skipped(tmp_path: Path):
     prs = Presentation(str(out_path))
     # Only Title slide was created; no table slide was added
     assert len(prs.slides) == 1
+
+
+def test_renderers_superscript_citations(tmp_path: Path):
+    """
+    Verifies that narrative superscript citations format properly across
+    HTML, Word .docx, PowerPoint .pptx, and Markdown.
+    """
+    from docx import Document as DocxDocument
+
+    from medstat.reporting.renderers import (
+        render_docx,
+        render_html,
+        render_markdown,
+        render_pptx,
+    )
+
+    doc = ReportDocument(title="Evidence-Based Sepsis Study")
+    doc.add_heading("Introduction & Clinical Guidelines", level=1)
+    doc.add_paragraph(
+        'Early antibiotic administration reduces mortality in septic shock.<sup class="citation"><a href="#ref-1">1</a>,<a href="#ref-2">2</a></sup>'
+    )
+    doc.add_paragraph(
+        "Standard resuscitation guidelines recommend 30 mL/kg crystalloids within 3 hours.^3"
+    )
+    doc.add_heading("References", level=2)
+    doc.add_paragraph("1. Singer M, et al. Sepsis-3 Definitions. JAMA 2016.")
+    doc.add_paragraph("2. Evans L, et al. Surviving Sepsis Campaign. CCM 2021.")
+    doc.add_paragraph("3. Rhodes A, et al. Surviving Sepsis Guidelines. ICM 2017.")
+
+    # 1. HTML Verification
+    html_file = tmp_path / "citations_report.html"
+    render_html(doc, html_file)
+    html_content = html_file.read_text(encoding="utf-8")
+    assert '<sup class="citation">' in html_content
+    assert '<a href="#ref-1">1</a>' in html_content
+    assert '<p id="ref-1">' in html_content
+    assert "&lt;sup&gt;" not in html_content
+    assert "^3" in html_content  # Bare ^3 remains unchanged without bracket syntax
+
+    # 2. DOCX Verification
+    docx_file = tmp_path / "citations_report.docx"
+    render_docx(doc, docx_file)
+    docx_doc = DocxDocument(str(docx_file))
+    superscript_runs = [
+        run
+        for p in docx_doc.paragraphs
+        for run in p.runs
+        if run.font.superscript is True
+    ]
+    assert [r.text for r in superscript_runs] == ["1,2"]
+    # References hanging indent verification
+    ref_paras = [p for p in docx_doc.paragraphs if p.text.startswith("1. ")]
+    assert len(ref_paras) == 1
+    assert ref_paras[0].paragraph_format.first_line_indent < 0
+
+    # 3. PPTX Verification
+    pptx_file = tmp_path / "citations_presentation.pptx"
+    render_pptx(doc, pptx_file)
+    prs = Presentation(str(pptx_file))
+    slide_texts = [
+        s.text_frame.text
+        for slide in prs.slides
+        for s in slide.shapes
+        if s.has_text_frame
+    ]
+    all_slide_text = " ".join(slide_texts)
+    # Zero raw <sup> tags leaking into PPTX and converted Unicode superscript verification
+    assert "<sup" not in all_slide_text
+    assert "</sup>" not in all_slide_text
+    assert "¹" in all_slide_text
+
+    # 4. Markdown Verification
+    md_file = tmp_path / "citations_report.md"
+    render_markdown(doc, md_file)
+    md_content = md_file.read_text(encoding="utf-8")
+    assert "<sup" in md_content
+
+
+def test_html_math_exponents_and_anchor_attributes(tmp_path):
+    """
+    Verifies that mathematical exponents (R^2, m^2, x^2) remain uncorrupted by citation
+    rendering, anchor attributes (href, id, name) are preserved, and PPTX callout cards clean superscripts.
+    """
+    from pptx import Presentation
+
+    from medstat.reporting.renderers import render_html, render_pptx
+
+    doc = ReportDocument(title="Math and Anchors Report")
+    doc.add_paragraph("Model fit yielded R^2 = 0.85 with BMI in kg/m^2 and x^2 term.")
+    doc.add_paragraph(
+        'Target anchor: <a id="ref-99">Anchor 99</a> and <a href="#ref-99">Jump</a>.'
+    )
+    doc.add_callout('Key finding: risk was reduced.<sup class="citation">1</sup>')
+
+    html_file = tmp_path / "math_report.html"
+    render_html(doc, html_file)
+    content = html_file.read_text(encoding="utf-8")
+    assert "R^2" in content
+    assert "kg/m^2" in content
+    assert "x^2" in content
+    assert '<sup class="citation">2</sup>' not in content
+    assert '<a id="ref-99">' in content
+    assert '<a href="#ref-99">' in content
+
+    # PPTX Callout test
+    pptx_file = tmp_path / "callout_report.pptx"
+    render_pptx(doc, pptx_file)
+    prs = Presentation(str(pptx_file))
+    slide_texts = [
+        s.text_frame.text
+        for slide in prs.slides
+        for s in slide.shapes
+        if s.has_text_frame
+    ]
+    all_slide_text = " ".join(slide_texts)
+    assert "<sup" not in all_slide_text
+    assert "¹" in all_slide_text
+
+    # References test with Lancet/BMJ bare numbering (e.g. "1 Singer")
+    doc_ref = ReportDocument(title="Lancet Style References")
+    doc_ref.add_heading("References", level=2)
+    doc_ref.add_paragraph("1 Singer M, et al. Sepsis-3 definitions. JAMA 2016.")
+    doc_ref.add_paragraph("2 Evans L, et al. Surviving sepsis. CCM 2021.")
+    html_ref_file = tmp_path / "lancet_ref.html"
+    render_html(doc_ref, html_ref_file)
+    ref_content = html_ref_file.read_text(encoding="utf-8")
+    assert '<p id="ref-1">' in ref_content
+    assert '<p id="ref-2">' in ref_content
+
+    # PPTX Callout and paragraph preserving comparison operators (< 1, > 2, p<alpha and HR>1)
+    # and converting bracketed carets (^[1], ^[2, 3]) to Unicode superscripts
+    doc_pptx = ReportDocument(title="Comparison Presentation")
+    doc_pptx.add_paragraph(
+        "Patients with score < 1 or age > 2 years were included from JAMA^[1] with p<alpha and HR>1."
+    )
+    doc_pptx.add_callout(
+        "Significant cutoff was < 1 with threshold > 2 and evidence^[2, 3] showing p<alpha and HR>1."
+    )
+    pptx_cmp_file = tmp_path / "pptx_cmp.pptx"
+    render_pptx(doc_pptx, pptx_cmp_file)
+    prs_cmp = Presentation(str(pptx_cmp_file))
+    cmp_slide_texts = " ".join(
+        [
+            s.text_frame.text
+            for slide in prs_cmp.slides
+            for s in slide.shapes
+            if s.has_text_frame
+        ]
+    )
+    assert "< 1" in cmp_slide_texts
+    assert "> 2" in cmp_slide_texts
+    assert "p<alpha and HR>1" in cmp_slide_texts
+    assert "¹" in cmp_slide_texts
+    assert "², ³" in cmp_slide_texts

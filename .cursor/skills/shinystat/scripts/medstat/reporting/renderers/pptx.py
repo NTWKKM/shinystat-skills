@@ -6,6 +6,7 @@ and formatted tables.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -275,10 +276,46 @@ def _add_table_slide(prs: Presentation, block: TableBlock, section_title: str) -
             fn_p.font.color.rgb = COLOR_MUTED
 
 
+_RECOGNIZED_TAGS_RE = re.compile(
+    r"</?(?:b|strong|i|em|u|sup|sub|a|span|code|p|br|div|small|mark|font)\b[^>]*>",
+    re.IGNORECASE,
+)
+_SUP_TRANS = str.maketrans("0123456789,-–", "⁰¹²³⁴⁵⁶⁷⁸⁹,⁻⁻")
+
+
+def _clean_slide_text(text: str) -> str:
+    """Converts superscripts to Unicode and removes recognized HTML tags.
+
+    Converts <sup>...</sup> and bracketed caret citations such as ^[1, 2] or
+    ^[1-3] to Unicode superscript digits and minus signs; commas and other
+    characters remain unchanged. Bare ^1 and comparison operators are preserved.
+    """
+
+    def _to_unicode_sup(m: re.Match) -> str:
+        """Returns capture group 1 with recognized tags stripped and digits raised."""
+        inner = _RECOGNIZED_TAGS_RE.sub("", m.group(1)).strip()
+        return inner.translate(_SUP_TRANS)
+
+    # 1. Convert bracketed caret citations: ^[1] or ^[1, 2] -> Unicode superscripts
+    cleaned = re.sub(r"\^\[(\d+(?:[,\-–]\s*\d+)*)\]", _to_unicode_sup, text)
+    # 2. Convert HTML <sup> citations: <sup>1,2</sup> -> Unicode superscripts
+    cleaned = re.sub(
+        r"<sup[^>]*>(.*?)</sup>", _to_unicode_sup, cleaned, flags=re.IGNORECASE
+    )
+    # 3. Strip recognized markup tags while preserving comparison operators like < 1, > 2, p<alpha and HR>1
+    cleaned = _RECOGNIZED_TAGS_RE.sub("", cleaned)
+    return cleaned
+
+
 def _add_content_slide(
     prs: Presentation, title: str, paragraphs: list[str], callouts: list[str]
 ) -> None:
-    """Creates a text and narrative slide with bullet points and callout boxes."""
+    """Appends narrative slides to ``prs``, with up to five bullet paragraphs each.
+
+    All callouts appear on the final slide. An empty paragraph list still produces
+    one slide, even without callouts. Paragraph and callout text uses Unicode
+    superscripts with recognized HTML tags removed.
+    """
     chunk_size = 5
     para_chunks = (
         [paragraphs[i : i + chunk_size] for i in range(0, len(paragraphs), chunk_size)]
@@ -302,7 +339,7 @@ def _add_content_slide(
 
         for idx, p_text in enumerate(chunk):
             p = tf.paragraphs[0] if idx == 0 else tf.add_paragraph()
-            p.text = f"•  {p_text}"
+            p.text = f"•  {_clean_slide_text(p_text)}"
             p.font.name = "Arial"
             p.font.size = Pt(13)
             p.font.color.rgb = COLOR_SECONDARY
@@ -327,7 +364,7 @@ def _add_content_slide(
             ctf.word_wrap = True
             for c_idx, c_text in enumerate(callouts):
                 cp = ctf.paragraphs[0] if c_idx == 0 else ctf.add_paragraph()
-                cp.text = f"NOTE: {c_text}"
+                cp.text = f"NOTE: {_clean_slide_text(c_text)}"
                 cp.font.name = "Arial"
                 cp.font.size = Pt(11)
                 cp.font.bold = True

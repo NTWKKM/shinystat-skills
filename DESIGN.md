@@ -1304,4 +1304,37 @@ Ensuring zero defect across all clinical figures in `shinystat` required validat
 
 [MEMORY_LEARN: In Cox proportional hazards diagnostics, Schoenfeld tests with rank time transform can miss non-monotone time-varying effects; automated Bonferroni P <= 0.05/k partitions strong vs weak violations, while plot_schoenfeld_residuals visual inspection remains mandatory before finalizing remedies.]
 
+---
+
+## ADR 47: Optional Polish Grilling Gate for Evidence-Base Grounding & Superscript Citations
+
+### Context
+In automated manuscript preparation and clinical report generation, AI agents risk two distinct failure modes:
+1. **Evidence Mismatch & Phantom Citations**: Agents may invent fictional paper titles, misattribute clinical findings, or cite studies that do not exist or whose actual conclusions contradict the narrative claims. Furthermore, prose claims may overstep study designs (e.g. asserting causality on unadjusted observational cohorts).
+2. **Citation Formatting Disconnect**: Narrative references often leak raw Markdown/HTML markup into exports or trigger false-positive "untraced number" failures during Pillar 5 numerical traceability auditing when citation numbers exceed standard statistical index limits.
+
+### Decision
+1. **Mandatory Inquiry at Gate #5 & Polish Grilling Gate #6**:
+   - Integrated into the **Mandatory Alignment Gate (#5)** alongside Deliverable Format and House Style (if prompt explicitly requests finding supporting evidence e.g. "หาหลักฐานมาประกอบ", "find evidence", Gate #6 Full Polish auto-activates immediately):
+     - **(Standard) Skip Polish (Direct Fast-Path)**: Proceeds immediately through the normal analysis workflow to deliver statistical findings, tables, and figures using user-provided or existing local sources (when user sources cite studies without full text or complete details, executes targeted primary study retrieval via `search_web`/MCP to format complete superscript citations `<sup>1</sup>`; no exploratory literature review; on-demand full polish remains available later).
+     - **(Optional) Full Publication Polish (Execute Gate #6)**: Executes empirical literature verification via `search_web` / MCP databases, data claims reconciliation, and Vancouver/ICMJE superscript citations (`<sup>1</sup>`, Word runs).
+   - **Data Grounding & Causal Language**: Audits clinical assertions in Discussion and Results against `results_dict` and study design. Evaluates permitted causal claims based on the prespecified estimand, study design, confounder control, and identification assumptions (does not treat weighting alone as sufficient or unweighted observational data as automatically prohibiting causal claims; reports associative framing where identification is unverified, with E-values where defined and appropriate on supported effect scales). Restricts the $P > \alpha$ "insufficient evidence to reject the null hypothesis" requirement to superiority tests, while preserving margin- and CI-based interpretation for prespecified non-inferiority or equivalence analyses. Enforces exact magnitude- and percentage-specific numerical traceability matching the SKILL.md SSOT rule.
+   - **Empirical Literature Verification & Primary Source Retrieval**: When user sources cite papers without full text/details, or when verifying narrative claims, cross-audits every cited study/guideline using `search_web`, PubMed, or bibliographic services, while restricting `medical-terminology` MCP to clinical ontology codes (SNOMED, LOINC, RxNorm, ICD-10) and laboratory reference ranges. Enforces the **Anti-Phantom Citation Invariant** (zero hallucinated studies).
+   - **Superscript Citations & House Style Reference List**: Generates sequential in-text numerical superscript citations (`<sup>1</sup>`, native Word `.docx` superscript runs, Markdown/LaTeX) paired with a complete bibliographic References section formatted in the target Journal House Style (`NEJM`, `JAMA`, `Lancet`, `BMJ`, `Clinical`).
+2. **Reporting Integrity Structural Recognition**:
+   - Enhanced `_is_structural_context` in `medstat.reporting.integrity` (`verify_report_integrity`) and `verify_standalone_integrity` in `report-builder.md` to recognize bounded citation numbers (`<sup>12</sup>`, `[12]`, `^[12]`, `Ref 12`, `12. Author`) and publication years (1900–2035) with recognizable bibliographic context (removing overbroad keywords and bare parentheses). Enforces plausible citation bounds and References-section requirements for branches 6c and 6e to preserve auditing for clinical values (`[250]`, `[12-15 days]`, `250. Patients were...`). Accurately calculates `citations_count` across bracketed and caret forms.
+3. **Multi-Format Parity**:
+   - Renderers (`html.py`, `docx.py`, `pptx.py`, `markdown.py`) format superscript tags cleanly with target-specific styling (Word OpenXML native superscript runs, PowerPoint Unicode superscripts via `_clean_slide_text` in both narrative and callout cards, HTML CSS `sup.citation`). HTML renderer restores anchor attributes (`href`, `id`, `name`) faithfully, emits `id="ref-N"` targets on reference paragraphs, and prevents bare carets from corrupting mathematical exponents and units ($R^2$, $m^2$).
+4. **Multi-Agent Mirror Synchronization**:
+   - Maintained byte-identical synchronization across canonical `skills/` and all 4 platform mirrors (`.agent/`, `.agents/`, `.claude/`, `.cursor/`, and `packaging/cloud/shinystat-cloud/`) via `./scripts/install-skills.sh --sync`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Evidence Integrity**: Eliminates phantom citations and unsupported clinical claims from automated manuscript pipelines.
+- **Publication Parity**: Generates seamless superscript citations across HTML, Word, PowerPoint, and Markdown matching ICMJE standards.
+- **Traceability Coherence**: Citation numbers no longer trigger false-positive traceability failures during Pillar 5 audits.
+
+[MEMORY_LEARN: Incorporating an optional Polish Grilling Gate with websearch/MCP literature verification enforces an anti-phantom citation invariant and aligns narrative claims with empirical data, while structural token recognition preserves numerical traceability in Pillar 5 audits.]
+
+
 

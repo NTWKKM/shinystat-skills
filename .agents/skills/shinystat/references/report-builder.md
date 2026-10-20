@@ -128,3 +128,45 @@ if not audit.passed:
 2. **Zero-PHI Compliance**: Automated regex screening checks text, table cells, headers, and figure metadata for Hospital Numbers (`HN`), Thai 13-digit National IDs, phone numbers, dates of birth, and honorific-prefixed names (`Mr.`, `Mrs.`, `Ms.`, `Dr.`, `นาย`, `นาง`, `นพ.`, `พญ.`). A passing automated audit does not prove absolute zero PHI (names without honorifics are not detected); manual clinical review remains mandatory.
 3. **Observational Causal Inference & E-Value Caveats**: If observational regression, Cox survival, or PSM models are reported, narrative must explicitly address unmeasured confounding and E-values.
 4. **Retention Flow & Methodology**: Enforces presence of cohort participant flow details and statistical software/version citations.
+
+---
+
+## 4. Evidence-Base Verification & Superscript Citations Pipeline
+
+When the **Polish Grilling Gate (#6)** is engaged (via explicit prompt request e.g. "หาหลักฐานมาประกอบ" / "find evidence", Gate #5 Full Polish selection, or triggered on-demand), execute this 4-step evidence verification and citation workflow (if Standard Skip Polish is active, standard deliverables proceed directly using user-provided or existing local sources, resolving incomplete citations via targeted search_web/MCP without exploratory literature reviews):
+
+### Step 1: Clinical Claims vs Analyzed Data Audit
+- Cross-audit every narrative statement in Discussion and Results against `results_dict` and study design.
+- Base permitted causal language on the prespecified estimand, study design, confounder control, and identification assumptions (do not treat weighting alone as sufficient or unweighted observational data as automatically prohibiting causal claims; report associative framing where identification is unverified, and require E-values only where defined and appropriate for the supported effect measure and sensitivity question).
+- Derive the significance threshold ($\alpha$) and confidence-interval level ($1-\alpha$) from analysis metadata rather than assuming fixed $0.05$ and $95\%$; verify that non-significant results in superiority or null-hypothesis tests ($P > \alpha$) are strictly stated as "insufficient evidence to reject the null hypothesis" rather than claiming equivalence or "no effect", while preserving separate margin- and CI-based interpretation for prespecified non-inferiority or equivalence analyses.
+- Compare normalized point estimates, confidence intervals, and $P$-values against tabular outputs using the magnitude- and percentage-specific tolerance rule (`abs_tol = min(0.02, 10**(-dec_digits))` for $|val| \le 1.0$, $0.02$ absolute or $0.01$ relative for $|val| > 1.0$, or $\min(0.05, abs\_tol \times 100.0)$ for percentages).
+
+### Step 2: Primary Source Retrieval & Empirical Literature Grounding via WebSearch & MCP Databases
+- **Incomplete User Source Resolution**: When user-provided materials, clinical notes, or prompts cite or mention external studies (e.g., "Singer 2016", "Sepsis-3", "KDIGO 2012") without full text or complete bibliographic metadata:
+  - Do NOT leave it as an informal or truncated citation.
+  - Query `search_web` or PubMed to retrieve the authentic primary publication: Title, full Author list, Journal, Year, Volume, Pages, and DOI.
+  - Insert the complete, verified study into the References list and assign sequential superscript citations (`<sup>1</sup>`).
+- Audit every cited study, trial, or guideline against real biomedical literature:
+  - **`search_web` / PubMed**: Verify bibliographic metadata via query: `"<First Author> <Journal> <Year> <Title keywords>"` or DOI/PMID.
+  - **`medical-terminology` MCP**: Validate medical terminology, standardized ontology codes (SNOMED CT, LOINC, RxNorm, ICD-10), and laboratory reference ranges.
+- Confirm that the cited paper's primary findings directly support the specific sentence in the manuscript.
+- **Anti-Phantom Citation Invariant**: Zero fabricated papers, hallucinated author lists, or synthetic DOIs. If a citation cannot be verified or its actual conclusions contradict the narrative statement, halt at Grilling Gate #6 to reconcile or replace the citation.
+
+### Step 3: Sequential In-Text Superscript Citations
+- Number citations sequentially in order of first appearance using superscript notation (`<sup>1</sup>`, `<sup>2,3</sup>`, `<sup>4–6</sup>`). Track citation-to-reference assignments so repeated citations reuse the same reference number and anchor instead of creating duplicate entries.
+- Multi-renderer implementation:
+  - **HTML (`render_html`)**: `Early resuscitation improves survival.<sup class="citation"><a href="#ref-1">1</a></sup>` (styled via CSS `sup.citation`, un-escaped safely; emits `id="ref-N"` on reference paragraphs matching each citation's `href="#ref-N"` target).
+  - **Word (`render_docx`)**: Converted into native OpenXML text runs with `run.font.superscript = True` and `8.5 pt` font size.
+  - **PowerPoint (`render_pptx`)**: Cleaned to Unicode superscripts (`¹`, `²`) or bracketed numbers `[1]`, eliminating raw HTML tag leaks.
+  - **Markdown (`render_markdown`)**: Rendered cleanly as `<sup>1</sup>` or `[^1]`.
+
+### Step 4: Bibliographic Reference List Assembly by Journal House Style
+Format the concluding **References** section strictly in the locked Journal House Style:
+
+| Journal Style | In-Text Citation | Reference List Format Example |
+| :--- | :--- | :--- |
+| **NEJM** | `...guidelines.<sup>1</sup>` | `1. Singer M, Deutschman CS, Seymour CW, et al. The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA 2016;315:801-10.` |
+| **JAMA** | `...guidelines.<sup>1</sup>` | `1. Singer M, Deutschman CS, Seymour CW, et al. The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA. 2016;315(8):801-810. doi:10.1001/jama.2016.0287` |
+| **Lancet** | `...guidelines<sup>1</sup>` | `1 Singer M, Deutschman CS, Seymour CW, et al. The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA 2016; 315: 801–10.` |
+| **BMJ** | `...guidelines.<sup>1</sup>` | `1 Singer M, Deutschman CS, Seymour CW, et al. The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA 2016;315:801-10. doi:10.1001/jama.2016.0287` |
+| **Clinical** | `...guidelines<sup>1</sup>` | `1. Singer, M. et al. The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA 315, 801–810 (2016).` |

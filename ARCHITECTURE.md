@@ -115,11 +115,11 @@ System architecture and structural specifications for `medstat-core` and the `me
 - **`ir.py`**: Report Intermediate Representation (IR) acting as Single Source of Truth (`ReportDocument`, `Block`, `HeadingBlock`, `ParagraphBlock`, `TableBlock`, `FigureBlock`, `CalloutBlock`).
 - **`renderers/`**: Multi-format document renderers:
   - `markdown.py`: GitHub Flavored Markdown + linked assets directory (`render_markdown`).
-  - `html.py`: Self-contained single-file HTML with embedded base64 figures, ICMJE 3-rule table styling, Output Format Alignment Gate defaults, and Dual / Toggle View (`render_html`) placing Plotly interactive charts as the primary view with a toggle to "Publication 300 DPI Figure (Static)" for journal submission, offline fallback resilience, and print parity.
-  - `docx.py`: Native Microsoft Word `.docx` with OpenXML `<w:tblBorders>` 3-rule borders and 6.5 in figures (`render_docx`).
-  - `pptx.py`: Native PowerPoint 16:9 widescreen presentation with 1 figure per slide layout and structured takeaway cards (`render_pptx`).
+  - `html.py`: Self-contained single-file HTML with embedded base64 figures, ICMJE 3-rule table styling, Output Format Alignment Gate defaults, Dual / Toggle View (`render_html`), and safe inline superscript citation formatting (`<sup>1</sup>`, `<a href="#ref-X">`).
+  - `docx.py`: Native Microsoft Word `.docx` with OpenXML `<w:tblBorders>` 3-rule borders, 6.5 in figures, hanging-indent reference list formatting, and native superscript runs (`run.font.superscript = True`; `render_docx`).
+  - `pptx.py`: Native PowerPoint 16:9 widescreen presentation with 1 figure per slide layout, structured takeaway cards, and clean Unicode superscript citation formatting (`render_pptx`).
   - `pdf.py`: High-fidelity PDF rendering via Playwright headless Chromium with LibreOffice fallback (`render_pdf`).
-- **`integrity.py`**: Pillar 5 Reporting Integrity audit (`verify_report_integrity`): numerical traceability to `results_dict` ($\pm 0.02$), Zero-PHI regex scan (HN, Thai citizen ID, phone, names), and observational causal inference / E-value caveat enforcement.
+- **`integrity.py`**: Pillar 5 Reporting Integrity audit (`verify_report_integrity`): numerical traceability to `results_dict` ($\pm 0.02$), Zero-PHI regex scan (HN, Thai citizen ID, phone, names), observational causal inference / E-value caveat enforcement, and structural citation / reference marker recognition (`_is_structural_context`).
 
 ---
 

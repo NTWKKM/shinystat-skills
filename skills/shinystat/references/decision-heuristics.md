@@ -168,6 +168,29 @@ Determining Required Sample Size for Multivariable Prediction Model Development
 └── Required Sample Size = max(N1, N2, N3, N4) with binding criterion explicitly reported
 ```
 
+### J. Polish Grilling Gate & Evidence Grounding Decision Tree
+```
+Polish Grilling Gate #6 Activation & Routing
+├── Triggering Conditions:
+│   ├── User prompt explicitly requests evidence/literature (e.g. "หาหลักฐานมาประกอบ", "find evidence") ──▶ Auto-activate Gate #6 Full Polish
+│   └── Polish preference omitted in prompt ──▶ Gate #5 Alignment Inquiry:
+│       ├── (Standard) Skip Polish (Direct Fast-Path) ──▶ Standard normal flow using user-provided or existing sources; verifies every citation (including complete-looking local citations) via targeted search_web, PubMed, or other bibliographic services without exploratory literature reviews (fails closed: if unverified or conflicting, halt and request replacement or omit; never synthesize details; on-demand full polish available later)
+│       └── (Optional) Full Publication Polish (Execute Gate #6) ──▶ External literature grounding & superscript citations
+├── Polish Execution (Full Polish or On-Demand Trigger):
+│   ├── Step 1: Claim vs Data Reconciliation
+│   │   ├── Assess causal language by identification assumptions, prespecified estimand, and confounder control (do not treat weighting alone as sufficient or unweighted observational data as automatically prohibiting causal claims; report associative framing where identification is unverified, and require E-values only where defined and appropriate for the supported effect measure and sensitivity question)
+│   │   ├── Superiority P > alpha (from analysis metadata, default 0.05) must be stated as "insufficient evidence to reject the null" (never "treatments are equivalent"); preserve separate interpretation for prespecified non-inferiority or equivalence analyses based on their margin and confidence interval
+│   │   └── Numerical prose numbers must match results_dict within abs_tol = min(0.02, 10**(-dec_digits)) for |val| <= 1.0, 0.02 absolute or 0.01 (1%) relative tolerance for |val| > 1.0, or min(0.05, abs_tol * 100.0) for percentages
+│   ├── Step 2: Primary Study Retrieval & Real-World Literature Verification (websearch / bibliographic services)
+│   │   ├── When user sources cite papers without full text/details, locate authentic primary study via search_web, PubMed, or other bibliographic services
+│   │   ├── Query search_web, PubMed, or other bibliographic services for author, title, journal, year, DOI, and findings; restrict medical-terminology MCP to terminology, ontology codes, and laboratory reference ranges
+│   │   ├── Anti-Phantom Citation Invariant: All cited papers must be verified real-world publications
+│   │   └── If reference is unverified, retracted, or contradicts narrative ──▶ Halt to reconcile or replace
+│   └── Step 3: Citation & Reference Formatting
+│       ├── Sequential numerical superscripts (<sup>1</sup>, <sup>2,3</sup>) in order of appearance
+│       └── Format Reference List in locked Journal House Style (NEJM, JAMA, Lancet, BMJ, Clinical)
+```
+
 ---
 
 ## 3. Reporting & Table Styling Standards

@@ -34,6 +34,7 @@ class IntegrityReport:
     has_methods: bool = False
     has_retention_flow: bool = False
     has_causal_caveat: bool = True  # True if not needed or properly addressed
+    citations_count: int = 0
 
     def summary(self) -> str:
         lines = [f"Integrity Audit: {'PASSED' if self.passed else 'FAILED'}"]
@@ -134,9 +135,21 @@ class TextToken(NamedTuple):
 
 
 def _is_structural_context(
-    val: float, raw_str: str, window_before: str, window_after: str
+    val: float,
+    raw_str: str,
+    window_before: str,
+    window_after: str,
+    doc_has_references: bool = False,
 ) -> bool:
-    """Checks whether an unmatched numeric token is an uninformative structural constant."""
+    """Checks whether an unmatched numeric token is an uninformative structural constant.
+
+    The windows provide surrounding same-line context for ``raw_str``.
+    Recognized context includes citation markers, exponents, and calendar or
+    publication years from 1900 through 2035. ``doc_has_references`` enables
+    additional exemptions for author-style bibliography entries numbered 1–100;
+    it indicates a reference heading anywhere in the document, not that the
+    token itself is in a reference section.
+    """
     window = f"{window_before}{raw_str}{window_after}"
 
     # 1. Confidence interval levels (e.g., 90%, 95%, 99% CI)
@@ -153,9 +166,15 @@ def _is_structural_context(
         ):
             return True
 
-    # 3. Calendar years (2010-2035) when preceded immediately by date-related context
-    if 2010.0 <= val <= 2035.0 and "." not in raw_str:
+    # 3. Calendar & Publication years (1900-2035) when preceded by date or journal/citation context
+    if 1900.0 <= val <= 2035.0 and "." not in raw_str:
         if _DATE_PREFIX_PATTERN.search(window_before):
+            return True
+        if re.search(
+            r"\b(?:et\s+al\.?|JAMA|NEJM|Lancet|BMJ|Crit\s+Care|doi|vol|pp?\.?)\b",
+            window_before,
+            re.IGNORECASE,
+        ):
             return True
 
     # 4. Structural headings and table/figure/step counters (e.g., Table 1, Figure 2, Tier 1, Step 3, v.1)
@@ -176,12 +195,80 @@ def _is_structural_context(
     ):
         return True
 
+    # 6. Mathematical or unit exponents (e.g. R^2, m^2, x^2, cm^2)
+    if "." not in raw_str and re.search(r"[a-zA-Z\)]\^$", window_before):
+        return True
+
+    # 7. Superscript citations and bibliographic reference markers (e.g., <sup>1</sup>, <sup>12,13</sup>, ^[1], [^1], [1], Ref 1, 1. Author)
+    if "." not in raw_str:
+        # 7a. Inside HTML superscript tags: <sup>...</sup>
+        if "<sup" in window_before and "</sup>" in window_after:
+            last_sup_open = window_before.rfind("<sup")
+            last_sup_close = window_before.rfind("</sup>")
+            if last_sup_open > last_sup_close:
+                return True
+
+        # 6b. Footnote / caret citation reference: [^1] or ^[1]
+        if re.search(r"\[\^\s*$", window_before) and window_after.startswith("]"):
+            return True
+        if re.search(r"\^\[(?:[\d\s,]+|[\d\s,]*[-–]\s*)*$", window_before) and re.match(
+            r"^(?:[\s,\-–]+\d+)*\s*\](?![a-zA-Z])", window_after
+        ):
+            return True
+
+        # 6c. Bracketed citation reference: [1], [1, 2], [1-3]
+        # Bounded by plausible citation range (1 <= val <= 100) and clean bracket closure
+        if (
+            1.0 <= val <= 100.0
+            and re.search(r"\[(?:[\d\s,]+|[\d\s,]*[-–]\s*)*$", window_before)
+            and re.match(
+                r"^(?:[\s,\-–]+\d+)*\s*\](?![a-zA-Z])",
+                window_after,
+            )
+        ):
+            return True
+
+        # 6d. Reference or citation label: Ref. 1, Reference 1, Citation 2
+        if re.search(
+            r"\b(?:Ref\.?|Refs\.?|Reference|References|Citation|Citations)\s*#?$",
+            window_before,
+            re.IGNORECASE,
+        ):
+            return True
+
+        # 6e. Bibliographic reference list item at start of paragraph/line: "1. Smith J...", "1 Smith J...", "1 O'Neil J...", "[1] McDonald A..."
+        # Requires document to have a References/Bibliography section, plausible range (1 <= val <= 100),
+        # and author/bibliographic format
+        if (
+            doc_has_references
+            and 1.0 <= val <= 100.0
+            and re.match(r"^\s*(?:\[\s*)?$", window_before)
+            and re.match(
+                r"^\s*(?:\]\s*)?[\.\)]?\s+[A-Z](?:['’]?[a-zA-Z]+)+(?:\s+[A-Z]{1,3}\b|\s*,\s*[A-Z]{1,3}\b|\s+et\s+al)",
+                window_after,
+            )
+        ):
+            return True
+
     return False
 
 
 def _extract_text_tokens(text: str) -> list[TextToken]:
-    """Extracts candidate TextToken objects from narrative text."""
-    clean_text = text.replace(",", "")
+    """Extracts candidate TextToken objects from narrative text.
+
+    Normalizes thousands separators and preserves token order and duplicates.
+    Percentages retain their displayed scale (85% yields ``val=85.0`` with
+    ``has_pct=True``). Only values strictly between -1e7 and 1e7 are returned,
+    with raw numeric strings and flags identifying structural context.
+    """
+    clean_text = re.sub(r"(?<=\d),(?=\d{3}\b)", "", text)
+    doc_has_references = bool(
+        re.search(
+            r"(?:^|\n)\s*(?:#{1,4}\s*)?(?:References|Bibliography)\b",
+            text,
+            re.IGNORECASE,
+        )
+    )
     matches = list(
         re.finditer(
             r"(?<!\w)(?<![a-zA-Z]-)(?P<num>(?:[-+]?\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?)(?P<pct>\s*%)?",
@@ -202,11 +289,15 @@ def _extract_text_tokens(text: str) -> list[TextToken]:
         has_pct = bool(pct_group and pct_group.strip() == "%")
         start = m.start()
         end = m.end()
-        window_before = clean_text[max(0, start - 30) : start].split("\n")[-1]
-        window_after = clean_text[end : min(len(clean_text), end + 30)].split("\n")[0]
+        window_before = clean_text[max(0, start - 80) : start].split("\n")[-1]
+        window_after = clean_text[end : min(len(clean_text), end + 80)].split("\n")[0]
 
         is_structural = _is_structural_context(
-            val, raw_num, window_before, window_after
+            val,
+            raw_num,
+            window_before,
+            window_after,
+            doc_has_references=doc_has_references,
         )
         tokens.append(
             TextToken(
@@ -226,11 +317,20 @@ def _extract_text_numbers(text: str) -> list[float]:
 
 def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
     """
-    Performs comprehensive verification on a ReportDocument:
+    Audits a ReportDocument and returns an IntegrityReport:
     1. Traces numbers in narrative text against results_dict.
     2. Scans all text and table entries for PHI.
-    3. Verifies causal inference / unmeasured confounding caveats.
-    4. Confirms methods and retention flow representation.
+    3. Checks confounding caveats when results_dict keys suggest causal analyses.
+    4. Checks for methods and retention keywords.
+
+    Structural constants are exempt from numerical tracing. ``passed`` requires
+    no PHI matches, any required confounding caveat, and at most
+    ``max(1, int(number_of_extracted_tokens * 0.15))`` untraced numbers.
+    Missing methods or retention keywords only add warnings.
+
+    ``citations_count`` counts matched citation groups, not unique references;
+    bracketed bibliography labels can also count. Citation sources and their
+    agreement with the narrative are not verified.
     """
     all_text = doc.extract_all_text()
 
@@ -389,6 +489,14 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
             "Document lacks cohort retention / inclusion-exclusion flow details."
         )
 
+    # 5. Citation Count
+    citation_matches = re.findall(
+        r"<sup[^>]*>.*?</sup>|\[\^\d+\]|\^\[\d+(?:[,\-–]\s*\d+)*\]|\[(?:100|\d{1,2})(?:\s*[,\-–]\s*(?:100|\d{1,2}))*\]|\b(?:Ref\.?|Citation)\s*#?\d+",
+        all_text,
+        re.IGNORECASE,
+    )
+    citations_count = len(citation_matches)
+
     passed = (
         (len(phi_violations) == 0)
         and has_causal_caveat
@@ -405,4 +513,5 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
         has_methods=has_methods,
         has_retention_flow=has_retention_flow,
         has_causal_caveat=has_causal_caveat,
+        citations_count=citations_count,
     )

@@ -327,3 +327,123 @@ def test_integrity_scientific_notation_precision():
     doc_sci_ok.add_paragraph("Genome-wide significance reached 1.23e-4.")
     audit_ok = verify_report_integrity(doc_sci_ok)
     assert 1.23e-4 not in audit_ok.untraced_numbers
+
+
+def test_integrity_superscript_citations_and_references():
+    """
+    Verifies that citation numbers above 10 (e.g. <sup>12</sup>, [^14], [16], and
+    bibliographic list items '17. Author') are recognized as structural and do not
+    falsely trigger untraced data number failures.
+    """
+    doc = ReportDocument(
+        title="Clinical Trial with References",
+        results_dict={"sample_size": 250, "p_value": 0.02},
+    )
+    doc.add_heading("Methods & Statistical Protocol", level=1)
+    doc.add_paragraph(
+        "Cohort inclusion flow: 250 patients analyzed per protocol. Treatment guidelines recommend early resuscitation.<sup>12,13</sup>"
+    )
+    doc.add_paragraph(
+        "Prior prognostic models demonstrated moderate discrimination[^14] and risk stratification.[16]"
+    )
+    doc.add_paragraph("Analysis was carried out with p = 0.02.")
+    doc.add_heading("References", level=2)
+    doc.add_paragraph(
+        "12. Singer M, et al. The Third International Consensus Definitions for Sepsis. JAMA 2016."
+    )
+    doc.add_paragraph(
+        "13. Evans L, et al. Surviving Sepsis Campaign Guidelines. Crit Care Med 2021."
+    )
+    doc.add_paragraph("14. Riley RD, et al. Sample size calculation. BMJ 2020.")
+    doc.add_paragraph(
+        "16. Vickers AJ, et al. Decision curve analysis. Med Decis Making 2006."
+    )
+
+    audit = verify_report_integrity(doc)
+    assert audit.passed is True
+    # Ensure citation numbers 12, 13, 14, 16 are not in untraced numbers
+    assert 12.0 not in audit.untraced_numbers
+    assert 13.0 not in audit.untraced_numbers
+    assert 14.0 not in audit.untraced_numbers
+    assert 16.0 not in audit.untraced_numbers
+    assert audit.citations_count == 3
+
+    # Negative cases: ensure clinical [250], non-reference line "250. Patients were enrolled",
+    # and "1950 patients" remain in untraced_numbers when absent from results_dict
+    doc_neg = ReportDocument(
+        title="Negative Audit Document",
+        results_dict={"known_val": 42.0},
+    )
+    doc_neg.add_paragraph("Dosage was escalated to [250] in the severe subgroup.")
+    doc_neg.add_paragraph("250. Patients were enrolled across all trial centers.")
+    doc_neg.add_paragraph("In a historical registry, 1950 patients were evaluated.")
+    audit_neg = verify_report_integrity(doc_neg)
+    assert 250.0 in audit_neg.untraced_numbers
+    assert 1950.0 in audit_neg.untraced_numbers
+
+
+def test_integrity_comma_bracketed_citations_and_exponents():
+    """
+    Verifies that multi-number bracketed citations like [1, 2] preserve comma separation,
+    bracketed caret citations ^[3] are recognized as citations, and mathematical exponents
+    such as R^2, m^2, and x^2 are treated as structural without being counted as citations.
+    """
+    doc = ReportDocument(
+        title="Model Fit and Citations",
+        results_dict={"r_squared": 0.85, "area": 25.0},
+    )
+    doc.add_paragraph("Prior observational trials demonstrated robust outcomes [1, 2].")
+    doc.add_paragraph("Regression analysis yielded R^2 = 0.85 across a 25 m^2 region.")
+    doc.add_paragraph("Further validation confirmed sensitivity ^[3].")
+    doc.add_heading("References", level=2)
+    doc.add_paragraph("1. Singer M, et al. Sepsis definitions. JAMA 2016.")
+    doc.add_paragraph("2. Evans L, et al. Surviving Sepsis. Crit Care Med 2021.")
+    doc.add_paragraph("3. Riley RD, et al. Sample size calculation. BMJ 2020.")
+
+    audit = verify_report_integrity(doc)
+    # [1, 2] and ^[3] are citations -> citations_count should be 2
+    # R^2 and m^2 must NOT be counted as citations
+    assert audit.citations_count == 2
+
+    # Structural numbers: 1, 2, 3, and exponent 2 should not be untraced
+    assert 1.0 not in audit.untraced_numbers
+    assert 2.0 not in audit.untraced_numbers
+    assert 3.0 not in audit.untraced_numbers
+    assert len(audit.untraced_numbers) == 0
+
+
+def test_integrity_citation_ranges_and_bare_references():
+    """
+    Verifies that all endpoints of bracketed citation ranges such as [1-3] are
+    classified as structural, and bare-number reference items in the bibliography
+    such as '1 Singer M...' (Lancet/BMJ style) are recognized as structural.
+    """
+    doc = ReportDocument(
+        title="Range Citations and Bare References",
+        results_dict={"odds_ratio": 1.45},
+    )
+    doc.add_paragraph(
+        "Comprehensive reviews summarize therapeutic efficacy [1-3] and outcomes [5-7]."
+    )
+    doc.add_paragraph("Odds ratio reached 1.45 in the primary analysis.")
+    doc.add_heading("References", level=2)
+    doc.add_paragraph("1 Singer M, et al. Sepsis-3 definitions. JAMA 2016.")
+    doc.add_paragraph("2 Evans L, et al. Surviving sepsis. CCM 2021.")
+    doc.add_paragraph("3 Riley RD, et al. Sample size calculation. BMJ 2020.")
+    doc.add_paragraph(
+        "5 Vickers AJ, et al. Decision curve analysis. Med Decis Making 2006."
+    )
+    doc.add_paragraph("7 Austin PC, et al. Propensity score matching. Stat Med 2011.")
+    doc.add_paragraph("8 O'Neil J, et al. Critical Care Trials. NEJM 2022.")
+    doc.add_paragraph("9 McDonald A, et al. Oncology outcomes. Lancet 2023.")
+    doc.add_paragraph("10 D'Agostino RB, et al. Cardiovascular risk. Stroke 2008.")
+
+    audit = verify_report_integrity(doc)
+    assert 1.0 not in audit.untraced_numbers
+    assert 3.0 not in audit.untraced_numbers
+    assert 5.0 not in audit.untraced_numbers
+    assert 7.0 not in audit.untraced_numbers
+    assert 8.0 not in audit.untraced_numbers
+    assert 9.0 not in audit.untraced_numbers
+    assert 10.0 not in audit.untraced_numbers
+    assert len(audit.untraced_numbers) == 0

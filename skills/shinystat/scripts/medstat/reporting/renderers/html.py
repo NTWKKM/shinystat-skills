@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import html
+import re
 import urllib.parse
 import warnings
 from pathlib import Path
@@ -59,13 +60,74 @@ def _encode_csv_data_uri(csv_path: str | Path | None) -> str | None:
     return f"data:text/csv;charset=utf-8,{escaped}"
 
 
+def _format_inline_html(text: str) -> str:
+    """
+    Escapes text for HTML rendering while preserving safe inline typography tags
+    including superscript citations (<sup>...</sup>), subscript (<sub>...</sub>),
+    basic formatting (<em>, <strong>, <code>), and citation anchors (<a href="#...">).
+
+    Also converts bracketed caret citations such as ^[1, 2] to superscripts,
+    leaving bare ^1 unchanged. Allowed tags may have a restricted class value;
+    anchors may have a single href, id, or name with an optional leading # and
+    only ASCII letters, digits, underscores, and hyphens in its value. Other
+    markup remains escaped in the returned HTML fragment.
+    """
+    escaped = html.escape(text)
+
+    # Restore safe tags
+    safe_tags = ["sup", "sub", "em", "strong", "code", "b", "i"]
+    for tag in safe_tags:
+        escaped = re.sub(rf"&lt;({tag})&gt;", r"<\1>", escaped, flags=re.IGNORECASE)
+        escaped = re.sub(rf"&lt;(/({tag}))&gt;", r"<\1>", escaped, flags=re.IGNORECASE)
+        escaped = re.sub(
+            rf"&lt;({tag})\s+class=&quot;([a-zA-Z0-9_\-\s]+)&quot;&gt;",
+            r'<\1 class="\2">',
+            escaped,
+            flags=re.IGNORECASE,
+        )
+
+    # Restore reference anchors: <a href="#ref-1">...</a>, <a id="ref-1">...</a>, <a name="ref-1">...</a>
+    escaped = re.sub(
+        r"&lt;a\s+(href|id|name)=&quot;(#?[a-zA-Z0-9_\-]+)&quot;&gt;",
+        r'<a \1="\2">',
+        escaped,
+        flags=re.IGNORECASE,
+    )
+    escaped = re.sub(r"&lt;/a&gt;", "</a>", escaped, flags=re.IGNORECASE)
+
+    # Support raw bracketed caret superscript citations if used in plain narrative: e.g. text^[1] or text^[1, 2]
+    escaped = re.sub(
+        r"\^\[(\d+(?:,\s*\d+)*)\]",
+        r'<sup class="citation">\1</sup>',
+        escaped,
+    )
+
+    return escaped
+
+
 def render_html(
     doc: ReportDocument,
     out_path: str | Path,
 ) -> str:
     """
-    Renders ReportDocument into a self-contained, publication-grade HTML document
+    Renders ReportDocument into a publication-grade HTML document
     with responsive tables and dual interactive/publication figures.
+
+    Creates parent directories for ``out_path``, overwrites an existing file,
+    and returns its resolved absolute path as a string. Images are embedded;
+    interactive figures use Plotly from a CDN with a static fallback. Paragraphs
+    and callouts support restricted inline HTML and bracketed caret citations.
+    Numbered paragraphs under References or Bibliography headings receive
+    reference anchors until the next heading, unless their text already contains
+    an explicit ``id="ref-..."`` marker.
+
+    Missing CSV files and CSV read or decoding errors emit UserWarning and omit
+    the CSV download while allowing the report to render.
+
+    Raises:
+        FileNotFoundError: A figure file does not exist.
+        OSError: A figure cannot be read or the output directory or file cannot
+            be created or written.
     """
     out_p = Path(out_path).resolve()
     out_p.parent.mkdir(parents=True, exist_ok=True)
@@ -144,6 +206,15 @@ def render_html(
             "    }",
             "    table.pub-table tr:hover { background-color: #F8FAFC; }",
             "    .pub-table-footnote { font-size: 12px; color: #64748B; margin-top: 6px; font-style: italic; }",
+            "",
+            "    /* Typography & Superscript Citations */",
+            "    sup { font-size: 75%; line-height: 0; position: relative; vertical-align: baseline; top: -0.5em; font-weight: 600; }",
+            "    sup.citation { color: #0369A1; padding: 0 1px; }",
+            "    sup a { color: inherit; text-decoration: none; }",
+            "    sup a:hover { text-decoration: underline; }",
+            "    .reference-list { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #E2E8F0; font-size: 13.5px; line-height: 1.6; color: #334155; }",
+            "    .reference-list ol { padding-left: 1.5rem; }",
+            "    .reference-list li { margin-bottom: 0.5rem; }",
             "",
             "    /* Dual-View Figure Card Styling */",
             "    .figure-card {",
@@ -322,15 +393,26 @@ def render_html(
         )
 
     fig_idx = 0
+    in_references_section = False
     for block in doc.blocks:
         if isinstance(block, HeadingBlock):
+            in_references_section = bool(
+                re.search(r"\b(?:references|bibliography)\b", block.text, re.IGNORECASE)
+            )
             tag = f"h{max(2, min(6, block.level + 1))}"
             html_parts.append(f"    <{tag}>{html.escape(block.text)}</{tag}>")
         elif isinstance(block, ParagraphBlock):
-            html_parts.append(f"    <p>{html.escape(block.text)}</p>")
+            ref_match = re.match(r"^\s*(?:\[(\d+)\]|(\d+)\.?)\s+", block.text)
+            if in_references_section and ref_match and 'id="ref-' not in block.text:
+                ref_num = ref_match.group(1) or ref_match.group(2)
+                html_parts.append(
+                    f'    <p id="ref-{ref_num}">{_format_inline_html(block.text)}</p>'
+                )
+            else:
+                html_parts.append(f"    <p>{_format_inline_html(block.text)}</p>")
         elif isinstance(block, CalloutBlock):
             html_parts.append(
-                f'    <div class="callout">{html.escape(block.text)}</div>'
+                f'    <div class="callout">{_format_inline_html(block.text)}</div>'
             )
         elif isinstance(block, TableBlock):
             caption_esc = html.escape(block.caption)
