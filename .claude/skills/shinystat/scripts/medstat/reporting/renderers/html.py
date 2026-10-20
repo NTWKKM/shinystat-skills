@@ -65,6 +65,12 @@ def _format_inline_html(text: str) -> str:
     Escapes text for HTML rendering while preserving safe inline typography tags
     including superscript citations (<sup>...</sup>), subscript (<sub>...</sub>),
     basic formatting (<em>, <strong>, <code>), and citation anchors (<a href="#...">).
+
+    Also converts bracketed caret citations such as ^[1, 2] to superscripts,
+    leaving bare ^1 unchanged. Allowed tags may have a restricted class value;
+    anchors may have a single href, id, or name with an optional leading # and
+    only ASCII letters, digits, underscores, and hyphens in its value. Other
+    markup remains escaped in the returned HTML fragment.
     """
     escaped = html.escape(text)
 
@@ -104,8 +110,24 @@ def render_html(
     out_path: str | Path,
 ) -> str:
     """
-    Renders ReportDocument into a self-contained, publication-grade HTML document
+    Renders ReportDocument into a publication-grade HTML document
     with responsive tables and dual interactive/publication figures.
+
+    Creates parent directories for ``out_path``, overwrites an existing file,
+    and returns its resolved absolute path as a string. Images are embedded;
+    interactive figures use Plotly from a CDN with a static fallback. Paragraphs
+    and callouts support restricted inline HTML and bracketed caret citations.
+    Numbered paragraphs under References or Bibliography headings receive
+    reference anchors until the next heading, unless their text already contains
+    an explicit ``id="ref-..."`` marker.
+
+    Missing CSV files and CSV read or decoding errors emit UserWarning and omit
+    the CSV download while allowing the report to render.
+
+    Raises:
+        FileNotFoundError: A figure file does not exist.
+        OSError: A figure cannot be read or the output directory or file cannot
+            be created or written.
     """
     out_p = Path(out_path).resolve()
     out_p.parent.mkdir(parents=True, exist_ok=True)

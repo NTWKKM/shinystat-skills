@@ -141,7 +141,15 @@ def _is_structural_context(
     window_after: str,
     doc_has_references: bool = False,
 ) -> bool:
-    """Checks whether an unmatched numeric token is an uninformative structural constant."""
+    """Checks whether an unmatched numeric token is an uninformative structural constant.
+
+    The windows provide surrounding same-line context for ``raw_str``.
+    Recognized context includes citation markers, exponents, and calendar or
+    publication years from 1900 through 2035. ``doc_has_references`` enables
+    additional exemptions for author-style bibliography entries numbered 1–100;
+    it indicates a reference heading anywhere in the document, not that the
+    token itself is in a reference section.
+    """
     window = f"{window_before}{raw_str}{window_after}"
 
     # 1. Confidence interval levels (e.g., 90%, 95%, 99% CI)
@@ -246,7 +254,13 @@ def _is_structural_context(
 
 
 def _extract_text_tokens(text: str) -> list[TextToken]:
-    """Extracts candidate TextToken objects from narrative text."""
+    """Extracts candidate TextToken objects from narrative text.
+
+    Normalizes thousands separators and preserves token order and duplicates.
+    Percentages retain their displayed scale (85% yields ``val=85.0`` with
+    ``has_pct=True``). Only values strictly between -1e7 and 1e7 are returned,
+    with raw numeric strings and flags identifying structural context.
+    """
     clean_text = re.sub(r"(?<=\d),(?=\d{3}\b)", "", text)
     doc_has_references = bool(
         re.search(
@@ -303,11 +317,20 @@ def _extract_text_numbers(text: str) -> list[float]:
 
 def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
     """
-    Performs comprehensive verification on a ReportDocument:
+    Audits a ReportDocument and returns an IntegrityReport:
     1. Traces numbers in narrative text against results_dict.
     2. Scans all text and table entries for PHI.
-    3. Verifies causal inference / unmeasured confounding caveats.
-    4. Confirms methods and retention flow representation.
+    3. Checks confounding caveats when results_dict keys suggest causal analyses.
+    4. Checks for methods and retention keywords.
+
+    Structural constants are exempt from numerical tracing. ``passed`` requires
+    no PHI matches, any required confounding caveat, and at most
+    ``max(1, int(number_of_extracted_tokens * 0.15))`` untraced numbers.
+    Missing methods or retention keywords only add warnings.
+
+    ``citations_count`` counts matched citation groups, not unique references;
+    bracketed bibliography labels can also count. Citation sources and their
+    agreement with the narrative are not verified.
     """
     all_text = doc.extract_all_text()
 

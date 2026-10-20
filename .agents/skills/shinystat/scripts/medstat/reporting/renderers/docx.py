@@ -73,8 +73,10 @@ def _apply_three_rule_table_borders(table) -> None:
 
 def _add_formatted_runs_to_paragraph(paragraph, text: str) -> None:
     """
-    Parses text into Word runs, converting <sup>...</sup> tags or caret notation ^1
-    into native Word superscript text runs (run.font.superscript = True).
+    Appends text to an existing Word paragraph, converting <sup>...</sup> tags
+    and bracketed caret citations such as ^[1] or ^[1, 2] into native superscript
+    runs. Tags nested inside superscripts are stripped; text outside matched
+    superscripts, including bare ^1, is appended literally.
     """
     pattern = re.compile(
         r"<sup[^>]*>(.*?)</sup>|\^\[(\d+(?:,\s*\d+)*)\]",
@@ -113,6 +115,18 @@ def render_docx(
 ) -> str:
     """
     Renders ReportDocument into a native .docx Word document.
+
+    Creates parent directories for ``out_path``, overwrites an existing file,
+    and returns its resolved absolute path as a string. Paragraph blocks support
+    native superscript citations; paragraphs starting with a number followed by
+    a period and whitespace receive hanging indents.
+
+    Raises:
+        FileNotFoundError: A figure file does not exist.
+        OSError: A figure cannot be read or the output directory or file cannot
+            be created or written.
+        docx.image.exceptions.UnrecognizedImageError: A figure's image format
+            is not recognized by python-docx.
     """
     out_p = Path(out_path).resolve()
     out_p.parent.mkdir(parents=True, exist_ok=True)
