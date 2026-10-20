@@ -174,7 +174,7 @@ Polish Grilling Gate #6 Activation & Routing
 ├── Triggering Conditions:
 │   ├── User prompt explicitly requests evidence/literature (e.g. "หาหลักฐานมาประกอบ", "find evidence") ──▶ Auto-activate Gate #6 Full Polish
 │   └── Polish preference omitted in prompt ──▶ Gate #5 Alignment Inquiry:
-│       ├── (Standard) Skip Polish (Direct Fast-Path) ──▶ Standard normal flow using user-provided or existing sources (no external search; on-demand polish available later)
+│       ├── (Standard) Skip Polish (Direct Fast-Path) ──▶ Standard normal flow using user-provided or existing sources (superscripts applied if sources provided; no external search; on-demand polish available later)
 │       └── (Optional) Full Publication Polish (Execute Gate #6) ──▶ External literature grounding & superscript citations
 ├── Polish Execution (Full Polish or On-Demand Trigger):
 │   ├── Step 1: Claim vs Data Reconciliation
