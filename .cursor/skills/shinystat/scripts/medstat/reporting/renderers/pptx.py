@@ -345,7 +345,7 @@ def _add_content_slide(
             ctf.word_wrap = True
             for c_idx, c_text in enumerate(callouts):
                 cp = ctf.paragraphs[0] if c_idx == 0 else ctf.add_paragraph()
-                cp.text = f"NOTE: {c_text}"
+                cp.text = f"NOTE: {_clean_slide_text(c_text)}"
                 cp.font.name = "Arial"
                 cp.font.size = Pt(11)
                 cp.font.bold = True

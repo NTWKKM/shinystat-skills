@@ -178,12 +178,12 @@ Polish Grilling Gate #6 Activation & Routing
 │       └── (Optional) Full Publication Polish (Execute Gate #6) ──▶ External literature grounding & superscript citations
 ├── Polish Execution (Full Polish or On-Demand Trigger):
 │   ├── Step 1: Claim vs Data Reconciliation
-│   │   ├── Prohibit causal claims on unweighted observational data (must report association + E-value)
-│   │   ├── P > 0.05 must be stated as "insufficient evidence to reject the null" (never "treatments are equivalent")
-│   │   └── Numerical prose numbers must match results_dict within ±0.02 or 1%
-│   ├── Step 2: Primary Study Retrieval & Real-World Literature Verification (websearch / MCP databases)
+│   │   ├── Assess causal language by identification assumptions, prespecified estimand, and confounder control (do not treat weighting alone as sufficient or unweighted observational data as automatically prohibiting causal claims; report associative framing where identification is unverified, and require E-values only where defined and appropriate for the supported effect measure and sensitivity question)
+│   │   ├── Superiority P > 0.05 must be stated as "insufficient evidence to reject the null" (never "treatments are equivalent"); preserve separate interpretation for prespecified non-inferiority or equivalence analyses based on their margin and confidence interval
+│   │   └── Numerical prose numbers must match results_dict within abs_tol = min(0.02, 10**(-dec_digits)) for |val| <= 1.0, 0.02 absolute or 0.01 (1%) relative tolerance for |val| > 1.0, or min(0.05, abs_tol * 100.0) for percentages
+│   ├── Step 2: Primary Study Retrieval & Real-World Literature Verification (websearch / bibliographic services)
 │   │   ├── When user sources cite papers without full text/details, locate authentic primary study via search_web or PubMed
-│   │   ├── Query search_web or medical-terminology MCP for author, title, journal, year, DOI, and findings
+│   │   ├── Query search_web or PubMed for author, title, journal, year, DOI, and findings; restrict medical-terminology MCP to terminology, ontology codes, and laboratory reference ranges
 │   │   ├── Anti-Phantom Citation Invariant: All cited papers must be verified real-world publications
 │   │   └── If reference is unverified, retracted, or contradicts narrative ──▶ Halt to reconcile or replace
 │   └── Step 3: Citation & Reference Formatting

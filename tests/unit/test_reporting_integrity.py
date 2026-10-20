@@ -366,4 +366,17 @@ def test_integrity_superscript_citations_and_references():
     assert 13.0 not in audit.untraced_numbers
     assert 14.0 not in audit.untraced_numbers
     assert 16.0 not in audit.untraced_numbers
-    assert audit.citations_count >= 2
+    assert audit.citations_count == 3
+
+    # Negative cases: ensure clinical [250], non-reference line "250. Patients were enrolled",
+    # and "1950 patients" remain in untraced_numbers when absent from results_dict
+    doc_neg = ReportDocument(
+        title="Negative Audit Document",
+        results_dict={"known_val": 42.0},
+    )
+    doc_neg.add_paragraph("Dosage was escalated to [250] in the severe subgroup.")
+    doc_neg.add_paragraph("250. Patients were enrolled across all trial centers.")
+    doc_neg.add_paragraph("In a historical registry, 1950 patients were evaluated.")
+    audit_neg = verify_report_integrity(doc_neg)
+    assert 250.0 in audit_neg.untraced_numbers
+    assert 1950.0 in audit_neg.untraced_numbers

@@ -82,21 +82,16 @@ def _format_inline_html(text: str) -> str:
 
     # Restore reference anchors: <a href="#ref-1">...</a>, <a id="ref-1">...</a>, <a name="ref-1">...</a>
     escaped = re.sub(
-        r"&lt;a\s+(?:href|id|name)=&quot;(#?[a-zA-Z0-9_\-]+)&quot;&gt;",
-        r'<a href="\1">',
+        r"&lt;a\s+(href|id|name)=&quot;(#?[a-zA-Z0-9_\-]+)&quot;&gt;",
+        r'<a \1="\2">',
         escaped,
         flags=re.IGNORECASE,
     )
     escaped = re.sub(r"&lt;/a&gt;", "</a>", escaped, flags=re.IGNORECASE)
 
-    # Support raw caret superscript citations if used in plain narrative: e.g. text^1,2 or text^[1]
+    # Support raw bracketed caret superscript citations if used in plain narrative: e.g. text^[1] or text^[1, 2]
     escaped = re.sub(
         r"\^\[(\d+(?:,\s*\d+)*)\]",
-        r'<sup class="citation">\1</sup>',
-        escaped,
-    )
-    escaped = re.sub(
-        r"(?<=\w)\^(\d+(?:,\s*\d+)*)(?=\b|[.,;:!?)\]\s]|$)",
         r'<sup class="citation">\1</sup>',
         escaped,
     )
@@ -376,12 +371,23 @@ def render_html(
         )
 
     fig_idx = 0
+    in_references_section = False
     for block in doc.blocks:
         if isinstance(block, HeadingBlock):
+            in_references_section = bool(
+                re.search(r"\b(?:references|bibliography)\b", block.text, re.IGNORECASE)
+            )
             tag = f"h{max(2, min(6, block.level + 1))}"
             html_parts.append(f"    <{tag}>{html.escape(block.text)}</{tag}>")
         elif isinstance(block, ParagraphBlock):
-            html_parts.append(f"    <p>{_format_inline_html(block.text)}</p>")
+            ref_match = re.match(r"^\s*(?:\[(\d+)\]|(\d+)\.)\s+", block.text)
+            if in_references_section and ref_match and 'id="ref-' not in block.text:
+                ref_num = ref_match.group(1) or ref_match.group(2)
+                html_parts.append(
+                    f'    <p id="ref-{ref_num}">{_format_inline_html(block.text)}</p>'
+                )
+            else:
+                html_parts.append(f"    <p>{_format_inline_html(block.text)}</p>")
         elif isinstance(block, CalloutBlock):
             html_parts.append(
                 f'    <div class="callout">{_format_inline_html(block.text)}</div>'

@@ -135,7 +135,11 @@ class TextToken(NamedTuple):
 
 
 def _is_structural_context(
-    val: float, raw_str: str, window_before: str, window_after: str
+    val: float,
+    raw_str: str,
+    window_before: str,
+    window_after: str,
+    doc_has_references: bool = False,
 ) -> bool:
     """Checks whether an unmatched numeric token is an uninformative structural constant."""
     window = f"{window_before}{raw_str}{window_after}"
@@ -159,7 +163,7 @@ def _is_structural_context(
         if _DATE_PREFIX_PATTERN.search(window_before):
             return True
         if re.search(
-            r"\b(?:et\s+al\.?|JAMA|NEJM|Lancet|BMJ|Med|Crit\s+Care|J\b|Ann\b|Clin\b|Sci\b|Press|Univ|doi|vol|pp?\.?)\b|[\(\[]\s*$",
+            r"\b(?:et\s+al\.?|JAMA|NEJM|Lancet|BMJ|Crit\s+Care|doi|vol|pp?\.?)\b",
             window_before,
             re.IGNORECASE,
         ):
@@ -201,8 +205,14 @@ def _is_structural_context(
             return True
 
         # 6c. Bracketed citation reference: [1], [1, 2], [1-3]
-        if re.search(r"\[\s*$", window_before) and re.match(
-            r"\s*[,\-\]]", window_after
+        # Bounded by plausible citation range (1 <= val <= 100) and clean bracket closure
+        if (
+            1.0 <= val <= 100.0
+            and re.search(r"\[(?:\d+\s*,\s*)*$", window_before)
+            and re.match(
+                r"^(?:\s*,\s*\d+)*\s*(?:[-–]\s*\d+)?\s*\](?!\s*[a-zA-Z])",
+                window_after,
+            )
         ):
             return True
 
@@ -215,8 +225,16 @@ def _is_structural_context(
             return True
 
         # 6e. Bibliographic reference list item at start of paragraph/line: "1. Smith J...", "[1] Doe A..."
-        if re.match(r"^\s*(?:\[\s*)?$", window_before) and re.match(
-            r"^\s*(?:\]\s*)?[\.\)]\s+[A-Z]", window_after
+        # Requires document to have a References/Bibliography section, plausible range (1 <= val <= 100),
+        # and author/bibliographic format
+        if (
+            doc_has_references
+            and 1.0 <= val <= 100.0
+            and re.match(r"^\s*(?:\[\s*)?$", window_before)
+            and re.match(
+                r"^\s*(?:\]\s*)?[\.\)]\s+[A-Z][a-z]+(?:\s+[A-Z]{1,3}\b|\s*,\s*[A-Z]{1,3}\b|\s+et\s+al)",
+                window_after,
+            )
         ):
             return True
 
@@ -226,6 +244,13 @@ def _is_structural_context(
 def _extract_text_tokens(text: str) -> list[TextToken]:
     """Extracts candidate TextToken objects from narrative text."""
     clean_text = text.replace(",", "")
+    doc_has_references = bool(
+        re.search(
+            r"(?:^|\n)\s*(?:#{1,4}\s*)?(?:References|Bibliography)\b",
+            text,
+            re.IGNORECASE,
+        )
+    )
     matches = list(
         re.finditer(
             r"(?<!\w)(?<![a-zA-Z]-)(?P<num>(?:[-+]?\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?)(?P<pct>\s*%)?",
@@ -246,11 +271,15 @@ def _extract_text_tokens(text: str) -> list[TextToken]:
         has_pct = bool(pct_group and pct_group.strip() == "%")
         start = m.start()
         end = m.end()
-        window_before = clean_text[max(0, start - 30) : start].split("\n")[-1]
-        window_after = clean_text[end : min(len(clean_text), end + 30)].split("\n")[0]
+        window_before = clean_text[max(0, start - 80) : start].split("\n")[-1]
+        window_after = clean_text[end : min(len(clean_text), end + 80)].split("\n")[0]
 
         is_structural = _is_structural_context(
-            val, raw_num, window_before, window_after
+            val,
+            raw_num,
+            window_before,
+            window_after,
+            doc_has_references=doc_has_references,
         )
         tokens.append(
             TextToken(
@@ -435,7 +464,7 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
 
     # 5. Citation Count
     citation_matches = re.findall(
-        r"<sup[^>]*>.*?</sup>|\[\^\d+\]|\b(?:Ref\.?|Citation)\s*#?\d+",
+        r"<sup[^>]*>.*?</sup>|\[\^\d+\]|\^\[\d+(?:[,\-–]\s*\d+)*\]|\^\d+\b|\[(?:100|\d{1,2})(?:\s*[,\-–]\s*(?:100|\d{1,2}))*\]|\b(?:Ref\.?|Citation)\s*#?\d+",
         all_text,
         re.IGNORECASE,
     )
