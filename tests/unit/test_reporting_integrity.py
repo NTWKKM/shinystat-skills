@@ -434,10 +434,16 @@ def test_integrity_citation_ranges_and_bare_references():
         "5 Vickers AJ, et al. Decision curve analysis. Med Decis Making 2006."
     )
     doc.add_paragraph("7 Austin PC, et al. Propensity score matching. Stat Med 2011.")
+    doc.add_paragraph("8 O'Neil J, et al. Critical Care Trials. NEJM 2022.")
+    doc.add_paragraph("9 McDonald A, et al. Oncology outcomes. Lancet 2023.")
+    doc.add_paragraph("10 D'Agostino RB, et al. Cardiovascular risk. Stroke 2008.")
 
     audit = verify_report_integrity(doc)
     assert 1.0 not in audit.untraced_numbers
     assert 3.0 not in audit.untraced_numbers
     assert 5.0 not in audit.untraced_numbers
     assert 7.0 not in audit.untraced_numbers
+    assert 8.0 not in audit.untraced_numbers
+    assert 9.0 not in audit.untraced_numbers
+    assert 10.0 not in audit.untraced_numbers
     assert len(audit.untraced_numbers) == 0
