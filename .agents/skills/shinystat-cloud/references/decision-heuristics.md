@@ -185,8 +185,8 @@ Polish Grilling Gate #6 Activation & Routing
 │   │   ├── Superiority P > alpha (from analysis metadata, default 0.05) must be stated as "insufficient evidence to reject the null" (never "treatments are equivalent"); preserve separate interpretation for prespecified non-inferiority or equivalence analyses based on their margin and confidence interval
 │   │   └── Numerical prose numbers must match results_dict within abs_tol = min(0.02, 10**(-dec_digits)) for |val| <= 1.0, 0.02 absolute or 0.01 (1%) relative tolerance for |val| > 1.0, or min(0.05, abs_tol * 100.0) for percentages
 │   ├── Step 2: Primary Study Retrieval & Real-World Literature Verification (websearch / bibliographic services)
-│   │   ├── When user sources cite papers without full text/details, locate authentic primary study via search_web or PubMed
-│   │   ├── Query search_web or PubMed for author, title, journal, year, DOI, and findings; restrict medical-terminology MCP to terminology, ontology codes, and laboratory reference ranges
+│   │   ├── When user sources cite papers without full text/details, locate authentic primary study via search_web, PubMed, or other bibliographic services
+│   │   ├── Query search_web, PubMed, or other bibliographic services for author, title, journal, year, DOI, and findings; restrict medical-terminology MCP to terminology, ontology codes, and laboratory reference ranges
 │   │   ├── Anti-Phantom Citation Invariant: All cited papers must be verified real-world publications
 │   │   └── If reference is unverified, retracted, or contradicts narrative ──▶ Halt to reconcile or replace
 │   └── Step 3: Citation & Reference Formatting
