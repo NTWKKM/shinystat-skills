@@ -174,15 +174,16 @@ Polish Grilling Gate #6 Activation & Routing
 ├── Triggering Conditions:
 │   ├── User prompt explicitly requests evidence/literature (e.g. "หาหลักฐานมาประกอบ", "find evidence") ──▶ Auto-activate Gate #6 Full Polish
 │   └── Polish preference omitted in prompt ──▶ Gate #5 Alignment Inquiry:
-│       ├── (Standard) Skip Polish (Direct Fast-Path) ──▶ Standard normal flow using user-provided or existing sources (superscripts applied if sources provided; no external search; on-demand polish available later)
+│       ├── (Standard) Skip Polish (Direct Fast-Path) ──▶ Standard normal flow using user-provided or existing sources; resolves partial/incomplete user citations via targeted search_web/MCP without exploratory literature reviews (on-demand polish available later)
 │       └── (Optional) Full Publication Polish (Execute Gate #6) ──▶ External literature grounding & superscript citations
 ├── Polish Execution (Full Polish or On-Demand Trigger):
 │   ├── Step 1: Claim vs Data Reconciliation
 │   │   ├── Prohibit causal claims on unweighted observational data (must report association + E-value)
 │   │   ├── P > 0.05 must be stated as "insufficient evidence to reject the null" (never "treatments are equivalent")
 │   │   └── Numerical prose numbers must match results_dict within ±0.02 or 1%
-│   ├── Step 2: Real-World Literature Verification (websearch / MCP databases)
-│   │   ├── Query search_web or medical-terminology MCP for author, title, journal, year, and findings
+│   ├── Step 2: Primary Study Retrieval & Real-World Literature Verification (websearch / MCP databases)
+│   │   ├── When user sources cite papers without full text/details, locate authentic primary study via search_web or PubMed
+│   │   ├── Query search_web or medical-terminology MCP for author, title, journal, year, DOI, and findings
 │   │   ├── Anti-Phantom Citation Invariant: All cited papers must be verified real-world publications
 │   │   └── If reference is unverified, retracted, or contradicts narrative ──▶ Halt to reconcile or replace
 │   └── Step 3: Citation & Reference Formatting

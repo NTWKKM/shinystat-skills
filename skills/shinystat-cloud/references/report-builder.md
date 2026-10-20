@@ -1337,7 +1337,7 @@ def verify_standalone_integrity(
 
 ## 4. Evidence-Base Verification & Superscript Citations Pipeline
 
-When the **Polish Grilling Gate (#6)** is engaged (via explicit prompt request e.g. "หาหลักฐานมาประกอบ" / "find evidence", Gate #5 Full Polish selection, or triggered on-demand), execute this 4-step evidence verification and citation workflow (if Standard Skip Polish is active, standard deliverables proceed directly using user-provided or existing local sources without external search):
+When the **Polish Grilling Gate (#6)** is engaged (via explicit prompt request e.g. "หาหลักฐานมาประกอบ" / "find evidence", Gate #5 Full Polish selection, or triggered on-demand), execute this 4-step evidence verification and citation workflow (if Standard Skip Polish is active, standard deliverables proceed directly using user-provided or existing local sources, resolving incomplete citations via targeted search_web/MCP without exploratory literature reviews):
 
 ### Step 1: Clinical Claims vs Analyzed Data Audit
 - Cross-audit every narrative statement in Discussion and Results against `results_dict` and study design.
@@ -1345,7 +1345,11 @@ When the **Polish Grilling Gate (#6)** is engaged (via explicit prompt request e
 - Verify that non-significant results ($P > 0.05$) are strictly stated as "insufficient evidence to reject the null hypothesis" rather than claiming equivalence or "no effect".
 - Ensure point estimates, 95% CIs, and $P$-values match tabular outputs exactly.
 
-### Step 2: Empirical Literature Grounding via WebSearch & MCP Databases
+### Step 2: Primary Source Retrieval & Empirical Literature Grounding via WebSearch & MCP Databases
+- **Incomplete User Source Resolution**: When user-provided materials, clinical notes, or prompts cite or mention external studies (e.g., "Singer 2016", "Sepsis-3", "KDIGO 2012") without full text or complete bibliographic metadata:
+  - Do NOT leave it as an informal or truncated citation.
+  - Query `search_web` or PubMed/MCP to retrieve the authentic primary publication: Title, full Author list, Journal, Year, Volume, Pages, and DOI.
+  - Insert the complete, verified study into the References list and assign sequential superscript citations (`<sup>1</sup>`).
 - Audit every cited study, trial, or guideline against real biomedical literature:
   - **`search_web`**: Verify publication metadata via query: `"<First Author> <Journal> <Year> <Title keywords>"` or DOI/PMID.
   - **`medical-terminology` MCP**: Validate medical terminology, standardized ontology codes (SNOMED CT, LOINC, RxNorm, ICD-10), and laboratory reference ranges.
