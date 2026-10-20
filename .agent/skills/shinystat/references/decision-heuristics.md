@@ -172,8 +172,8 @@ Determining Required Sample Size for Multivariable Prediction Model Development
 ```
 Polish Grilling Gate #6 Activation & Routing
 ├── Mandatory Inquiry at Gate #5:
+│   ├── (Recommended) Skip Polish (Direct Fast-Path) ──▶ Standard normal flow without external literature verification
 │   ├── Full Publication Polish (Execute Gate #6) ──▶ Literature grounding & superscript citations
-│   ├── Skip Polish (Direct Fast-Path) ──▶ Standard normal flow without external literature verification
 │   └── Defer Polish (Do Later) ──▶ Standard analysis & draft first; polish available on-demand later
 ├── Polish Execution (Full Polish or On-Demand Trigger):
 │   ├── Step 1: Claim vs Data Reconciliation
