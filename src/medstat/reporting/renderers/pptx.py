@@ -284,9 +284,15 @@ _SUP_TRANS = str.maketrans("0123456789,-–", "⁰¹²³⁴⁵⁶⁷⁸⁹,⁻�
 
 
 def _clean_slide_text(text: str) -> str:
-    """Replaces HTML superscript citations and bracketed carets with Unicode superscripts, and cleans markup."""
+    """Converts superscripts to Unicode and removes recognized HTML tags.
+
+    Converts <sup>...</sup> and bracketed caret citations such as ^[1, 2] or
+    ^[1-3] to Unicode superscript digits and minus signs; commas and other
+    characters remain unchanged. Bare ^1 and comparison operators are preserved.
+    """
 
     def _to_unicode_sup(m: re.Match) -> str:
+        """Returns capture group 1 with recognized tags stripped and digits raised."""
         inner = _RECOGNIZED_TAGS_RE.sub("", m.group(1)).strip()
         return inner.translate(_SUP_TRANS)
 
@@ -304,7 +310,12 @@ def _clean_slide_text(text: str) -> str:
 def _add_content_slide(
     prs: Presentation, title: str, paragraphs: list[str], callouts: list[str]
 ) -> None:
-    """Creates a text and narrative slide with bullet points and callout boxes."""
+    """Appends narrative slides to ``prs``, with up to five bullet paragraphs each.
+
+    All callouts appear on the final slide. An empty paragraph list still produces
+    one slide, even without callouts. Paragraph and callout text uses Unicode
+    superscripts with recognized HTML tags removed.
+    """
     chunk_size = 5
     para_chunks = (
         [paragraphs[i : i + chunk_size] for i in range(0, len(paragraphs), chunk_size)]
