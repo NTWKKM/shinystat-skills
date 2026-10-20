@@ -170,19 +170,23 @@ Determining Required Sample Size for Multivariable Prediction Model Development
 
 ### J. Polish Grilling Gate & Evidence Grounding Decision Tree
 ```
-Polish Grilling Gate #6 Activation
-├── Triggered ──▶ Explicit user request for "polish", "evidence check", "verify references", or publication manuscript assembly
-├── Step 1: Claim vs Data Reconciliation
-│   ├── Prohibit causal claims on unweighted observational data (must report association + E-value)
-│   ├── P > 0.05 must be stated as "insufficient evidence to reject the null" (never "treatments are equivalent")
-│   └── Numerical prose numbers must match results_dict within ±0.02 or 1%
-├── Step 2: Real-World Literature Verification (websearch / MCP databases)
-│   ├── Query search_web or medical-terminology MCP for author, title, journal, year, and findings
-│   ├── Anti-Phantom Citation Invariant: All cited papers must be verified real-world publications
-│   └── If reference is unverified, retracted, or contradicts narrative ──▶ Halt at Polish Gate to reconcile or replace
-└── Step 3: Citation & Reference Formatting
-    ├── Sequential numerical superscripts (<sup>1</sup>, <sup>2,3</sup>) in order of appearance
-    └── Format Reference List in locked Journal House Style (NEJM, JAMA, Lancet, BMJ, Clinical)
+Polish Grilling Gate #6 Activation & Routing
+├── Mandatory Inquiry at Gate #5:
+│   ├── Full Publication Polish (Execute Gate #6) ──▶ Literature grounding & superscript citations
+│   ├── Skip Polish (Direct Fast-Path) ──▶ Standard normal flow without external literature verification
+│   └── Defer Polish (Do Later) ──▶ Standard analysis & draft first; polish available on-demand later
+├── Polish Execution (Full Polish or On-Demand Trigger):
+│   ├── Step 1: Claim vs Data Reconciliation
+│   │   ├── Prohibit causal claims on unweighted observational data (must report association + E-value)
+│   │   ├── P > 0.05 must be stated as "insufficient evidence to reject the null" (never "treatments are equivalent")
+│   │   └── Numerical prose numbers must match results_dict within ±0.02 or 1%
+│   ├── Step 2: Real-World Literature Verification (websearch / MCP databases)
+│   │   ├── Query search_web or medical-terminology MCP for author, title, journal, year, and findings
+│   │   ├── Anti-Phantom Citation Invariant: All cited papers must be verified real-world publications
+│   │   └── If reference is unverified, retracted, or contradicts narrative ──▶ Halt to reconcile or replace
+│   └── Step 3: Citation & Reference Formatting
+│       ├── Sequential numerical superscripts (<sup>1</sup>, <sup>2,3</sup>) in order of appearance
+│       └── Format Reference List in locked Journal House Style (NEJM, JAMA, Lancet, BMJ, Clinical)
 ```
 
 ---

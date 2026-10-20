@@ -133,7 +133,7 @@ if not audit.passed:
 
 ## 4. Evidence-Base Verification & Superscript Citations Pipeline
 
-When the **Polish Grilling Gate (#6)** is engaged or when preparing publication-grade manuscripts, execute this 4-step evidence verification and citation workflow:
+When the **Polish Grilling Gate (#6)** is engaged (via Gate #5 Full Polish selection or triggered on-demand), execute this 4-step evidence verification and citation workflow (if Skip Polish or Defer Polish is chosen at Gate #5, standard analysis deliverables proceed directly through the normal flow):
 
 ### Step 1: Clinical Claims vs Analyzed Data Audit
 - Cross-audit every narrative statement in Discussion and Results against `results_dict` and study design.
