@@ -303,3 +303,76 @@ def test_render_pptx_empty_columns_table_skipped(tmp_path: Path):
     prs = Presentation(str(out_path))
     # Only Title slide was created; no table slide was added
     assert len(prs.slides) == 1
+
+
+def test_renderers_superscript_citations(tmp_path: Path):
+    """
+    Verifies that narrative superscript citations format properly across
+    HTML, Word .docx, PowerPoint .pptx, and Markdown.
+    """
+    from docx import Document as DocxDocument
+
+    from medstat.reporting.renderers import (
+        render_docx,
+        render_html,
+        render_markdown,
+        render_pptx,
+    )
+
+    doc = ReportDocument(title="Evidence-Based Sepsis Study")
+    doc.add_heading("Introduction & Clinical Guidelines", level=1)
+    doc.add_paragraph(
+        'Early antibiotic administration reduces mortality in septic shock.<sup class="citation"><a href="#ref-1">1</a>,<a href="#ref-2">2</a></sup>'
+    )
+    doc.add_paragraph(
+        "Standard resuscitation guidelines recommend 30 mL/kg crystalloids within 3 hours.^3"
+    )
+    doc.add_heading("References", level=2)
+    doc.add_paragraph("1. Singer M, et al. Sepsis-3 Definitions. JAMA 2016.")
+    doc.add_paragraph("2. Evans L, et al. Surviving Sepsis Campaign. CCM 2021.")
+    doc.add_paragraph("3. Rhodes A, et al. Surviving Sepsis Guidelines. ICM 2017.")
+
+    # 1. HTML Verification
+    html_file = tmp_path / "citations_report.html"
+    render_html(doc, html_file)
+    html_content = html_file.read_text(encoding="utf-8")
+    assert '<sup class="citation">' in html_content
+    assert '<a href="#ref-1">1</a>' in html_content
+    assert "&lt;sup&gt;" not in html_content
+
+    # 2. DOCX Verification
+    docx_file = tmp_path / "citations_report.docx"
+    render_docx(doc, docx_file)
+    docx_doc = DocxDocument(str(docx_file))
+    superscript_runs = [
+        run
+        for p in docx_doc.paragraphs
+        for run in p.runs
+        if run.font.superscript is True
+    ]
+    assert len(superscript_runs) >= 1
+    # References hanging indent verification
+    ref_paras = [p for p in docx_doc.paragraphs if p.text.startswith("1. ")]
+    assert len(ref_paras) == 1
+    assert ref_paras[0].paragraph_format.first_line_indent < 0
+
+    # 3. PPTX Verification
+    pptx_file = tmp_path / "citations_presentation.pptx"
+    render_pptx(doc, pptx_file)
+    prs = Presentation(str(pptx_file))
+    slide_texts = [
+        s.text_frame.text
+        for slide in prs.slides
+        for s in slide.shapes
+        if s.has_text_frame
+    ]
+    all_slide_text = " ".join(slide_texts)
+    # Zero raw <sup> tags leaking into PPTX
+    assert "<sup" not in all_slide_text
+    assert "</sup>" not in all_slide_text
+
+    # 4. Markdown Verification
+    md_file = tmp_path / "citations_report.md"
+    render_markdown(doc, md_file)
+    md_content = md_file.read_text(encoding="utf-8")
+    assert "<sup" in md_content

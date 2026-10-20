@@ -70,6 +70,10 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
 | **Schoenfeld Violator Remedy** | `schoenfeld_violator_remedy` | Mandatory rule (decision-heuristics.md §2.E, ADR 46) requiring that every covariate violating proportional hazards ($P \le 0.05$) carry an actionable remedy: stratification (`refit_cox_with_strata`) for nuisance covariates, or period-specific time-varying HR (`piecewise_hr`) or RMST for exposure. |
 | **Bonferroni PH Multiplicity** | `bonferroni_ph_multiplicity` | Multiple-testing correction threshold $\alpha_{\text{Bonferroni}} = 0.05 / k$ for $k$ tested covariates, partitioning violations into strong ($P \le \alpha_{\text{Bonferroni}}$) and weak ($\alpha_{\text{Bonferroni}} < P \le 0.05$). Known limitation: rank time transform can miss non-monotone effects, requiring residual plot inspection (`plot_schoenfeld_residuals`). |
 | **Piecewise Hazard Ratio** | `piecewise_hr` | Period-specific exposure HR estimation via counting-process episode splitting and lifelines `CoxTimeVaryingFitter`, taking standard errors strictly from model-based variance to avoid entry-time sandwich variance inflation. |
+| **Polish Grilling Gate** | `polish_grilling_gate` | Optional gating checkpoint activated during report polish and manuscript review that reconciles narrative claims against analyzed data, verifies real-world literature evidence, and formats superscript citations. |
+| **Evidence Grounding** | `evidence_grounding` | Verification of cited literature against authoritative sources (WebSearch, PubMed, medical MCP databases) to ensure factual accuracy and alignment with narrative claims. |
+| **Superscript Citations** | `superscript_citations` | In-text citation formatting in sequential Vancouver / ICMJE style (`<sup>1</sup>`, native Word `.docx` superscript runs, Markdown footnotes) linked to an audited reference list. |
+| **Anti-Phantom Citation** | `anti_phantom_citation` | Mandatory zero-hallucination invariant prohibiting fabricated studies, synthetic DOIs, or misattributed literature claims. |
 
 
 ---

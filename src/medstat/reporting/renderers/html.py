@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import html
+import re
 import urllib.parse
 import warnings
 from pathlib import Path
@@ -57,6 +58,50 @@ def _encode_csv_data_uri(csv_path: str | Path | None) -> str | None:
         return None
     escaped = urllib.parse.quote(content)
     return f"data:text/csv;charset=utf-8,{escaped}"
+
+
+def _format_inline_html(text: str) -> str:
+    """
+    Escapes text for HTML rendering while preserving safe inline typography tags
+    including superscript citations (<sup>...</sup>), subscript (<sub>...</sub>),
+    basic formatting (<em>, <strong>, <code>), and citation anchors (<a href="#...">).
+    """
+    escaped = html.escape(text)
+
+    # Restore safe tags
+    safe_tags = ["sup", "sub", "em", "strong", "code", "b", "i"]
+    for tag in safe_tags:
+        escaped = re.sub(rf"&lt;({tag})&gt;", r"<\1>", escaped, flags=re.IGNORECASE)
+        escaped = re.sub(rf"&lt;(/({tag}))&gt;", r"<\1>", escaped, flags=re.IGNORECASE)
+        escaped = re.sub(
+            rf"&lt;({tag})\s+class=&quot;([a-zA-Z0-9_\-\s]+)&quot;&gt;",
+            r'<\1 class="\2">',
+            escaped,
+            flags=re.IGNORECASE,
+        )
+
+    # Restore reference anchors: <a href="#ref-1">...</a>, <a id="ref-1">...</a>, <a name="ref-1">...</a>
+    escaped = re.sub(
+        r"&lt;a\s+(?:href|id|name)=&quot;(#?[a-zA-Z0-9_\-]+)&quot;&gt;",
+        r'<a href="\1">',
+        escaped,
+        flags=re.IGNORECASE,
+    )
+    escaped = re.sub(r"&lt;/a&gt;", "</a>", escaped, flags=re.IGNORECASE)
+
+    # Support raw caret superscript citations if used in plain narrative: e.g. text^1,2 or text^[1]
+    escaped = re.sub(
+        r"\^\[(\d+(?:,\s*\d+)*)\]",
+        r'<sup class="citation">\1</sup>',
+        escaped,
+    )
+    escaped = re.sub(
+        r"(?<=\w)\^(\d+(?:,\s*\d+)*)(?=\b|[.,;:!?)\]\s]|$)",
+        r'<sup class="citation">\1</sup>',
+        escaped,
+    )
+
+    return escaped
 
 
 def render_html(
@@ -144,6 +189,15 @@ def render_html(
             "    }",
             "    table.pub-table tr:hover { background-color: #F8FAFC; }",
             "    .pub-table-footnote { font-size: 12px; color: #64748B; margin-top: 6px; font-style: italic; }",
+            "",
+            "    /* Typography & Superscript Citations */",
+            "    sup { font-size: 75%; line-height: 0; position: relative; vertical-align: baseline; top: -0.5em; font-weight: 600; }",
+            "    sup.citation { color: #0369A1; padding: 0 1px; }",
+            "    sup a { color: inherit; text-decoration: none; }",
+            "    sup a:hover { text-decoration: underline; }",
+            "    .reference-list { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #E2E8F0; font-size: 13.5px; line-height: 1.6; color: #334155; }",
+            "    .reference-list ol { padding-left: 1.5rem; }",
+            "    .reference-list li { margin-bottom: 0.5rem; }",
             "",
             "    /* Dual-View Figure Card Styling */",
             "    .figure-card {",
@@ -327,10 +381,10 @@ def render_html(
             tag = f"h{max(2, min(6, block.level + 1))}"
             html_parts.append(f"    <{tag}>{html.escape(block.text)}</{tag}>")
         elif isinstance(block, ParagraphBlock):
-            html_parts.append(f"    <p>{html.escape(block.text)}</p>")
+            html_parts.append(f"    <p>{_format_inline_html(block.text)}</p>")
         elif isinstance(block, CalloutBlock):
             html_parts.append(
-                f'    <div class="callout">{html.escape(block.text)}</div>'
+                f'    <div class="callout">{_format_inline_html(block.text)}</div>'
             )
         elif isinstance(block, TableBlock):
             caption_esc = html.escape(block.caption)

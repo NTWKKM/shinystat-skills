@@ -34,6 +34,7 @@ class IntegrityReport:
     has_methods: bool = False
     has_retention_flow: bool = False
     has_causal_caveat: bool = True  # True if not needed or properly addressed
+    citations_count: int = 0
 
     def summary(self) -> str:
         lines = [f"Integrity Audit: {'PASSED' if self.passed else 'FAILED'}"]
@@ -153,9 +154,15 @@ def _is_structural_context(
         ):
             return True
 
-    # 3. Calendar years (2010-2035) when preceded immediately by date-related context
-    if 2010.0 <= val <= 2035.0 and "." not in raw_str:
+    # 3. Calendar & Publication years (1900-2035) when preceded by date or journal/citation context
+    if 1900.0 <= val <= 2035.0 and "." not in raw_str:
         if _DATE_PREFIX_PATTERN.search(window_before):
+            return True
+        if re.search(
+            r"\b(?:et\s+al\.?|JAMA|NEJM|Lancet|BMJ|Med|Crit\s+Care|J\b|Ann\b|Clin\b|Sci\b|Press|Univ|doi|vol|pp?\.?)\b|[\(\[]\s*$",
+            window_before,
+            re.IGNORECASE,
+        ):
             return True
 
     # 4. Structural headings and table/figure/step counters (e.g., Table 1, Figure 2, Tier 1, Step 3, v.1)
@@ -175,6 +182,43 @@ def _is_structural_context(
         r"\b(?:scale|normalized|range|total)\b", window, re.IGNORECASE
     ):
         return True
+
+    # 6. Superscript citations and bibliographic reference markers (e.g., <sup>1</sup>, <sup>12,13</sup>, ^1, [^1], [1], Ref 1, 1. Author)
+    if "." not in raw_str:
+        # 6a. Inside HTML superscript tags: <sup>...</sup>
+        if "<sup" in window_before and "</sup>" in window_after:
+            last_sup_open = window_before.rfind("<sup")
+            last_sup_close = window_before.rfind("</sup>")
+            if last_sup_open > last_sup_close:
+                return True
+
+        # 6b. Markdown footnote reference: [^1] or ^1
+        if re.search(r"\[\^\s*$", window_before) and window_after.startswith("]"):
+            return True
+        if re.search(r"\^\s*$", window_before) and (
+            not window_after or window_after[0] in " \t\n,.;:)]"
+        ):
+            return True
+
+        # 6c. Bracketed citation reference: [1], [1, 2], [1-3]
+        if re.search(r"\[\s*$", window_before) and re.match(
+            r"\s*[,\-\]]", window_after
+        ):
+            return True
+
+        # 6d. Reference or citation label: Ref. 1, Reference 1, Citation 2
+        if re.search(
+            r"\b(?:Ref\.?|Refs\.?|Reference|References|Citation|Citations)\s*#?$",
+            window_before,
+            re.IGNORECASE,
+        ):
+            return True
+
+        # 6e. Bibliographic reference list item at start of paragraph/line: "1. Smith J...", "[1] Doe A..."
+        if re.match(r"^\s*(?:\[\s*)?$", window_before) and re.match(
+            r"^\s*(?:\]\s*)?[\.\)]\s+[A-Z]", window_after
+        ):
+            return True
 
     return False
 
@@ -389,6 +433,14 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
             "Document lacks cohort retention / inclusion-exclusion flow details."
         )
 
+    # 5. Citation Count
+    citation_matches = re.findall(
+        r"<sup[^>]*>.*?</sup>|\[\^\d+\]|\b(?:Ref\.?|Citation)\s*#?\d+",
+        all_text,
+        re.IGNORECASE,
+    )
+    citations_count = len(citation_matches)
+
     passed = (
         (len(phi_violations) == 0)
         and has_causal_caveat
@@ -405,4 +457,5 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
         has_methods=has_methods,
         has_retention_flow=has_retention_flow,
         has_causal_caveat=has_causal_caveat,
+        citations_count=citations_count,
     )

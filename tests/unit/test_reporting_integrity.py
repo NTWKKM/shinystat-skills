@@ -327,3 +327,43 @@ def test_integrity_scientific_notation_precision():
     doc_sci_ok.add_paragraph("Genome-wide significance reached 1.23e-4.")
     audit_ok = verify_report_integrity(doc_sci_ok)
     assert 1.23e-4 not in audit_ok.untraced_numbers
+
+
+def test_integrity_superscript_citations_and_references():
+    """
+    Verifies that citation numbers above 10 (e.g. <sup>12</sup>, [^14], [16], and
+    bibliographic list items '17. Author') are recognized as structural and do not
+    falsely trigger untraced data number failures.
+    """
+    doc = ReportDocument(
+        title="Clinical Trial with References",
+        results_dict={"sample_size": 250, "p_value": 0.02},
+    )
+    doc.add_heading("Methods & Statistical Protocol", level=1)
+    doc.add_paragraph(
+        "Cohort inclusion flow: 250 patients analyzed per protocol. Treatment guidelines recommend early resuscitation.<sup>12,13</sup>"
+    )
+    doc.add_paragraph(
+        "Prior prognostic models demonstrated moderate discrimination[^14] and risk stratification.[16]"
+    )
+    doc.add_paragraph("Analysis was carried out with p = 0.02.")
+    doc.add_heading("References", level=2)
+    doc.add_paragraph(
+        "12. Singer M, et al. The Third International Consensus Definitions for Sepsis. JAMA 2016."
+    )
+    doc.add_paragraph(
+        "13. Evans L, et al. Surviving Sepsis Campaign Guidelines. Crit Care Med 2021."
+    )
+    doc.add_paragraph("14. Riley RD, et al. Sample size calculation. BMJ 2020.")
+    doc.add_paragraph(
+        "16. Vickers AJ, et al. Decision curve analysis. Med Decis Making 2006."
+    )
+
+    audit = verify_report_integrity(doc)
+    assert audit.passed is True
+    # Ensure citation numbers 12, 13, 14, 16 are not in untraced numbers
+    assert 12.0 not in audit.untraced_numbers
+    assert 13.0 not in audit.untraced_numbers
+    assert 14.0 not in audit.untraced_numbers
+    assert 16.0 not in audit.untraced_numbers
+    assert audit.citations_count >= 2

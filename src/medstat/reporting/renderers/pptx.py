@@ -6,6 +6,7 @@ and formatted tables.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -275,6 +276,23 @@ def _add_table_slide(prs: Presentation, block: TableBlock, section_title: str) -
             fn_p.font.color.rgb = COLOR_MUTED
 
 
+_SUP_TRANS = str.maketrans("0123456789,-", "⁰¹²³⁴⁵⁶⁷⁸⁹,⁻")
+
+
+def _clean_slide_text(text: str) -> str:
+    """Replaces HTML superscript citations with Unicode superscripts and cleans markup."""
+
+    def _to_unicode_sup(m: re.Match) -> str:
+        inner = re.sub(r"<[^>]+>", "", m.group(1)).strip()
+        return inner.translate(_SUP_TRANS)
+
+    cleaned = re.sub(
+        r"<sup[^>]*>(.*?)</sup>", _to_unicode_sup, text, flags=re.IGNORECASE
+    )
+    cleaned = re.sub(r"<[^>]+>", "", cleaned)
+    return cleaned
+
+
 def _add_content_slide(
     prs: Presentation, title: str, paragraphs: list[str], callouts: list[str]
 ) -> None:
@@ -302,7 +320,7 @@ def _add_content_slide(
 
         for idx, p_text in enumerate(chunk):
             p = tf.paragraphs[0] if idx == 0 else tf.add_paragraph()
-            p.text = f"•  {p_text}"
+            p.text = f"•  {_clean_slide_text(p_text)}"
             p.font.name = "Arial"
             p.font.size = Pt(13)
             p.font.color.rgb = COLOR_SECONDARY

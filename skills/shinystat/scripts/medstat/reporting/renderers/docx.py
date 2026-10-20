@@ -5,6 +5,7 @@ Applies ICMJE 3-rule publication table borders via OpenXML and inserts figures a
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -70,6 +71,42 @@ def _apply_three_rule_table_borders(table) -> None:
                     run.bold = True
 
 
+def _add_formatted_runs_to_paragraph(paragraph, text: str) -> None:
+    """
+    Parses text into Word runs, converting <sup>...</sup> tags or caret notation ^1
+    into native Word superscript text runs (run.font.superscript = True).
+    """
+    pattern = re.compile(
+        r"<sup[^>]*>(.*?)</sup>|\^\[(\d+(?:,\s*\d+)*)\]",
+        re.IGNORECASE,
+    )
+    pos = 0
+    for match in pattern.finditer(text):
+        start, end = match.span()
+        if start > pos:
+            chunk = text[pos:start]
+            run = paragraph.add_run(chunk)
+            run.font.name = "Arial"
+            run.font.size = Pt(10.5)
+            run.font.color.rgb = RGBColor(15, 23, 42)
+
+        sup_content = match.group(1) if match.group(1) is not None else match.group(2)
+        clean_sup = re.sub(r"<[^>]+>", "", sup_content)
+        s_run = paragraph.add_run(clean_sup)
+        s_run.font.name = "Arial"
+        s_run.font.size = Pt(8.5)
+        s_run.font.superscript = True
+        s_run.font.color.rgb = RGBColor(3, 105, 161)
+        pos = end
+
+    if pos < len(text):
+        chunk = text[pos:]
+        run = paragraph.add_run(chunk)
+        run.font.name = "Arial"
+        run.font.size = Pt(10.5)
+        run.font.color.rgb = RGBColor(15, 23, 42)
+
+
 def render_docx(
     doc: ReportDocument,
     out_path: str | Path,
@@ -129,11 +166,13 @@ def render_docx(
                 run.font.color.rgb = RGBColor(30, 41, 59)
         elif isinstance(block, ParagraphBlock):
             p = document.add_paragraph()
-            p_run = p.add_run(block.text)
-            p_run.font.name = "Arial"
-            p_run.font.size = Pt(10.5)
+            _add_formatted_runs_to_paragraph(p, block.text)
             p.paragraph_format.line_spacing = 1.25
             p.paragraph_format.space_after = Pt(8)
+            # Apply hanging indent for bibliographic reference list items
+            if re.match(r"^\d+\.\s+", block.text.strip()):
+                p.paragraph_format.left_indent = Inches(0.3)
+                p.paragraph_format.first_line_indent = Inches(-0.3)
         elif isinstance(block, CalloutBlock):
             c_p = document.add_paragraph()
             c_run = c_p.add_run(f"Note: {block.text}")

@@ -171,6 +171,23 @@ Determining Required Sample Size for Multivariable Prediction Model Development
 └── Required Sample Size = max(N1, N2, N3, N4) with binding criterion explicitly reported (Recipe 20)
 ```
 
+### J. Polish Grilling Gate & Evidence Grounding Decision Tree
+```
+Polish Grilling Gate #6 Activation
+├── Triggered ──▶ Explicit user request for "polish", "evidence check", "verify references", or publication manuscript assembly
+├── Step 1: Claim vs Data Reconciliation
+│   ├── Prohibit causal claims on unweighted observational data (must report association + E-value)
+│   ├── P > 0.05 must be stated as "insufficient evidence to reject the null" (never "treatments are equivalent")
+│   └── Numerical prose numbers must match results_dict within ±0.02 or 1%
+├── Step 2: Real-World Literature Verification (websearch / MCP databases)
+│   ├── Query search_web or medical-terminology MCP for author, title, journal, year, and findings
+│   ├── Anti-Phantom Citation Invariant: All cited papers must be verified real-world publications
+│   └── If reference is unverified, retracted, or contradicts narrative ──▶ Halt at Polish Gate to reconcile or replace
+└── Step 3: Citation & Reference Formatting
+    ├── Sequential numerical superscripts (<sup>1</sup>, <sup>2,3</sup>) in order of appearance
+    └── Format Reference List in locked Journal House Style (NEJM, JAMA, Lancet, BMJ, Clinical)
+```
+
 ---
 
 ## 3. Reporting & Publication Standards

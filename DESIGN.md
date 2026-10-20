@@ -1304,4 +1304,35 @@ Ensuring zero defect across all clinical figures in `shinystat` required validat
 
 [MEMORY_LEARN: In Cox proportional hazards diagnostics, Schoenfeld tests with rank time transform can miss non-monotone time-varying effects; automated Bonferroni P <= 0.05/k partitions strong vs weak violations, while plot_schoenfeld_residuals visual inspection remains mandatory before finalizing remedies.]
 
+---
+
+## ADR 47: Optional Polish Grilling Gate for Evidence-Base Grounding & Superscript Citations
+
+### Context
+In automated manuscript preparation and clinical report generation, AI agents risk two distinct failure modes:
+1. **Evidence Mismatch & Phantom Citations**: Agents may invent fictional paper titles, misattribute clinical findings, or cite studies that do not exist or whose actual conclusions contradict the narrative claims. Furthermore, prose claims may overstep study designs (e.g. asserting causality on unadjusted observational cohorts).
+2. **Citation Formatting Disconnect**: Narrative references often leak raw Markdown/HTML markup into exports or trigger false-positive "untraced number" failures during Pillar 5 numerical traceability auditing when citation numbers exceed standard statistical index limits.
+
+### Decision
+1. **Grilling Gate #6 (Optional Polish Gate)**:
+   - Activated when the user requests "polish", "verify references", "audit evidence", "manuscript review", or publication-grade polish.
+   - **Data Grounding**: Audits clinical assertions in Discussion and Results against `results_dict` and study design (prohibits causal claims on unweighted observational data; verifies $P > 0.05$ is reported as "insufficient evidence to reject the null hypothesis").
+   - **Empirical Literature Verification**: Cross-audits every cited study/guideline using `search_web` or medical MCP databases (`medical-terminology` LOINC/SNOMED/RxNorm/ICD-10, PubMed). Enforces the **Anti-Phantom Citation Invariant** (zero hallucinated studies).
+   - **Superscript Citations & House Style Reference List**: Generates sequential in-text numerical superscript citations (`<sup>1</sup>`, native Word `.docx` superscript runs, Markdown/LaTeX) paired with a complete bibliographic References section formatted in the target Journal House Style (`NEJM`, `JAMA`, `Lancet`, `BMJ`, `Clinical`).
+2. **Reporting Integrity Structural Recognition**:
+   - Enhanced `_is_structural_context` in `medstat.reporting.integrity` (`verify_report_integrity`) and `verify_standalone_integrity` in `report-builder.md` to recognize citation numbers (`<sup>12</sup>`, `[12]`, `^12`) and publication years (1900–2035) in references/citations, preventing false-positive traceability rejections.
+3. **Multi-Format Parity**:
+   - Renderers (`html.py`, `docx.py`, `pptx.py`, `markdown.py`) format superscript tags cleanly with target-specific styling (Word OpenXML native superscript runs, PowerPoint Unicode superscripts, HTML CSS `sup.citation`).
+4. **Multi-Agent Mirror Synchronization**:
+   - Maintained byte-identical synchronization across canonical `skills/` and all 4 platform mirrors (`.agent/`, `.agents/`, `.claude/`, `.cursor/`, and `packaging/cloud/shinystat-cloud/`) via `./scripts/install-skills.sh --sync`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Evidence Integrity**: Eliminates phantom citations and unsupported clinical claims from automated manuscript pipelines.
+- **Publication Parity**: Generates seamless superscript citations across HTML, Word, PowerPoint, and Markdown matching ICMJE standards.
+- **Traceability Coherence**: Citation numbers no longer trigger false-positive traceability failures during Pillar 5 audits.
+
+[MEMORY_LEARN: Incorporating an optional Polish Grilling Gate with websearch/MCP literature verification enforces an anti-phantom citation invariant and aligns narrative claims with empirical data, while structural token recognition preserves numerical traceability in Pillar 5 audits.]
+
+
 

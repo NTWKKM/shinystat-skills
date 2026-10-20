@@ -1291,13 +1291,34 @@ def verify_standalone_integrity(
                 r"|\b(?:19\d{2}|20\d{2})\s*(?:-|–|/|\b(?:to|through|until|and)\b)"
                 r")\s*$"
             )
+            window_after = clean_text[m.end() : min(len(clean_text), m.end() + 30)].split("\n")[0]
             is_year = (
-                2010.0 <= val <= 2035.0
+                1900.0 <= val <= 2035.0
                 and "." not in raw_str
-                and bool(re.search(date_prefix_pattern, window_before, re.IGNORECASE))
+                and (
+                    bool(re.search(date_prefix_pattern, window_before, re.IGNORECASE))
+                    or bool(
+                        re.search(
+                            r"\b(?:et\s+al\.?|JAMA|NEJM|Lancet|BMJ|Med|Crit\s+Care|J\b|Ann\b|Clin\b|Sci\b|Press|Univ|doi|vol|pp?\.?)\b|[\(\[]\s*$",
+                            window_before,
+                            re.IGNORECASE,
+                        )
+                    )
+                )
+            )
+            is_citation = (
+                "." not in raw_str
+                and (
+                    ("<sup" in window_before and "</sup>" in window_after and window_before.rfind("<sup") > window_before.rfind("</sup>"))
+                    or bool(re.search(r"\[\^\s*$", window_before) and window_after.startswith("]"))
+                    or bool(re.search(r"\^\s*$", window_before) and (not window_after or window_after[0] in " \t\n,.;:)]"))
+                    or bool(re.search(r"\[\s*$", window_before) and re.match(r"\s*[,\-\]]", window_after))
+                    or bool(re.search(r"\b(?:Ref\.?|Refs\.?|Reference|References|Citation|Citations)\s*#?$", window_before, re.IGNORECASE))
+                    or bool(re.match(r"^\s*(?:\[\s*)?$", window_before) and re.match(r"^\s*(?:\]\s*)?[\.\)]\s+[A-Z]", window_after))
+                )
             )
             is_structural_10 = val == 10.0 and is_counter
-            if not (val in ignored_structural or is_structural_10 or is_year):
+            if not (val in ignored_structural or is_structural_10 or is_year or is_citation):
                 untraced_nums.append(val)
 
     untraced_rate = len(untraced_nums) / max(len(raw_matches), 1)
@@ -1310,4 +1331,43 @@ def verify_standalone_integrity(
         "untraced_numbers": untraced_nums,
         "traceability_passed": traceability_passed,
     }
+```
+
+---
+
+## 4. Evidence-Base Verification & Superscript Citations Pipeline
+
+When the **Polish Grilling Gate (#6)** is engaged or when preparing publication-grade manuscripts, execute this 4-step evidence verification and citation workflow:
+
+### Step 1: Clinical Claims vs Analyzed Data Audit
+- Cross-audit every narrative statement in Discussion and Results against `results_dict` and study design.
+- Prohibit causal assertions (e.g., "Drug X reduces mortality") when analyzing unadjusted or observational cohorts; require associative framing ("was associated with lower mortality") and E-value sensitivity discussion.
+- Verify that non-significant results ($P > 0.05$) are strictly stated as "insufficient evidence to reject the null hypothesis" rather than claiming equivalence or "no effect".
+- Ensure point estimates, 95% CIs, and $P$-values match tabular outputs exactly.
+
+### Step 2: Empirical Literature Grounding via WebSearch & MCP Databases
+- Audit every cited study, trial, or guideline against real biomedical literature:
+  - **`search_web`**: Verify publication metadata via query: `"<First Author> <Journal> <Year> <Title keywords>"` or DOI/PMID.
+  - **`medical-terminology` MCP**: Validate medical terminology, standardized ontology codes (SNOMED CT, LOINC, RxNorm, ICD-10), and laboratory reference ranges.
+- Confirm that the cited paper's primary findings directly support the specific sentence in the manuscript.
+- **Anti-Phantom Citation Invariant**: Zero fabricated papers, hallucinated author lists, or synthetic DOIs. If a citation cannot be verified or its actual conclusions contradict the narrative statement, halt at Grilling Gate #6 to reconcile or replace the citation.
+
+### Step 3: Sequential In-Text Superscript Citations
+- Number citations sequentially in order of first appearance using superscript notation (`<sup>1</sup>`, `<sup>2,3</sup>`, `<sup>4–6</sup>`).
+- Multi-renderer implementation:
+  - **HTML (`generate_html_report`)**: `Early resuscitation improves survival.<sup class="citation"><a href="#ref-1">1</a></sup>` (styled via CSS `sup.citation`, un-escaped safely).
+  - **Word (`render_docx`)**: Converted into native OpenXML text runs with `run.font.superscript = True` and `8.5 pt` font size.
+  - **PowerPoint (`render_pptx`)**: Cleaned to Unicode superscripts (`¹`, `²`) or bracketed numbers `[1]`, eliminating raw HTML tag leaks.
+  - **Markdown (`render_markdown`)**: Rendered cleanly as `<sup>1</sup>` or `[^1]`.
+
+### Step 4: Bibliographic Reference List Assembly by Journal House Style
+Format the concluding **References** section strictly in the locked Journal House Style:
+
+| Journal Style | In-Text Citation | Reference List Format Example |
+| :--- | :--- | :--- |
+| **NEJM** | `...guidelines.<sup>1</sup>` | `1. Singer M, Deutschman CS, Seymour CW, et al. The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA 2016;315:801-10.` |
+| **JAMA** | `...guidelines.<sup>1</sup>` | `1. Singer M, Deutschman CS, Seymour CW, et al. The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA. 2016;315(8):801-810. doi:10.1001/jama.2016.0287` |
+| **Lancet** | `...guidelines<sup>1</sup>` | `1 Singer M, Deutschman CS, Seymour CW, et al. The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA 2016; 315: 801–10.` |
+| **BMJ** | `...guidelines.<sup>1</sup>` | `1 Singer M, Deutschman CS, Seymour CW, et al. The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA 2016;315:801-10. doi:10.1001/jama.2016.0287` |
+| **Clinical** | `...guidelines<sup>1</sup>` | `1. Singer, M. et al. The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA 315, 801–810 (2016).` |
 ```
