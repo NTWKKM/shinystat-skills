@@ -182,7 +182,7 @@ Polish Grilling Gate #6 Activation & Routing
 ├── Polish Execution (Full Polish or On-Demand Trigger):
 │   ├── Step 1: Claim vs Data Reconciliation
 │   │   ├── Assess causal language by identification assumptions, prespecified estimand, and confounder control (do not treat weighting alone as sufficient or unweighted observational data as automatically prohibiting causal claims; report associative framing where identification is unverified, and require E-values only where defined and appropriate for the supported effect measure and sensitivity question)
-│   │   ├── Superiority P > 0.05 must be stated as "insufficient evidence to reject the null" (never "treatments are equivalent"); preserve separate interpretation for prespecified non-inferiority or equivalence analyses based on their margin and confidence interval
+│   │   ├── Superiority P > alpha (from analysis metadata, default 0.05) must be stated as "insufficient evidence to reject the null" (never "treatments are equivalent"); preserve separate interpretation for prespecified non-inferiority or equivalence analyses based on their margin and confidence interval
 │   │   └── Numerical prose numbers must match results_dict within abs_tol = min(0.02, 10**(-dec_digits)) for |val| <= 1.0, 0.02 absolute or 0.01 (1%) relative tolerance for |val| > 1.0, or min(0.05, abs_tol * 100.0) for percentages
 │   ├── Step 2: Primary Study Retrieval & Real-World Literature Verification (websearch / bibliographic services)
 │   │   ├── When user sources cite papers without full text/details, locate authentic primary study via search_web or PubMed

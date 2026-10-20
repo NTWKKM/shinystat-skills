@@ -380,7 +380,7 @@ def render_html(
             tag = f"h{max(2, min(6, block.level + 1))}"
             html_parts.append(f"    <{tag}>{html.escape(block.text)}</{tag}>")
         elif isinstance(block, ParagraphBlock):
-            ref_match = re.match(r"^\s*(?:\[(\d+)\]|(\d+)\.)\s+", block.text)
+            ref_match = re.match(r"^\s*(?:\[(\d+)\]|(\d+)\.?)\s+", block.text)
             if in_references_section and ref_match and 'id="ref-' not in block.text:
                 ref_num = ref_match.group(1) or ref_match.group(2)
                 html_parts.append(

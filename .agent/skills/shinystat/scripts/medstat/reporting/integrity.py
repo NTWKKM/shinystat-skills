@@ -187,20 +187,24 @@ def _is_structural_context(
     ):
         return True
 
-    # 6. Superscript citations and bibliographic reference markers (e.g., <sup>1</sup>, <sup>12,13</sup>, ^1, [^1], [1], Ref 1, 1. Author)
+    # 6. Mathematical or unit exponents (e.g. R^2, m^2, x^2, cm^2)
+    if "." not in raw_str and re.search(r"[a-zA-Z\)]\^$", window_before):
+        return True
+
+    # 7. Superscript citations and bibliographic reference markers (e.g., <sup>1</sup>, <sup>12,13</sup>, ^[1], [^1], [1], Ref 1, 1. Author)
     if "." not in raw_str:
-        # 6a. Inside HTML superscript tags: <sup>...</sup>
+        # 7a. Inside HTML superscript tags: <sup>...</sup>
         if "<sup" in window_before and "</sup>" in window_after:
             last_sup_open = window_before.rfind("<sup")
             last_sup_close = window_before.rfind("</sup>")
             if last_sup_open > last_sup_close:
                 return True
 
-        # 6b. Markdown footnote reference: [^1] or ^1
+        # 6b. Footnote / caret citation reference: [^1] or ^[1]
         if re.search(r"\[\^\s*$", window_before) and window_after.startswith("]"):
             return True
-        if re.search(r"\^\s*$", window_before) and (
-            not window_after or window_after[0] in " \t\n,.;:)]"
+        if re.search(r"\^\[(?:\d+[\s,]+)*$", window_before) and re.match(
+            r"^(?:[\s,]+\d+)*\s*\]", window_after
         ):
             return True
 
@@ -208,9 +212,9 @@ def _is_structural_context(
         # Bounded by plausible citation range (1 <= val <= 100) and clean bracket closure
         if (
             1.0 <= val <= 100.0
-            and re.search(r"\[(?:\d+\s*,\s*)*$", window_before)
+            and re.search(r"\[(?:\d+[\s,]+)*$", window_before)
             and re.match(
-                r"^(?:\s*,\s*\d+)*\s*(?:[-–]\s*\d+)?\s*\](?!\s*[a-zA-Z])",
+                r"^(?:[\s,]+\d+)*\s*(?:[-–]\s*\d+)?\s*\](?!\s*[a-zA-Z])",
                 window_after,
             )
         ):
@@ -243,7 +247,7 @@ def _is_structural_context(
 
 def _extract_text_tokens(text: str) -> list[TextToken]:
     """Extracts candidate TextToken objects from narrative text."""
-    clean_text = text.replace(",", "")
+    clean_text = re.sub(r"(?<=\d),(?=\d{3}\b)", "", text)
     doc_has_references = bool(
         re.search(
             r"(?:^|\n)\s*(?:#{1,4}\s*)?(?:References|Bibliography)\b",
@@ -464,7 +468,7 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
 
     # 5. Citation Count
     citation_matches = re.findall(
-        r"<sup[^>]*>.*?</sup>|\[\^\d+\]|\^\[\d+(?:[,\-–]\s*\d+)*\]|\^\d+\b|\[(?:100|\d{1,2})(?:\s*[,\-–]\s*(?:100|\d{1,2}))*\]|\b(?:Ref\.?|Citation)\s*#?\d+",
+        r"<sup[^>]*>.*?</sup>|\[\^\d+\]|\^\[\d+(?:[,\-–]\s*\d+)*\]|\[(?:100|\d{1,2})(?:\s*[,\-–]\s*(?:100|\d{1,2}))*\]|\b(?:Ref\.?|Citation)\s*#?\d+",
         all_text,
         re.IGNORECASE,
     )

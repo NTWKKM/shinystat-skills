@@ -380,3 +380,33 @@ def test_integrity_superscript_citations_and_references():
     audit_neg = verify_report_integrity(doc_neg)
     assert 250.0 in audit_neg.untraced_numbers
     assert 1950.0 in audit_neg.untraced_numbers
+
+
+def test_integrity_comma_bracketed_citations_and_exponents():
+    """
+    Verifies that multi-number bracketed citations like [1, 2] preserve comma separation,
+    bracketed caret citations ^[3] are recognized as citations, and mathematical exponents
+    such as R^2, m^2, and x^2 are treated as structural without being counted as citations.
+    """
+    doc = ReportDocument(
+        title="Model Fit and Citations",
+        results_dict={"r_squared": 0.85, "area": 25.0},
+    )
+    doc.add_paragraph("Prior observational trials demonstrated robust outcomes [1, 2].")
+    doc.add_paragraph("Regression analysis yielded R^2 = 0.85 across a 25 m^2 region.")
+    doc.add_paragraph("Further validation confirmed sensitivity ^[3].")
+    doc.add_heading("References", level=2)
+    doc.add_paragraph("1. Singer M, et al. Sepsis definitions. JAMA 2016.")
+    doc.add_paragraph("2. Evans L, et al. Surviving Sepsis. Crit Care Med 2021.")
+    doc.add_paragraph("3. Riley RD, et al. Sample size calculation. BMJ 2020.")
+
+    audit = verify_report_integrity(doc)
+    # [1, 2] and ^[3] are citations -> citations_count should be 2
+    # R^2 and m^2 must NOT be counted as citations
+    assert audit.citations_count == 2
+
+    # Structural numbers: 1, 2, 3, and exponent 2 should not be untraced
+    assert 1.0 not in audit.untraced_numbers
+    assert 2.0 not in audit.untraced_numbers
+    assert 3.0 not in audit.untraced_numbers
+    assert len(audit.untraced_numbers) == 0

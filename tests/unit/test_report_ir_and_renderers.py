@@ -420,3 +420,32 @@ def test_html_math_exponents_and_anchor_attributes(tmp_path):
     all_slide_text = " ".join(slide_texts)
     assert "<sup" not in all_slide_text
     assert "¹" in all_slide_text
+
+    # References test with Lancet/BMJ bare numbering (e.g. "1 Singer")
+    doc_ref = ReportDocument(title="Lancet Style References")
+    doc_ref.add_heading("References", level=2)
+    doc_ref.add_paragraph("1 Singer M, et al. Sepsis-3 definitions. JAMA 2016.")
+    doc_ref.add_paragraph("2 Evans L, et al. Surviving sepsis. CCM 2021.")
+    html_ref_file = tmp_path / "lancet_ref.html"
+    render_html(doc_ref, html_ref_file)
+    ref_content = html_ref_file.read_text(encoding="utf-8")
+    assert '<p id="ref-1">' in ref_content
+    assert '<p id="ref-2">' in ref_content
+
+    # PPTX Callout and paragraph preserving comparison operators (< 1, > 2)
+    doc_pptx = ReportDocument(title="Comparison Presentation")
+    doc_pptx.add_paragraph("Patients with score < 1 or age > 2 years were included.")
+    doc_pptx.add_callout("Significant cutoff was < 1 with threshold > 2.")
+    pptx_cmp_file = tmp_path / "pptx_cmp.pptx"
+    render_pptx(doc_pptx, pptx_cmp_file)
+    prs_cmp = Presentation(str(pptx_cmp_file))
+    cmp_slide_texts = " ".join(
+        [
+            s.text_frame.text
+            for slide in prs_cmp.slides
+            for s in slide.shapes
+            if s.has_text_frame
+        ]
+    )
+    assert "< 1" in cmp_slide_texts
+    assert "> 2" in cmp_slide_texts

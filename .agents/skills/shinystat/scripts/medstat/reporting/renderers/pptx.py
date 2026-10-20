@@ -283,13 +283,13 @@ def _clean_slide_text(text: str) -> str:
     """Replaces HTML superscript citations with Unicode superscripts and cleans markup."""
 
     def _to_unicode_sup(m: re.Match) -> str:
-        inner = re.sub(r"<[^>]+>", "", m.group(1)).strip()
+        inner = re.sub(r"</?[a-zA-Z][^>]*>", "", m.group(1)).strip()
         return inner.translate(_SUP_TRANS)
 
     cleaned = re.sub(
         r"<sup[^>]*>(.*?)</sup>", _to_unicode_sup, text, flags=re.IGNORECASE
     )
-    cleaned = re.sub(r"<[^>]+>", "", cleaned)
+    cleaned = re.sub(r"</?[a-zA-Z][^>]*>", "", cleaned)
     return cleaned
 
 
