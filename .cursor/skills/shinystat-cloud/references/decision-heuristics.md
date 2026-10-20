@@ -174,9 +174,11 @@ Determining Required Sample Size for Multivariable Prediction Model Development
 ### J. Polish Grilling Gate & Evidence Grounding Decision Tree
 ```
 Polish Grilling Gate #6 Activation & Routing
-├── Mandatory Inquiry at Gate #5:
-│   ├── (Standard) Skip Polish (Direct Fast-Path) ──▶ Standard normal flow without external literature verification (on-demand polish available later)
-│   └── (Optional) Full Publication Polish (Execute Gate #6) ──▶ Literature grounding & superscript citations
+├── Triggering Conditions:
+│   ├── User prompt explicitly requests evidence/literature (e.g. "หาหลักฐานมาประกอบ", "find evidence") ──▶ Auto-activate Gate #6 Full Polish
+│   └── Polish preference omitted in prompt ──▶ Gate #5 Alignment Inquiry:
+│       ├── (Standard) Skip Polish (Direct Fast-Path) ──▶ Standard normal flow using user-provided or existing sources (no external search; on-demand polish available later)
+│       └── (Optional) Full Publication Polish (Execute Gate #6) ──▶ External literature grounding & superscript citations
 ├── Polish Execution (Full Polish or On-Demand Trigger):
 │   ├── Step 1: Claim vs Data Reconciliation
 │   │   ├── Prohibit causal claims on unweighted observational data (must report association + E-value)

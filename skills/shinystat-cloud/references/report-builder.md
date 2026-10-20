@@ -1337,7 +1337,7 @@ def verify_standalone_integrity(
 
 ## 4. Evidence-Base Verification & Superscript Citations Pipeline
 
-When the **Polish Grilling Gate (#6)** is engaged (via Gate #5 Full Polish selection or triggered on-demand), execute this 4-step evidence verification and citation workflow (if Skip Polish is chosen at Gate #5, standard analysis deliverables proceed directly through the normal flow):
+When the **Polish Grilling Gate (#6)** is engaged (via explicit prompt request e.g. "หาหลักฐานมาประกอบ" / "find evidence", Gate #5 Full Polish selection, or triggered on-demand), execute this 4-step evidence verification and citation workflow (if Standard Skip Polish is active, standard deliverables proceed directly using user-provided or existing local sources without external search):
 
 ### Step 1: Clinical Claims vs Analyzed Data Audit
 - Cross-audit every narrative statement in Discussion and Results against `results_dict` and study design.
