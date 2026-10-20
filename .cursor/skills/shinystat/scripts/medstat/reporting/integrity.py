@@ -203,8 +203,8 @@ def _is_structural_context(
         # 6b. Footnote / caret citation reference: [^1] or ^[1]
         if re.search(r"\[\^\s*$", window_before) and window_after.startswith("]"):
             return True
-        if re.search(r"\^\[(?:\d+[\s,]+)*$", window_before) and re.match(
-            r"^(?:[\s,]+\d+)*\s*\]", window_after
+        if re.search(r"\^\[(?:[\d\s,]+|[\d\s,]*[-–]\s*)*$", window_before) and re.match(
+            r"^(?:[\s,\-–]+\d+)*\s*\](?![a-zA-Z])", window_after
         ):
             return True
 
@@ -212,9 +212,9 @@ def _is_structural_context(
         # Bounded by plausible citation range (1 <= val <= 100) and clean bracket closure
         if (
             1.0 <= val <= 100.0
-            and re.search(r"\[(?:\d+[\s,]+)*$", window_before)
+            and re.search(r"\[(?:[\d\s,]+|[\d\s,]*[-–]\s*)*$", window_before)
             and re.match(
-                r"^(?:[\s,]+\d+)*\s*(?:[-–]\s*\d+)?\s*\](?!\s*[a-zA-Z])",
+                r"^(?:[\s,\-–]+\d+)*\s*\](?![a-zA-Z])",
                 window_after,
             )
         ):
@@ -228,7 +228,7 @@ def _is_structural_context(
         ):
             return True
 
-        # 6e. Bibliographic reference list item at start of paragraph/line: "1. Smith J...", "[1] Doe A..."
+        # 6e. Bibliographic reference list item at start of paragraph/line: "1. Smith J...", "1 Smith J...", "[1] Doe A..."
         # Requires document to have a References/Bibliography section, plausible range (1 <= val <= 100),
         # and author/bibliographic format
         if (
@@ -236,7 +236,7 @@ def _is_structural_context(
             and 1.0 <= val <= 100.0
             and re.match(r"^\s*(?:\[\s*)?$", window_before)
             and re.match(
-                r"^\s*(?:\]\s*)?[\.\)]\s+[A-Z][a-z]+(?:\s+[A-Z]{1,3}\b|\s*,\s*[A-Z]{1,3}\b|\s+et\s+al)",
+                r"^\s*(?:\]\s*)?[\.\)]?\s+[A-Z][a-z]+(?:\s+[A-Z]{1,3}\b|\s*,\s*[A-Z]{1,3}\b|\s+et\s+al)",
                 window_after,
             )
         ):

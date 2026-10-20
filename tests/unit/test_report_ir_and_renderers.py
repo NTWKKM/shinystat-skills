@@ -432,10 +432,15 @@ def test_html_math_exponents_and_anchor_attributes(tmp_path):
     assert '<p id="ref-1">' in ref_content
     assert '<p id="ref-2">' in ref_content
 
-    # PPTX Callout and paragraph preserving comparison operators (< 1, > 2)
+    # PPTX Callout and paragraph preserving comparison operators (< 1, > 2, p<alpha and HR>1)
+    # and converting bracketed carets (^[1], ^[2, 3]) to Unicode superscripts
     doc_pptx = ReportDocument(title="Comparison Presentation")
-    doc_pptx.add_paragraph("Patients with score < 1 or age > 2 years were included.")
-    doc_pptx.add_callout("Significant cutoff was < 1 with threshold > 2.")
+    doc_pptx.add_paragraph(
+        "Patients with score < 1 or age > 2 years were included from JAMA^[1] with p<alpha and HR>1."
+    )
+    doc_pptx.add_callout(
+        "Significant cutoff was < 1 with threshold > 2 and evidence^[2, 3] showing p<alpha and HR>1."
+    )
     pptx_cmp_file = tmp_path / "pptx_cmp.pptx"
     render_pptx(doc_pptx, pptx_cmp_file)
     prs_cmp = Presentation(str(pptx_cmp_file))
@@ -449,3 +454,6 @@ def test_html_math_exponents_and_anchor_attributes(tmp_path):
     )
     assert "< 1" in cmp_slide_texts
     assert "> 2" in cmp_slide_texts
+    assert "p<alpha and HR>1" in cmp_slide_texts
+    assert "¹" in cmp_slide_texts
+    assert "², ³" in cmp_slide_texts

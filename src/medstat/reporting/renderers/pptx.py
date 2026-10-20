@@ -276,20 +276,28 @@ def _add_table_slide(prs: Presentation, block: TableBlock, section_title: str) -
             fn_p.font.color.rgb = COLOR_MUTED
 
 
-_SUP_TRANS = str.maketrans("0123456789,-", "⁰¹²³⁴⁵⁶⁷⁸⁹,⁻")
+_RECOGNIZED_TAGS_RE = re.compile(
+    r"</?(?:b|strong|i|em|u|sup|sub|a|span|code|p|br|div|small|mark|font)\b[^>]*>",
+    re.IGNORECASE,
+)
+_SUP_TRANS = str.maketrans("0123456789,-–", "⁰¹²³⁴⁵⁶⁷⁸⁹,⁻⁻")
 
 
 def _clean_slide_text(text: str) -> str:
-    """Replaces HTML superscript citations with Unicode superscripts and cleans markup."""
+    """Replaces HTML superscript citations and bracketed carets with Unicode superscripts, and cleans markup."""
 
     def _to_unicode_sup(m: re.Match) -> str:
-        inner = re.sub(r"</?[a-zA-Z][^>]*>", "", m.group(1)).strip()
+        inner = _RECOGNIZED_TAGS_RE.sub("", m.group(1)).strip()
         return inner.translate(_SUP_TRANS)
 
+    # 1. Convert bracketed caret citations: ^[1] or ^[1, 2] -> Unicode superscripts
+    cleaned = re.sub(r"\^\[(\d+(?:[,\-–]\s*\d+)*)\]", _to_unicode_sup, text)
+    # 2. Convert HTML <sup> citations: <sup>1,2</sup> -> Unicode superscripts
     cleaned = re.sub(
-        r"<sup[^>]*>(.*?)</sup>", _to_unicode_sup, text, flags=re.IGNORECASE
+        r"<sup[^>]*>(.*?)</sup>", _to_unicode_sup, cleaned, flags=re.IGNORECASE
     )
-    cleaned = re.sub(r"</?[a-zA-Z][^>]*>", "", cleaned)
+    # 3. Strip recognized markup tags while preserving comparison operators like < 1, > 2, p<alpha and HR>1
+    cleaned = _RECOGNIZED_TAGS_RE.sub("", cleaned)
     return cleaned
 
 

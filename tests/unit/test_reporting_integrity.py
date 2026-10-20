@@ -410,3 +410,34 @@ def test_integrity_comma_bracketed_citations_and_exponents():
     assert 2.0 not in audit.untraced_numbers
     assert 3.0 not in audit.untraced_numbers
     assert len(audit.untraced_numbers) == 0
+
+
+def test_integrity_citation_ranges_and_bare_references():
+    """
+    Verifies that all endpoints of bracketed citation ranges such as [1-3] are
+    classified as structural, and bare-number reference items in the bibliography
+    such as '1 Singer M...' (Lancet/BMJ style) are recognized as structural.
+    """
+    doc = ReportDocument(
+        title="Range Citations and Bare References",
+        results_dict={"odds_ratio": 1.45},
+    )
+    doc.add_paragraph(
+        "Comprehensive reviews summarize therapeutic efficacy [1-3] and outcomes [5-7]."
+    )
+    doc.add_paragraph("Odds ratio reached 1.45 in the primary analysis.")
+    doc.add_heading("References", level=2)
+    doc.add_paragraph("1 Singer M, et al. Sepsis-3 definitions. JAMA 2016.")
+    doc.add_paragraph("2 Evans L, et al. Surviving sepsis. CCM 2021.")
+    doc.add_paragraph("3 Riley RD, et al. Sample size calculation. BMJ 2020.")
+    doc.add_paragraph(
+        "5 Vickers AJ, et al. Decision curve analysis. Med Decis Making 2006."
+    )
+    doc.add_paragraph("7 Austin PC, et al. Propensity score matching. Stat Med 2011.")
+
+    audit = verify_report_integrity(doc)
+    assert 1.0 not in audit.untraced_numbers
+    assert 3.0 not in audit.untraced_numbers
+    assert 5.0 not in audit.untraced_numbers
+    assert 7.0 not in audit.untraced_numbers
+    assert len(audit.untraced_numbers) == 0
