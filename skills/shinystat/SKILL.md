@@ -22,6 +22,7 @@ Execute clinical biostatistics through the 5 Decision Pillars below, exercising 
 
 3. **Pillar 3: Adaptive Python Scripting (Autonomous Biostatistical Authority)**
    - Write standalone Python scripts using the bundled `medstat` engine in `scripts/medstat/` (CLI: `python <skill-dir>/scripts/medstat_cli.py`) or standard scientific libraries (`pandas`, `scipy.stats`, `statsmodels`, `lifelines`, `scikit-learn`).
+   - Run every script with the pinned stack: `uv run --with-requirements <skill-dir>/requirements.txt python <script.py>` (append `--with <pkg>` only for packages outside that file).
    - **EPV & Sparse-Data Routing** ([decision-heuristics.md §2.A](references/decision-heuristics.md#a-events-per-variable-epv--sparse-data)):
      - Compute $\text{EPV}_{\text{binary}} = \min(N_{\text{events}}, N_{\text{non-events}}) / P_{\text{parameters}}$ (binary logistic) and $\text{EPV}_{\text{Cox}} = N_{\text{failures}} / P_{\text{parameters}}$ (Cox PH), where $P_{\text{parameters}}$ counts $k-1$ factor levels and spline df.
      - Halt at **Grilling Gate #3** when monotone separation is present.
