@@ -2,8 +2,10 @@
 # Usage: uv run --with-requirements <skill_dir>/requirements.txt python <script.py>
 # PDF rendering (medstat/reporting/renderers/pdf.py) additionally needs: --with playwright
 # Note: Playwright requires Chromium browser binaries in addition to the Python package:
-#   uv run playwright install chromium (Linux environments may require: uv run playwright install --with-deps chromium)
+#   uv run --with playwright python -m playwright install chromium (Linux environments may require: uv run --with playwright python -m playwright install --with-deps chromium)
 pandas==2.3.3
+openpyxl==3.1.5
+pyarrow==25.0.1
 numpy==2.5.3
 scipy==1.18.1
 statsmodels==0.15.0
