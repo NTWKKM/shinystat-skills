@@ -174,21 +174,23 @@ Polish Grilling Gate #6 Activation & Routing
 ├── Triggering Conditions:
 │   ├── User prompt explicitly requests evidence/literature (e.g. "หาหลักฐานมาประกอบ", "find evidence") ──▶ Auto-activate Gate #6 Full Polish
 │   └── Polish preference omitted in prompt ──▶ Gate #5 Alignment Inquiry:
-│       ├── (Standard) Skip Polish (Direct Fast-Path) ──▶ Standard normal flow using user-provided or existing sources; verifies every citation (including complete-looking local citations) via targeted search_web, PubMed, or other bibliographic services without exploratory literature reviews (fails closed: if unverified or conflicting, halt and request replacement or omit; never synthesize details; on-demand full polish available later)
-│       └── (Optional) Full Publication Polish (Execute Gate #6) ──▶ External literature grounding & superscript citations
+│       ├── (Standard) Skip Polish (Direct Fast-Path / User-Scoped References) ──▶ Reference list strictly scoped to user-provided sources (omitted if none provided; zero unsolicited external citations); dynamically queries available literature MCPs (e.g. PubMed, PRISMA, NEJM, Cochrane) or search_web for user sources to verify metadata, extract real empirical benchmarks for the Discussion narrative, and format complete House Style References with sequential superscripts (fails closed: if unverified or conflicting, halt and request replacement or omit; never synthesize details; on-demand full polish available later)
+│       └── (Optional) Full Publication Polish (Execute Gate #6 / Relevant Literature Enrichment) ──▶ Full empirical Discussion grounding on user sources + comprehensive exploratory retrieval across available literature MCPs / search engines to enrich Discussion and References
 ├── Polish Execution (Full Polish or On-Demand Trigger):
 │   ├── Step 1: Claim vs Data Reconciliation
 │   │   ├── Assess causal language by identification assumptions, prespecified estimand, and confounder control (do not treat weighting alone as sufficient or unweighted observational data as automatically prohibiting causal claims; report associative framing where identification is unverified, and require E-values only where defined and appropriate for the supported effect measure and sensitivity question)
 │   │   ├── Superiority P > alpha (from analysis metadata, default 0.05) must be stated as "insufficient evidence to reject the null" (never "treatments are equivalent"); preserve separate interpretation for prespecified non-inferiority or equivalence analyses based on their margin and confidence interval
 │   │   └── Numerical prose numbers must match results_dict within abs_tol = min(0.02, 10**(-dec_digits)) for |val| <= 1.0, 0.02 absolute or 0.01 (1%) relative tolerance for |val| > 1.0, or min(0.05, abs_tol * 100.0) for percentages
-│   ├── Step 2: Primary Study Retrieval & Real-World Literature Verification (websearch / bibliographic services)
-│   │   ├── When user sources cite papers without full text/details, locate authentic primary study via search_web, PubMed, or other bibliographic services
-│   │   ├── Query search_web, PubMed, or other bibliographic services for author, title, journal, year, DOI, and findings; restrict medical-terminology MCP to terminology, ontology codes, and laboratory reference ranges
+│   ├── Step 2: Empirical Research Grounding & Dynamic MCP / Literature Verification
+│   │   ├── Dynamic Source Adaptation: Discover and prioritize any available bibliographic MCP servers (PubMed, PRISMA, NEJM, Cochrane, Semantic Scholar, medical-terminology); fallback to search_web / web queries when dedicated MCP tools are absent
+│   │   ├── Step 2A (User-Scoped Sources): For every user-provided reference (even when full-text is available), query available MCPs/search to retrieve complete metadata (author, title, journal, year, DOI) and real empirical findings (benchmarks, effect sizes, control rates) to directly ground the Discussion narrative and format complete House Style References
+│   │   ├── Step 2B (Literature Enrichment, Full Polish only): Actively search available MCPs / search_web for additional authentic, relevant published studies matching the study topic to enrich the clinical Discussion and expand the reference list
+│   │   ├── Query available literature MCPs or bibliographic services for authentic details; restrict medical-terminology MCP to terminology, ontology codes, and laboratory reference ranges
 │   │   ├── Anti-Phantom Citation Invariant: All cited papers must be verified real-world publications
 │   │   └── If reference is unverified, retracted, or contradicts narrative ──▶ Halt to reconcile or replace
 │   └── Step 3: Citation & Reference Formatting
 │       ├── Sequential numerical superscripts (<sup>1</sup>, <sup>2,3</sup>) in order of appearance
-│       └── Format Reference List in locked Journal House Style (NEJM, JAMA, Lancet, BMJ, Clinical)
+│       └── Format Reference List in locked Journal House Style (NEJM, JAMA, Lancet, BMJ, Clinical; strictly user-scoped in Standard Mode, enriched in Full Polish)
 ```
 
 ---

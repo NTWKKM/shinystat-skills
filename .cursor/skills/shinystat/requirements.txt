@@ -1,0 +1,17 @@
+# medstat engine runtime stack — derived from imports under scripts/ (2026-10-25 efficiency audit).
+# Usage: uv run --with-requirements <skill_dir>/requirements.txt python <script.py>
+# PDF rendering (medstat/reporting/renderers/pdf.py) additionally needs: --with playwright
+pandas
+numpy
+scipy
+statsmodels
+patsy
+scikit-learn
+lifelines
+firthmodels
+matplotlib
+plotly
+python-docx
+python-pptx
+click
+pyyaml

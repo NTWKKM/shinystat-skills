@@ -1336,5 +1336,44 @@ In automated manuscript preparation and clinical report generation, AI agents ri
 
 [MEMORY_LEARN: Incorporating an optional Polish Grilling Gate with websearch/MCP literature verification enforces an anti-phantom citation invariant and aligns narrative claims with empirical data, while structural token recognition preserves numerical traceability in Pillar 5 audits.]
 
+---
+
+## ADR 48: User-Scoped References in Standard Mode vs Relevant Literature Enrichment in Full Polish with Mandatory Online Empirical Comparison
+
+### Context
+Following ADR 47, Gate #5 offered a binary choice between `(Standard) Skip Polish` and `(Optional) Full Publication Polish`. However, two ambiguities remained under `/writing-for-agents`:
+1. **Unsolicited References Risk**: In Standard Mode, the scope of references was loosely phrased as "using user-provided or existing local sources", leaving room for agents to spontaneously insert external literature citations or exploratory references that the user never asked for.
+2. **Empirical Evidence Grounding Gap**: When discussing statistical findings in Discussion or Results, agents could rely on generic priors or unverified assumptions rather than real empirical research benchmarks. Furthermore, even when users supplied local full-text documents or notes, references lacked cross-comparison against live primary publications online.
+
+### Decision
+1. **User-Scoped References in Standard Mode**:
+   - In `(Standard) Skip Polish (Direct Fast-Path / User-Scoped References)`:
+     - The Reference list is strictly scoped to references explicitly provided by the user in the prompt, notes, study protocol, or data dictionary.
+     - When the user provides references, the agent extracts real empirical research figures (sample sizes, benchmark effect sizes, control event rates, 95% CIs) from the published papers to directly ground the **Discussion narrative**, inserts sequential superscript citations (`<sup>1</sup>`, `<sup>2,3</sup>`), and formats a complete **References** section in the chosen **Journal House Style** (`NEJM`, `JAMA`, `Lancet`, `BMJ`, `Clinical`).
+     - If the user provides NO references, standard deliverables omit the external literature References section entirely (reporting only statistical findings, tables, figures, and methodology).
+     - Prohibit all spontaneous or unsolicited external literature citations in Standard Mode.
+2. **Dynamic Bibliographic MCP Routing & Online Empirical Comparison**:
+   - The agent dynamically discovers and prioritizes any connected literature or medical database MCP servers (e.g., PubMed MCP, PRISMA MCP, NEJM, Cochrane, Semantic Scholar, ScienceDirect, `medical-terminology`), seamlessly falling back to `search_web` / web queries when dedicated MCP servers are not mounted.
+   - For every user-provided reference or cited paper (even when the user supplies a local full-text document or clinical notes):
+     - Query available MCPs or online sources if searchable to verify complete metadata (author list, journal, year, volume, pages, DOI).
+     - Extract real empirical research findings from published literature to compare, validate, and enrich the Discussion narrative against empirical evidence.
+3. **Relevant Literature Enrichment in Full Publication Polish**:
+   - In `(Optional) Full Publication Polish (Execute Gate #6 / Relevant Literature Enrichment)`:
+     - Execute all standard verifications, empirical Discussion grounding, superscript citations, and House Style References on user-provided sources.
+     - In addition, actively conduct exploratory literature retrieval across available bibliographic MCPs / `search_web` to identify and integrate additional authentic, relevant published studies, clinical trials, and guidelines that directly match the user's research topic, population, and findings.
+     - Extract real clinical benchmarks and comparison figures to enrich the clinical Discussion, format sequential superscript citations (`<sup>1</sup>`, `<sup>2,3</sup>`), and assemble a comprehensive References block in the locked Journal House Style.
+   - Enforce the **Anti-Phantom Citation Invariant** strictly across all modes.
+4. **Synchronization across Mirrors**:
+   - Maintain canonical Single Source of Truth in `skills/` and propagate across all agent platform mirrors (`.agents/`, `.agent/`, `.claude/`, `.cursor/`, and `packaging/cloud/shinystat-cloud/`) via `./scripts/install-skills.sh --sync`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Reference Cleanliness**: Eliminates uninvited external citations in standard deliverables while preserving seamless references when users provide them.
+- **Empirical Rigor**: Ensures narrative Discussion points are compared against authentic real-world published data rather than hallucinations or model priors.
+- **Progressive Enrichment**: Clearly delineates fast-path user-scoped deliverables from exploratory publication-grade literature reviews.
+
+[MEMORY_LEARN: In clinical report generation, standard reference lists must be strictly scoped to user-provided sources with online empirical comparison against authentic published data, while exploratory literature enrichment is reserved for Full Publication Polish.]
+
+
 
 
