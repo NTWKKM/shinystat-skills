@@ -142,21 +142,23 @@ When the **Polish Grilling Gate (#6)** is engaged (via explicit prompt request e
 - Compare normalized point estimates, confidence intervals, and $P$-values against tabular outputs using the magnitude- and percentage-specific tolerance rule (`abs_tol = min(0.02, 10**(-dec_digits))` for $|val| \le 1.0$, $0.02$ absolute or $0.01$ relative for $|val| > 1.0$, or $\min(0.05, abs\_tol \times 100.0)$ for percentages).
 
 ### Step 2: Empirical Research Grounding & Primary Source Verification via MCPs & Bibliographic Engines
+
 - **Dynamic Bibliographic Source & MCP Adaptation**:
   - Dynamically discover and adapt to any literature or medical database MCP servers connected in the environment (e.g. PubMed MCP, PRISMA MCP, NEJM, Cochrane, Semantic Scholar, ScienceDirect, `medical-terminology`).
   - Prioritize specialized MCP tools when available for fast, authoritative metadata and abstract retrieval; seamlessly fallback to `search_web` / PubMed web queries when dedicated MCP database servers are absent.
 - **Step 2A: User-Scoped Source Resolution & Online Empirical Comparison (Standard & Full Polish)**:
   - When user-provided materials, clinical notes, or prompts cite or mention external studies (e.g., "Singer 2016", "Sepsis-3", "KDIGO 2012") with or without full text or complete bibliographic metadata:
     - Do NOT leave it as an informal or truncated citation.
-    - Query available MCPs or search engines to retrieve the authentic primary publication: Title, full Author list, Journal, Year, Volume, Pages, and DOI.
-    - **Discussion Empirical Grounding**: Even when the user supplies a local document or full text, query online sources (MCPs/search) if searchable to extract real empirical research figures (sample sizes, benchmark effect sizes, control group event rates, 95% CIs) and directly integrate them into the **Discussion narrative** to contextualize analyzed findings against authentic published evidence.
+    - Query available MCPs or search engines to retrieve the authentic primary publication: Title, full Author list, Journal, Year, Volume, Pages, and DOI, and verify that the cited source directly supports the Discussion claim.
+    - **Discussion Empirical Grounding (Conditional on Source Content)**: Even when the user supplies a local document or full text, query online sources (MCPs/search) if searchable. Extract real empirical research figures (sample sizes, benchmark effect sizes, control group event rates, 95% CIs) ONLY when the source actually reports them and they directly support the **Discussion narrative**. Sources that do not report relevant empirical figures (e.g., clinical guidelines, consensus criteria, classification frameworks) must be cited for the conceptual claims, recommendations, or criteria they support without inventing or importing unevidenced figures.
+    - **Offline / Unavailable Literature Services**: When online literature services (MCPs, `search_web`) are unavailable or unreachable, authenticated local full text with complete bibliographic metadata satisfies verification; if neither online verification nor authenticated local text is available, halt explicitly (anti-phantom citation invariant).
     - Insert the complete, verified study into the References list and assign sequential superscript citations (`<sup>1</sup>`, `<sup>2,3</sup>`) formatted in the chosen Journal House Style.
   - **Zero Unsolicited References in Standard Mode**: If the user does not provide references or mention external literature, the Standard Mode deliverable contains NO external literature References section.
 - **Step 2B: Relevant Literature Enrichment (Full Polish Only)**:
   - Actively search available literature MCPs / `search_web` for additional authentic, relevant published studies, clinical trials, or guidelines that directly relate to the study's clinical topic, target population, and analyzed outcomes.
-  - Extract real empirical findings and comparison benchmarks from retrieved literature to enrich the Discussion narrative, assigning sequential superscript citations and expanding the Reference list.
+  - Extract real empirical findings and comparison benchmarks when reported to enrich the Discussion narrative, assigning sequential superscript citations and expanding the Reference list.
 - **Verification & Safety Rules (All Modes)**:
-  - **Bibliographic Verification**: Verify bibliographic metadata via query: `"<First Author> <Journal> <Year> <Title keywords>"` or DOI/PMID across available MCPs or `search_web`.
+  - **Bibliographic Verification**: Verify bibliographic metadata via query: `"<First Author> <Journal> <Year> <Title keywords>"` or DOI/PMID across available MCPs or `search_web`. When literature services are unavailable, authenticated local full text with complete bibliographic metadata satisfies verification; explicitly halt if verification is unavailable.
   - **`medical-terminology` MCP**: Validate medical terminology, standardized ontology codes (SNOMED CT, LOINC, RxNorm, ICD-10), and laboratory reference ranges.
   - Confirm that the cited paper's primary findings directly support the specific sentence in the manuscript.
   - **Anti-Phantom Citation Invariant**: Zero fabricated papers, hallucinated author lists, or synthetic DOIs. If a citation cannot be verified or its actual conclusions contradict the narrative statement, halt at Grilling Gate #6 to reconcile or replace the citation.

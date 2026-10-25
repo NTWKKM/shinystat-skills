@@ -46,6 +46,26 @@ def test_shinystat_canonical_skill_exists_and_valid():
         "scripts/medstat/models/firth.py missing"
     )
 
+    # Runtime requirements stack check
+    req_file = canonical_skill.parent / "requirements.txt"
+    assert req_file.exists(), "skills/shinystat/requirements.txt missing"
+    req_lines = [
+        line.strip()
+        for line in req_file.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    assert len(req_lines) >= 14, (
+        "Expected at least 14 runtime dependencies in requirements.txt"
+    )
+    for dep in req_lines:
+        assert "==" in dep, (
+            f"Runtime dependency {dep} must be pinned to exact version with =="
+        )
+
+    req_text = req_file.read_text(encoding="utf-8")
+    assert "playwright install chromium" in req_text
+    assert "--with-deps" in req_text
+
 
 def _is_valid_skill_file(path: Path) -> bool:
     return (
