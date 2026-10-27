@@ -19,7 +19,7 @@ import yaml
 from medstat.causal.balance import compute_balance_table
 from medstat.causal.iptw import compute_iptw_weights, fit_iptw_outcome_model
 from medstat.data.clean import prepare_data_for_analysis
-from medstat.data.loader import load_clinical_data
+from medstat.data.loader import get_clinical_columns, load_clinical_data
 from medstat.data.missing import pool_estimates
 from medstat.data.retention import SampleFlowTracker
 from medstat.diagnostic.roc import (
@@ -57,6 +57,33 @@ from medstat.reporting.tables import (
     format_reclassification_table,
     format_time_dependent_roc_table,
     render_competing_risks_table,
+)
+
+
+class _UniqueKeyLoader(yaml.SafeLoader):
+    pass
+
+
+def _construct_unique_mapping(
+    loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False
+) -> dict[str, Any]:
+    loader.flatten_mapping(node)
+    mapping: dict[str, Any] = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                f"found duplicate key: '{key}'",
+                key_node.start_mark,
+            )
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_UniqueKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_unique_mapping
 )
 
 
@@ -146,7 +173,7 @@ class AnalysisPlan:
             raise FileNotFoundError(f"Analysis plan YAML not found: {p}")
 
         with open(p, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f)
+            data = yaml.load(f, Loader=_UniqueKeyLoader)
 
         meta_dict = data.get("metadata", {})
         metadata = MetadataSpec(
@@ -1104,33 +1131,28 @@ class AnalysisPlan:
 
 
 SCHEMA_YAML_TEMPLATE = """# MedStat Declarative Analysis Plan Schema (Use with: medstat_cli.py --spec plan.yaml)
-project:
-  title: "Clinical Cohort Study"
-  study_design: "retrospective_cohort"  # rct | retrospective_cohort | prospective_cohort | case_control | cross_sectional | diagnostic
-  house_style: "nejm"                   # nejm | lancet | jama | bmj | nature
+metadata:
+  study_title: "Clinical Cohort Study"
+  study_design: "observational"         # rct | observational | cohort | case_control | diagnostic
+  reporting_guideline: "STROBE"         # STROBE | CONSORT | TRIPOD | STARD | PRISMA
 
 data:
-  path: "data/cohort.csv"
-  id_col: "patient_id"
-  check_phi: true
-  missing_strategy: "mice"              # complete_case | mice | simple
+  input_path: "data/cohort.csv"
+  id_column: "patient_id"
 
-table1:
-  group_col: "treatment_group"
-  continuous_vars: ["age", "bmi", "lactate"]
-  categorical_vars: ["sex", "sepsis_shock"]
-
-analyses:
-  - id: "primary_outcome"
-    type: "glm"                         # glm | firth_logistic | cox | firth_cox | fine_gray | ordinal | multilevel | iptw | psm | roc | dca
+models:
+  - name: "primary_outcome"
+    type: "logistic"                    # logistic | linear | cox | fine_gray | ordinal | multilevel | iptw | diagnostic | validation | recalibration
     outcome: "mortality_28d"
     exposure: "treatment_group"
     covariates: ["age", "sex", "sofa_score"]
-    # สำหรับ survival/fine_gray ให้ระบุ time_col: "follow_up_days" และ competing_event_val: 2
+    missing_strategy: "complete-case"   # complete-case | mice | knn | indicator
+    missing_justification: "Complete-case analysis prespecified"
+    # For survival/fine_gray specify time: "follow_up_days" and options: {competing_event_val: 2}
 
 reporting:
-  formats: ["markdown", "docx", "html"] # docx | html | markdown | pdf | pptx
-  output_dir: "outputs/"
+  style: "nejm"                         # nejm | lancet | jama | bmj
+  format: "html"                        # html | docx | pptx | markdown | pdf
 """
 
 
@@ -1162,7 +1184,7 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
         return report
 
     try:
-        raw_spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+        raw_spec = yaml.load(path.read_text(encoding="utf-8"), Loader=_UniqueKeyLoader)
     except Exception as exc:
         report["valid"] = False
         report["errors"].append(f"Invalid YAML syntax: {exc}")
@@ -1186,15 +1208,87 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
     if not has_spec_keys:
         report["valid"] = False
         report["errors"].append(
-            "YAML spec must contain at least one top-level section: 'data', 'project', 'metadata', 'analyses', or 'models'."
+            "YAML spec must contain at least one top-level section: 'data', 'metadata', or 'models'."
         )
         report["agent_remediation"].append(
             "Run `medstat_cli.py --schema` to view the expected top-level keys."
         )
         return report
 
-    # ตรวจสอบคอลัมน์ในไฟล์ข้อมูลจริง (หากระบุ data.path หรือ data.input_path)
-    data_cfg = raw_spec.get("data", {})
+    # 1. Dataset section check
+    data_cfg = raw_spec.get("data")
+    if not isinstance(data_cfg, dict) or not (
+        data_cfg.get("path") or data_cfg.get("input_path")
+    ):
+        report["valid"] = False
+        report["errors"].append(
+            "YAML spec must contain a 'data' section with an 'input_path' (or 'path') pointing to the dataset."
+        )
+        report["agent_remediation"].append(
+            "Specify `data.input_path: path/to/dataset.csv` in your spec YAML."
+        )
+
+    # 2. Executable models section check
+    analyses_list = raw_spec.get("models") or raw_spec.get("analyses")
+    if not isinstance(analyses_list, list) or len(analyses_list) == 0:
+        report["valid"] = False
+        report["errors"].append(
+            "YAML spec must contain a non-empty 'models' (or 'analyses') list specifying executable models."
+        )
+        report["agent_remediation"].append(
+            "Define at least one executable model in the `models` section of your spec YAML."
+        )
+        analyses_list = []
+    else:
+        supported_types = {
+            "logistic",
+            "binary",
+            "firth_logistic",
+            "linear",
+            "ols",
+            "cox",
+            "cox_ph",
+            "survival",
+            "competing_risks",
+            "cif",
+            "fine_gray",
+            "iptw",
+            "causal_iptw",
+            "reclassification",
+            "diagnostic",
+            "diag",
+            "time_dependent_roc",
+            "td_roc",
+            "internal_validation",
+            "validation",
+            "tripod",
+            "recalibration",
+            "recalibrate",
+            "multilevel",
+            "mixed",
+            "gee",
+            "ordinal",
+        }
+        for idx, item in enumerate(analyses_list, start=1):
+            if not isinstance(item, dict):
+                report["valid"] = False
+                report["errors"].append(
+                    f"Model item #{idx} must be a dictionary/mapping."
+                )
+                continue
+            m_type = (
+                str(item.get("type", item.get("method", "logistic"))).lower().strip()
+            )
+            if not m_type or m_type not in supported_types:
+                report["valid"] = False
+                report["errors"].append(
+                    f"Model item #{idx} specifies unsupported or missing model type '{m_type}'. "
+                    f"Supported types: {sorted(supported_types)}"
+                )
+                report["agent_remediation"].append(
+                    f"Set `type` in model item #{idx} to one of {sorted(supported_types)}."
+                )
+
     data_path_str = None
     if isinstance(data_cfg, dict):
         data_path_str = data_cfg.get("path") or data_cfg.get("input_path")
@@ -1202,11 +1296,14 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
     if data_path_str:
         data_path = Path(data_path_str)
         if not data_path.is_absolute():
-            resolved = (path.parent / data_path).resolve()
-            if resolved.exists():
-                data_path = resolved
-            elif Path(data_path_str).exists():
-                data_path = Path(data_path_str)
+            cwd_resolved = (Path.cwd() / data_path).resolve()
+            spec_resolved = (path.parent / data_path).resolve()
+            if cwd_resolved.exists():
+                data_path = cwd_resolved
+            elif spec_resolved.exists():
+                data_path = spec_resolved
+            else:
+                data_path = cwd_resolved
 
         if not data_path.exists():
             report["valid"] = False
@@ -1214,17 +1311,19 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
             report["agent_remediation"].append(
                 "Update `data.path` in the YAML spec to point to an existing CSV/Parquet file."
             )
+            available_cols = set()
         else:
             try:
-                from medstat.data.loader import load_clinical_data
-
-                df_head = load_clinical_data(data_path)
-                available_cols = set(df_head.columns)
-            except Exception:
-                import pandas as pd
-
-                df_head = pd.read_csv(data_path, nrows=5)
-                available_cols = set(df_head.columns)
+                available_cols = set(get_clinical_columns(data_path))
+            except Exception as exc:
+                report["valid"] = False
+                report["errors"].append(
+                    f"Failed to read dataset columns from '{data_path}': {exc}"
+                )
+                report["agent_remediation"].append(
+                    "Ensure the dataset file exists, has a supported format, and contains valid column headers."
+                )
+                available_cols = set()
 
             referenced_cols: set[str] = set()
             t1 = raw_spec.get("table1", {})
@@ -1234,7 +1333,6 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
                 referenced_cols.update(t1.get("continuous_vars", []))
                 referenced_cols.update(t1.get("categorical_vars", []))
 
-            analyses_list = raw_spec.get("analyses") or raw_spec.get("models") or []
             for item in analyses_list:
                 if isinstance(item, dict):
                     for key in (
@@ -1248,6 +1346,48 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
                         if item.get(key):
                             referenced_cols.add(item[key])
                     referenced_cols.update(item.get("covariates", []))
+                    opts = item.get("options", {})
+                    if isinstance(opts, dict):
+                        for opt_key in (
+                            "p_old",
+                            "p_old_col",
+                            "score_old",
+                            "p_new",
+                            "p_new_col",
+                            "score_new",
+                            "score_col",
+                            "time_col",
+                            "event_col",
+                            "p_recal",
+                            "p_pred",
+                            "score",
+                        ):
+                            opt_val = opts.get(opt_key)
+                            if opt_val and isinstance(opt_val, str):
+                                referenced_cols.add(opt_val)
+                    m_type = str(item.get("type", "")).lower()
+                    if m_type in (
+                        "cox",
+                        "cox_ph",
+                        "survival",
+                        "fine_gray",
+                        "competing_risks",
+                        "cif",
+                    ):
+                        time_var = (
+                            item.get("time")
+                            or item.get("time_col")
+                            or (
+                                opts.get("time_col") if isinstance(opts, dict) else None
+                            )
+                        )
+                        if time_var:
+                            referenced_cols.add(time_var)
+                        else:
+                            report["valid"] = False
+                            report["errors"].append(
+                                f"Survival model '{item.get('name', 'unnamed')}' requires a 'time' or 'time_col' specification."
+                            )
 
             variables_list = raw_spec.get("variables", [])
             if isinstance(variables_list, list):
@@ -1256,7 +1396,7 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
                         referenced_cols.add(v["name"])
 
             missing_cols = sorted(referenced_cols - available_cols)
-            if missing_cols:
+            if missing_cols and available_cols:
                 report["valid"] = False
                 report["errors"].append(f"Columns missing from dataset: {missing_cols}")
                 report["agent_remediation"].append(

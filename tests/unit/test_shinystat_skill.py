@@ -143,17 +143,24 @@ def test_shinystat_cloud_canonical_skill_exists_and_valid():
     # Body checks
     body = parts[2]
     assert "The 5 Decision Pillars" in body
-    assert "references/decision-heuristics.md" in body
-    assert "references/figures.md" in body
-    assert "references/python-recipes.md" in body
-    assert "references/report-builder.md" in body
+    assert "_shared/references/decision-heuristics.md" in body
+    assert "_shared/references/figures.md" in body
+    assert "references/recipes/01-data-missing-table1.md" in body
+    assert "_shared/references/report-builder.md" in body
 
     # References existence check
-    ref_dir = cloud_skill.parent / "references"
-    assert (ref_dir / "decision-heuristics.md").exists()
-    assert (ref_dir / "figures.md").exists()
-    assert (ref_dir / "python-recipes.md").exists()
-    assert (ref_dir / "report-builder.md").exists()
+    shared_ref_dir = repo_root / "skills" / "_shared" / "references"
+    assert (shared_ref_dir / "decision-heuristics.md").exists()
+    assert (shared_ref_dir / "figures.md").exists()
+    assert (shared_ref_dir / "report-builder.md").exists()
+
+    recipes_dir = cloud_skill.parent / "references" / "recipes"
+    for r_num in range(1, 6):
+        pattern = f"0{r_num}-*.md"
+        matched = list(recipes_dir.glob(pattern))
+        assert len(matched) == 1, (
+            f"Expected 1 recipe file matching {pattern}, found {len(matched)}"
+        )
 
     # Full tree and content parity with packaging/cloud/shinystat-cloud
     assert packaging_cloud.exists(), "packaging/cloud/shinystat-cloud not found"

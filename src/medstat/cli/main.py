@@ -785,8 +785,12 @@ def model_cmd(
 ) -> None:
     """Fit regression or survival models or execute a pre-specified SAP plan."""
     if spec:
-        plan = AnalysisPlan.from_yaml(spec)
-        res = plan.execute()
+        try:
+            plan = AnalysisPlan.from_yaml(spec)
+            res = plan.execute()
+        except Exception as e:
+            emit_agent_actionable_error(e)
+            raise SystemExit(1)
         if output:
             Path(output).parent.mkdir(parents=True, exist_ok=True)
             with open(output, "w") as f:

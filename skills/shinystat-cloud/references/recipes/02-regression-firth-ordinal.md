@@ -12,22 +12,20 @@ When sample sizes are small or monotone separation occurs ($\text{EPV} < 10$), s
 
 ```python
 import numpy as np
-import scipy.stats as stats
 import scipy.optimize as optimize
+from scipy.special import expit
+import scipy.stats as stats
 
 
 def _firth_penalized_loglik(beta: np.ndarray, X: np.ndarray, y: np.ndarray) -> float:
-    eta = np.clip(X @ beta, -30, 30)
-    pi = 1.0 / (1.0 + np.exp(-eta))
+    eta = X @ beta
+    pi = expit(eta)
     W = pi * (1.0 - pi)
     I = (X.T * W) @ X
     sign, logdet = np.linalg.slogdet(I)
     if sign <= 0:
         return -np.inf
-    ll = np.sum(
-        y * np.log(np.clip(pi, 1e-15, 1.0))
-        + (1.0 - y) * np.log(np.clip(1.0 - pi, 1e-15, 1.0))
-    )
+    ll = np.sum(y * eta - np.logaddexp(0.0, eta))
     return float(ll + 0.5 * logdet)
 
 
@@ -39,6 +37,9 @@ def fit_firth_logistic(
     tol: float = 1e-6,
 ) -> dict:
     """Firth penalized logistic regression with Newton-Raphson step-halving and Profile Likelihood CIs."""
+    if not isinstance(max_iter, (int, np.integer)) or isinstance(max_iter, bool) or max_iter < 1:
+        raise ValueError(f"max_iter must be an integer >= 1; got {max_iter}")
+
     X_arr = np.asarray(X, dtype=float)
     y_arr = np.asarray(y, dtype=float).ravel()
 
@@ -61,8 +62,8 @@ def fit_firth_logistic(
 
     converged = False
     for iteration in range(max_iter):
-        eta = np.clip(X_arr @ beta, -30, 30)
-        pi = 1.0 / (1.0 + np.exp(-eta))
+        eta = X_arr @ beta
+        pi = expit(eta)
         W = pi * (1.0 - pi)
 
         I = (X_arr.T * W) @ X_arr
@@ -100,6 +101,15 @@ def fit_firth_logistic(
             converged = True
             break
 
+    # Recompute information matrix and inverse at final beta
+    eta_final = X_arr @ beta
+    pi_final = expit(eta_final)
+    W_final = pi_final * (1.0 - pi_final)
+    I_final = (X_arr.T * W_final) @ X_arr
+    try:
+        I_inv = np.linalg.inv(I_final)
+    except np.linalg.LinAlgError:
+        I_inv = np.linalg.pinv(I_final)
     se = np.sqrt(np.diag(I_inv))
 
     # Profile Likelihood Confidence Intervals (chi2 cutoff = 3.841)
@@ -214,17 +224,26 @@ def calculate_e_value(
 ) -> dict:
     """Calculate VanderWeele & Ding (2017) E-value for RR, OR, or HR with prevalence branching."""
     est = float(estimate)
-    if est <= 0.0:
-        raise ValueError("Estimate must be strictly positive (> 0) on ratio scale.")
+    if not np.isfinite(est) or est <= 0.0:
+        raise ValueError("Estimate must be finite and strictly positive (> 0) on ratio scale.")
     low = float(lower) if lower is not None else None
     up = float(upper) if upper is not None else None
-    if low is not None and low <= 0.0:
-        raise ValueError("lower limit must be strictly positive (> 0) on ratio scale.")
-    if up is not None and up <= 0.0:
-        raise ValueError("upper limit must be strictly positive (> 0) on ratio scale.")
+    if low is not None and (not np.isfinite(low) or low <= 0.0):
+        raise ValueError("lower limit must be finite and strictly positive (> 0) on ratio scale.")
+    if up is not None and (not np.isfinite(up) or up <= 0.0):
+        raise ValueError("upper limit must be finite and strictly positive (> 0) on ratio scale.")
+    if low is not None and low > est:
+        raise ValueError(f"lower confidence limit ({low}) cannot exceed estimate ({est}).")
+    if up is not None and up < est:
+        raise ValueError(f"upper confidence limit ({up}) cannot be less than estimate ({est}).")
     if low is not None and up is not None and low > up:
         raise ValueError(
             f"lower confidence limit ({low}) cannot exceed upper confidence limit ({up})."
+        )
+
+    if estimate_type not in ("RR", "OR", "HR"):
+        raise ValueError(
+            f"Unsupported estimate_type '{estimate_type}'. Supported values are 'RR', 'OR', 'HR'."
         )
 
     # Conversion to Risk Ratio (RR) scale
@@ -297,17 +316,27 @@ def fit_logistic_regression_table(
         raise ValueError(
             f"Outcome column '{outcome}' must contain strictly binary values (0 and 1)."
         )
+    if set(outcome_vals) != {0, 1}:
+        raise ValueError(
+            f"Outcome column '{outcome}' must contain both classes (0 and 1)."
+        )
     y = outcome_vals.astype(int)
 
     # 1. Multivariable model
     X_multi = sm.add_constant(clean[covariates].astype(float))
     fit_multi = sm.Logit(y, X_multi).fit(disp=False)
+    if not getattr(fit_multi, "mle_retvals", {}).get("converged", True):
+        raise ValueError("Multivariable logistic regression fit did not converge.")
 
     rows = []
     for var in covariates:
         # Univariable model (Crude OR)
         X_uni = sm.add_constant(clean[[var]].astype(float))
         fit_uni = sm.Logit(y, X_uni).fit(disp=False)
+        if not getattr(fit_uni, "mle_retvals", {}).get("converged", True):
+            raise ValueError(
+                f"Univariable logistic regression for '{var}' did not converge."
+            )
 
         crude_b = fit_uni.params[var]
         crude_ci = fit_uni.conf_int().loc[var]

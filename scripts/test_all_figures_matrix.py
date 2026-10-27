@@ -3,6 +3,8 @@
 scripts/test_all_figures_matrix.py: Lightweight CLI runner wrapping tests/unit/test_all_figures_matrix.py
 """
 
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import sys

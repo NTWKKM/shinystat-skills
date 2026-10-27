@@ -10,10 +10,9 @@ from medstat.cli.spec import get_cli_schema_template, preflight_validate_spec
 def test_cli_schema_template():
     template = get_cli_schema_template()
     assert "MedStat Declarative Analysis Plan Schema" in template
-    assert "project:" in template
+    assert "metadata:" in template
     assert "data:" in template
-    assert "table1:" in template
-    assert "analyses:" in template
+    assert "models:" in template
 
 
 def test_cli_schema_flag():
@@ -21,7 +20,8 @@ def test_cli_schema_flag():
     result = runner.invoke(cli, ["--schema"])
     assert result.exit_code == 0
     assert "MedStat Declarative Analysis Plan Schema" in result.output
-    assert "project:" in result.output
+    assert "metadata:" in result.output
+    assert "models:" in result.output
 
 
 def test_preflight_validate_valid_spec():
@@ -121,3 +121,27 @@ def test_emit_agent_actionable_error(capsys):
     assert payload["status"] == "error"
     assert payload["error_type"] == "ValueError"
     assert any("firth" in rem.lower() for rem in payload["agent_remediation"])
+
+
+def test_preflight_validate_duplicate_keys(tmp_path):
+    dup_yaml = tmp_path / "dup_plan.yaml"
+    dup_yaml.write_text(
+        """
+metadata:
+  study_title: "Test"
+data:
+  input_path: "test.csv"
+models:
+  - name: "m1"
+    type: "logistic"
+    outcome: "y"
+models:
+  - name: "m2"
+    type: "logistic"
+    outcome: "y"
+""",
+        encoding="utf-8",
+    )
+    report = preflight_validate_spec(dup_yaml)
+    assert report["valid"] is False
+    assert any("duplicate key" in err.lower() for err in report["errors"])

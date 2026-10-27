@@ -14,19 +14,16 @@ import yaml
 # Import functions from python-recipes directly by extracting or importing
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CLOUD_DIR = REPO_ROOT / "packaging" / "cloud" / "shinystat-cloud"
-RECIPES_PATH = CLOUD_DIR / "references" / "python-recipes.md"
+RECIPES_DIR = REPO_ROOT / "skills" / "shinystat-cloud" / "references" / "recipes"
 
 
 def _extract_recipe_namespace():
-    """Extract and execute all Python code blocks from modular recipes or python-recipes.md in an isolated namespace."""
-    recipes_dir = CLOUD_DIR / "references" / "recipes"
-    if recipes_dir.exists() and list(recipes_dir.glob("*.md")):
-        parts = [
-            p.read_text(encoding="utf-8") for p in sorted(recipes_dir.glob("*.md"))
-        ]
-        content = "\n\n".join(parts)
-    else:
-        content = RECIPES_PATH.read_text(encoding="utf-8")
+    """Extract and execute all Python code blocks from modular recipes in an isolated namespace."""
+    recipe_files = sorted(RECIPES_DIR.glob("*.md"))
+    if not recipe_files:
+        raise FileNotFoundError(f"No recipe files found in {RECIPES_DIR}")
+    parts = [p.read_text(encoding="utf-8") for p in recipe_files]
+    content = "\n\n".join(parts)
     blocks = re.findall(r"```python\n(.*?)\n```", content, re.DOTALL)
     ns = {}
     combined_code = "\n".join(blocks)
@@ -700,8 +697,13 @@ def test_publication_table_html_rendering(recipes):
 
 
 def test_each_recipe_is_self_contained():
-    """Verify that every python code block in python-recipes.md executes and runs in an isolated namespace."""
-    content = RECIPES_PATH.read_text(encoding="utf-8")
+    """Verify that every python code block in modular recipes executes and runs in an isolated namespace."""
+    recipe_files = sorted(RECIPES_DIR.glob("*.md"))
+    assert len(recipe_files) == 5, (
+        f"Expected 5 modular recipe files, got {len(recipe_files)}"
+    )
+    parts = [p.read_text(encoding="utf-8") for p in recipe_files]
+    content = "\n\n".join(parts)
     blocks = re.findall(r"```python\n(.*?)\n```", content, re.DOTALL)
     assert len(blocks) >= 17, f"Expected at least 17 recipes, got {len(blocks)}"
     for idx, block in enumerate(blocks, start=1):

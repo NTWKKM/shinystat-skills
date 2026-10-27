@@ -8,7 +8,7 @@
 
 ## 1. Table 1 Baseline Characteristics & Standardized Mean Difference (SMD)
 
-Computes publication-grade baseline patient characteristics with Austin (2009) Standardized Mean Differences ($\text{SMD} < 0.10$ denotes balance). Handles zero-variance disparity correctly (returning `np.nan` rather than misleading `0.00`) and provides Fisher's exact test fallback for sparse cell counts.
+Computes publication-grade baseline patient characteristics with Austin (2009) Standardized Mean Differences ($|\text{SMD}| < 0.10$ denotes balance). Handles zero-variance disparity correctly (returning `np.nan` rather than misleading `0.00`) and provides Fisher's exact test fallback for sparse cell counts.
 
 ```python
 import numpy as np
@@ -194,6 +194,8 @@ import scipy.stats as stats
 def littles_mcar_test(
     df: pd.DataFrame, variables: list[str], max_iter: int = 100, tol: float = 1e-5
 ) -> dict:
+    if not isinstance(max_iter, (int, np.integer)) or isinstance(max_iter, bool) or max_iter < 1:
+        raise ValueError(f"max_iter must be an integer >= 1; got {max_iter}")
     """Perform Roderick Little's (1988) MCAR test via pattern-grouped EM ML estimation.
 
     Statistical & Regularization Notes:
@@ -204,6 +206,10 @@ def littles_mcar_test(
     """
     data = df[variables].to_numpy(dtype=float, copy=True)
     N, P = data.shape
+    if np.isinf(data).any():
+        raise ValueError(
+            "Data contains infinite values (inf or -inf); Little's MCAR test requires finite values or NaN for missing."
+        )
     nan_mask = np.isnan(data)
 
     if not np.any(nan_mask):
@@ -349,7 +355,7 @@ def littles_mcar_test(
             inv_Sigma_OO = np.linalg.pinv(Sigma_OO)
         d2 += n_s * float(diff.T @ inv_Sigma_OO @ diff)
 
-    p_val = float(stats.chi2.sf(d2, df=df_stat))
+    p_val = float(stats.chi2.sf(d2, df=df_stat)) if converged else np.nan
     missing_summary = pd.DataFrame(
         {
             "Variable": variables,
@@ -358,10 +364,10 @@ def littles_mcar_test(
         }
     )
     return {
-        "chi2": float(d2),
+        "chi2": float(d2) if converged else np.nan,
         "df": int(df_stat),
-        "p_value": float(p_val),
-        "mcar_rejected": bool(p_val < 0.05),
+        "p_value": p_val,
+        "mcar_rejected": bool(p_val < 0.05) if converged else False,
         "n_patterns": len(parsed_patterns),
         "converged": converged,
         "n_iterations": n_iterations,
@@ -487,13 +493,18 @@ def impute_mice_datasets(
                 "Gaussian posterior draws produce fractional values and cannot enforce binary {0, 1} "
                 "or group membership. Restrict features_to_impute to continuous variables."
             )
-        if vals_set.issubset({1, 2, 3, 1.0, 2.0, 3.0}) or vals_set.issubset(
-            {0, 1, 2, 0.0, 1.0, 2.0}
+        is_declared_continuous = bool(target_types and target_types.get(feat) == "continuous")
+        if not is_declared_continuous and (
+            vals_set.issubset({1, 2, 3, 1.0, 2.0, 3.0})
+            or vals_set.issubset({0, 1, 2, 0.0, 1.0, 2.0})
+            or vals_set.issubset({1, 2, 3, 4, 5, 1.0, 2.0, 3.0, 4.0, 5.0})
+            or vals_set.issubset({0, 1, 2, 3, 4, 5, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0})
         ):
             raise ValueError(
                 f"Column '{feat}' in features_to_impute has discrete integer category codes ({vals_set}). "
                 "Categorical and ordinal variables must not be imputed via Gaussian linear regression MICE; "
-                "they require variable-type-specific models (e.g. polytomous/ordinal logistic MICE)."
+                "they require variable-type-specific models (e.g. polytomous/ordinal logistic MICE), "
+                "or an explicit declaration in target_types={'column': 'continuous'}."
             )
 
     # Validate conditioning columns, predictors, and outcome
@@ -678,6 +689,8 @@ def pool_estimates_rubin(
     MUST be performed on the log scale (log OR, log HR) with log-scale standard errors,
     and then exponentiated for reporting and hypothesis testing.
     """
+    if not (0.0 < alpha < 1.0):
+        raise ValueError(f"alpha must be strictly between 0 and 1; got {alpha}")
     m = len(point_estimates)
     if len(point_estimates) != len(standard_errors):
         raise ValueError(
@@ -745,13 +758,22 @@ def pool_estimates_rubin(
         df = float(nu_com_adj) if nu_com_adj is not None else np.inf
         fmi = 0.0
 
-    t_stat = theta_bar / se if se > 0 else 0.0
-    if np.isfinite(df) and df > 0:
-        p_val = float(2.0 * stats.t.sf(abs(t_stat), df))
-        t_crit = float(stats.t.ppf(1.0 - alpha / 2.0, df))
+    if se > 0:
+        t_stat = theta_bar / se
+        if np.isfinite(df) and df > 0:
+            p_val = float(2.0 * stats.t.sf(abs(t_stat), df))
+            t_crit = float(stats.t.ppf(1.0 - alpha / 2.0, df))
+        else:
+            p_val = float(2.0 * stats.norm.sf(abs(t_stat)))
+            t_crit = float(stats.norm.ppf(1.0 - alpha / 2.0))
     else:
-        p_val = float(2.0 * stats.norm.sf(abs(t_stat)))
-        t_crit = float(stats.norm.ppf(1.0 - alpha / 2.0))
+        if theta_bar == 0.0:
+            t_stat = 0.0
+            p_val = 1.0
+        else:
+            t_stat = float(np.sign(theta_bar) * np.inf)
+            p_val = 0.0
+        t_crit = 0.0
 
     ci_lower = float(theta_bar - t_crit * se)
     ci_upper = float(theta_bar + t_crit * se)
@@ -847,13 +869,18 @@ def impute_mice_single(
                 "Gaussian posterior draws produce fractional values and cannot enforce binary {0, 1} "
                 "or group membership. Restrict features_to_impute to continuous variables."
             )
-        if vals_set.issubset({1, 2, 3, 1.0, 2.0, 3.0}) or vals_set.issubset(
-            {0, 1, 2, 0.0, 1.0, 2.0}
+        is_declared_continuous = bool(target_types and target_types.get(feat) == "continuous")
+        if not is_declared_continuous and (
+            vals_set.issubset({1, 2, 3, 1.0, 2.0, 3.0})
+            or vals_set.issubset({0, 1, 2, 0.0, 1.0, 2.0})
+            or vals_set.issubset({1, 2, 3, 4, 5, 1.0, 2.0, 3.0, 4.0, 5.0})
+            or vals_set.issubset({0, 1, 2, 3, 4, 5, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0})
         ):
             raise ValueError(
                 f"Column '{feat}' in features_to_impute has discrete integer category codes ({vals_set}). "
                 "Categorical and ordinal variables must not be imputed via Gaussian linear regression MICE; "
-                "they require variable-type-specific models."
+                "they require variable-type-specific models, "
+                "or an explicit declaration in target_types={'column': 'continuous'}."
             )
 
     # Validate conditioning columns, predictors, and outcome
@@ -1032,7 +1059,7 @@ def render_publication_table(
     for _, row in df.iterrows():
         table_html += "      <tr>\n"
         for col in df.columns:
-            val = str(row[col]) if row[col] is not None else ""
+            val = "" if pd.isna(row[col]) else str(row[col])
             escaped_val = html.escape(val)
             table_html += f'        <td style="padding: 5px 10px;">{escaped_val}</td>\n'
         table_html += "      </tr>\n"

@@ -116,9 +116,10 @@ def fit_standard_logistic(
     bse_arr = np.asarray(result.bse)
     if np.any(bse_arr > 50.0) or np.any(~np.isfinite(bse_arr)):
         remediation = (
-            "Complete or quasi-complete separation detected in standard logistic regression (standard error > 50 or infinite). "
-            "Action: Switch model to Firth penalized logistic regression (medstat.models.firth.fit_firth_logistic) "
-            "or specify 'firth_logistic' in your spec YAML."
+            "Large or non-finite standard errors detected in standard logistic regression (standard error > 50 or infinite). "
+            "Inconclusive warning: this may indicate complete or quasi-complete separation, extreme predictor scaling, or severe collinearity. "
+            "Action: Inspect predictor scales and cross-tabulations. If separation is confirmed, switch model to Firth penalized logistic regression "
+            "(medstat.models.firth.fit_firth_logistic) or specify 'firth_logistic' in your spec YAML."
         )
 
     return {

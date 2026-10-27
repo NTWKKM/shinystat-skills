@@ -513,7 +513,9 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
         )
     if untraced:
         remediation_hints.append(
-            "Untraced numbers detected. Remediation: Ensure narrative numbers match values in results_dict within numerical tolerance (+/- 0.02)."
+            "Untraced numbers detected. Remediation: Ensure narrative numbers match values in results_dict within audit tolerance rules "
+            "(displayed precision min(0.02, 10^(-dec_digits)) for |val| <= 1.0, 1% relative tolerance or 0.02 for |val| > 1.0, "
+            "and percentage-scale matching within 0.05 or min(0.05, 100*abs_tol))."
         )
     if not has_causal_caveat:
         remediation_hints.append(

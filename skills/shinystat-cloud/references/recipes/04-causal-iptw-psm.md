@@ -41,6 +41,9 @@ def match_propensity_scores(
             return 0.0 if mean_t == mean_c else np.nan
         return float((mean_t - mean_c) / pooled_sd)
 
+    if not confounders:
+        raise ValueError("confounders list must not be empty.")
+
     n_initial = len(df)
     clean = (
         df.dropna(subset=[treatment_col] + confounders).copy().reset_index(drop=True)
@@ -65,6 +68,10 @@ def match_propensity_scores(
     clean["ps"] = ps_model.predict(X)
     clean["logit_ps"] = logit(np.clip(clean["ps"], 1e-5, 1.0 - 1e-5))
 
+    if not np.isfinite(caliper_sd) or caliper_sd < 0.0:
+        raise ValueError(
+            f"caliper_sd must be finite and non-negative (>= 0); got {caliper_sd}"
+        )
     caliper = caliper_sd * float(np.std(clean["logit_ps"]))
 
     treated = clean[clean[treatment_col] == 1].copy()
@@ -101,7 +108,7 @@ def match_propensity_scores(
         matched_clean = matched_df.reset_index(drop=True)
         matched_X = pd.get_dummies(
             matched_clean[confounders], drop_first=True, dtype=float
-        )
+        ).reindex(columns=X_raw.columns, fill_value=0.0)
     else:
         matched_X = pd.DataFrame(columns=X_raw.columns)
 
@@ -130,7 +137,15 @@ def match_propensity_scores(
             }
         )
 
-    bal_df = pd.DataFrame(balance_rows)
+    bal_df = pd.DataFrame(
+        balance_rows,
+        columns=[
+            "Variable",
+            "Pre-Match SMD",
+            "Post-Match SMD",
+            "Balanced (<0.10)",
+        ],
+    )
     love_plot_data = {
         "covariates": list(bal_df["Variable"]),
         "smd_raw": [
@@ -187,9 +202,18 @@ def compute_iptw(
     """Compute IPTW weights with Kish's Neff, truncation, and positivity diagnostics."""
     clean = df[[treatment_col] + covariates].dropna().copy()
     T = clean[treatment_col].to_numpy(dtype=float)
+    if not np.all(np.isfinite(T)) or not np.all(np.isin(T, [0.0, 1.0])):
+        raise ValueError(
+            f"Treatment column '{treatment_col}' must contain strictly binary values (0 and 1)."
+        )
+    if set(T) != {0.0, 1.0}:
+        raise ValueError(
+            f"Treatment column '{treatment_col}' must contain both treated and control subjects (both 0 and 1)."
+        )
 
-    # 1. Fit Propensity Score via Logistic Regression
-    X = sm.add_constant(clean[covariates])
+    # 1. Fit Propensity Score via Logistic Regression with dummy encoding for categorical covariates
+    X_raw = pd.get_dummies(clean[covariates], drop_first=True, dtype=float)
+    X = sm.add_constant(X_raw)
     ps_model = sm.Logit(T, X).fit(disp=False)
     ps = np.clip(ps_model.predict(X).to_numpy(dtype=float), 1e-4, 1.0 - 1e-4)
     clean["propensity_score"] = ps
@@ -214,7 +238,19 @@ def compute_iptw(
 
     # 3. Truncation
     if truncate_quantiles is not None and estimand_u != "ATO":
-        w_low, w_high = np.quantile(w_raw, truncate_quantiles[0]), np.quantile(w_raw, truncate_quantiles[1])
+        q_low, q_high = truncate_quantiles
+        if not (0.0 <= q_low <= 1.0 and 0.0 <= q_high <= 1.0):
+            raise ValueError(
+                f"truncate_quantiles values must be within [0, 1]; got {truncate_quantiles}"
+            )
+        if q_low > q_high:
+            raise ValueError(
+                f"truncate_quantiles low ({q_low}) cannot exceed high ({q_high})"
+            )
+        w_low, w_high = (
+            np.quantile(w_raw, q_low),
+            np.quantile(w_raw, q_high),
+        )
         w_final = np.clip(w_raw, w_low, w_high)
     else:
         w_final = w_raw.copy()
@@ -285,6 +321,10 @@ def fit_weighted_outcome_model(
     """Fit weighted outcome model with robust sandwich standard errors (Huber-White)."""
     clean = df.dropna(subset=[outcome_col, treatment_col, weights_col]).copy()
     weights = clean[weights_col].to_numpy(dtype=float)
+    if not np.all(np.isfinite(weights)) or np.any(weights <= 0.0):
+        raise ValueError(
+            f"Weights column '{weights_col}' must contain strictly finite and positive (> 0) values."
+        )
     T = clean[treatment_col].to_numpy(dtype=float)
 
     if model_type == "continuous":
@@ -301,6 +341,14 @@ def fit_weighted_outcome_model(
         }
     elif model_type == "binary":
         Y = clean[outcome_col].to_numpy(dtype=float)
+        if not np.all(np.isin(Y, [0.0, 1.0])):
+            raise ValueError(
+                f"Binary outcome column '{outcome_col}' must contain strictly 0 and 1 values."
+            )
+        if set(Y) != {0.0, 1.0}:
+            raise ValueError(
+                f"Binary outcome column '{outcome_col}' must contain both classes (0 and 1)."
+            )
         X = sm.add_constant(T)
         res = sm.GLM(Y, X, family=sm.families.Binomial(), freq_weights=weights).fit(cov_type="HC1")
         or_val = float(np.exp(res.params[1]))
@@ -328,6 +376,10 @@ def fit_weighted_outcome_model(
             "robust_se": float(cph.standard_errors_[treatment_col]),
             "p_value": float(cph.summary.loc[treatment_col, "p"]),
         }
+    else:
+        raise ValueError(
+            f"Unsupported model_type '{model_type}'. Supported types are 'continuous', 'binary', 'survival'."
+        )
 ```
 
 ---

@@ -24,27 +24,17 @@ import pytest
 
 from tests.fixtures.synthetic_clinical import generate_synthetic_clinical_cohort
 
-RECIPES_PATH = (
-    REPO_ROOT
-    / "packaging"
-    / "cloud"
-    / "shinystat-cloud"
-    / "references"
-    / "python-recipes.md"
-)
+RECIPES_DIR = REPO_ROOT / "skills" / "shinystat-cloud" / "references" / "recipes"
 SNAPSHOT_PATH = REPO_ROOT / "tests" / "fixtures" / "recipes_baseline_snapshot.json"
 
 
 def extract_recipes_namespace() -> dict[str, Any]:
-    """Execute code blocks in modular references/recipes/*.md (or python-recipes.md) in an isolated namespace."""
-    recipes_dir = RECIPES_PATH.parent / "recipes"
-    if recipes_dir.exists() and list(recipes_dir.glob("*.md")):
-        parts = [
-            p.read_text(encoding="utf-8") for p in sorted(recipes_dir.glob("*.md"))
-        ]
-        content = "\n\n".join(parts)
-    else:
-        content = RECIPES_PATH.read_text(encoding="utf-8")
+    """Execute code blocks in modular references/recipes/*.md in an isolated namespace."""
+    recipe_files = sorted(RECIPES_DIR.glob("*.md"))
+    if not recipe_files:
+        raise FileNotFoundError(f"No recipe files found in {RECIPES_DIR}")
+    parts = [p.read_text(encoding="utf-8") for p in recipe_files]
+    content = "\n\n".join(parts)
     blocks = re.findall(r"```python\n(.*?)\n```", content, re.DOTALL)
     ns = {}
     combined_code = "\n".join(blocks)

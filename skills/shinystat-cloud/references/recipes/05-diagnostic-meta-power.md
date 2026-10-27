@@ -18,8 +18,16 @@ import scipy.stats as stats
 
 def calculate_ci_wilson_score(k: int, n: int, ci: float = 0.95) -> tuple[float, float]:
     """Compute asymmetric Wilson score confidence interval for binomial proportion."""
+    if not isinstance(k, (int, np.integer)) or not isinstance(n, (int, np.integer)):
+        raise ValueError(
+            f"k and n must be integers; got k={type(k).__name__}, n={type(n).__name__}"
+        )
     if n <= 0:
-        return (np.nan, np.nan)
+        raise ValueError(f"n must be strictly positive (> 0); got n={n}")
+    if k < 0 or k > n:
+        raise ValueError(f"k must satisfy 0 <= k <= n; got k={k}, n={n}")
+    if not (0.0 < ci < 1.0):
+        raise ValueError(f"ci must be strictly between 0 and 1; got ci={ci}")
     alpha = 1.0 - ci
     z = stats.norm.ppf(1.0 - alpha / 2.0)
     p = k / n
@@ -35,9 +43,13 @@ def calculate_ci_wilson_score(k: int, n: int, ci: float = 0.95) -> tuple[float, 
 def calculate_2x2_metrics(tp: int, fp: int, fn: int, tn: int, ci: float = 0.95) -> dict:
     """Calculate sensitivity, specificity, PPV, NPV, LR+, LR-, and DOR with complete 95% CIs."""
     for count_val, name in [(tp, "tp"), (fp, "fp"), (fn, "fn"), (tn, "tn")]:
-        if int(count_val) < 0:
+        if (
+            not np.isfinite(count_val)
+            or not float(count_val).is_integer()
+            or count_val < 0
+        ):
             raise ValueError(
-                f"Contingency cell count '{name}' must be non-negative (>= 0)."
+                f"Contingency cell count '{name}' must be a finite non-negative integer (>= 0); got {count_val}."
             )
     tp, fp, fn, tn = int(tp), int(fp), int(fn), int(tn)
     if tp + fp + fn + tn == 0:
@@ -380,9 +392,17 @@ def calculate_dca(y_true, y_pred, thresholds: np.ndarray | None = None) -> pd.Da
         )
     valid = ~(np.isnan(y_raw) | np.isnan(p_raw))
     y_valid = y_raw[valid]
+    if len(y_valid) == 0:
+        raise ValueError(
+            "No complete cases remaining after removing missing values."
+        )
     if not np.all(np.isin(y_valid, [0, 1])):
         raise ValueError(
             "Binary outcome y_true must contain strictly binary values (0 and 1)."
+        )
+    if len(np.unique(y_valid)) < 2:
+        raise ValueError(
+            "Binary outcome y_true must contain both event classes (0 and 1)."
         )
     y_t = y_valid.astype(int)
     y_p = p_raw[valid]
@@ -398,11 +418,15 @@ def calculate_dca(y_true, y_pred, thresholds: np.ndarray | None = None) -> pd.Da
     prevalence = float(np.mean(y_t))
     if thresholds is None:
         thresholds = np.linspace(0.01, 0.99, 99)
+    else:
+        thresholds = np.asarray(thresholds, dtype=float)
+        if len(thresholds) == 0:
+            raise ValueError("Thresholds array cannot be empty.")
+        if not np.all(np.isfinite(thresholds)) or np.any(thresholds <= 0.0) or np.any(thresholds >= 1.0):
+            raise ValueError("All decision thresholds must be finite and strictly between 0 and 1.")
 
     records = []
     for pt in thresholds:
-        if pt <= 0.0 or pt >= 1.0:
-            continue
         weight = pt / (1.0 - pt)
         tp = np.sum((y_p >= pt) & (y_t == 1))
         fp = np.sum((y_p >= pt) & (y_t == 0))
@@ -628,22 +652,26 @@ def calculate_icc_matrix(values: np.ndarray, alpha: float = 0.05) -> pd.DataFram
         icc2 = (MSB - MSE) / denom_icc2 if denom_icc2 != 0 else np.nan
         denom_icc2k = MSB + (MSJ - MSE) / n
         icc2k = (MSB - MSE) / denom_icc2k if denom_icc2k != 0 else np.nan
-        F_J = MSJ / MSE if MSE > 0 else 1.0
-        r2 = icc2 if not np.isnan(icc2) else 0.0
-        v_num = df_E * (k * r2 * F_J + n * (1.0 + (k - 1) * r2) - k * r2) ** 2
-        v_den = df_B * (k * r2 * F_J) ** 2 + (n * (1.0 + (k - 1) * r2) - k * r2) ** 2
-        v = max(v_num / v_den, 1.0) if v_den != 0 else 1.0
-        f2_u = stats.f.ppf(1.0 - alpha / 2.0, df_B, v)
-        f2_l = stats.f.ppf(1.0 - alpha / 2.0, v, df_B)
-        denom_L2 = f2_u * (k * MSJ + (k * n - k - n) * MSE) + n * MSB
-        L2 = n * (MSB - f2_u * MSE) / denom_L2 if denom_L2 != 0 else np.nan
-        denom_U2 = k * MSJ + (k * n - k - n) * MSE + n * f2_l * MSB
-        U2 = n * (f2_l * MSB - MSE) / denom_U2 if denom_U2 != 0 else np.nan
-        ci_icc2 = (L2, U2)
-        ci_icc2k = (
-            (k * L2) / (1.0 + (k - 1) * L2) if (1.0 + (k - 1) * L2) != 0 else np.nan,
-            (k * U2) / (1.0 + (k - 1) * U2) if (1.0 + (k - 1) * U2) != 0 else np.nan,
-        )
+        if MSE == 0 and MSJ > 0:
+            ci_icc2 = (np.nan, np.nan)
+            ci_icc2k = (np.nan, np.nan)
+        else:
+            F_J = MSJ / MSE if MSE > 0 else 1.0
+            r2 = icc2 if not np.isnan(icc2) else 0.0
+            v_num = df_E * (k * r2 * F_J + n * (1.0 + (k - 1) * r2) - k * r2) ** 2
+            v_den = df_B * (k * r2 * F_J) ** 2 + (n * (1.0 + (k - 1) * r2) - k * r2) ** 2
+            v = max(v_num / v_den, 1.0) if v_den != 0 else 1.0
+            f2_u = stats.f.ppf(1.0 - alpha / 2.0, df_B, v)
+            f2_l = stats.f.ppf(1.0 - alpha / 2.0, v, df_B)
+            denom_L2 = f2_u * (k * MSJ + (k * n - k - n) * MSE) + n * MSB
+            L2 = n * (MSB - f2_u * MSE) / denom_L2 if denom_L2 != 0 else np.nan
+            denom_U2 = k * MSJ + (k * n - k - n) * MSE + n * f2_l * MSB
+            U2 = n * (f2_l * MSB - MSE) / denom_U2 if denom_U2 != 0 else np.nan
+            ci_icc2 = (L2, U2)
+            ci_icc2k = (
+                (k * L2) / (1.0 + (k - 1) * L2) if (1.0 + (k - 1) * L2) != 0 else np.nan,
+                (k * U2) / (1.0 + (k - 1) * U2) if (1.0 + (k - 1) * U2) != 0 else np.nan,
+            )
 
     return pd.DataFrame(
         [
@@ -739,7 +767,14 @@ def compute_reclassification_metrics(
         raise ValueError("y_true, p_old, and p_new must have identical lengths.")
 
     valid = ~(np.isnan(y_t) | np.isnan(p_0) | np.isnan(p_1))
-    y_t = y_t[valid].astype(int)
+    y_valid = y_t[valid]
+    if len(y_valid) == 0:
+        raise ValueError("No complete cases remaining after removing missing values.")
+    if not np.all(np.isin(y_valid, [0.0, 1.0])):
+        raise ValueError("y_true must contain strictly binary values (0 and 1).")
+    if len(np.unique(y_valid)) < 2:
+        raise ValueError("y_true must contain both event classes (0 and 1).")
+    y_t = y_valid.astype(int)
     p_0 = p_0[valid]
     p_1 = p_1[valid]
 
@@ -1281,27 +1316,56 @@ def compute_time_dependent_roc(
     dur_arr = pd.Series(durations).to_numpy(dtype=float)
     ev_arr = pd.Series(events).to_numpy(dtype=float)
 
+    allowed_event_codes = (
+        {0.0, 1.0}
+        if competing_event_code is None
+        else {0.0, 1.0, float(competing_event_code)}
+    )
+
+    def _validate_and_cast_events(ev_sub: np.ndarray) -> np.ndarray:
+        if not np.all(np.isfinite(ev_sub)):
+            raise ValueError("Event values must be finite.")
+        if not np.all(np.floor(ev_sub) == ev_sub):
+            raise ValueError("Event values must be integer-valued codes.")
+        if not np.all(np.isin(ev_sub, list(allowed_event_codes))):
+            raise ValueError(f"Event values must be in {allowed_event_codes}.")
+        return ev_sub.astype(int)
+
     is_comparison = False
     if scores_old is not None and scores_new is not None:
         is_comparison = True
         s_old = pd.Series(scores_old).to_numpy(dtype=float)
         s_new = pd.Series(scores_new).to_numpy(dtype=float)
         valid = ~(np.isnan(dur_arr) | np.isnan(ev_arr) | np.isnan(s_old) | np.isnan(s_new))
-        dur_arr, ev_arr, s_old, s_new = dur_arr[valid], ev_arr[valid].astype(int), s_old[valid], s_new[valid]
+        dur_arr, ev_arr, s_old, s_new = (
+            dur_arr[valid],
+            _validate_and_cast_events(ev_arr[valid]),
+            s_old[valid],
+            s_new[valid],
+        )
         s_arr = s_new
     elif isinstance(scores, dict):
         is_comparison = True
         s_old = pd.Series(scores.get("old", scores.get("baseline"))).to_numpy(dtype=float)
         s_new = pd.Series(scores.get("new", scores.get("updated"))).to_numpy(dtype=float)
         valid = ~(np.isnan(dur_arr) | np.isnan(ev_arr) | np.isnan(s_old) | np.isnan(s_new))
-        dur_arr, ev_arr, s_old, s_new = dur_arr[valid], ev_arr[valid].astype(int), s_old[valid], s_new[valid]
+        dur_arr, ev_arr, s_old, s_new = (
+            dur_arr[valid],
+            _validate_and_cast_events(ev_arr[valid]),
+            s_old[valid],
+            s_new[valid],
+        )
         s_arr = s_new
     else:
         if scores is None:
             raise ValueError("Must provide scores or both scores_old and scores_new.")
         s_arr = pd.Series(scores).to_numpy(dtype=float)
         valid = ~(np.isnan(dur_arr) | np.isnan(ev_arr) | np.isnan(s_arr))
-        dur_arr, ev_arr, s_arr = dur_arr[valid], ev_arr[valid].astype(int), s_arr[valid]
+        dur_arr, ev_arr, s_arr = (
+            dur_arr[valid],
+            _validate_and_cast_events(ev_arr[valid]),
+            s_arr[valid],
+        )
         s_old, s_new = None, None
 
     if (dur_arr < 0).any():
@@ -1558,7 +1622,16 @@ def bootstrap_internal_validation(
     if len(sub_df) < 10:
         raise ValueError(f"Insufficient non-missing observations (N = {len(sub_df)}).")
 
-    y_orig = sub_df[outcome].to_numpy(dtype=float)
+    y_orig_raw = sub_df[outcome].to_numpy(dtype=float)
+    if not np.all(np.isin(y_orig_raw, [0.0, 1.0])):
+        raise ValueError(
+            f"Binary outcome '{outcome}' must contain strictly binary values (0 and 1)."
+        )
+    if len(np.unique(y_orig_raw)) < 2:
+        raise ValueError(
+            f"Binary outcome '{outcome}' must contain both event classes (0 and 1)."
+        )
+    y_orig = y_orig_raw.astype(int)
 
     # Check for categorical / non-float predictor dtypes (object, string, category, bool)
     pred_df = sub_df[predictors].copy()
@@ -1660,6 +1733,7 @@ def bootstrap_internal_validation(
         return {
             "auroc": auc,
             "brier_score": brier,
+            "cox_snell_r2": cs_r2,
             "nagelkerke_r2": nag_r2,
             "calibration_intercept": inter,
             "calibration_slope": slope,
@@ -1712,44 +1786,54 @@ def bootstrap_internal_validation(
     metrics_summary = {}
     for k in apparent:
         app_val = apparent[k]
-        opt_mean = float(np.mean(optimism_records[k])) if optimism_records[k] else 0.0
-        b_mean = float(np.mean(boot_records[k])) if boot_records[k] else app_val
-        t_mean = float(np.mean(test_records[k])) if test_records[k] else app_val
-        corrected = app_val - opt_mean
-        if k in ("auroc", "nagelkerke_r2"):
-            corrected = max(0.0, min(1.0, corrected))
-        elif k == "brier_score":
-            corrected = max(0.0, corrected)
+        if n_successful == 0:
+            opt_mean = np.nan
+            b_mean = np.nan
+            t_mean = np.nan
+            corrected = np.nan
+        else:
+            opt_mean = float(np.mean(optimism_records[k])) if optimism_records[k] else 0.0
+            b_mean = float(np.mean(boot_records[k])) if boot_records[k] else app_val
+            t_mean = float(np.mean(test_records[k])) if test_records[k] else app_val
+            corrected = app_val - opt_mean
+            if k in ("auroc", "nagelkerke_r2", "cox_snell_r2"):
+                corrected = max(0.0, min(1.0, corrected))
+            elif k == "brier_score":
+                corrected = max(0.0, corrected)
         metrics_summary[k] = {
             "apparent": float(app_val),
-            "boot_mean": float(b_mean),
-            "test_mean": float(t_mean),
-            "optimism": float(opt_mean),
-            "optimism_corrected": float(corrected),
+            "boot_mean": float(b_mean) if not np.isnan(b_mean) else np.nan,
+            "test_mean": float(t_mean) if not np.isnan(t_mean) else np.nan,
+            "optimism": float(opt_mean) if not np.isnan(opt_mean) else np.nan,
+            "optimism_corrected": float(corrected) if not np.isnan(corrected) else np.nan,
         }
 
-    raw_s = float(np.mean(test_slopes)) if test_slopes else 1.0
-    shrinkage_factor = float(np.clip(raw_s, 0.01, 1.0))
-
-    # Shrunk coefficients
     orig_intercept = float(orig_params[0])
     orig_betas = [float(b) for b in orig_params[1:]]
-    shrunk_betas = [shrinkage_factor * b for b in orig_betas]
-    lp_shrunk_no_inter = np.dot(X_orig, shrunk_betas)
 
-    # Re-estimate intercept
-    target_events = float(np.sum(y_orig))
-    try:
-        shrunk_intercept = float(
-            opt.brentq(
-                lambda a: float(np.sum(expit(a + lp_shrunk_no_inter)) - target_events),
-                -50.0,
-                50.0,
+    if n_successful == 0:
+        shrinkage_factor = np.nan
+        shrunk_intercept = np.nan
+        shrunk_betas = [np.nan for _ in orig_betas]
+    else:
+        raw_s = float(np.mean(test_slopes)) if test_slopes else 1.0
+        shrinkage_factor = float(np.clip(raw_s, 0.01, 1.0))
+        shrunk_betas = [shrinkage_factor * b for b in orig_betas]
+        lp_shrunk_no_inter = np.dot(X_orig, shrunk_betas)
+
+        # Re-estimate intercept
+        target_events = float(np.sum(y_orig))
+        try:
+            shrunk_intercept = float(
+                opt.brentq(
+                    lambda a: float(np.sum(expit(a + lp_shrunk_no_inter)) - target_events),
+                    -50.0,
+                    50.0,
+                )
             )
-        )
-    except Exception:
-        prev_orig = np.clip(target_events / n_total, 1e-6, 1.0 - 1e-6)
-        shrunk_intercept = float(logit(prev_orig) - np.mean(lp_shrunk_no_inter))
+        except Exception:
+            prev_orig = np.clip(target_events / n_total, 1e-6, 1.0 - 1e-6)
+            shrunk_intercept = float(logit(prev_orig) - np.mean(lp_shrunk_no_inter))
 
     orig_coef_dict = {"Intercept": orig_intercept}
     shrunk_coef_dict = {"Intercept": shrunk_intercept}
@@ -1761,11 +1845,15 @@ def bootstrap_internal_validation(
         warnings.append(
             f"Low events per predictor (EPP = {epp:.2f} < 10), indicating elevated risk of model overfitting."
         )
-    if shrinkage_factor < 0.80:
+    if not np.isnan(shrinkage_factor) and shrinkage_factor < 0.80:
         warnings.append(
             f"Uniform shrinkage factor s_hat = {shrinkage_factor:.3f} (< 0.80) indicates substantial overfitting."
         )
-    if n_successful < n_bootstrap * 0.5:
+    if n_successful == 0:
+        warnings.append(
+            "Zero bootstrap resamples converged successfully; optimism and shrinkage could not be estimated."
+        )
+    elif n_successful < n_bootstrap * 0.5:
         warnings.append(
             f"Fewer than 50% of bootstrap resamples converged ({n_successful}/{n_bootstrap})."
         )
@@ -1938,14 +2026,19 @@ def recalibrate_prediction_model(
     p_inter = expit(alpha_inter + lp_orig)
 
     X = sm.add_constant(lp_orig)
+    logistic_fallback = False
     try:
         fit_mod = sm.Logit(y_arr, X).fit(disp=False)
+        converged = getattr(fit_mod, "mle_retvals", {}).get("converged", True)
+        if not converged:
+            raise RuntimeError("Logistic recalibration failed to converge.")
         alpha_log = float(fit_mod.params[0])
         beta_log = float(fit_mod.params[1])
         alpha_ci = [float(c) for c in fit_mod.conf_int()[0]]
         beta_ci = [float(c) for c in fit_mod.conf_int()[1]]
         p_log = expit(alpha_log + beta_log * lp_orig)
     except Exception:
+        logistic_fallback = True
         alpha_log = alpha_inter
         beta_log = 1.0
         alpha_ci = [alpha_inter, alpha_inter]
@@ -1970,15 +2063,16 @@ def recalibrate_prediction_model(
             "p_recalibrated_logistic": p_log,
         }
     elif norm_m == "logistic":
+        reported_method = "intercept_only_fallback" if logistic_fallback else "logistic"
         lp_recal = alpha_log + beta_log * lp_orig
         post_metrics = _calc_suite(y_arr, p_log, lp_recal)
         return {
-            "method": "logistic",
+            "method": reported_method,
             "n": n,
             "pre": pre_metrics,
             "post": post_metrics,
             "recalibration_parameters": {
-                "method": "logistic",
+                "method": reported_method,
                 "alpha": alpha_log,
                 "alpha_ci": alpha_ci,
                 "beta": beta_log,
@@ -1999,8 +2093,13 @@ def recalibrate_prediction_model(
             "post_intercept_only": post_inter,
             "post_logistic": post_log,
             "post": post_log,
+            "logistic_fallback": logistic_fallback,
             "parameters_intercept_only": {"alpha": alpha_inter, "beta": 1.0},
-            "parameters_logistic": {"alpha": alpha_log, "beta": beta_log},
+            "parameters_logistic": {
+                "alpha": alpha_log,
+                "beta": beta_log,
+                "fallback": logistic_fallback,
+            },
             "p_recalibrated": p_log,
             "p_recalibrated_intercept_only": p_inter,
             "p_recalibrated_logistic": p_log,
@@ -2083,6 +2182,16 @@ def calculate_riley_sample_size(
         raise ValueError(
             f"shrinkage_target must be strictly in (0.5, 1.0), got {shrinkage_target}"
         )
+    if not (math.isfinite(intercept_margin) and intercept_margin > 0.0):
+        raise ValueError(
+            f"intercept_margin must be finite and > 0, got {intercept_margin}"
+        )
+    if not (math.isfinite(optimism_margin) and optimism_margin > 0.0):
+        raise ValueError(
+            f"optimism_margin must be finite and > 0, got {optimism_margin}"
+        )
+    if mape_target is not None and not (math.isfinite(mape_target) and mape_target > 0.0):
+        raise ValueError(f"mape_target must be finite and > 0, got {mape_target}")
 
     phi = float(prevalence)
     p_params = int(n_parameters)

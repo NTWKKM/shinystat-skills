@@ -8,7 +8,7 @@
 
 ## 11. Survival Analysis: Kaplan-Meier, Log-Rank & Cox Proportional Hazards
 
-Computes Kaplan-Meier survival estimates with median survival times, Log-Rank hypothesis test (supports 2 or more groups), and multivariable Cox Proportional Hazards table with per-variable Grambsch-Therneau Schoenfeld residual tests. When proportional hazards assumptions are violated, consult [decision-heuristics.md §2.E](decision-heuristics.md#e-time-to-event-analysis-under-competing-risks--proportional-hazards-violations) and apply `refit_cox_with_strata` (for nuisance covariates) or `piecewise_hr` (for exposure).
+Computes Kaplan-Meier survival estimates with median survival times, Log-Rank hypothesis test (supports 2 or more groups), and multivariable Cox Proportional Hazards table with per-variable Grambsch-Therneau Schoenfeld residual tests. When proportional hazards assumptions are violated, consult [decision-heuristics.md §2.E](../../../_shared/references/decision-heuristics.md#e-time-to-event-analysis-under-competing-risks--proportional-hazards-violations) and apply `refit_cox_with_strata` (for nuisance covariates) or `piecewise_hr` (for exposure).
 
 ```python
 from typing import Any
@@ -80,11 +80,16 @@ def schoenfeld_diagnostics(
         note = " ".join(notes)
 
     remediation = None
-    if not passed:
+    if strong_violations or weak_violations:
         remediation = (
             "Proportional hazards assumption violated (Schoenfeld p < 0.05). "
             "Action: Add stratification (refit_cox_with_strata / strata_cols) for nuisance covariates, "
             "or period-specific time-varying hazard ratios (piecewise_hr) for exposure."
+        )
+    elif indeterminate_tests:
+        remediation = (
+            f"Indeterminate proportional hazards test result: non-finite p-value for {indeterminate_tests}. "
+            "Action: Inspect Schoenfeld residual plots (plot_schoenfeld_residuals) and verify event density across follow-up."
         )
 
     return {
@@ -580,8 +585,47 @@ def fit_competing_risks_cif(
     alpha: float = 0.05,
 ) -> dict[str, Any]:
     """Fit Aalen-Johansen CIF curves and audit Naive 1 - KM overestimation bias."""
+    if event_of_interest <= 0 or competing_event <= 0:
+        raise ValueError(
+            f"event_of_interest ({event_of_interest}) and competing_event ({competing_event}) must be positive integers (> 0); 0 is reserved for censoring."
+        )
+    if event_of_interest == competing_event:
+        raise ValueError(
+            f"event_of_interest ({event_of_interest}) and competing_event ({competing_event}) must be distinct."
+        )
+    if not (0.0 < alpha < 1.0):
+        raise ValueError(f"alpha must be strictly between 0 and 1; got {alpha}")
+
     dur = np.asarray(durations, dtype=float)
-    evt = np.asarray(event_observed, dtype=int)
+    raw_evt = np.asarray(event_observed)
+    if len(dur) != len(raw_evt):
+        raise ValueError(f"Length mismatch: durations ({len(dur)}) and event_observed ({len(raw_evt)}) must match.")
+
+    if not np.all(np.isfinite(dur)) or np.any(dur < 0):
+        raise ValueError("durations must contain strictly finite, non-negative values.")
+
+    try:
+        evt_float = raw_evt.astype(float)
+    except (ValueError, TypeError) as err:
+        raise ValueError(f"event_observed must contain numeric values: {err}") from err
+
+    if not np.all(np.isfinite(evt_float)) or not np.all(np.equal(np.mod(evt_float, 1), 0)):
+        raise ValueError("event_observed values must be finite integers.")
+
+    allowed = {0, event_of_interest, competing_event}
+    if not np.all(np.isin(evt_float, list(allowed))):
+        raise ValueError(f"event_observed must contain only values in {allowed}; got {set(evt_float)}")
+
+    evt = evt_float.astype(int)
+    if len(dur) < 5:
+        raise ValueError("Competing risks analysis requires at least 5 observations.")
+
+    n_primary = int(np.sum(evt == event_of_interest))
+    n_competing = int(np.sum(evt == competing_event))
+    if n_primary == 0 and n_competing == 0:
+        raise ValueError("Cohort contains no observed events.")
+    if n_primary == 0:
+        raise ValueError(f"No events of interest (code={event_of_interest}) observed.")
 
     # 1. Fit Aalen-Johansen
     ajf1 = AalenJohansenFitter(calculate_variance=True)
@@ -791,7 +835,45 @@ def fit_competing_risks_regression(
 
     se_method: "sandwich" (entry-aware cluster sandwich, fast) or "bootstrap" (patient resampling, slow, covers IPCW uncertainty).
     """
+    if event_of_interest <= 0 or competing_event <= 0:
+        raise ValueError(
+            f"event_of_interest ({event_of_interest}) and competing_event ({competing_event}) must be positive integers (> 0); 0 is reserved for censoring."
+        )
+    if event_of_interest == competing_event:
+        raise ValueError(
+            f"event_of_interest ({event_of_interest}) and competing_event ({competing_event}) must be distinct."
+        )
+    if not (0.0 < alpha < 1.0):
+        raise ValueError(f"alpha must be strictly between 0 and 1; got {alpha}")
+
+    n_input = len(df)
     clean = df[[duration_col, event_col] + covariates].dropna().reset_index(drop=True)
+    n_analyzed = len(clean)
+    if n_analyzed < 5:
+        raise ValueError("Competing risks regression requires at least 5 complete observations.")
+
+    raw_dur = clean[duration_col].to_numpy(dtype=float)
+    if not np.all(np.isfinite(raw_dur)) or np.any(raw_dur < 0):
+        raise ValueError("duration_col must contain strictly finite, non-negative values.")
+
+    raw_evt = clean[event_col].to_numpy()
+    try:
+        evt_float = raw_evt.astype(float)
+    except (ValueError, TypeError) as err:
+        raise ValueError(f"event_col must contain numeric values: {err}") from err
+
+    if not np.all(np.isfinite(evt_float)) or not np.all(np.equal(np.mod(evt_float, 1), 0)):
+        raise ValueError("event_col values must be finite integers.")
+
+    allowed = {0, event_of_interest, competing_event}
+    if not np.all(np.isin(evt_float, list(allowed))):
+        raise ValueError(f"event_col must contain only values in {allowed}; got {set(evt_float)}")
+
+    clean[event_col] = evt_float.astype(int)
+    n_events = int((clean[event_col] == event_of_interest).sum())
+    n_competing = int((clean[event_col] == competing_event).sum())
+    if n_events == 0:
+        raise ValueError(f"No events of interest (code={event_of_interest}) observed in analyzed cohort.")
 
     # 1. Cause-Specific Cox Model (one row per patient, so lifelines' robust SE is exact)
     df_cs = clean.copy()
@@ -817,7 +899,16 @@ def fit_competing_risks_regression(
 
     # 3. Side-by-side comparison
     comp_rows = []
+    conf_pct = int(round((1.0 - alpha) * 100.0))
+    cs_ci_key = f"cs_{conf_pct}_ci"
+    fg_ci_key = f"fg_{conf_pct}_ci"
+
     for j, cov in enumerate(covariates):
+        if not np.isfinite(se[j]) or se[j] <= 0:
+            raise ValueError(
+                f"Standard error for covariate '{cov}' must be finite and positive (> 0); got {se[j]}"
+            )
+
         cs_hr = float(cph_cs.hazard_ratios_[cov])
         cs_ci = cph_cs.confidence_intervals_.loc[cov]
         cs_p = float(cph_cs.summary.loc[cov, "p"])
@@ -826,19 +917,36 @@ def fit_competing_risks_regression(
         fg_lo, fg_hi = float(np.exp(beta[j] - z_crit * se[j])), float(np.exp(beta[j] + z_crit * se[j]))
         fg_p = float(2.0 * stats.norm.sf(abs(beta[j] / se[j])))
 
-        comp_rows.append({
+        row_dict = {
             "covariate": cov,
             "cause_specific_hr": round(cs_hr, 3),
-            "cs_95_ci": f"{cs_hr:.3f} ({np.exp(cs_ci.iloc[0]):.3f} to {np.exp(cs_ci.iloc[1]):.3f})",
+            cs_ci_key: f"{cs_hr:.3f} ({np.exp(cs_ci.iloc[0]):.3f} to {np.exp(cs_ci.iloc[1]):.3f})",
             "cs_p_value": cs_p,
             "fine_gray_shr": round(fg_shr, 3),
-            "fg_95_ci": f"{fg_shr:.3f} ({fg_lo:.3f} to {fg_hi:.3f})",
+            fg_ci_key: f"{fg_shr:.3f} ({fg_lo:.3f} to {fg_hi:.3f})",
             "fg_p_value": fg_p,
+            "fg_se_method": se_method,
+            "fg_score_gap": score_gap,
+            "confidence_level": 1.0 - alpha,
             "profile": "Divergent" if (cs_p < 0.05) != (fg_p < 0.05) else "Concordant",
-        })
+        }
+        # Retain standard 95 alias if alpha is custom
+        if conf_pct != 95:
+            row_dict["cs_95_ci"] = row_dict[cs_ci_key]
+            row_dict["fg_95_ci"] = row_dict[fg_ci_key]
+        comp_rows.append(row_dict)
 
     out = pd.DataFrame(comp_rows)
-    out.attrs.update({"fg_se_method": se_method, "fg_score_gap": score_gap})
+    out.attrs.update({
+        "fg_se_method": se_method,
+        "fg_score_gap": score_gap,
+        "retention": {
+            "n_input": n_input,
+            "n_analyzed": n_analyzed,
+            "n_events": n_events,
+            "n_competing": n_competing,
+        },
+    })
     return out
 ```
 
