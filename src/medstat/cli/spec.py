@@ -1101,3 +1101,166 @@ class AnalysisPlan:
                 }
 
         return results
+
+
+SCHEMA_YAML_TEMPLATE = """# MedStat Declarative Analysis Plan Schema (Use with: medstat_cli.py --spec plan.yaml)
+project:
+  title: "Clinical Cohort Study"
+  study_design: "retrospective_cohort"  # rct | retrospective_cohort | prospective_cohort | case_control | cross_sectional | diagnostic
+  house_style: "nejm"                   # nejm | lancet | jama | bmj | nature
+
+data:
+  path: "data/cohort.csv"
+  id_col: "patient_id"
+  check_phi: true
+  missing_strategy: "mice"              # complete_case | mice | simple
+
+table1:
+  group_col: "treatment_group"
+  continuous_vars: ["age", "bmi", "lactate"]
+  categorical_vars: ["sex", "sepsis_shock"]
+
+analyses:
+  - id: "primary_outcome"
+    type: "glm"                         # glm | firth_logistic | cox | firth_cox | fine_gray | ordinal | multilevel | iptw | psm | roc | dca
+    outcome: "mortality_28d"
+    exposure: "treatment_group"
+    covariates: ["age", "sex", "sofa_score"]
+    # สำหรับ survival/fine_gray ให้ระบุ time_col: "follow_up_days" และ competing_event_val: 2
+
+reporting:
+  formats: ["markdown", "docx", "html"] # docx | html | markdown | pdf | pptx
+  output_dir: "outputs/"
+"""
+
+
+def get_cli_schema_template() -> str:
+    """Returns a commented YAML analysis plan template for agent introspection."""
+    return SCHEMA_YAML_TEMPLATE
+
+
+def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
+    """
+    Validates YAML syntax, required keys, and column existence in the target dataset
+    without running statistical models. Returns a structured dict for agent self-healing.
+    """
+    path = Path(spec_path)
+    report: dict[str, Any] = {
+        "valid": True,
+        "spec_path": str(path),
+        "errors": [],
+        "warnings": [],
+        "agent_remediation": [],
+    }
+
+    if not path.exists():
+        report["valid"] = False
+        report["errors"].append(f"Spec file not found: {path}")
+        report["agent_remediation"].append(
+            "Verify the file path passed to --validate-only."
+        )
+        return report
+
+    try:
+        raw_spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        report["valid"] = False
+        report["errors"].append(f"Invalid YAML syntax: {exc}")
+        report["agent_remediation"].append(
+            "Run `medstat_cli.py --schema` to inspect valid YAML structure."
+        )
+        return report
+
+    if not isinstance(raw_spec, dict):
+        report["valid"] = False
+        report["errors"].append("Root of YAML spec must be a mapping/dictionary.")
+        report["agent_remediation"].append(
+            "Run `medstat_cli.py --schema` to inspect the valid top-level structure."
+        )
+        return report
+
+    has_spec_keys = any(
+        k in raw_spec
+        for k in ("data", "project", "metadata", "analyses", "models", "variables")
+    )
+    if not has_spec_keys:
+        report["valid"] = False
+        report["errors"].append(
+            "YAML spec must contain at least one top-level section: 'data', 'project', 'metadata', 'analyses', or 'models'."
+        )
+        report["agent_remediation"].append(
+            "Run `medstat_cli.py --schema` to view the expected top-level keys."
+        )
+        return report
+
+    # ตรวจสอบคอลัมน์ในไฟล์ข้อมูลจริง (หากระบุ data.path หรือ data.input_path)
+    data_cfg = raw_spec.get("data", {})
+    data_path_str = None
+    if isinstance(data_cfg, dict):
+        data_path_str = data_cfg.get("path") or data_cfg.get("input_path")
+
+    if data_path_str:
+        data_path = Path(data_path_str)
+        if not data_path.is_absolute():
+            resolved = (path.parent / data_path).resolve()
+            if resolved.exists():
+                data_path = resolved
+            elif Path(data_path_str).exists():
+                data_path = Path(data_path_str)
+
+        if not data_path.exists():
+            report["valid"] = False
+            report["errors"].append(f"Dataset file not found: {data_path_str}")
+            report["agent_remediation"].append(
+                "Update `data.path` in the YAML spec to point to an existing CSV/Parquet file."
+            )
+        else:
+            try:
+                from medstat.data.loader import load_clinical_data
+
+                df_head = load_clinical_data(data_path)
+                available_cols = set(df_head.columns)
+            except Exception:
+                import pandas as pd
+
+                df_head = pd.read_csv(data_path, nrows=5)
+                available_cols = set(df_head.columns)
+
+            referenced_cols: set[str] = set()
+            t1 = raw_spec.get("table1", {})
+            if isinstance(t1, dict):
+                if t1.get("group_col"):
+                    referenced_cols.add(t1["group_col"])
+                referenced_cols.update(t1.get("continuous_vars", []))
+                referenced_cols.update(t1.get("categorical_vars", []))
+
+            analyses_list = raw_spec.get("analyses") or raw_spec.get("models") or []
+            for item in analyses_list:
+                if isinstance(item, dict):
+                    for key in (
+                        "outcome",
+                        "exposure",
+                        "time_col",
+                        "time",
+                        "event_col",
+                        "cluster_col",
+                    ):
+                        if item.get(key):
+                            referenced_cols.add(item[key])
+                    referenced_cols.update(item.get("covariates", []))
+
+            variables_list = raw_spec.get("variables", [])
+            if isinstance(variables_list, list):
+                for v in variables_list:
+                    if isinstance(v, dict) and v.get("name"):
+                        referenced_cols.add(v["name"])
+
+            missing_cols = sorted(referenced_cols - available_cols)
+            if missing_cols:
+                report["valid"] = False
+                report["errors"].append(f"Columns missing from dataset: {missing_cols}")
+                report["agent_remediation"].append(
+                    f"Missing columns {missing_cols} not found in dataset. Select from available columns: {sorted(available_cols)}"
+                )
+
+    return report

@@ -152,12 +152,12 @@ All subcommands and renderers emit structured contracts allowing deterministic c
 ┌────────────────────────────────────────────────────────┐
 │               src/medstat/ (Package SSOT)               │
 └───────────────────────────┬────────────────────────────┘
-                            │ rsync / parity check
+                            │ relative symlink (Phase 1)
                             ▼
 ┌────────────────────────────────────────────────────────┐
-│         skills/shinystat/scripts/medstat/ (Canonical)   │
+│         skills/shinystat/scripts/medstat/ (Link)       │
 └───────────────────────────┬────────────────────────────┘
-                            │ automated mirror sync
+                            │ automated symlink harnesses
       ┌─────────────────────┼─────────────────────┐
       ▼                     ▼                     ▼
 ┌───────────┐         ┌───────────┐         ┌───────────┐
@@ -165,9 +165,10 @@ All subcommands and renderers emit structured contracts allowing deterministic c
 └───────────┘         └───────────┘         └───────────┘
 ```
 
-- **SSOT Integrity**: `src/medstat/` is the single source of truth for the biostatistical calculation engine.
-- **Automated Parity Gate**: `test_src_medstat_and_skills_bundled_medstat_byte_identical()` in `tests/unit/test_shinystat_skill.py` ensures 100% byte-for-byte fidelity across all 78 engine modules between `src/medstat/` and `skills/shinystat/scripts/medstat/`.
-- **Zero-Setup Mirrors**: Multi-agent workspace directories (`.agent/`, `.agents/`, `.claude/`, `.cursor/`) are maintained in lockstep via `./scripts/install-skills.sh --sync` to support instant out-of-the-box discovery without manual installation.
+- **SSOT Integrity**: `src/medstat/` is the single source of truth for the biostatistical calculation engine. Skill harnesses (`.agent/`, `.agents/`, `.claude/`, `.cursor/`, `skills/shinystat/scripts/medstat/`) are symlinked and git-ignored to prevent 6x repo duplication and context pollution.
+- **Progressive Disclosure Recipes**: `skills/shinystat-cloud/references/recipes/` divides recipes into 5 focused modules (`01-data-missing-table1`, `02-regression-firth-ordinal`, `03-survival-competing-risks`, `04-causal-iptw-psm`, `05-diagnostic-meta-power`), routed contextually by `SKILL.md`.
+- **Shared Reference Repository**: Common references (`decision-heuristics.md`, `figures.md`, etc.) are centralized in `skills/_shared/references/` and synced via `./scripts/install-skills.sh`.
+- **Self-Healing CLI & Pre-Flight Validation**: `medstat_cli.py` exposes `--schema` and `--validate-only <plan.yaml>`, returning structured JSON with `agent_remediation` hints for automatic self-correction.
 
 ---
 

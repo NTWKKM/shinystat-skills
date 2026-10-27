@@ -35,6 +35,7 @@ class IntegrityReport:
     has_retention_flow: bool = False
     has_causal_caveat: bool = True  # True if not needed or properly addressed
     citations_count: int = 0
+    agent_remediation: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
         lines = [f"Integrity Audit: {'PASSED' if self.passed else 'FAILED'}"]
@@ -505,6 +506,28 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
         )
     )
 
+    remediation_hints: list[str] = []
+    if phi_violations:
+        remediation_hints.append(
+            "PHI detected. Remediation: Strip or mask patient identifiers (HN, Thai ID, phone, patient names) before publishing."
+        )
+    if untraced:
+        remediation_hints.append(
+            "Untraced numbers detected. Remediation: Ensure narrative numbers match values in results_dict within numerical tolerance (+/- 0.02)."
+        )
+    if not has_causal_caveat:
+        remediation_hints.append(
+            "Observational analysis lacks causal/unmeasured confounding caveat. Remediation: Add VanderWeele E-value or unmeasured confounding caveat."
+        )
+    if not has_methods:
+        remediation_hints.append(
+            "Lacks Methods section. Remediation: Include a dedicated Methods section in the ReportDocument."
+        )
+    if not has_retention_flow:
+        remediation_hints.append(
+            "Lacks cohort retention flow. Remediation: Include participant retention flow (initial -> excluded -> analyzed) in the report."
+        )
+
     return IntegrityReport(
         passed=passed,
         untraced_numbers=untraced,
@@ -514,4 +537,5 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
         has_retention_flow=has_retention_flow,
         has_causal_caveat=has_causal_caveat,
         citations_count=citations_count,
+        agent_remediation=remediation_hints,
     )

@@ -7,9 +7,11 @@ clean, table1, model, diag, agreement, causal, meta, sample-size, and report.
 
 from __future__ import annotations
 
+import argparse
 import json
 import math
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +29,11 @@ from medstat.causal.balance import (
 )
 from medstat.causal.iptw import compute_iptw_weights, fit_iptw_outcome_model
 from medstat.causal.psm import propensity_score_match
-from medstat.cli.spec import AnalysisPlan
+from medstat.cli.spec import (
+    AnalysisPlan,
+    get_cli_schema_template,
+    preflight_validate_spec,
+)
 from medstat.data.clean import (
     MissingStrategyRequiredError,
     _is_id_column,
@@ -149,11 +155,95 @@ def _sanitize_for_json(obj: Any) -> Any:
     return obj
 
 
-@click.group()
+AGENT_ERROR_REMEDIATION_MAP = {
+    "separation": "Complete/quasi-complete separation detected. Action: Change model type from 'glm' to 'firth_logistic' (or 'firth_cox' for survival) in your spec YAML.",
+    "singular": "Singular matrix / collinearity detected. Action: Remove redundant collinear covariates or switch to 'firth_logistic'.",
+    "proportional hazard": "Proportional hazards assumption violated (Schoenfeld p < 0.05). Action: Add stratification (`strata_cols`) or time-varying covariates in `survival` config.",
+    "competing": "Competing risks present. Action: Use 'fine_gray' model type instead of standard 'cox' to estimate subdistribution hazard ratios (sHR).",
+}
+
+
+def register_agent_ergonomic_flags(parser: argparse.ArgumentParser) -> None:
+    """Attach --schema and --validate-only flags to an argparse ArgumentParser."""
+    parser.add_argument(
+        "--schema",
+        action="store_true",
+        help="Print commented YAML analysis plan schema template for agents and exit.",
+    )
+    parser.add_argument(
+        "--validate-only",
+        metavar="YAML_PATH",
+        help="Validate YAML spec syntax and dataset column names without executing models.",
+    )
+
+
+def handle_agent_ergonomic_flags(args: argparse.Namespace) -> int | None:
+    """
+    Executes --schema or --validate-only if requested.
+    Returns an exit code (0 or 1) if handled, or None to continue normal CLI execution.
+    """
+    if getattr(args, "schema", False):
+        print(get_cli_schema_template())
+        return 0
+
+    validate_target = getattr(args, "validate_only", None)
+    if validate_target:
+        result = preflight_validate_spec(validate_target)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return 0 if result["valid"] else 1
+
+    return None
+
+
+def emit_agent_actionable_error(exc: Exception) -> None:
+    """Formats runtime statistical exceptions into structured JSON with remediation hints."""
+    msg = str(exc)
+    msg_lower = msg.lower()
+    hints = [
+        hint
+        for keyword, hint in AGENT_ERROR_REMEDIATION_MAP.items()
+        if keyword in msg_lower
+    ]
+    if not hints:
+        hints.append(
+            "Run `medstat_cli.py --validate-only <spec.yaml>` to verify column names and spec structure."
+        )
+
+    payload = {
+        "status": "error",
+        "error_type": type(exc).__name__,
+        "message": msg,
+        "agent_remediation": hints,
+    }
+    print(json.dumps(payload, indent=2, ensure_ascii=False), file=sys.stderr)
+
+
+@click.group(invoke_without_command=True)
+@click.option(
+    "--schema",
+    is_flag=True,
+    help="Print commented YAML analysis plan schema template for agents and exit.",
+)
+@click.option(
+    "--validate-only",
+    type=click.Path(),
+    metavar="YAML_PATH",
+    help="Validate YAML spec syntax and dataset column names without executing models.",
+)
 @click.version_option(version="0.1.0", prog_name="medstat")
-def cli() -> None:
+@click.pass_context
+def cli(ctx: click.Context, schema: bool, validate_only: str | None) -> None:
     """medstat: Clinical Biostatistics & Health Data Science CLI."""
-    pass
+    if schema:
+        print(get_cli_schema_template())
+        ctx.exit(0)
+    if validate_only:
+        result = preflight_validate_spec(validate_only)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        ctx.exit(0 if result["valid"] else 1)
+    if ctx.invoked_subcommand is None:
+        print(ctx.get_help())
+        ctx.exit(0)
 
 
 # ==============================================================================

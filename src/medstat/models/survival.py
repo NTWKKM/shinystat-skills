@@ -279,6 +279,14 @@ def schoenfeld_diagnostics(
             )
         note = " ".join(notes)
 
+    remediation = None
+    if not passed:
+        remediation = (
+            "Proportional hazards assumption violated (Schoenfeld p < 0.05). "
+            "Action: Add stratification (refit_cox_with_strata / strata_cols) for nuisance covariates, "
+            "or period-specific time-varying hazard ratios (piecewise_hr) for exposure."
+        )
+
     return {
         "p_values": p_values,
         "test_statistics": test_statistics,
@@ -289,6 +297,7 @@ def schoenfeld_diagnostics(
         "no_ph_violation_detected": passed,
         "PH_Assumptions_Passed": passed,
         "PH_Note": note,
+        "agent_remediation": remediation,
     }
 
 
