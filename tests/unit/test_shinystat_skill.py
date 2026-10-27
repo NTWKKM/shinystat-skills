@@ -106,6 +106,18 @@ def _is_valid_skill_file(path: Path) -> bool:
     )
 
 
+def _collect_valid_skill_files(root: Path) -> set[Path]:
+    import os
+
+    files = set()
+    for dirpath, _, filenames in os.walk(root, followlinks=True):
+        for f in filenames:
+            p = Path(dirpath) / f
+            if _is_valid_skill_file(p):
+                files.add(p.relative_to(root))
+    return files
+
+
 def test_shinystat_cloud_canonical_skill_exists_and_valid():
     """Verify skills/shinystat-cloud/SKILL.md exists, has valid YAML frontmatter, references, and matches packaging/cloud/shinystat-cloud."""
     repo_root = Path(__file__).resolve().parent.parent.parent
@@ -145,16 +157,8 @@ def test_shinystat_cloud_canonical_skill_exists_and_valid():
 
     # Full tree and content parity with packaging/cloud/shinystat-cloud
     assert packaging_cloud.exists(), "packaging/cloud/shinystat-cloud not found"
-    canonical_files = {
-        path.relative_to(canonical_cloud)
-        for path in canonical_cloud.rglob("*")
-        if _is_valid_skill_file(path)
-    }
-    packaging_files = {
-        path.relative_to(packaging_cloud)
-        for path in packaging_cloud.rglob("*")
-        if _is_valid_skill_file(path)
-    }
+    canonical_files = _collect_valid_skill_files(canonical_cloud)
+    packaging_files = _collect_valid_skill_files(packaging_cloud)
     assert canonical_files == packaging_files, (
         f"Tree mismatch between skills/shinystat-cloud and packaging/cloud/shinystat-cloud: "
         f"missing={sorted(canonical_files - packaging_files)}, "
@@ -193,20 +197,12 @@ def test_shinystat_multi_agent_mirrors_byte_identical():
         repo_root / ".cursor" / "skills",
     ]
 
-    canonical_files = {
-        path.relative_to(canonical_dir)
-        for path in canonical_dir.rglob("*")
-        if _is_valid_skill_file(path)
-    }
+    canonical_files = _collect_valid_skill_files(canonical_dir)
     assert canonical_files, "No files found in canonical skills directory"
 
     for mirror in mirrors:
         assert mirror.exists(), f"Mirror {mirror} missing"
-        mirror_files = {
-            path.relative_to(mirror)
-            for path in mirror.rglob("*")
-            if _is_valid_skill_file(path)
-        }
+        mirror_files = _collect_valid_skill_files(mirror)
         assert mirror_files == canonical_files, (
             f"Path mismatch for mirror {mirror}: "
             f"missing={sorted(canonical_files - mirror_files)}, "
@@ -249,20 +245,12 @@ def test_src_medstat_and_skills_bundled_medstat_byte_identical():
         ),
     ]
 
-    src_files = {
-        path.relative_to(src_dir)
-        for path in src_dir.rglob("*")
-        if _is_valid_skill_file(path)
-    }
+    src_files = _collect_valid_skill_files(src_dir)
     assert src_files, "No valid files found in src/medstat"
 
     for label, target_dir in targets:
         assert target_dir.exists(), f"{label} target directory not found: {target_dir}"
-        target_files = {
-            path.relative_to(target_dir)
-            for path in target_dir.rglob("*")
-            if _is_valid_skill_file(path)
-        }
+        target_files = _collect_valid_skill_files(target_dir)
         assert src_files == target_files, (
             f"File tree mismatch between src/medstat and {label} ({target_dir}): "
             f"missing_in_target={sorted(src_files - target_files)}, "

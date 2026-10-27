@@ -1,0 +1,7 @@
+# Auto-linked IDE Harness & Packaging Directories (Managed by scripts/install-skills.sh)
+.agent/
+.agents/
+.claude/
+.cursor/
+packaging/
+skills/shinystat/scripts/medstat/
