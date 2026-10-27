@@ -9,6 +9,38 @@ Execute clinical biostatistics in cloud sandboxes through the 5 Decision Pillars
 
 ---
 
+## Context-Efficient Reference Routing (Progressive Disclosure)
+
+**CRITICAL RULE FOR AGENTS:** Never read all files in `references/` at once. Follow this 2-step loading protocol to preserve context window capacity and prevent parameter drift:
+
+1. **Step 1 (Statistical & Visual Routing):** Identify your exact task in the tables below and read **ONLY** the single matching recipe or reference file.
+2. **Step 2 (Execution & Verification):** Execute the standalone Python recipe in your sandbox, verify outputs against integrity rules, and format according to the target journal house style.
+
+### A. Statistical Code Recipes (`references/recipes/`)
+
+| Clinical / Statistical Task | Target Reference File to Read | Key Methods Covered |
+| :--- | :--- | :--- |
+| **Data Hygiene, Missingness & Table 1** | `references/recipes/01-data-missing-table1.md` | PHI scan, data cleaning, Little's MCAR test, MICE imputation, CONSORT/STROBE flow counts, baseline Table 1 |
+| **Regression, Rare Events & Splines** | `references/recipes/02-regression-firth-ordinal.md` | GLM, Firth penalized logistic/Cox (complete separation), ordinal proportional odds, multilevel mixed models, RCS splines, E-value |
+| **Survival & Competing Risks** | `references/recipes/03-survival-competing-risks.md` | Kaplan-Meier, Cox PH, Schoenfeld residuals, PH violation remedies (stratified/time-varying), Fine-Gray subdistribution hazard |
+| **Causal Inference (Observational)** | `references/recipes/04-causal-iptw-psm.md` | Propensity score matching (PSM), IPTW (stabilized/trimmed weights), SMD balance & Love plots, causal mediation |
+| **Diagnostics, Agreement, Meta & Power** | `references/recipes/05-diagnostic-meta-power.md` | ROC/tdROC, DeLong test, NRI/IDI, calibration, Decision Curve Analysis (DCA), ICC/Kappa/Bland-Altman, meta-analysis, Riley sample size |
+
+> **Fallback:** Only read `references/python-recipes.md` if your environment cannot access the `references/recipes/` subdirectory.
+
+### B. Shared Methodological & Formatting References (`references/`)
+
+| When You Need To... | Read This File | Do NOT Read Unless... |
+| :--- | :--- | :--- |
+| Choose the right statistical test or handle assumption failures | `references/decision-heuristics.md` | An assumption check (e.g., separation, PH violation, non-normality) fails or study design is ambiguous |
+| Plot clinical charts (ROC, Forest, KM, Love, Calibration, DCA) | `references/figures.md` | You are actively generating matplotlib/HTML statistical figures |
+| Build CONSORT / STROBE / PRISMA participant flow diagrams | `references/flows.md` | The user requests an attrition or cohort selection flowchart |
+| Apply journal typography, dimensions & colorblind-safe palettes | `references/house-styles.md` | You are finalizing figure DPI, column widths, or journal-specific styling (e.g., NEJM, Lancet, JAMA) |
+| Draw medical/anatomical or conceptual vector illustrations | `references/illustration.md` | The user asks for schematic or conceptual artwork (also see `examples/journal_artwork_cloud_demo.py`) |
+| Compile multi-format manuscripts (DOCX, PDF, HTML, PPTX, MD) | `references/report-builder.md` | You are assembling tables, narrative text, and figures into a final report deliverable |
+
+---
+
 ## 1. The 5 Decision Pillars (Cloud Sandbox Edition)
 
 1. **Pillar 1: Data Reality Inspection (Autonomous Profiling)**

@@ -18,8 +18,15 @@ RECIPES_PATH = CLOUD_DIR / "references" / "python-recipes.md"
 
 
 def _extract_recipe_namespace():
-    """Extract and execute all Python code blocks from python-recipes.md in an isolated namespace."""
-    content = RECIPES_PATH.read_text(encoding="utf-8")
+    """Extract and execute all Python code blocks from modular recipes or python-recipes.md in an isolated namespace."""
+    recipes_dir = CLOUD_DIR / "references" / "recipes"
+    if recipes_dir.exists() and list(recipes_dir.glob("*.md")):
+        parts = [
+            p.read_text(encoding="utf-8") for p in sorted(recipes_dir.glob("*.md"))
+        ]
+        content = "\n\n".join(parts)
+    else:
+        content = RECIPES_PATH.read_text(encoding="utf-8")
     blocks = re.findall(r"```python\n(.*?)\n```", content, re.DOTALL)
     ns = {}
     combined_code = "\n".join(blocks)
@@ -707,7 +714,7 @@ def test_each_recipe_is_self_contained():
             )
 
         try:
-            if idx == 1:
+            if "generate_table_one" in isolated_ns:
                 df = pd.DataFrame(
                     {
                         "arm": ["A", "A", "B", "B"],
@@ -719,24 +726,24 @@ def test_each_recipe_is_self_contained():
                     df, strata="arm", continuous_vars=["age"], categorical_vars=["sex"]
                 )
                 assert isinstance(res, pd.DataFrame)
-            elif idx == 2:
+            elif "calculate_2x2_metrics" in isolated_ns:
                 res = isolated_ns["calculate_2x2_metrics"](tp=40, fp=10, fn=5, tn=45)
                 assert "Sensitivity" in res
-            elif idx == 3:
+            elif "auc_ci_delong" in isolated_ns:
                 res1 = isolated_ns["auc_ci_delong"]([1, 0, 1, 0], [0.9, 0.1, 0.8, 0.2])
                 assert "auc" in res1
                 res2 = isolated_ns["delong_paired_test"](
                     [1, 0, 1, 0], [0.9, 0.1, 0.8, 0.2], [0.8, 0.2, 0.7, 0.3]
                 )
                 assert "p_value" in res2
-            elif idx == 4:
+            elif "evaluate_calibration" in isolated_ns:
                 res1 = isolated_ns["evaluate_calibration"](
                     [1, 0, 1, 0], [0.8, 0.2, 0.7, 0.3]
                 )
                 assert "brier_score" in res1
                 res2 = isolated_ns["calculate_dca"]([1, 0, 1, 0], [0.8, 0.2, 0.7, 0.3])
                 assert isinstance(res2, pd.DataFrame)
-            elif idx == 5:
+            elif "calculate_bland_altman" in isolated_ns:
                 res1 = isolated_ns["calculate_bland_altman"](
                     [10.0, 20.0, 30.0], [10.2, 19.8, 30.1]
                 )
@@ -745,7 +752,7 @@ def test_each_recipe_is_self_contained():
                     np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
                 )
                 assert isinstance(res2, pd.DataFrame)
-            elif idx == 6:
+            elif "match_propensity_scores" in isolated_ns:
                 df_psm = pd.DataFrame(
                     {
                         "trt": [0, 0, 1, 1, 0, 1],
@@ -757,7 +764,7 @@ def test_each_recipe_is_self_contained():
                     df_psm, treatment_col="trt", confounders=["age", "sex"]
                 )
                 assert "matched_df" in res
-            elif idx == 7:
+            elif "fit_firth_logistic" in isolated_ns:
                 X = np.array(
                     [
                         [1.0, 2.0],
@@ -771,7 +778,7 @@ def test_each_recipe_is_self_contained():
                 y = np.array([0, 0, 0, 1, 1, 1])
                 res = isolated_ns["fit_firth_logistic"](X, y)
                 assert "coefficients" in res
-            elif idx == 8:
+            elif "littles_mcar_test" in isolated_ns:
                 df_mcar = pd.DataFrame(
                     {
                         "a": [1.0, 2.0, 3.0, 4.0, np.nan],
@@ -780,12 +787,12 @@ def test_each_recipe_is_self_contained():
                 )
                 res = isolated_ns["littles_mcar_test"](df_mcar, ["a", "b"])
                 assert "p_value" in res
-            elif idx == 9:
+            elif "calculate_e_value" in isolated_ns:
                 res = isolated_ns["calculate_e_value"](
                     2.5, lower=1.5, upper=4.0, estimate_type="OR", rare_outcome=True
                 )
                 assert "e_value_point" in res
-            elif idx == 10:
+            elif "fit_logistic_regression_table" in isolated_ns:
                 df_l = pd.DataFrame(
                     {"y": [0, 0, 1, 1, 0, 1], "x1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]}
                 )
@@ -793,7 +800,7 @@ def test_each_recipe_is_self_contained():
                     df_l, outcome="y", covariates=["x1"]
                 )
                 assert isinstance(res, pd.DataFrame)
-            elif idx == 11:
+            elif "fit_survival_analysis_suite" in isolated_ns:
                 df_s = pd.DataFrame(
                     {
                         "t": [10.0, 20.0, 30.0, 40.0],
@@ -810,7 +817,7 @@ def test_each_recipe_is_self_contained():
                     covariates=["age"],
                 )
                 assert "km_summary" in res
-            elif idx == 12:
+            elif "impute_mice_datasets" in isolated_ns:
                 df_m = pd.DataFrame(
                     {
                         "y": [0, 0, 1, 1, 0, 1],
@@ -834,11 +841,11 @@ def test_each_recipe_is_self_contained():
                     [1.0, 1.1], [0.2, 0.2], n_obs=100, k_params=1
                 )
                 assert "pooled_estimate" in pooled
-            elif idx == 13:
+            elif "render_publication_table" in isolated_ns:
                 df_r = pd.DataFrame({"Var": ["Age"], "Val": ["50 ± 10"]})
                 res = isolated_ns["render_publication_table"](df_r, title="Table 1")
                 assert "<table" in res
-            elif idx == 14:
+            elif "compute_iptw" in isolated_ns:
                 np.random.seed(42)
                 n_pts = 40
                 x = np.random.normal(0, 1, n_pts)
@@ -879,7 +886,7 @@ def test_each_recipe_is_self_contained():
                     model_type="continuous",
                 )
                 assert "effect" in fit_res
-            elif idx == 15:
+            elif "fit_competing_risks_cif" in isolated_ns:
                 dur = np.array([5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0])
                 evt = np.array([1, 2, 0, 1, 2, 0, 1, 2])
                 cif_res = isolated_ns["fit_competing_risks_cif"](
@@ -901,7 +908,7 @@ def test_each_recipe_is_self_contained():
                 assert isinstance(reg_res, pd.DataFrame)
                 assert "cause_specific_hr" in reg_res.columns
                 assert "fine_gray_shr" in reg_res.columns
-            elif idx == 16:
+            elif "compute_reclassification_metrics" in isolated_ns:
                 y = np.array([1, 1, 0, 0, 1, 0])
                 p_old = np.array([0.7, 0.6, 0.4, 0.3, 0.5, 0.2])
                 p_new = np.array([0.8, 0.7, 0.3, 0.2, 0.6, 0.1])
@@ -911,7 +918,7 @@ def test_each_recipe_is_self_contained():
                 assert "nri_continuous" in res16
                 assert "nri_categorical" in res16
                 assert "idi" in res16
-            elif idx == 17:
+            elif "compute_time_dependent_roc" in isolated_ns:
                 d = np.array(
                     [
                         10.0,

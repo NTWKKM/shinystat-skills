@@ -36,8 +36,15 @@ SNAPSHOT_PATH = REPO_ROOT / "tests" / "fixtures" / "recipes_baseline_snapshot.js
 
 
 def extract_recipes_namespace() -> dict[str, Any]:
-    """Execute code blocks in python-recipes.md in an isolated namespace."""
-    content = RECIPES_PATH.read_text(encoding="utf-8")
+    """Execute code blocks in modular references/recipes/*.md (or python-recipes.md) in an isolated namespace."""
+    recipes_dir = RECIPES_PATH.parent / "recipes"
+    if recipes_dir.exists() and list(recipes_dir.glob("*.md")):
+        parts = [
+            p.read_text(encoding="utf-8") for p in sorted(recipes_dir.glob("*.md"))
+        ]
+        content = "\n\n".join(parts)
+    else:
+        content = RECIPES_PATH.read_text(encoding="utf-8")
     blocks = re.findall(r"```python\n(.*?)\n```", content, re.DOTALL)
     ns = {}
     combined_code = "\n".join(blocks)
