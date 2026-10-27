@@ -1336,5 +1336,50 @@ In automated manuscript preparation and clinical report generation, AI agents ri
 
 [MEMORY_LEARN: Incorporating an optional Polish Grilling Gate with websearch/MCP literature verification enforces an anti-phantom citation invariant and aligns narrative claims with empirical data, while structural token recognition preserves numerical traceability in Pillar 5 audits.]
 
+---
+
+## ADR 48: User-Scoped References in Standard Mode vs Relevant Literature Enrichment in Full Polish with Mandatory Online Empirical Comparison
+
+### Context
+Following ADR 47, Gate #5 offered a binary choice between `(Standard) Skip Polish` and `(Optional) Full Publication Polish`. However, two ambiguities remained under `/writing-for-agents`:
+1. **Unsolicited References Risk**: In Standard Mode, the scope of references was loosely phrased as "using user-provided or existing local sources", leaving room for agents to spontaneously insert external literature citations or exploratory references that the user never asked for.
+2. **Empirical Evidence Grounding Gap**: When discussing statistical findings in Discussion or Results, agents could rely on generic priors or unverified assumptions rather than real empirical research benchmarks. Furthermore, even when users supplied local full-text documents or notes, references lacked cross-comparison against live primary publications online.
+
+### Decision
+1. **User-Scoped References in Standard Mode**:
+   - In `(Standard) Skip Polish (Direct Fast-Path / User-Scoped References)`:
+     - The Reference list is strictly scoped to references explicitly provided by the user in the prompt, notes, study protocol, or data dictionary.
+     - When the user provides references, require authentic bibliographic metadata and direct claim support for each source; extract and present real empirical research figures (sample sizes, benchmark effect sizes, control event rates, 95% CIs) as comparable ONLY when the source actually reports them, matches the target estimand, population, outcome, and time horizon, and directly supports Discussion claims (citing non-empirical sources or sources with different clinical contexts for the claims or criteria they support without inventing or presenting non-comparable figures); online comparison against real research data is mandated only when the source reports relevant empirical findings; inserts sequential superscript citations (`<sup>1</sup>`, `<sup>2,3</sup>`), and formats a complete **References** section in the chosen **Journal House Style** (`NEJM`, `JAMA`, `Lancet`, `BMJ`, `Clinical`).
+     - If the user provides NO references, standard deliverables omit the external literature References section entirely (reporting only statistical findings, tables, figures, and methodology).
+     - Prohibit all spontaneous or unsolicited external literature citations in Standard Mode.
+2. **Dynamic Bibliographic MCP Routing & Online Empirical Comparison**:
+   - The agent dynamically discovers and prioritizes any connected literature or medical database MCP servers (e.g., PubMed MCP, PRISMA MCP, NEJM, Cochrane, Semantic Scholar, ScienceDirect, `medical-terminology`), seamlessly falling back to `search_web` / web queries when dedicated MCP servers are not mounted.
+   - Enforce the **Zero-PHI Literature Query Boundary**: never transmit raw clinical notes, patient excerpts, or Protected Health Information (HN, patient name, DOB, Thai National ID, phone) to external literature MCPs or `search_web`. External queries must be constructed strictly from verified bibliographic metadata and de-identified medical topic descriptors.
+   - For every user-provided reference or cited paper (even when the user supplies a local full-text document or clinical notes):
+     - Query available MCPs or online sources if searchable to verify the cited source itself using bibliographic fields appropriate to the source type: for journal articles, full author list, title, journal, year, volume, and pages (or article number / e-locator when pages are not assigned), and DOI (when assigned); for clinical practice guidelines, consensus statements, government reports, or standards, issuing body/organization, title, year, version/report identifier, and official URL when no DOI exists; and for books or older publications, authors/editors, title, publisher, and year. Verify that the source directly supports the Discussion claim.
+     - Extract and present real empirical research findings from published literature as comparable when reported and directly supporting the Discussion claim matching its estimand, population, outcome, and time horizon (citing non-empirical sources without figures for supported claims).
+     - When literature services are unavailable or unreachable, authenticated local full text with source-appropriate bibliographic metadata satisfies verification ONLY when carrying an accepted provenance signal (user-provided file in workspace/prompt, publisher frontmatter/header, DOI/PMID header, or official organization publication cover); if neither online verification nor authenticated local text with provenance is available, halt explicitly.
+3. **Relevant Literature Enrichment in Full Publication Polish**:
+   - In `(Optional) Full Publication Polish (Execute Gate #6 / Relevant Literature Enrichment)`:
+     - Execute all standard verifications, empirical Discussion grounding, superscript citations, and House Style References on user-provided sources.
+     - In addition, actively conduct exploratory literature retrieval across available bibliographic MCPs / `search_web` to identify and integrate additional authentic, relevant published studies, clinical trials, and guidelines that directly match the user's research topic, population, and findings.
+     - Extract and present real clinical benchmarks and comparison figures as comparable ONLY when reported by the source, matching the target estimand, population, outcome, and time horizon, and directly supporting a specific Discussion claim (otherwise cite the source for its conceptual claims without figures or omit it), format sequential superscript citations (`<sup>1</sup>`, `<sup>2,3</sup>`), and assemble a comprehensive References block in the locked Journal House Style.
+   - Enforce the **Anti-Phantom Citation Invariant** strictly across all modes (failing closed with an explicit halt if verification is unavailable or conflicting).
+4. **Runtime Requirements Pinning & Headless PDF Rendering**:
+   - Pin all runtime dependencies in `skills/shinystat/requirements.txt` to exact tested versions (including `openpyxl==3.1.5` and `pyarrow==25.0.1` for Excel and Parquet data ingestion alongside `pandas`) to guarantee reproducible biostatistical execution across runs.
+   - Document the Playwright Chromium installation requirement (`uv run --with playwright python -m playwright install chromium`, with `--with-deps` on Linux) to prevent headless PDF export failures in environments where Playwright is not pre-installed.
+5. **Synchronization across Mirrors**:
+   - Maintain canonical Single Source of Truth in `skills/` and propagate across all agent platform mirrors (`.agents/`, `.agent/`, `.claude/`, `.cursor/`, and `packaging/cloud/shinystat-cloud/`) via `./scripts/install-skills.sh --sync`.
+
+### Consequences
+- **Status**: Accepted & Verified.
+- **Reference Cleanliness**: Eliminates uninvited external citations in standard deliverables while preserving seamless references when users provide them.
+- **Empirical Rigor**: Ensures narrative Discussion points are compared against authentic real-world published data matching estimand and time horizon rather than hallucinations or model priors, while respecting non-empirical sources and guidelines lacking DOIs.
+- **Verification Determinism**: Clearly defines verification outcomes when literature services are unavailable, permitting authenticated local full text with source-appropriate metadata and halting when verification cannot be achieved.
+- **Execution Reproducibility**: Exact version pins covering CSV, Excel, and Parquet data sources eliminate subtle numerical differences or import breakages from future unpinned package resolutions.
+
+[MEMORY_LEARN: In clinical report generation, standard reference lists must be strictly scoped to user-provided sources with online empirical comparison against authentic published data, while exploratory literature enrichment is reserved for Full Publication Polish.]
+
+
 
 

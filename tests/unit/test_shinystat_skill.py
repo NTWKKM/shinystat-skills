@@ -46,6 +46,56 @@ def test_shinystat_canonical_skill_exists_and_valid():
         "scripts/medstat/models/firth.py missing"
     )
 
+    # Runtime requirements stack check
+    req_file = canonical_skill.parent / "requirements.txt"
+    assert req_file.exists(), "skills/shinystat/requirements.txt missing"
+
+    expected_packages = {
+        "pandas",
+        "openpyxl",
+        "pyarrow",
+        "numpy",
+        "scipy",
+        "statsmodels",
+        "patsy",
+        "scikit-learn",
+        "lifelines",
+        "firthmodels",
+        "matplotlib",
+        "plotly",
+        "python-docx",
+        "python-pptx",
+        "click",
+        "pyyaml",
+    }
+
+    import re
+
+    parsed_deps = {}
+    for line in req_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        assert "==" in line, f"Runtime dependency {line} must use exact '==' pin"
+        pkg, sep, ver = line.partition("==")
+        pkg = pkg.strip()
+        ver = ver.strip()
+        assert pkg, f"Package name cannot be empty in {line}"
+        assert ver, f"Version pin cannot be empty for package {pkg}"
+        assert re.match(r"^\d+(\.\d+)*(\.post\d+)?$", ver), (
+            f"Invalid version string '{ver}' for package {pkg}"
+        )
+        parsed_deps[pkg] = ver
+
+    assert set(parsed_deps.keys()) == expected_packages, (
+        f"Mismatch in runtime packages: missing={expected_packages - set(parsed_deps.keys())}, "
+        f"unexpected={set(parsed_deps.keys()) - expected_packages}"
+    )
+
+    req_text = req_file.read_text(encoding="utf-8")
+    assert "--with playwright python -m playwright install chromium" in req_text
+    assert "--with-deps" in req_text
+
 
 def _is_valid_skill_file(path: Path) -> bool:
     return (
