@@ -79,6 +79,7 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
 | **Evidence Grounding** | `evidence_grounding` | Verification of cited literature against authoritative sources (WebSearch, PubMed, medical MCP databases) to ensure factual accuracy and alignment with narrative claims. |
 | **Superscript Citations** | `superscript_citations` | In-text citation formatting in sequential Vancouver / ICMJE style (`<sup>1</sup>`, native Word `.docx` superscript runs, Markdown footnotes) linked to an audited reference list. |
 | **Anti-Phantom Citation** | `anti_phantom_citation` | Mandatory zero-hallucination invariant prohibiting fabricated studies, synthetic DOIs, or misattributed literature claims; fails closed with an explicit halt when verification is unavailable from both online services and authenticated local full text carrying an accepted provenance signal. |
+| **Zero-PHI Literature Query Boundary** | `zero_phi_literature_boundary` | Privacy invariant prohibiting the transmission of raw user materials, clinical-note text, or patient identifiers (HN, name, DOB, Thai National ID, phone) to external literature MCPs or web searches, requiring queries to be constructed exclusively from de-identified bibliographic metadata and medical concept descriptors. |
 
 
 ---
