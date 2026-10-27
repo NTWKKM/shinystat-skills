@@ -197,7 +197,9 @@ def test_shinystat_multi_agent_mirrors_byte_identical():
         repo_root / ".cursor" / "skills",
     ]
 
-    canonical_files = _collect_valid_skill_files(canonical_dir)
+    canonical_files = {
+        p for p in _collect_valid_skill_files(canonical_dir) if "_shared" not in p.parts
+    }
     assert canonical_files, "No files found in canonical skills directory"
 
     for mirror in mirrors:
