@@ -589,10 +589,14 @@ def impute_mice_datasets(
             if isinstance(max_value, dict) and feat in max_value
             else (max_value if isinstance(max_value, (int, float)) else None)
         )
-        if low_val is not None and np.isnan(low_val):
-            raise ValueError(f"min_value for feature '{feat}' cannot be NaN.")
-        if high_val is not None and np.isnan(high_val):
-            raise ValueError(f"max_value for feature '{feat}' cannot be NaN.")
+        if low_val is not None and (np.isnan(low_val) or low_val == float("inf")):
+            raise ValueError(
+                f"min_value for feature '{feat}' cannot be NaN or positive infinity."
+            )
+        if high_val is not None and (np.isnan(high_val) or high_val == float("-inf")):
+            raise ValueError(
+                f"max_value for feature '{feat}' cannot be NaN or negative infinity."
+            )
         if low_val is not None and high_val is not None and low_val >= high_val:
             raise ValueError(
                 f"Invalid bound ordering for feature '{feat}': min_value ({low_val}) must be strictly less than max_value ({high_val})."
@@ -645,8 +649,7 @@ def impute_mice_datasets(
                 residuals = y_obs - X_obs @ beta_hat
                 rss = float(np.sum(residuals**2))
                 tss = float(np.sum((y_obs - np.mean(y_obs)) ** 2))
-                scale_ref = max(tss, float(np.sum(y_obs**2)))
-                if scale_ref == 0.0 or (rss / scale_ref) <= 1e-12:
+                if tss == 0.0 or (rss / tss) <= 1e-12:
                     raise ValueError(
                         f"Degenerate residual sum of squares for feature '{feat}' (relative RSS <= 1e-12). "
                         "The target is perfectly predicted by conditioning features; "
@@ -971,10 +974,14 @@ def impute_mice_single(
             if isinstance(max_value, dict) and feat in max_value
             else (max_value if isinstance(max_value, (int, float)) else None)
         )
-        if low_val is not None and np.isnan(low_val):
-            raise ValueError(f"min_value for feature '{feat}' cannot be NaN.")
-        if high_val is not None and np.isnan(high_val):
-            raise ValueError(f"max_value for feature '{feat}' cannot be NaN.")
+        if low_val is not None and (np.isnan(low_val) or low_val == float("inf")):
+            raise ValueError(
+                f"min_value for feature '{feat}' cannot be NaN or positive infinity."
+            )
+        if high_val is not None and (np.isnan(high_val) or high_val == float("-inf")):
+            raise ValueError(
+                f"max_value for feature '{feat}' cannot be NaN or negative infinity."
+            )
         if low_val is not None and high_val is not None and low_val >= high_val:
             raise ValueError(
                 f"Invalid bound ordering for feature '{feat}': min_value ({low_val}) must be strictly less than max_value ({high_val})."
@@ -1022,8 +1029,7 @@ def impute_mice_single(
             residuals = y_obs - X_obs @ beta_hat
             rss = float(np.sum(residuals**2))
             tss = float(np.sum((y_obs - np.mean(y_obs)) ** 2))
-            scale_ref = max(tss, float(np.sum(y_obs**2)))
-            if scale_ref == 0.0 or (rss / scale_ref) <= 1e-12:
+            if tss == 0.0 or (rss / tss) <= 1e-12:
                 raise ValueError(
                     f"Degenerate residual sum of squares for feature '{feat}' (relative RSS <= 1e-12). "
                     "The target is perfectly predicted by conditioning features; "

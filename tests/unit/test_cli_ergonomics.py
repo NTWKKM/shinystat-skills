@@ -7,8 +7,12 @@ import pytest
 from click.testing import CliRunner
 
 from medstat.cli.main import cli, emit_agent_actionable_error
-from medstat.cli.spec import get_cli_schema_template, preflight_validate_spec
-from medstat.data.loader import get_clinical_columns
+from medstat.cli.spec import (
+    AnalysisPlan,
+    get_cli_schema_template,
+    preflight_validate_spec,
+)
+from medstat.data.loader import get_clinical_columns, load_clinical_data
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -326,6 +330,18 @@ def test_get_clinical_columns_formats_and_duplicates(tmp_path):
     cols = get_clinical_columns(parquet_path)
     assert cols == ["col_a", "col_b"]
 
+    # 1b. Parquet with named index: index must not appear in columns
+    df_idx = pd.DataFrame(
+        {"col_a": [1, 2], "col_b": [3, 4]},
+        index=pd.Index(["p1", "p2"], name="patient_id"),
+    )
+    parquet_idx_path = tmp_path / "data_idx.parquet"
+    df_idx.to_parquet(parquet_idx_path)
+    cols_idx = get_clinical_columns(parquet_idx_path)
+    assert cols_idx == ["col_a", "col_b"]
+    loaded_df = load_clinical_data(parquet_idx_path)
+    assert list(loaded_df.columns) == cols_idx
+
     # 2. Excel .xlsx
     xlsx_path = tmp_path / "data.xlsx"
     df.to_excel(xlsx_path, index=False)
@@ -345,3 +361,96 @@ def test_get_clinical_columns_formats_and_duplicates(tmp_path):
         click.ClickException, match="duplicate column names after normalization"
     ):
         get_clinical_columns(dup_csv)
+
+
+def test_preflight_validate_non_string_input_path(tmp_path):
+    for bad_input in [123, True, ["some/path.csv"]]:
+        spec_file = tmp_path / "spec_bad_path.yaml"
+        spec_content = f"""
+metadata:
+  study_title: "Non-string input_path test"
+data:
+  input_path: {bad_input}
+models:
+  - name: "m1"
+    type: "logistic"
+    outcome: "y"
+"""
+        spec_file.write_text(spec_content, encoding="utf-8")
+        report = preflight_validate_spec(spec_file)
+        assert report["valid"] is False
+        assert any("data" in err and "input_path" in err for err in report["errors"])
+
+
+def test_analysis_plan_from_yaml_time_col_precedence(tmp_path):
+    # 1. time_col populates ModelSpec.time when time is unset
+    spec_time_col = tmp_path / "spec_time_col.yaml"
+    spec_time_col.write_text(
+        """
+metadata:
+  study_title: "Time Col Test"
+data:
+  input_path: "dummy.csv"
+models:
+  - name: "cox_model"
+    type: "cox"
+    time_col: "follow_up_days"
+    outcome: "dead"
+""",
+        encoding="utf-8",
+    )
+    plan1 = AnalysisPlan.from_yaml(spec_time_col)
+    assert plan1.models[0].time == "follow_up_days"
+
+    # 2. time takes precedence over time_col when both are specified
+    spec_precedence = tmp_path / "spec_precedence.yaml"
+    spec_precedence.write_text(
+        """
+metadata:
+  study_title: "Precedence Test"
+data:
+  input_path: "dummy.csv"
+models:
+  - name: "cox_model"
+    type: "cox"
+    time: "primary_time"
+    time_col: "secondary_time"
+    outcome: "dead"
+""",
+        encoding="utf-8",
+    )
+    plan2 = AnalysisPlan.from_yaml(spec_precedence)
+    assert plan2.models[0].time == "primary_time"
+
+
+def test_actionable_error_ph_and_competing_risk_remediation(capsys):
+    # Cox error about competing events matches competing risk remediation
+    exc_competing = ValueError("Competing events detected in Cox survival analysis")
+    emit_agent_actionable_error(exc_competing)
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert any("competing_risk" in rem for rem in payload["agent_remediation"])
+
+    # Cox error about too few observations must NOT suggest competing risk
+    exc_obs = ValueError("Cox PH requires at least 5 observations.")
+    emit_agent_actionable_error(exc_obs)
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert not any("competing_risk" in rem for rem in payload["agent_remediation"])
+
+    # Competing risks error about too few observations must NOT suggest competing risk
+    exc_comp_obs = ValueError("Too few observations in competing risks cohort")
+    emit_agent_actionable_error(exc_comp_obs)
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert not any("competing_risk" in rem for rem in payload["agent_remediation"])
+
+    # Proportional hazards error directs agents to halt unless using standalone script
+    exc_ph = ValueError("Proportional hazard assumption violated")
+    emit_agent_actionable_error(exc_ph)
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert any(
+        "Declarative plan cannot apply time-varying covariates or strata; halt" in rem
+        for rem in payload["agent_remediation"]
+    )

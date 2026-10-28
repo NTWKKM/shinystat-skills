@@ -414,6 +414,14 @@ def fit_weighted_outcome_model(
             raise ValueError(
                 "No valid observations remaining for weighted Cox survival model."
             )
+        if surv_clean[treatment_col].nunique() < 2:
+            raise ValueError(
+                f"Treatment column '{treatment_col}' must contain both treatment classes in weighted cohort."
+            )
+        if not (surv_clean[outcome_col] == 1).any():
+            raise ValueError(
+                f"Outcome column '{outcome_col}' must contain at least one observed event in weighted cohort."
+            )
         cph = CoxPHFitter()
         cph.fit(
             surv_clean[[duration_col, outcome_col, treatment_col, weights_col]],

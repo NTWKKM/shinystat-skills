@@ -698,302 +698,335 @@ def test_publication_table_html_rendering(recipes):
 
 def test_each_recipe_is_self_contained():
     """Verify that every python code block in modular recipes executes and runs in an isolated namespace."""
-    recipe_files = sorted(RECIPES_DIR.glob("*.md"))
-    assert len(recipe_files) == 5, (
-        f"Expected 5 modular recipe files, got {len(recipe_files)}"
-    )
-    parts = [p.read_text(encoding="utf-8") for p in recipe_files]
-    content = "\n\n".join(parts)
-    blocks = re.findall(r"```python\n(.*?)\n```", content, re.DOTALL)
-    assert len(blocks) >= 20, f"Expected at least 20 recipes, got {len(blocks)}"
-    for idx, block in enumerate(blocks, start=1):
-        isolated_ns = {}
-        try:
-            exec(block, isolated_ns)
-        except Exception as e:
-            pytest.fail(
-                f"Recipe {idx} failed to import/define in an isolated namespace: {e}"
-            )
-
-        try:
-            if "generate_table_one" in isolated_ns:
-                df = pd.DataFrame(
-                    {
-                        "arm": ["A", "A", "B", "B"],
-                        "age": [40.0, 50.0, 60.0, 70.0],
-                        "sex": ["M", "F", "M", "F"],
-                    }
-                )
-                res = isolated_ns["generate_table_one"](
-                    df, strata="arm", continuous_vars=["age"], categorical_vars=["sex"]
-                )
-                assert isinstance(res, pd.DataFrame)
-            elif "calculate_2x2_metrics" in isolated_ns:
-                res = isolated_ns["calculate_2x2_metrics"](tp=40, fp=10, fn=5, tn=45)
-                assert "Sensitivity" in res
-            elif "auc_ci_delong" in isolated_ns:
-                res1 = isolated_ns["auc_ci_delong"]([1, 0, 1, 0], [0.9, 0.1, 0.8, 0.2])
-                assert "auc" in res1
-                res2 = isolated_ns["delong_paired_test"](
-                    [1, 0, 1, 0], [0.9, 0.1, 0.8, 0.2], [0.8, 0.2, 0.7, 0.3]
-                )
-                assert "p_value" in res2
-            elif "evaluate_calibration" in isolated_ns:
-                res1 = isolated_ns["evaluate_calibration"](
-                    [1, 0, 1, 0], [0.8, 0.2, 0.7, 0.3]
-                )
-                assert "brier_score" in res1
-                res2 = isolated_ns["calculate_dca"]([1, 0, 1, 0], [0.8, 0.2, 0.7, 0.3])
-                assert isinstance(res2, pd.DataFrame)
-            elif "calculate_bland_altman" in isolated_ns:
-                res1 = isolated_ns["calculate_bland_altman"](
-                    [10.0, 20.0, 30.0], [10.2, 19.8, 30.1]
-                )
-                assert "mean_diff" in res1
-                res2 = isolated_ns["calculate_icc_matrix"](
-                    np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
-                )
-                assert isinstance(res2, pd.DataFrame)
-            elif "match_propensity_scores" in isolated_ns:
-                df_psm = pd.DataFrame(
-                    {
-                        "trt": [0, 0, 1, 1, 0, 1],
-                        "age": [20.0, 25.0, 30.0, 35.0, 22.0, 32.0],
-                        "sex": ["M", "F", "M", "F", "F", "M"],
-                    }
-                )
-                res = isolated_ns["match_propensity_scores"](
-                    df_psm, treatment_col="trt", confounders=["age", "sex"]
-                )
-                assert "matched_df" in res
-            elif "fit_firth_logistic" in isolated_ns:
-                X = np.array(
-                    [
-                        [1.0, 2.0],
-                        [2.0, 1.0],
-                        [3.0, 4.0],
-                        [4.0, 3.0],
-                        [5.0, 5.0],
-                        [6.0, 7.0],
-                    ]
-                )
-                y = np.array([0, 0, 0, 1, 1, 1])
-                res = isolated_ns["fit_firth_logistic"](X, y)
-                assert "coefficients" in res
-            elif "littles_mcar_test" in isolated_ns:
-                df_mcar = pd.DataFrame(
-                    {
-                        "a": [1.0, 2.0, 3.0, 4.0, np.nan],
-                        "b": [2.0, 3.0, np.nan, 5.0, 6.0],
-                    }
-                )
-                res = isolated_ns["littles_mcar_test"](df_mcar, ["a", "b"])
-                assert "p_value" in res
-            elif "calculate_e_value" in isolated_ns:
-                res = isolated_ns["calculate_e_value"](
-                    2.5, lower=1.5, upper=4.0, estimate_type="OR", rare_outcome=True
-                )
-                assert "e_value_point" in res
-            elif "fit_logistic_regression_table" in isolated_ns:
-                df_l = pd.DataFrame(
-                    {"y": [0, 0, 1, 1, 0, 1], "x1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]}
-                )
-                res = isolated_ns["fit_logistic_regression_table"](
-                    df_l, outcome="y", covariates=["x1"]
-                )
-                assert isinstance(res, pd.DataFrame)
-            elif "fit_survival_analysis_suite" in isolated_ns:
-                df_s = pd.DataFrame(
-                    {
-                        "t": [10.0, 20.0, 30.0, 40.0],
-                        "e": [1, 0, 1, 0],
-                        "arm": ["A", "A", "B", "B"],
-                        "age": [50.0, 60.0, 55.0, 65.0],
-                    }
-                )
-                res = isolated_ns["fit_survival_analysis_suite"](
-                    df_s,
-                    duration_col="t",
-                    event_col="e",
-                    strata_col="arm",
-                    covariates=["age"],
-                )
-                assert "km_summary" in res
-            elif "impute_mice_datasets" in isolated_ns:
-                df_m = pd.DataFrame(
-                    {
-                        "y": [0, 0, 1, 1, 0, 1],
-                        "x1": [1.2, np.nan, 3.5, 3.8, np.nan, 6.1],
-                        "x2": [10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
-                    }
-                )
-                dsets = isolated_ns["impute_mice_datasets"](
-                    df_m,
-                    features_to_impute=["x1"],
-                    outcome_col="y",
-                    predictors=["x2"],
-                    m=2,
-                )
-                assert len(dsets) == 2
-                single_m = isolated_ns["impute_mice_single"](
-                    df_m, features_to_impute=["x1"], outcome_col="y", predictors=["x2"]
-                )
-                assert isinstance(single_m, pd.DataFrame)
-                pooled = isolated_ns["pool_estimates_rubin"](
-                    [1.0, 1.1], [0.2, 0.2], n_obs=100, k_params=1
-                )
-                assert "pooled_estimate" in pooled
-            elif "render_publication_table" in isolated_ns:
-                df_r = pd.DataFrame({"Var": ["Age"], "Val": ["50 ± 10"]})
-                res = isolated_ns["render_publication_table"](df_r, title="Table 1")
-                assert "<table" in res
-            elif "compute_iptw" in isolated_ns:
-                np.random.seed(42)
-                n_pts = 40
-                x = np.random.normal(0, 1, n_pts)
-                p = 1.0 / (1.0 + np.exp(-0.5 * x))
-                t = (np.random.rand(n_pts) < p).astype(int)
-                if t.sum() == 0:
-                    t[0] = 1
-                if t.sum() == n_pts:
-                    t[0] = 0
-                df_iptw = pd.DataFrame(
-                    {
-                        "trt": t,
-                        "x1": x,
-                        "y_cont": 2.0 * t + 0.5 * x + np.random.normal(0, 1, n_pts),
-                        "y_bin": (
-                            2.0 * t + 0.5 * x + np.random.normal(0, 1, n_pts) > 0
-                        ).astype(int),
-                        "time": np.random.exponential(10, n_pts) + 1.0,
-                    }
-                )
-                res_df, diag = isolated_ns["compute_iptw"](
-                    df_iptw, treatment_col="trt", covariates=["x1"], estimand="ATE"
-                )
-                assert "iptw_weight" in res_df.columns
-                assert "n_eff" in diag
-                smd = isolated_ns["calculate_weighted_smd"](
-                    res_df.loc[res_df["trt"] == 1, "x1"],
-                    res_df.loc[res_df["trt"] == 0, "x1"],
-                    res_df.loc[res_df["trt"] == 1, "iptw_weight"],
-                    res_df.loc[res_df["trt"] == 0, "iptw_weight"],
-                )
-                assert np.isfinite(smd)
-                fit_res = isolated_ns["fit_weighted_outcome_model"](
-                    res_df,
-                    outcome_col="y_cont",
-                    treatment_col="trt",
-                    weights_col="iptw_weight",
-                    model_type="continuous",
-                )
-                assert "effect" in fit_res
-            elif "fit_competing_risks_cif" in isolated_ns:
-                dur = np.array([5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0])
-                evt = np.array([1, 2, 0, 1, 2, 0, 1, 2])
-                cif_res = isolated_ns["fit_competing_risks_cif"](
-                    dur, evt, event_of_interest=1, competing_event=2
-                )
-                assert "cif_table" in cif_res
-                assert "ajf_primary" in cif_res
-                df_cr = pd.DataFrame(
-                    {"time": dur, "status": evt, "x": [0, 1, 0, 1, 0, 1, 0, 1]}
-                )
-                reg_res = isolated_ns["fit_competing_risks_regression"](
-                    df_cr,
-                    duration_col="time",
-                    event_col="status",
-                    covariates=["x"],
-                    event_of_interest=1,
-                    competing_event=2,
-                )
-                assert isinstance(reg_res, pd.DataFrame)
-                assert "cause_specific_hr" in reg_res.columns
-                assert "fine_gray_shr" in reg_res.columns
-            elif "compute_reclassification_metrics" in isolated_ns:
-                y = np.array([1, 1, 0, 0, 1, 0])
-                p_old = np.array([0.7, 0.6, 0.4, 0.3, 0.5, 0.2])
-                p_new = np.array([0.8, 0.7, 0.3, 0.2, 0.6, 0.1])
-                res16 = isolated_ns["compute_reclassification_metrics"](
-                    y, p_old, p_new, thresholds=[0.5]
-                )
-                assert "nri_continuous" in res16
-                assert "nri_categorical" in res16
-                assert "idi" in res16
-            elif "compute_time_dependent_roc" in isolated_ns:
-                d = np.array(
-                    [
-                        10.0,
-                        20.0,
-                        30.0,
-                        40.0,
-                        50.0,
-                        60.0,
-                        70.0,
-                        80.0,
-                        90.0,
-                        100.0,
-                        110.0,
-                        120.0,
-                    ]
-                )
-                e = np.array([1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0])
-                s = np.array(
-                    [0.8, 0.2, 0.7, 0.3, 0.9, 0.1, 0.85, 0.15, 0.75, 0.25, 0.95, 0.05]
-                )
-                res17 = isolated_ns["compute_time_dependent_roc"](
-                    d, e, s, time_horizons=[25.0, 45.0], n_bootstrap=0
-                )
-                assert "trajectory" in res17
-                assert "results_by_horizon" in res17
-            elif "bootstrap_internal_validation" in isolated_ns:
-                np.random.seed(42)
-                n_b = 50
-                x1 = np.random.normal(0, 1, n_b)
-                x2 = np.random.normal(0, 1, n_b)
-                y = (x1 + x2 + np.random.normal(0, 1, n_b) > 0).astype(int)
-                df18 = pd.DataFrame({"y": y, "x1": x1, "x2": x2})
-                res18 = isolated_ns["bootstrap_internal_validation"](
-                    df18,
-                    outcome="y",
-                    predictors=["x1", "x2"],
-                    n_bootstrap=2,
-                    random_state=42,
-                )
-                assert "apparent_metrics" in res18
-                assert "metrics" in res18
-                assert "shrinkage_factor" in res18
-            elif "recalibrate_prediction_model" in isolated_ns:
-                np.random.seed(42)
-                n_recal = 30
-                x_recal = np.random.normal(0, 1, size=n_recal)
-                p_true = 1.0 / (1.0 + np.exp(-(0.5 + 1.2 * x_recal)))
-                y19 = (np.random.uniform(size=n_recal) < p_true).astype(int)
-                p19 = np.clip(1.0 / (1.0 + np.exp(-(-1.5 + 2.5 * x_recal))), 0.05, 0.95)
-                res19 = isolated_ns["recalibrate_prediction_model"](
-                    y19, p19, method="logistic"
-                )
-                assert "pre" in res19
-                assert "post" in res19
-                assert "recalibration_parameters" in res19
-            elif "calculate_riley_sample_size" in isolated_ns:
-                res20 = isolated_ns["calculate_riley_sample_size"](
-                    n_parameters=5, prevalence=0.2, cox_snell_r2=0.15
-                )
-                assert "n_total" in res20
-                assert "n_events" in res20
-                res20_diag = isolated_ns["calculate_diagnostic_auroc_sample_size"](
-                    auroc_expected=0.85, auroc_null=0.50, prevalence=0.30
-                )
-                assert "total_n" in res20_diag
-            else:
+    orig_rng_state = np.random.get_state()
+    try:
+        recipe_files = sorted(RECIPES_DIR.glob("*.md"))
+        assert len(recipe_files) == 5, (
+            f"Expected 5 modular recipe files, got {len(recipe_files)}"
+        )
+        parts = [p.read_text(encoding="utf-8") for p in recipe_files]
+        content = "\n\n".join(parts)
+        blocks = re.findall(r"```python\n(.*?)\n```", content, re.DOTALL)
+        assert len(blocks) >= 20, f"Expected at least 20 recipes, got {len(blocks)}"
+        for idx, block in enumerate(blocks, start=1):
+            isolated_ns = {}
+            try:
+                exec(block, isolated_ns)
+            except Exception as e:
                 pytest.fail(
-                    f"Recipe {idx} had no matching execution branch in isolated test harness"
+                    f"Recipe {idx} failed to import/define in an isolated namespace: {e}"
                 )
-        except Exception as e:
-            pytest.fail(
-                f"Recipe {idx} failed to run with valid test fixture in an isolated namespace: {e}"
-            )
+
+            try:
+                if "generate_table_one" in isolated_ns:
+                    df = pd.DataFrame(
+                        {
+                            "arm": ["A", "A", "B", "B"],
+                            "age": [40.0, 50.0, 60.0, 70.0],
+                            "sex": ["M", "F", "M", "F"],
+                        }
+                    )
+                    res = isolated_ns["generate_table_one"](
+                        df,
+                        strata="arm",
+                        continuous_vars=["age"],
+                        categorical_vars=["sex"],
+                    )
+                    assert isinstance(res, pd.DataFrame)
+                elif "calculate_2x2_metrics" in isolated_ns:
+                    res = isolated_ns["calculate_2x2_metrics"](
+                        tp=40, fp=10, fn=5, tn=45
+                    )
+                    assert "Sensitivity" in res
+                elif "auc_ci_delong" in isolated_ns:
+                    res1 = isolated_ns["auc_ci_delong"](
+                        [1, 0, 1, 0], [0.9, 0.1, 0.8, 0.2]
+                    )
+                    assert "auc" in res1
+                    res2 = isolated_ns["delong_paired_test"](
+                        [1, 0, 1, 0], [0.9, 0.1, 0.8, 0.2], [0.8, 0.2, 0.7, 0.3]
+                    )
+                    assert "p_value" in res2
+                elif "evaluate_calibration" in isolated_ns:
+                    res1 = isolated_ns["evaluate_calibration"](
+                        [1, 0, 1, 0], [0.8, 0.2, 0.7, 0.3]
+                    )
+                    assert "brier_score" in res1
+                    res2 = isolated_ns["calculate_dca"](
+                        [1, 0, 1, 0], [0.8, 0.2, 0.7, 0.3]
+                    )
+                    assert isinstance(res2, pd.DataFrame)
+                elif "calculate_bland_altman" in isolated_ns:
+                    res1 = isolated_ns["calculate_bland_altman"](
+                        [10.0, 20.0, 30.0], [10.2, 19.8, 30.1]
+                    )
+                    assert "mean_diff" in res1
+                    res2 = isolated_ns["calculate_icc_matrix"](
+                        np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+                    )
+                    assert isinstance(res2, pd.DataFrame)
+                elif "match_propensity_scores" in isolated_ns:
+                    df_psm = pd.DataFrame(
+                        {
+                            "trt": [0, 0, 1, 1, 0, 1],
+                            "age": [20.0, 25.0, 30.0, 35.0, 22.0, 32.0],
+                            "sex": ["M", "F", "M", "F", "F", "M"],
+                        }
+                    )
+                    res = isolated_ns["match_propensity_scores"](
+                        df_psm, treatment_col="trt", confounders=["age", "sex"]
+                    )
+                    assert "matched_df" in res
+                elif "fit_firth_logistic" in isolated_ns:
+                    X = np.array(
+                        [
+                            [1.0, 2.0],
+                            [2.0, 1.0],
+                            [3.0, 4.0],
+                            [4.0, 3.0],
+                            [5.0, 5.0],
+                            [6.0, 7.0],
+                        ]
+                    )
+                    y = np.array([0, 0, 0, 1, 1, 1])
+                    res = isolated_ns["fit_firth_logistic"](X, y)
+                    assert "coefficients" in res
+                elif "littles_mcar_test" in isolated_ns:
+                    df_mcar = pd.DataFrame(
+                        {
+                            "a": [1.0, 2.0, 3.0, 4.0, np.nan],
+                            "b": [2.0, 3.0, np.nan, 5.0, 6.0],
+                        }
+                    )
+                    res = isolated_ns["littles_mcar_test"](df_mcar, ["a", "b"])
+                    assert "p_value" in res
+                elif "calculate_e_value" in isolated_ns:
+                    res = isolated_ns["calculate_e_value"](
+                        2.5, lower=1.5, upper=4.0, estimate_type="OR", rare_outcome=True
+                    )
+                    assert "e_value_point" in res
+                elif "fit_logistic_regression_table" in isolated_ns:
+                    df_l = pd.DataFrame(
+                        {"y": [0, 0, 1, 1, 0, 1], "x1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]}
+                    )
+                    res = isolated_ns["fit_logistic_regression_table"](
+                        df_l, outcome="y", covariates=["x1"]
+                    )
+                    assert isinstance(res, pd.DataFrame)
+                elif "fit_survival_analysis_suite" in isolated_ns:
+                    df_s = pd.DataFrame(
+                        {
+                            "t": [10.0, 20.0, 30.0, 40.0],
+                            "e": [1, 0, 1, 0],
+                            "arm": ["A", "A", "B", "B"],
+                            "age": [50.0, 60.0, 55.0, 65.0],
+                        }
+                    )
+                    res = isolated_ns["fit_survival_analysis_suite"](
+                        df_s,
+                        duration_col="t",
+                        event_col="e",
+                        strata_col="arm",
+                        covariates=["age"],
+                    )
+                    assert "km_summary" in res
+                elif "impute_mice_datasets" in isolated_ns:
+                    df_m = pd.DataFrame(
+                        {
+                            "y": [0, 0, 1, 1, 0, 1],
+                            "x1": [1.2, np.nan, 3.5, 3.8, np.nan, 6.1],
+                            "x2": [10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
+                        }
+                    )
+                    dsets = isolated_ns["impute_mice_datasets"](
+                        df_m,
+                        features_to_impute=["x1"],
+                        outcome_col="y",
+                        predictors=["x2"],
+                        m=2,
+                    )
+                    assert len(dsets) == 2
+                    single_m = isolated_ns["impute_mice_single"](
+                        df_m,
+                        features_to_impute=["x1"],
+                        outcome_col="y",
+                        predictors=["x2"],
+                    )
+                    assert isinstance(single_m, pd.DataFrame)
+                    pooled = isolated_ns["pool_estimates_rubin"](
+                        [1.0, 1.1], [0.2, 0.2], n_obs=100, k_params=1
+                    )
+                    assert "pooled_estimate" in pooled
+                elif "render_publication_table" in isolated_ns:
+                    df_r = pd.DataFrame({"Var": ["Age"], "Val": ["50 ± 10"]})
+                    res = isolated_ns["render_publication_table"](df_r, title="Table 1")
+                    assert "<table" in res
+                elif "compute_iptw" in isolated_ns:
+                    np.random.seed(42)
+                    n_pts = 40
+                    x = np.random.normal(0, 1, n_pts)
+                    p = 1.0 / (1.0 + np.exp(-0.5 * x))
+                    t = (np.random.rand(n_pts) < p).astype(int)
+                    if t.sum() == 0:
+                        t[0] = 1
+                    if t.sum() == n_pts:
+                        t[0] = 0
+                    df_iptw = pd.DataFrame(
+                        {
+                            "trt": t,
+                            "x1": x,
+                            "y_cont": 2.0 * t + 0.5 * x + np.random.normal(0, 1, n_pts),
+                            "y_bin": (
+                                2.0 * t + 0.5 * x + np.random.normal(0, 1, n_pts) > 0
+                            ).astype(int),
+                            "time": np.random.exponential(10, n_pts) + 1.0,
+                        }
+                    )
+                    res_df, diag = isolated_ns["compute_iptw"](
+                        df_iptw, treatment_col="trt", covariates=["x1"], estimand="ATE"
+                    )
+                    assert "iptw_weight" in res_df.columns
+                    assert "n_eff" in diag
+                    smd = isolated_ns["calculate_weighted_smd"](
+                        res_df.loc[res_df["trt"] == 1, "x1"],
+                        res_df.loc[res_df["trt"] == 0, "x1"],
+                        res_df.loc[res_df["trt"] == 1, "iptw_weight"],
+                        res_df.loc[res_df["trt"] == 0, "iptw_weight"],
+                    )
+                    assert np.isfinite(smd)
+                    fit_res = isolated_ns["fit_weighted_outcome_model"](
+                        res_df,
+                        outcome_col="y_cont",
+                        treatment_col="trt",
+                        weights_col="iptw_weight",
+                        model_type="continuous",
+                    )
+                    assert "effect" in fit_res
+                elif "fit_competing_risks_cif" in isolated_ns:
+                    dur = np.array([5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0])
+                    evt = np.array([1, 2, 0, 1, 2, 0, 1, 2])
+                    cif_res = isolated_ns["fit_competing_risks_cif"](
+                        dur, evt, event_of_interest=1, competing_event=2
+                    )
+                    assert "cif_table" in cif_res
+                    assert "ajf_primary" in cif_res
+                    df_cr = pd.DataFrame(
+                        {"time": dur, "status": evt, "x": [0, 1, 0, 1, 0, 1, 0, 1]}
+                    )
+                    reg_res = isolated_ns["fit_competing_risks_regression"](
+                        df_cr,
+                        duration_col="time",
+                        event_col="status",
+                        covariates=["x"],
+                        event_of_interest=1,
+                        competing_event=2,
+                    )
+                    assert isinstance(reg_res, pd.DataFrame)
+                    assert "cause_specific_hr" in reg_res.columns
+                    assert "fine_gray_shr" in reg_res.columns
+                elif "compute_reclassification_metrics" in isolated_ns:
+                    y = np.array([1, 1, 0, 0, 1, 0])
+                    p_old = np.array([0.7, 0.6, 0.4, 0.3, 0.5, 0.2])
+                    p_new = np.array([0.8, 0.7, 0.3, 0.2, 0.6, 0.1])
+                    res16 = isolated_ns["compute_reclassification_metrics"](
+                        y, p_old, p_new, thresholds=[0.5]
+                    )
+                    assert "nri_continuous" in res16
+                    assert "nri_categorical" in res16
+                    assert "idi" in res16
+                elif "compute_time_dependent_roc" in isolated_ns:
+                    d = np.array(
+                        [
+                            10.0,
+                            20.0,
+                            30.0,
+                            40.0,
+                            50.0,
+                            60.0,
+                            70.0,
+                            80.0,
+                            90.0,
+                            100.0,
+                            110.0,
+                            120.0,
+                        ]
+                    )
+                    e = np.array([1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0])
+                    s = np.array(
+                        [
+                            0.8,
+                            0.2,
+                            0.7,
+                            0.3,
+                            0.9,
+                            0.1,
+                            0.85,
+                            0.15,
+                            0.75,
+                            0.25,
+                            0.95,
+                            0.05,
+                        ]
+                    )
+                    res17 = isolated_ns["compute_time_dependent_roc"](
+                        d, e, s, time_horizons=[25.0, 45.0], n_bootstrap=0
+                    )
+                    assert "trajectory" in res17
+                    assert "results_by_horizon" in res17
+                elif "bootstrap_internal_validation" in isolated_ns:
+                    np.random.seed(42)
+                    n_b = 50
+                    x1 = np.random.normal(0, 1, n_b)
+                    x2 = np.random.normal(0, 1, n_b)
+                    y = (x1 + x2 + np.random.normal(0, 1, n_b) > 0).astype(int)
+                    df18 = pd.DataFrame({"y": y, "x1": x1, "x2": x2})
+                    res18 = isolated_ns["bootstrap_internal_validation"](
+                        df18,
+                        outcome="y",
+                        predictors=["x1", "x2"],
+                        n_bootstrap=2,
+                        random_state=42,
+                    )
+                    assert "apparent_metrics" in res18
+                    assert "metrics" in res18
+                    assert res18["n_successful_replicates"] > 0
+                    assert np.isfinite(res18["shrinkage_factor"])
+                elif "recalibrate_prediction_model" in isolated_ns:
+                    np.random.seed(42)
+                    n_recal = 30
+                    x_recal = np.random.normal(0, 1, size=n_recal)
+                    p_true = 1.0 / (1.0 + np.exp(-(0.5 + 1.2 * x_recal)))
+                    y19 = (np.random.uniform(size=n_recal) < p_true).astype(int)
+                    p19 = np.clip(
+                        1.0 / (1.0 + np.exp(-(-1.5 + 2.5 * x_recal))), 0.05, 0.95
+                    )
+                    res19 = isolated_ns["recalibrate_prediction_model"](
+                        y19, p19, method="logistic"
+                    )
+                    assert "pre" in res19
+                    assert "post" in res19
+                    assert "recalibration_parameters" in res19
+                elif "calculate_riley_sample_size" in isolated_ns:
+                    res20 = isolated_ns["calculate_riley_sample_size"](
+                        n_parameters=5, prevalence=0.2, cox_snell_r2=0.15
+                    )
+                    assert "n_total" in res20
+                    assert "n_events" in res20
+                    res20_diag = isolated_ns["calculate_diagnostic_auroc_sample_size"](
+                        auroc_expected=0.85, auroc_null=0.50, prevalence=0.30
+                    )
+                    assert "total_n" in res20_diag
+                else:
+                    pytest.fail(
+                        f"Recipe {idx} had no matching execution branch in isolated test harness"
+                    )
+            except Exception as e:
+                pytest.fail(
+                    f"Recipe {idx} failed to run with valid test fixture in an isolated namespace: {e}"
+                )
+
+    finally:
+        np.random.set_state(orig_rng_state)
 
 
 # -----------------------------------------------------------------------------
@@ -1103,6 +1136,16 @@ def test_psm_and_logistic_strict_binary_and_retention_audit(recipes):
     assert res_logistic.attrs["retention_audit"]["n_initial"] == 8
     assert res_logistic.attrs["retention_audit"]["n_excluded"] == 1
     assert res_logistic.attrs["retention_audit"]["n_analyzed"] == 7
+
+    # Reject covariate with < 2 distinct finite values
+    df_const_cov = pd.DataFrame(
+        {
+            "y": [0, 1, 0, 1],
+            "age": [50.0, 50.0, 50.0, 50.0],
+        }
+    )
+    with pytest.raises(ValueError, match="at least two distinct finite values"):
+        fit_table(df_const_cov, outcome="y", covariates=["age"])
 
 
 def test_survival_strict_binary_event_negative_duration_and_cohort_separation(recipes):
@@ -1472,7 +1515,7 @@ def test_mice_input_guards_and_bounds(recipes):
                 predictors=["x2"],
             )
 
-        # 15. Reject invalid bound ordering (min_value >= max_value)
+        # 15. Reject invalid bound ordering (min_value >= max_value) and improper infinities
         df_order = pd.DataFrame(
             {
                 "y": [1, 0, 1, 0, 1],
@@ -1490,7 +1533,36 @@ def test_mice_input_guards_and_bounds(recipes):
                 max_value={"x1": 20.0},
             )
 
-        # 16. Reject perfectly predicted continuous target (RSS == 0)
+        with pytest.raises(ValueError, match="cannot be NaN or positive infinity"):
+            imp_fn(
+                df_order,
+                features_to_impute=["x1"],
+                outcome_col="y",
+                predictors=["x2"],
+                min_value={"x1": float("inf")},
+            )
+
+        with pytest.raises(ValueError, match="cannot be NaN or negative infinity"):
+            imp_fn(
+                df_order,
+                features_to_impute=["x1"],
+                outcome_col="y",
+                predictors=["x2"],
+                max_value={"x1": float("-inf")},
+            )
+
+        # Allow -inf as lower bound and +inf as upper bound
+        res_infs = imp_fn(
+            df_order,
+            features_to_impute=["x1"],
+            outcome_col="y",
+            predictors=["x2"],
+            min_value={"x1": float("-inf")},
+            max_value={"x1": float("inf")},
+        )
+        assert res_infs is not None
+
+        # 16. Reject perfectly predicted continuous target (relative RSS <= 1e-12)
         # x1 is an exact linear function of x2: x1 = 2 * x2 + 5
         df_perf = pd.DataFrame(
             {
@@ -2333,6 +2405,32 @@ def test_recipe_14_iptw_and_weighted_balance(recipes):
     assert fit_surv["model_type"] == "survival"
     assert "hazard_ratio" in fit_surv
     assert fit_surv["hazard_ratio"] > 0
+
+    # Reject survival when treatment column has only 1 class after filtering
+    res_single_trt = res_df.copy()
+    res_single_trt.loc[res_single_trt["treatment"] == 0, "time"] = -1.0
+    with pytest.raises(ValueError, match="must contain both treatment classes"):
+        fit_weighted_outcome_model(
+            res_single_trt,
+            outcome_col="surv_event",
+            treatment_col="treatment",
+            weights_col="iptw_weight",
+            model_type="survival",
+            duration_col="time",
+        )
+
+    # Reject survival when outcome column has 0 observed events
+    res_zero_events = res_df.copy()
+    res_zero_events["surv_event"] = 0
+    with pytest.raises(ValueError, match="at least one observed event"):
+        fit_weighted_outcome_model(
+            res_zero_events,
+            outcome_col="surv_event",
+            treatment_col="treatment",
+            weights_col="iptw_weight",
+            model_type="survival",
+            duration_col="time",
+        )
 
 
 # -----------------------------------------------------------------------------

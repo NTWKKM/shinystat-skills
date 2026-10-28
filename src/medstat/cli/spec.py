@@ -230,7 +230,7 @@ class AnalysisPlan:
                 covariates=m.get("covariates", []),
                 formula=m.get("formula"),
                 description=m.get("description", ""),
-                time=m.get("time"),
+                time=m.get("time") if m.get("time") is not None else m.get("time_col"),
                 reference_categories=m.get("reference_categories", {}),
                 missing_strategy=m.get("missing_strategy"),
                 missing_justification=m.get("missing_justification"),
@@ -1222,7 +1222,12 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
 
     # 1. Dataset section check
     data_cfg = raw_spec.get("data")
-    if not isinstance(data_cfg, dict) or not data_cfg.get("input_path"):
+    input_path_raw = data_cfg.get("input_path") if isinstance(data_cfg, dict) else None
+    if (
+        not isinstance(data_cfg, dict)
+        or not isinstance(input_path_raw, str)
+        or not input_path_raw.strip()
+    ):
         report["valid"] = False
         report["errors"].append(
             "YAML spec must contain a 'data' section with an 'input_path' pointing to the dataset."
@@ -1389,7 +1394,11 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
             if isinstance(v, dict) and v.get("name"):
                 _add_col_ref(v["name"], "variables.name")
 
-    data_path_str = data_cfg.get("input_path") if isinstance(data_cfg, dict) else None
+    data_path_str = (
+        input_path_raw
+        if isinstance(input_path_raw, str) and input_path_raw.strip()
+        else None
+    )
     if data_path_str:
         data_path = Path(data_path_str)
         if not data_path.is_absolute():

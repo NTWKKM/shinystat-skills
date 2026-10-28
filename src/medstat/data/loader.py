@@ -117,7 +117,17 @@ def get_clinical_columns(
             try:
                 import pyarrow.parquet as pq
 
-                raw_cols = pq.read_schema(p).names
+                schema = pq.read_schema(p)
+                raw_cols = list(schema.names)
+                if schema.pandas_metadata:
+                    index_cols = set()
+                    for idx_col in schema.pandas_metadata.get("index_columns", []):
+                        if isinstance(idx_col, str):
+                            index_cols.add(idx_col)
+                        elif isinstance(idx_col, dict) and idx_col.get("name"):
+                            index_cols.add(idx_col["name"])
+                    if index_cols:
+                        raw_cols = [c for c in raw_cols if c not in index_cols]
             except ImportError:
                 df_empty = pd.read_parquet(p)
                 raw_cols = list(df_empty.columns)

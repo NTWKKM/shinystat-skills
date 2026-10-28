@@ -336,6 +336,10 @@ def fit_logistic_regression_table(
         vals = clean[col].to_numpy(dtype=float)
         if not np.all(np.isfinite(vals)):
             raise ValueError(f"Column '{col}' contains non-finite values (inf or nan).")
+        if col != outcome and len(np.unique(vals)) < 2:
+            raise ValueError(
+                f"Covariate '{col}' must contain at least two distinct finite values."
+            )
 
     outcome_vals = clean[outcome].to_numpy()
     if not np.all(np.isin(outcome_vals, [0, 1])):

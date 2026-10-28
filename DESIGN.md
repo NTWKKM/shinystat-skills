@@ -1504,6 +1504,44 @@ During the detailed automated review on PR #22 by `coderabbitai`, edge cases and
 
 [MEMORY_LEARN: In PyYAML unique key loaders, check for duplicate keys directly on the AST node pair list before merge resolution to avoid false positives on standard merge key ('<<') inheritance.]
 
+---
+
+## ADR 52: PR #22 Code Review Polish: Centered Degeneracy, Covariate Cardinality, Parquet Indices & Spec Precedence
+
+### Context
+In the final review pass on PR #22 by `coderabbitai`, additional refinements were requested:
+1. `01-data-missing-table1.md`: Residual degeneracy checks in MICE implementations used uncentered variance (`sum(y_obs**2)`), distorting scale invariance under constant shifts. Bound validation permitted positive infinity as lower bound and negative infinity as upper bound.
+2. `02-regression-firth-ordinal.md`: Complete-case covariate validation did not verify minimum distinct cardinality (>= 2 distinct finite values per covariate), allowing singular/collinear fits with constant covariates.
+3. `04-causal-iptw-psm.md`: Weighted Cox survival fit post-filter lacked explicit guards requiring both treatment classes and at least one observed event in surviving records.
+4. `skills/shinystat/SKILL.md` & `main.py`: Proportional-hazards failure advice erroneously suggested competing risks as a remedy; the declarative spec executor cannot apply time-varying covariates or strata, so agents must halt unless using a standalone script. Competing risk remediation erroneously matched observation-count errors.
+5. `spec.py`: Non-string truthy `data.input_path` values (e.g. `123`, `True`) caused `TypeError` when constructing `Path`. `AnalysisPlan.from_yaml` failed to populate `ModelSpec.time` from `time_col` when `time` was unset.
+6. `loader.py`: `get_clinical_columns` derived Parquet columns from raw Arrow schema names including named pandas index fields, leading to mismatches against `load_clinical_data` which excludes named index fields from DataFrame columns.
+7. `test_shinystat_cloud.py`: Test state management did not scope `np.random.seed` resets to isolated tests, and Recipe 18 bootstrap checks only verified dictionary key presence rather than convergence.
+
+### Decision
+1. **MICE Centered Degeneracy & Bounds**:
+   - Replaced uncentered sum-of-squares with centered variation `tss = sum((y_obs - mean(y_obs))**2)`, checking `tss == 0.0 or (rss / tss) <= 1e-12`.
+   - Updated bound guards to reject `low_val == float("inf")` and `high_val == float("-inf")` while continuing to allow `-inf` lower bounds and `+inf` upper bounds alongside NaN rejection.
+2. **Covariate Cardinality Validation**:
+   - Enforced `len(np.unique(vals)) >= 2` for every covariate in `fit_logistic_regression_table`.
+3. **Weighted Cox Cohort Requirements**:
+   - Required `surv_clean[treatment_col].nunique() >= 2` and `(surv_clean[outcome_col] == 1).any()` before `CoxPHFitter.fit`.
+4. **Agent PH Failure Guidance & Remediations**:
+   - Updated SKILL.md and `main.py` to direct agents to halt on PH failure in declarative plans rather than suggesting competing risks or unsupported declarative time-varying covariates.
+   - Guarded `competing risk` remediation in `emit_agent_actionable_error` so observation-count errors never trigger it.
+5. **Spec & Path Hardening**:
+   - Validated `data.input_path` strictly as a non-empty string in preflight validation.
+   - Populated `ModelSpec.time` from `models[].time_col` when `models[].time` is unset, preserving `models[].time` precedence.
+6. **Parquet Pandas Metadata Extraction**:
+   - Extracted `pandas_metadata.get("index_columns")` in `get_clinical_columns` to exclude named index fields from available columns, matching `load_clinical_data`.
+7. **Test Random State Isolation & Convergence Verifications**:
+   - Wrapped `test_each_recipe_is_self_contained` in `try / finally` restoring `np.random.get_state()`.
+   - Asserted `res18["n_successful_replicates"] > 0` and `np.isfinite(res18["shrinkage_factor"])`.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Robustness**: Spec parsing, schema metadata extraction, and recipe mathematical stability are completely aligned across CLI, executor, and cloud environments.
+
 
 
 

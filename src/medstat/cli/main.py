@@ -158,8 +158,8 @@ def _sanitize_for_json(obj: Any) -> Any:
 AGENT_ERROR_REMEDIATION_MAP = {
     "separation": "Complete/quasi-complete separation detected. Action: Set model type to 'logistic' with 'options.method: firth' (or use Firth Cox via standalone script) in your spec YAML.",
     "singular": "Singular matrix / collinearity detected. Action: Remove redundant collinear covariates or switch to 'logistic' with 'options.method: firth'.",
-    "proportional hazard": "Proportional hazards assumption violated (Schoenfeld p < 0.05). Action: Consider time-varying covariates or sensitivity analysis per decision heuristics.",
-    "competing risk": "Competing risks present. Action: Use 'competing_risk' model type instead of standard 'cox' to estimate subdistribution hazard ratios (sHR).",
+    "proportional hazard": "Proportional hazards assumption violated (Schoenfeld p < 0.05). Action: Declarative plan cannot apply time-varying covariates or strata; halt execution unless using a standalone Python script applying strata, piecewise/time-varying HR, or RMST.",
+    "competing risk": "Competing events detected in Cox survival model. Action: Use 'competing_risk' model type instead of standard 'cox' to estimate subdistribution hazard ratios (sHR).",
 }
 
 
@@ -199,11 +199,21 @@ def emit_agent_actionable_error(exc: Exception) -> None:
     """Formats runtime statistical exceptions into structured JSON with remediation hints."""
     msg = str(exc)
     msg_lower = msg.lower()
-    hints = [
-        hint
-        for keyword, hint in AGENT_ERROR_REMEDIATION_MAP.items()
-        if keyword in msg_lower
-    ]
+    hints = []
+    for keyword, hint in AGENT_ERROR_REMEDIATION_MAP.items():
+        if keyword == "competing risk":
+            is_competing_error = (
+                "competing risk" in msg_lower or "competing event" in msg_lower
+            ) and "cox" in msg_lower
+            is_obs_error = any(
+                term in msg_lower
+                for term in ("observation", "too few", "insufficient", "at least")
+            )
+            if is_competing_error and not is_obs_error:
+                hints.append(hint)
+            continue
+        if keyword in msg_lower:
+            hints.append(hint)
     if not hints:
         hints.append(
             "Run `medstat_cli.py --validate-only <spec.yaml>` to verify column names and spec structure."
