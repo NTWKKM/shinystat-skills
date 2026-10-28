@@ -1542,6 +1542,28 @@ In the final review pass on PR #22 by `coderabbitai`, additional refinements wer
 - **Status**: Accepted & Fully Verified.
 - **Robustness**: Spec parsing, schema metadata extraction, and recipe mathematical stability are completely aligned across CLI, executor, and cloud environments.
 
+---
+
+## ADR 53: PR #22 Follow-Up Review: Per-Arm Survival Events, Parquet RangeIndex Handling, and Spec Time Resolution
+
+### Context
+In the latest review round on PR #22 by `coderabbitai`:
+1. `04-causal-iptw-psm.md`: In weighted Cox survival models, checking only overall observed event count allowed cohorts where one treatment arm had zero events, risking numeric instability and complete separation in Cox regression.
+2. `spec.py`: `AnalysisPlan.from_yaml` needed `options.time_col` to populate `ModelSpec.time` for survival models (including Cox), while keeping `time` > `time_col` precedence and keeping non-survival models unchanged.
+3. `loader.py`: `get_clinical_columns` Parquet pandas metadata inspection added named index column dictionaries to `index_cols` without excluding `kind: "range"`, which could erroneously flag legitimate columns sharing the RangeIndex name.
+4. Recipe 11 parity test: The parity test in `tests/unit/test_ph_violation_remedies.py` was referencing the removed/decomposed `skills/shinystat-cloud/references/python-recipes.md` document instead of the modular `03-survival-competing-risks.md`.
+
+### Decision
+1. **Per-Arm Survival Event Guard**: In `fit_weighted_outcome_model`, added verification that `surv_clean.groupby(treatment_col)[outcome_col]` has $\ge 1$ observed event in every treatment class, preserving the existing overall cohort event check.
+2. **Survival Model Time Resolution**: Added `_SURVIVAL_MODEL_TYPES` set and resolved `ModelSpec.time` from `options.time_col` when `time` and `time_col` are unset strictly for survival model types.
+3. **Parquet RangeIndex Kind Filter**: Updated pandas metadata dictionary handling in `get_clinical_columns` to check `idx_col.get("kind") != "range"` before adding to `index_cols`.
+4. **Recipe 11 Source Alignment**: Updated `test_recipe_11_equals_src_functions()` to read `skills/shinystat-cloud/references/recipes/03-survival-competing-risks.md`.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: All unit tests passing, ruff lint and format clean, 0 regressions.
+
+
 
 
 

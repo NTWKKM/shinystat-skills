@@ -422,6 +422,13 @@ def fit_weighted_outcome_model(
             raise ValueError(
                 f"Outcome column '{outcome_col}' must contain at least one observed event in weighted cohort."
             )
+        events_by_arm = surv_clean.groupby(treatment_col)[outcome_col].apply(
+            lambda s: int((s == 1).sum())
+        )
+        if (events_by_arm == 0).any():
+            raise ValueError(
+                f"Each treatment class in '{treatment_col}' must contain at least one observed event in weighted cohort."
+            )
         cph = CoxPHFitter()
         cph.fit(
             surv_clean[[duration_col, outcome_col, treatment_col, weights_col]],

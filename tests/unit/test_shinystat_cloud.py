@@ -2432,6 +2432,22 @@ def test_recipe_14_iptw_and_weighted_balance(recipes):
             duration_col="time",
         )
 
+    # Reject survival when either treatment class has 0 observed events
+    res_arm_zero = res_df.copy()
+    res_arm_zero.loc[res_arm_zero["treatment"] == 1, "surv_event"] = 0
+    with pytest.raises(
+        ValueError,
+        match="Each treatment class in 'treatment' must contain at least one observed event",
+    ):
+        fit_weighted_outcome_model(
+            res_arm_zero,
+            outcome_col="surv_event",
+            treatment_col="treatment",
+            weights_col="iptw_weight",
+            model_type="survival",
+            duration_col="time",
+        )
+
 
 # -----------------------------------------------------------------------------
 # 21. Recipe 15: Competing Risks Survival Analysis

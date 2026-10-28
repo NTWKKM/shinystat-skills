@@ -59,6 +59,16 @@ from medstat.reporting.tables import (
     render_competing_risks_table,
 )
 
+_SURVIVAL_MODEL_TYPES = {
+    "cox",
+    "cox_ph",
+    "survival",
+    "fine_gray",
+    "competing_risks",
+    "competing_risk",
+    "cif",
+}
+
 
 class _UniqueKeyLoader(yaml.SafeLoader):
     pass
@@ -221,23 +231,31 @@ class AnalysisPlan:
             for v in data.get("variables", [])
         ]
 
-        models = [
-            ModelSpec(
-                name=m.get("name", "model_1"),
-                type=m.get("type", "logistic"),
-                outcome=m.get("outcome", ""),
-                exposure=m.get("exposure"),
-                covariates=m.get("covariates", []),
-                formula=m.get("formula"),
-                description=m.get("description", ""),
-                time=m.get("time") if m.get("time") is not None else m.get("time_col"),
-                reference_categories=m.get("reference_categories", {}),
-                missing_strategy=m.get("missing_strategy"),
-                missing_justification=m.get("missing_justification"),
-                options=m.get("options", {}),
+        models = []
+        for m in data.get("models", []):
+            m_type = str(m.get("type", "logistic")).lower().strip()
+            time_val = m.get("time") if m.get("time") is not None else m.get("time_col")
+            if time_val is None and m_type in _SURVIVAL_MODEL_TYPES:
+                opts = m.get("options")
+                if isinstance(opts, dict):
+                    time_val = opts.get("time_col")
+
+            models.append(
+                ModelSpec(
+                    name=m.get("name", "model_1"),
+                    type=m.get("type", "logistic"),
+                    outcome=m.get("outcome", ""),
+                    exposure=m.get("exposure"),
+                    covariates=m.get("covariates", []),
+                    formula=m.get("formula"),
+                    description=m.get("description", ""),
+                    time=time_val,
+                    reference_categories=m.get("reference_categories", {}),
+                    missing_strategy=m.get("missing_strategy"),
+                    missing_justification=m.get("missing_justification"),
+                    options=m.get("options", {}),
+                )
             )
-            for m in data.get("models", [])
-        ]
 
         rep_dict = data.get("reporting", {})
         reporting = ReportingSpec(
@@ -1366,15 +1384,7 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
                         _add_col_ref(opts[opt_key], f"models.options.{opt_key}")
 
             m_type = str(item.get("type", "")).lower().strip()
-            if m_type in (
-                "cox",
-                "cox_ph",
-                "survival",
-                "fine_gray",
-                "competing_risks",
-                "competing_risk",
-                "cif",
-            ):
+            if m_type in _SURVIVAL_MODEL_TYPES:
                 time_var = (
                     item.get("time")
                     or item.get("time_col")

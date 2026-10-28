@@ -342,6 +342,16 @@ def test_get_clinical_columns_formats_and_duplicates(tmp_path):
     loaded_df = load_clinical_data(parquet_idx_path)
     assert list(loaded_df.columns) == cols_idx
 
+    # 1c. Parquet with named RangeIndex: range index entry must not filter columns
+    df_range = pd.DataFrame(
+        {"col_a": [1, 2], "col_b": [3, 4]},
+        index=pd.RangeIndex(0, 2, name="col_a"),
+    )
+    parquet_range_path = tmp_path / "data_range.parquet"
+    df_range.to_parquet(parquet_range_path)
+    cols_range = get_clinical_columns(parquet_range_path)
+    assert cols_range == ["col_a", "col_b"]
+
     # 2. Excel .xlsx
     xlsx_path = tmp_path / "data.xlsx"
     df.to_excel(xlsx_path, index=False)
@@ -402,7 +412,7 @@ models:
     plan1 = AnalysisPlan.from_yaml(spec_time_col)
     assert plan1.models[0].time == "follow_up_days"
 
-    # 2. time takes precedence over time_col when both are specified
+    # 2. time takes precedence over time_col and options.time_col when specified
     spec_precedence = tmp_path / "spec_precedence.yaml"
     spec_precedence.write_text(
         """
@@ -415,12 +425,26 @@ models:
     type: "cox"
     time: "primary_time"
     time_col: "secondary_time"
+    options:
+      time_col: "tertiary_time"
     outcome: "dead"
+  - name: "cox_from_options"
+    type: "cox"
+    outcome: "dead"
+    options:
+      time_col: "options_time"
+  - name: "logistic_ignore_options"
+    type: "logistic"
+    outcome: "dead"
+    options:
+      time_col: "ignored_time"
 """,
         encoding="utf-8",
     )
     plan2 = AnalysisPlan.from_yaml(spec_precedence)
     assert plan2.models[0].time == "primary_time"
+    assert plan2.models[1].time == "options_time"
+    assert plan2.models[2].time is None
 
 
 def test_actionable_error_ph_and_competing_risk_remediation(capsys):

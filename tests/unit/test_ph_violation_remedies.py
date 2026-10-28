@@ -216,7 +216,12 @@ def test_recipe_11_equals_src_functions():
     """Recipe 11 code block equals src functions (normalized source text and AST)."""
     repo_root = Path(__file__).resolve().parent.parent.parent
     recipe_path = (
-        repo_root / "skills" / "shinystat-cloud" / "references" / "python-recipes.md"
+        repo_root
+        / "skills"
+        / "shinystat-cloud"
+        / "references"
+        / "recipes"
+        / "03-survival-competing-risks.md"
     )
     src_path = repo_root / "src" / "medstat" / "models" / "survival.py"
 
@@ -224,7 +229,7 @@ def test_recipe_11_equals_src_functions():
     m = re.search(
         r"## 11\. Survival Analysis.*?```python\n(.*?)\n```", content, re.DOTALL
     )
-    assert m, "Recipe 11 code block not found in python-recipes.md"
+    assert m, "Recipe 11 code block not found in 03-survival-competing-risks.md"
     recipe_code = m.group(1)
 
     recipe_tree = ast.parse(recipe_code)
