@@ -442,6 +442,22 @@ models:
     type: "logistic"
     time_col: "ignored_top_time"
     outcome: "dead"
+  - name: "iptw_survival_top_time_col"
+    type: "iptw"
+    time_col: "iptw_surv_time"
+    outcome: "dead"
+  - name: "iptw_survival_options_time_col"
+    type: "causal_iptw"
+    options:
+      time_col: "iptw_opt_time"
+    outcome: "dead"
+  - name: "td_roc_top_time_col"
+    type: "time_dependent_roc"
+    time_col: "td_time"
+    outcome: "dead"
+  - name: "iptw_binary_no_time"
+    type: "iptw"
+    outcome: "dead"
 """,
         encoding="utf-8",
     )
@@ -450,6 +466,10 @@ models:
     assert plan2.models[1].time == "options_time"
     assert plan2.models[2].time is None
     assert plan2.models[3].time is None
+    assert plan2.models[4].time == "iptw_surv_time"
+    assert plan2.models[5].time == "iptw_opt_time"
+    assert plan2.models[6].time == "td_time"
+    assert plan2.models[7].time is None
 
 
 def test_actionable_error_ph_and_competing_risk_remediation(capsys):

@@ -69,6 +69,13 @@ _SURVIVAL_MODEL_TYPES = {
     "cif",
 }
 
+_TIME_SUPPORTED_MODEL_TYPES = _SURVIVAL_MODEL_TYPES | {
+    "iptw",
+    "causal_iptw",
+    "time_dependent_roc",
+    "td_roc",
+}
+
 
 class _UniqueKeyLoader(yaml.SafeLoader):
     pass
@@ -235,7 +242,7 @@ class AnalysisPlan:
         for m in data.get("models", []):
             m_type = str(m.get("type", "logistic")).lower().strip()
             time_val = m.get("time")
-            if time_val is None and m_type in _SURVIVAL_MODEL_TYPES:
+            if time_val is None and m_type in _TIME_SUPPORTED_MODEL_TYPES:
                 time_val = m.get("time_col")
                 if time_val is None:
                     opts = m.get("options")

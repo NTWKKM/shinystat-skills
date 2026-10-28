@@ -1555,7 +1555,7 @@ In the latest review round on PR #22 by `coderabbitai`:
 
 ### Decision
 1. **Per-Arm Survival Event Guard**: In `fit_weighted_outcome_model`, added verification that `surv_clean.groupby(treatment_col)[outcome_col]` has $\ge 1$ observed event in every treatment class, preserving the existing overall cohort event check. Parameterized test coverage verifies rejection across all treatment classes.
-2. **Survival Model Time Resolution**: Added `_SURVIVAL_MODEL_TYPES` set and resolved `ModelSpec.time` from `time_col` and `options.time_col` strictly for survival model types when `time` is unset, preserving `time` precedence and ensuring non-survival models (e.g. logistic) do not populate `time` from `time_col`.
+2. **Time-Supported Model Resolution**: Added `_TIME_SUPPORTED_MODEL_TYPES` (`_SURVIVAL_MODEL_TYPES | {"iptw", "causal_iptw", "time_dependent_roc", "td_roc"}`) and resolved `ModelSpec.time` from `time_col` and `options.time_col` when `time` is unset, keeping `time` precedence and ensuring non-time models (e.g. logistic, linear) do not populate `time` from `time_col`. Kept `_SURVIVAL_MODEL_TYPES` separate so preflight validation allows IPTW models with non-survival outcomes.
 3. **Parquet RangeIndex Kind Filter**: Updated pandas metadata dictionary handling in `get_clinical_columns` to check `idx_col.get("kind") != "range"` before adding to `index_cols`.
 4. **Recipe 11 Source Alignment**: Updated `test_recipe_11_equals_src_functions()` to read `skills/shinystat-cloud/references/recipes/03-survival-competing-risks.md`.
 
