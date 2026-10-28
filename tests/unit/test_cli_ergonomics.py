@@ -458,6 +458,47 @@ models:
   - name: "iptw_binary_no_time"
     type: "iptw"
     outcome: "dead"
+  - name: "iptw_binary_explicit_outcome_type"
+    type: "iptw"
+    time_col: "iptw_bin_time"
+    outcome: "dead"
+    options:
+      outcome_type: "binary"
+  - name: "iptw_continuous_explicit_outcome_type"
+    type: "causal_iptw"
+    outcome: "dead"
+    options:
+      outcome_type: "continuous"
+      time_col: "iptw_cont_time"
+  - name: "iptw_survival_explicit_outcome_type"
+    type: "iptw"
+    time_col: "iptw_surv_time_explicit"
+    outcome: "dead"
+    options:
+      outcome_type: "survival"
+  - name: "logistic_method_iptw_time_fallback"
+    type: "logistic"
+    time_col: "log_iptw_time"
+    outcome: "dead"
+    options:
+      method: "iptw"
+  - name: "logistic_method_iptw_binary_no_time"
+    type: "logistic"
+    time_col: "log_iptw_bin_time"
+    outcome: "dead"
+    options:
+      method: "iptw"
+      outcome_type: "binary"
+  - name: "diagnostic_td_roc_top_time_col"
+    type: "diagnostic"
+    time_col: "diag_td_time"
+    outcome: "dead"
+    options:
+      time_dependent_roc: true
+  - name: "diagnostic_ordinary_no_time"
+    type: "diagnostic"
+    time_col: "diag_ignored_time"
+    outcome: "dead"
 """,
         encoding="utf-8",
     )
@@ -470,6 +511,63 @@ models:
     assert plan2.models[5].time == "iptw_opt_time"
     assert plan2.models[6].time == "td_time"
     assert plan2.models[7].time is None
+    assert plan2.models[8].time is None  # iptw binary explicit
+    assert plan2.models[9].time is None  # iptw continuous explicit
+    assert plan2.models[10].time == "iptw_surv_time_explicit"
+    assert plan2.models[11].time == "log_iptw_time"  # options.method: iptw inherits
+    assert plan2.models[12].time is None  # options.method: iptw + binary outcome
+    assert plan2.models[13].time == "diag_td_time"  # diagnostic with time_dependent_roc
+    assert plan2.models[14].time is None  # ordinary diagnostic without td roc
+
+
+def test_execute_required_cols_duration_dedup(tmp_path, monkeypatch):
+    """AnalysisPlan.execute includes resolved duration from model.time and omits overridden options.time_col."""
+    import medstat.cli.spec as spec_mod
+
+    captured_req_cols = []
+    orig_prepare = spec_mod.prepare_data_for_analysis
+
+    def mock_prepare(*args, **kwargs):
+        captured_req_cols.append(kwargs.get("required_cols"))
+        return orig_prepare(*args, **kwargs)
+
+    monkeypatch.setattr(spec_mod, "prepare_data_for_analysis", mock_prepare)
+
+    csv_path = tmp_path / "data.csv"
+    pd.DataFrame(
+        {
+            "patient_id": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            "dead": [0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+            "age": [50, 60, 70, 80, 90, 55, 65, 75, 85, 95],
+            "time_top": [10, 20, 30, 40, 50, 15, 25, 35, 45, 55],
+            "time_stale": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        }
+    ).to_csv(csv_path, index=False)
+
+    plan_yaml = tmp_path / "plan.yaml"
+    plan_yaml.write_text(
+        f"""
+metadata:
+  study_title: "Duration Col Dedup"
+data:
+  input_path: "{csv_path}"
+models:
+  - name: "cox_model"
+    type: "cox"
+    time: "time_top"
+    outcome: "dead"
+    covariates: ["age"]
+    options:
+      time_col: "time_stale"
+""",
+        encoding="utf-8",
+    )
+
+    plan = AnalysisPlan.from_yaml(plan_yaml)
+    plan.execute()
+    assert len(captured_req_cols) == 1
+    assert "time_top" in captured_req_cols[0]
+    assert "time_stale" not in captured_req_cols[0]
 
 
 def test_actionable_error_ph_and_competing_risk_remediation(capsys):

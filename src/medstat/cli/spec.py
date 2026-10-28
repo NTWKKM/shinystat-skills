@@ -241,13 +241,34 @@ class AnalysisPlan:
         models = []
         for m in data.get("models", []):
             m_type = str(m.get("type", "logistic")).lower().strip()
+            opts = m.get("options")
+            opts_dict = opts if isinstance(opts, dict) else {}
+            m_method = str(opts_dict.get("method", "")).lower().strip()
+
+            is_survival = m_type in _SURVIVAL_MODEL_TYPES
+            is_iptw = m_type in ("iptw", "causal_iptw") or m_method == "iptw"
+            is_td_roc = m_type in ("time_dependent_roc", "td_roc") or (
+                m_type in ("diagnostic", "diag")
+                and bool(
+                    opts_dict.get("time_dependent_roc")
+                    or opts_dict.get("time_horizons")
+                    or opts_dict.get("horizons")
+                )
+            )
+
+            supports_time = False
+            if is_survival or is_td_roc:
+                supports_time = True
+            elif is_iptw:
+                outcome_type = str(opts_dict.get("outcome_type", "")).lower().strip()
+                if outcome_type not in ("binary", "continuous"):
+                    supports_time = True
+
             time_val = m.get("time")
-            if time_val is None and m_type in _TIME_SUPPORTED_MODEL_TYPES:
+            if time_val is None and supports_time:
                 time_val = m.get("time_col")
                 if time_val is None:
-                    opts = m.get("options")
-                    if isinstance(opts, dict):
-                        time_val = opts.get("time_col")
+                    time_val = opts_dict.get("time_col")
 
             models.append(
                 ModelSpec(
@@ -357,6 +378,8 @@ class AnalysisPlan:
                 "p_pred",
                 "score",
             ):
+                if opt_key == "time_col" and model_spec.time:
+                    continue
                 val = model_spec.options.get(opt_key)
                 if val and isinstance(val, str) and val in current_df.columns:
                     req_cols.append(val)
