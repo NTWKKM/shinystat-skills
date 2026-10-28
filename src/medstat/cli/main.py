@@ -156,10 +156,10 @@ def _sanitize_for_json(obj: Any) -> Any:
 
 
 AGENT_ERROR_REMEDIATION_MAP = {
-    "separation": "Complete/quasi-complete separation detected. Action: Change model type from 'glm' to 'firth_logistic' (or 'firth_cox' for survival) in your spec YAML.",
-    "singular": "Singular matrix / collinearity detected. Action: Remove redundant collinear covariates or switch to 'firth_logistic'.",
-    "proportional hazard": "Proportional hazards assumption violated (Schoenfeld p < 0.05). Action: Add stratification (`strata_cols`) or time-varying covariates in `survival` config.",
-    "competing": "Competing risks present. Action: Use 'fine_gray' model type instead of standard 'cox' to estimate subdistribution hazard ratios (sHR).",
+    "separation": "Complete/quasi-complete separation detected. Action: Set model type to 'logistic' with 'options.method: firth' (or use Firth Cox via standalone script) in your spec YAML.",
+    "singular": "Singular matrix / collinearity detected. Action: Remove redundant collinear covariates or switch to 'logistic' with 'options.method: firth'.",
+    "proportional hazard": "Proportional hazards assumption violated (Schoenfeld p < 0.05). Action: Consider time-varying covariates or sensitivity analysis per decision heuristics.",
+    "competing risk": "Competing risks present. Action: Use 'competing_risk' model type instead of standard 'cox' to estimate subdistribution hazard ratios (sHR).",
 }
 
 
@@ -234,13 +234,11 @@ def emit_agent_actionable_error(exc: Exception) -> None:
 @click.pass_context
 def cli(ctx: click.Context, schema: bool, validate_only: str | None) -> None:
     """medstat: Clinical Biostatistics & Health Data Science CLI."""
-    if schema:
-        print(get_cli_schema_template())
-        ctx.exit(0)
-    if validate_only:
-        result = preflight_validate_spec(validate_only)
-        print(json.dumps(result, indent=2, ensure_ascii=False))
-        ctx.exit(0 if result["valid"] else 1)
+    exit_code = handle_agent_ergonomic_flags(
+        argparse.Namespace(schema=schema, validate_only=validate_only)
+    )
+    if exit_code is not None:
+        ctx.exit(exit_code)
     if ctx.invoked_subcommand is None:
         print(ctx.get_help())
         ctx.exit(0)
@@ -979,6 +977,8 @@ def model_cmd(
             fit_res = fit_standard_logistic(y, X_df)
             sum_df = fit_res["summary_df"]
             result_data["coefficients"] = _serialize_summary_df(sum_df)
+            if fit_res.get("agent_remediation"):
+                result_data["agent_remediation"] = fit_res["agent_remediation"]
 
         if e_value and exposure:
             matching = [idx for idx in sum_df.index if str(idx) == exposure]

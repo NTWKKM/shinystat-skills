@@ -119,7 +119,7 @@ def fit_standard_logistic(
             "Large or non-finite standard errors detected in standard logistic regression (standard error > 50 or infinite). "
             "Inconclusive warning: this may indicate complete or quasi-complete separation, extreme predictor scaling, or severe collinearity. "
             "Action: Inspect predictor scales and cross-tabulations. If separation is confirmed, switch model to Firth penalized logistic regression "
-            "(medstat.models.firth.fit_firth_logistic) or specify 'firth_logistic' in your spec YAML."
+            "(medstat.models.firth.fit_firth_logistic) or set type: logistic with options.method: firth in your spec YAML."
         )
 
     return {

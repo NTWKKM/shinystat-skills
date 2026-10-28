@@ -41,7 +41,20 @@ def fit_firth_logistic(
         raise ValueError(f"max_iter must be an integer >= 1; got {max_iter}")
 
     X_arr = np.asarray(X, dtype=float)
+    if X_arr.ndim == 1:
+        X_arr = X_arr.reshape(-1, 1)
+    elif X_arr.ndim != 2:
+        raise ValueError(f"X must be a 2D array or 1D vector; got ndim={X_arr.ndim}")
+
     y_arr = np.asarray(y, dtype=float).ravel()
+    if len(X_arr) != len(y_arr):
+        raise ValueError(
+            f"Length mismatch: X ({len(X_arr)}) and y ({len(y_arr)}) must have matching row counts."
+        )
+    if not np.all(np.isfinite(X_arr)):
+        raise ValueError("X contains non-finite values (inf or nan).")
+    if not np.all(np.isfinite(y_arr)):
+        raise ValueError("y contains non-finite values (inf or nan).")
 
     if not np.all(np.isin(y_arr, [0, 1])):
         raise ValueError("Binary outcome y must contain strictly 0 and 1.")
@@ -111,6 +124,10 @@ def fit_firth_logistic(
     except np.linalg.LinAlgError:
         I_inv = np.linalg.pinv(I_final)
     se = np.sqrt(np.diag(I_inv))
+    if not np.all(np.isfinite(se)) or np.any(se <= 0.0):
+        raise ValueError(
+            "Standard errors derived from Fisher information matrix are non-finite or non-positive."
+        )
 
     # Profile Likelihood Confidence Intervals (chi2 cutoff = 3.841)
     # A profile likelihood interval requires the maximized penalized likelihood at convergence.
@@ -306,10 +323,19 @@ def fit_logistic_regression_table(
     df: pd.DataFrame, outcome: str, covariates: list[str]
 ) -> pd.DataFrame:
     """Generate publication-ready Logistic Regression table with Crude & Adjusted ORs."""
+    if not covariates:
+        raise ValueError("covariates list must not be empty.")
     n_initial = len(df)
     clean = df.dropna(subset=[outcome] + covariates).copy()
     n_analyzed = len(clean)
     n_excluded = n_initial - n_analyzed
+    if n_analyzed == 0:
+        raise ValueError("No complete cases remaining after cleaning.")
+
+    for col in [outcome] + covariates:
+        vals = clean[col].to_numpy(dtype=float)
+        if not np.all(np.isfinite(vals)):
+            raise ValueError(f"Column '{col}' contains non-finite values (inf or nan).")
 
     outcome_vals = clean[outcome].to_numpy()
     if not np.all(np.isin(outcome_vals, [0, 1])):
@@ -351,7 +377,10 @@ def fit_logistic_regression_table(
             f"{np.exp(adj_b):.2f} ({np.exp(adj_ci[0]):.2f}–{np.exp(adj_ci[1]):.2f})"
         )
 
-        p_val_str = f"{adj_p:.3f}" if adj_p >= 0.001 else "<0.001"
+        if not np.isfinite(adj_p):
+            p_val_str = "NA"
+        else:
+            p_val_str = f"{adj_p:.3f}" if adj_p >= 0.001 else "<0.001"
 
         rows.append(
             {

@@ -1465,6 +1465,46 @@ During code review for PR #22 (`refactor/repo-dedup-progressive-disclosure`), a 
 
 [MEMORY_LEARN: Pre-flight YAML and schema validation should inspect dataset schemas/headers using low-overhead metadata probes rather than full cohort loads, preventing out-of-memory overhead during agent planning.]
 
+---
+
+## ADR 51: Invariant Hardening, Robust YAML Pre-flight & Test Isolation (PR #22 Code Review Follow-Up)
+
+### Context
+During the detailed automated review on PR #22 by `coderabbitai`, edge cases and boundary behaviors were identified across CLI ergonomics, YAML loading, cloud recipes, and unit test coverage:
+1. `_construct_unique_mapping` in `spec.py` traversed flattened mappings, falsely flagging legitimate YAML merge key syntax (`<<: *base`) as duplicate keys.
+2. `preflight_validate_spec` permitted legacy fallbacks (`analyses` and `method`) instead of strictly requiring `models` with `type`, accepted arbitrary top-level sections, and did not consistently validate survival time/event specs prior to dataset existence checks.
+3. In `loader.py`, encoding fallback lists were duplicated across multiple functions, and Parquet column extraction caught broad exceptions rather than only `ImportError`.
+4. In `main.py`, the Click command entrypoint let `--schema` and `--validate-only` fall through into standard dispatch without clean termination, and standard logistic direct fits did not propagate `agent_remediation`.
+5. Across cloud recipes:
+   - Recipe 01: Little's MCAR lacked non-negative finite check on `tol`; MICE used fixed float epsilon for residual degeneracy rather than scale-aware tolerance; MICE bounds permitted `NaN`; Fisher's exact 2x2 test relied on observed counts rather than expected counts $< 5$; SMD functions lacked non-finite input rejection.
+   - Recipe 02: Covariate/outcome shape checks lacked non-finite validation; adjusted p-values lacked `NA` handling for non-finite values; standard error inversion lacked positive finite validation before Wald fallback.
+   - Recipe 03: Time horizons lacked non-negative finite validation; durations allowed zero; non-95% confidence intervals were mislabeled as 95%; profile threshold compared against fixed 0.05 instead of dynamic alpha.
+   - Recipe 04: IPTW and PSM allowed single-class treatment data; non-finite treatment/outcomes reached solvers; empty PSM matching dropped column schema and `pair_id`; negative IPTW weights were permitted; weighted Cox dropna subset omitted duration column.
+   - Recipe 05: Parameter domain validation was missing for alpha, ci, and direction; empty calibration complete-cases lacked explicit errors; categorical NRI allowed non-finite or outside (0, 1) thresholds; Youden threshold replaced optimal points with infinities; ICC matrix lacked 2D and finite validation; bootstrap internal validation omitted infinities from `n_excluded`; tdROC allowed length mismatches and infinite inputs.
+6. In `test_shinystat_cloud.py`, `test_each_recipe_is_self_contained` lacked test branches for Recipes 18, 19, and 20, silently falling through.
+
+### Decision
+1. **YAML Loader & Preflight Spec Hardening**:
+   - Updated `_construct_unique_mapping` to check `node.value` pairs before merge flattening, ignoring merge keys (`tag:yaml.org,2002:merge`) and unhashable keys, and delegating construction to `super().construct_mapping`.
+   - In `preflight_validate_spec`, enforced strict top-level keys (`data`, `metadata`, `models`), required `data.input_path`, resolved paths deterministically against `Path.cwd()`, and validated survival time and event columns unconditionally.
+2. **CLI Ergonomics & Ingestion Efficiency**:
+   - Reused consolidated `_READ_ENCODINGS` and `_normalize_columns` across `loader.py`.
+   - Caught only `ImportError` on Parquet schema extraction so corrupted files raise cleanly through Click error reporting.
+   - Routed `--schema` and `--validate-only` in Click `cli` through `handle_agent_ergonomic_flags` with clean exit codes.
+   - Copied `agent_remediation` from `fit_res` to `result_data` on standard logistic fits.
+3. **Recipe Numerical Guardrails & Parity**:
+   - Implemented strict numerical domain validations across Recipes 01–05.
+   - Added isolated test fixtures for Recipes 18, 19, and 20 in `test_each_recipe_is_self_contained`, with an explicit `else: pytest.fail(...)`.
+   - Updated `scripts/install-skills.sh` to package `packaging/cloud/shinystat-cloud` in sync with canonical `skills/shinystat-cloud`.
+
+### Consequences
+- **Status**: Accepted & Fully Verified (707/707 tests passing, clean ruff lint & format).
+- **Correctness**: Zero mathematical degeneracy, robust handling of YAML merge keys, and full test isolation across all 20 cloud recipes.
+- **Safety**: Early validation prevents invalid inputs, non-finite values, and malformed plans from reaching statistical solvers.
+
+[MEMORY_LEARN: In PyYAML unique key loaders, check for duplicate keys directly on the AST node pair list before merge resolution to avoid false positives on standard merge key ('<<') inheritance.]
+
+
 
 
 

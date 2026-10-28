@@ -67,19 +67,27 @@ class _UniqueKeyLoader(yaml.SafeLoader):
 def _construct_unique_mapping(
     loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False
 ) -> dict[str, Any]:
-    loader.flatten_mapping(node)
-    mapping: dict[str, Any] = {}
-    for key_node, value_node in node.value:
+    seen_keys = set()
+    for key_node, _ in node.value:
+        if getattr(key_node, "tag", None) == "tag:yaml.org,2002:merge":
+            continue
         key = loader.construct_object(key_node, deep=deep)
-        if key in mapping:
+        try:
+            is_dup = key in seen_keys
+        except TypeError:
+            is_dup = False
+        if is_dup:
             raise yaml.constructor.ConstructorError(
                 "while constructing a mapping",
                 node.start_mark,
                 f"found duplicate key: '{key}'",
                 key_node.start_mark,
             )
-        mapping[key] = loader.construct_object(value_node, deep=deep)
-    return mapping
+        try:
+            seen_keys.add(key)
+        except TypeError:
+            pass
+    return super(_UniqueKeyLoader, loader).construct_mapping(node, deep=deep)
 
 
 _UniqueKeyLoader.add_constructor(
@@ -1142,13 +1150,13 @@ data:
 
 models:
   - name: "primary_outcome"
-    type: "logistic"                    # logistic | linear | cox | fine_gray | ordinal | multilevel | iptw | diagnostic | validation | recalibration
+    type: "logistic"                    # logistic | linear | cox | competing_risk | fine_gray | iptw | diagnostic | validation | recalibration
     outcome: "mortality_28d"
     exposure: "treatment_group"
     covariates: ["age", "sex", "sofa_score"]
     missing_strategy: "complete-case"   # complete-case | mice | knn | indicator
     missing_justification: "Complete-case analysis prespecified"
-    # For survival/fine_gray specify time: "follow_up_days" and options: {competing_event_val: 2}
+    # For survival/competing_risk specify time: "follow_up_days" and options: {event_of_interest: 1, competing_event: 2}
 
 reporting:
   style: "nejm"                         # nejm | lancet | jama | bmj
@@ -1201,10 +1209,7 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
         )
         return report
 
-    has_spec_keys = any(
-        k in raw_spec
-        for k in ("data", "project", "metadata", "analyses", "models", "variables")
-    )
+    has_spec_keys = any(k in raw_spec for k in ("data", "metadata", "models"))
     if not has_spec_keys:
         report["valid"] = False
         report["errors"].append(
@@ -1217,28 +1222,26 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
 
     # 1. Dataset section check
     data_cfg = raw_spec.get("data")
-    if not isinstance(data_cfg, dict) or not (
-        data_cfg.get("path") or data_cfg.get("input_path")
-    ):
+    if not isinstance(data_cfg, dict) or not data_cfg.get("input_path"):
         report["valid"] = False
         report["errors"].append(
-            "YAML spec must contain a 'data' section with an 'input_path' (or 'path') pointing to the dataset."
+            "YAML spec must contain a 'data' section with an 'input_path' pointing to the dataset."
         )
         report["agent_remediation"].append(
             "Specify `data.input_path: path/to/dataset.csv` in your spec YAML."
         )
 
     # 2. Executable models section check
-    analyses_list = raw_spec.get("models") or raw_spec.get("analyses")
-    if not isinstance(analyses_list, list) or len(analyses_list) == 0:
+    models_list = raw_spec.get("models")
+    if not isinstance(models_list, list) or len(models_list) == 0:
         report["valid"] = False
         report["errors"].append(
-            "YAML spec must contain a non-empty 'models' (or 'analyses') list specifying executable models."
+            "YAML spec must contain a non-empty 'models' list specifying executable models."
         )
         report["agent_remediation"].append(
             "Define at least one executable model in the `models` section of your spec YAML."
         )
-        analyses_list = []
+        models_list = []
     else:
         supported_types = {
             "logistic",
@@ -1250,6 +1253,7 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
             "cox_ph",
             "survival",
             "competing_risks",
+            "competing_risk",
             "cif",
             "fine_gray",
             "iptw",
@@ -1264,21 +1268,24 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
             "tripod",
             "recalibration",
             "recalibrate",
-            "multilevel",
-            "mixed",
-            "gee",
-            "ordinal",
         }
-        for idx, item in enumerate(analyses_list, start=1):
+        for idx, item in enumerate(models_list, start=1):
             if not isinstance(item, dict):
                 report["valid"] = False
                 report["errors"].append(
                     f"Model item #{idx} must be a dictionary/mapping."
                 )
                 continue
-            m_type = (
-                str(item.get("type", item.get("method", "logistic"))).lower().strip()
-            )
+            if "type" not in item:
+                report["valid"] = False
+                report["errors"].append(
+                    f"Model item #{idx} missing required field 'type'."
+                )
+                report["agent_remediation"].append(
+                    f"Set `type` in model item #{idx} to one of {sorted(supported_types)}."
+                )
+                continue
+            m_type = str(item.get("type", "")).lower().strip()
             if not m_type or m_type not in supported_types:
                 report["valid"] = False
                 report["errors"].append(
@@ -1289,27 +1296,110 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
                     f"Set `type` in model item #{idx} to one of {sorted(supported_types)}."
                 )
 
-    data_path_str = None
-    if isinstance(data_cfg, dict):
-        data_path_str = data_cfg.get("path") or data_cfg.get("input_path")
+    # Validate column references across spec
+    referenced_cols: set[str] = set()
 
+    def _add_col_ref(val: Any, field_name: str) -> None:
+        if val is None:
+            return
+        if isinstance(val, str):
+            referenced_cols.add(val)
+        elif isinstance(val, list):
+            for elem in val:
+                if isinstance(elem, str):
+                    referenced_cols.add(elem)
+                else:
+                    report["valid"] = False
+                    report["errors"].append(
+                        f"Field '{field_name}' list items must be strings; got {type(elem).__name__}: {elem}"
+                    )
+        else:
+            report["valid"] = False
+            report["errors"].append(
+                f"Field '{field_name}' must be a string or list of strings; got {type(val).__name__}."
+            )
+
+    t1 = raw_spec.get("table1", {})
+    if isinstance(t1, dict):
+        if t1.get("group_col"):
+            _add_col_ref(t1["group_col"], "table1.group_col")
+        _add_col_ref(t1.get("continuous_vars"), "table1.continuous_vars")
+        _add_col_ref(t1.get("categorical_vars"), "table1.categorical_vars")
+
+    for item in models_list:
+        if isinstance(item, dict):
+            for key in (
+                "outcome",
+                "exposure",
+                "time_col",
+                "time",
+                "event_col",
+                "cluster_col",
+            ):
+                if key in item:
+                    _add_col_ref(item[key], f"models.{key}")
+            if "covariates" in item:
+                _add_col_ref(item["covariates"], "models.covariates")
+
+            opts = item.get("options", {})
+            if isinstance(opts, dict):
+                for opt_key in (
+                    "p_old",
+                    "p_old_col",
+                    "score_old",
+                    "p_new",
+                    "p_new_col",
+                    "score_new",
+                    "score_col",
+                    "time_col",
+                    "event_col",
+                    "p_recal",
+                    "p_pred",
+                    "score",
+                ):
+                    if opt_key in opts:
+                        _add_col_ref(opts[opt_key], f"models.options.{opt_key}")
+
+            m_type = str(item.get("type", "")).lower().strip()
+            if m_type in (
+                "cox",
+                "cox_ph",
+                "survival",
+                "fine_gray",
+                "competing_risks",
+                "competing_risk",
+                "cif",
+            ):
+                time_var = (
+                    item.get("time")
+                    or item.get("time_col")
+                    or (opts.get("time_col") if isinstance(opts, dict) else None)
+                )
+                if time_var:
+                    _add_col_ref(time_var, "models.time")
+                else:
+                    report["valid"] = False
+                    report["errors"].append(
+                        f"Survival model '{item.get('name', 'unnamed')}' requires a 'time' or 'time_col' specification."
+                    )
+
+    variables_list = raw_spec.get("variables", [])
+    if isinstance(variables_list, list):
+        for v in variables_list:
+            if isinstance(v, dict) and v.get("name"):
+                _add_col_ref(v["name"], "variables.name")
+
+    data_path_str = data_cfg.get("input_path") if isinstance(data_cfg, dict) else None
     if data_path_str:
         data_path = Path(data_path_str)
         if not data_path.is_absolute():
-            cwd_resolved = (Path.cwd() / data_path).resolve()
-            spec_resolved = (path.parent / data_path).resolve()
-            if cwd_resolved.exists():
-                data_path = cwd_resolved
-            elif spec_resolved.exists():
-                data_path = spec_resolved
-            else:
-                data_path = cwd_resolved
+            data_path = (Path.cwd() / data_path).resolve()
 
         if not data_path.exists():
             report["valid"] = False
             report["errors"].append(f"Dataset file not found: {data_path_str}")
             report["agent_remediation"].append(
-                "Update `data.path` in the YAML spec to point to an existing CSV/Parquet file."
+                "Update `data.input_path` in the YAML spec to point to an existing CSV/Parquet file."
             )
             available_cols = set()
         else:
@@ -1324,76 +1414,6 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
                     "Ensure the dataset file exists, has a supported format, and contains valid column headers."
                 )
                 available_cols = set()
-
-            referenced_cols: set[str] = set()
-            t1 = raw_spec.get("table1", {})
-            if isinstance(t1, dict):
-                if t1.get("group_col"):
-                    referenced_cols.add(t1["group_col"])
-                referenced_cols.update(t1.get("continuous_vars", []))
-                referenced_cols.update(t1.get("categorical_vars", []))
-
-            for item in analyses_list:
-                if isinstance(item, dict):
-                    for key in (
-                        "outcome",
-                        "exposure",
-                        "time_col",
-                        "time",
-                        "event_col",
-                        "cluster_col",
-                    ):
-                        if item.get(key):
-                            referenced_cols.add(item[key])
-                    referenced_cols.update(item.get("covariates", []))
-                    opts = item.get("options", {})
-                    if isinstance(opts, dict):
-                        for opt_key in (
-                            "p_old",
-                            "p_old_col",
-                            "score_old",
-                            "p_new",
-                            "p_new_col",
-                            "score_new",
-                            "score_col",
-                            "time_col",
-                            "event_col",
-                            "p_recal",
-                            "p_pred",
-                            "score",
-                        ):
-                            opt_val = opts.get(opt_key)
-                            if opt_val and isinstance(opt_val, str):
-                                referenced_cols.add(opt_val)
-                    m_type = str(item.get("type", "")).lower()
-                    if m_type in (
-                        "cox",
-                        "cox_ph",
-                        "survival",
-                        "fine_gray",
-                        "competing_risks",
-                        "cif",
-                    ):
-                        time_var = (
-                            item.get("time")
-                            or item.get("time_col")
-                            or (
-                                opts.get("time_col") if isinstance(opts, dict) else None
-                            )
-                        )
-                        if time_var:
-                            referenced_cols.add(time_var)
-                        else:
-                            report["valid"] = False
-                            report["errors"].append(
-                                f"Survival model '{item.get('name', 'unnamed')}' requires a 'time' or 'time_col' specification."
-                            )
-
-            variables_list = raw_spec.get("variables", [])
-            if isinstance(variables_list, list):
-                for v in variables_list:
-                    if isinstance(v, dict) and v.get("name"):
-                        referenced_cols.add(v["name"])
 
             missing_cols = sorted(referenced_cols - available_cols)
             if missing_cols and available_cols:

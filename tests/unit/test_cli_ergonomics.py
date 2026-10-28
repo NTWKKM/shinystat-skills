@@ -1,10 +1,16 @@
 import json
 from pathlib import Path
 
+import click
+import pandas as pd
+import pytest
 from click.testing import CliRunner
 
 from medstat.cli.main import cli, emit_agent_actionable_error
 from medstat.cli.spec import get_cli_schema_template, preflight_validate_spec
+from medstat.data.loader import get_clinical_columns
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 def test_cli_schema_template():
@@ -24,8 +30,9 @@ def test_cli_schema_flag():
     assert "models:" in result.output
 
 
-def test_preflight_validate_valid_spec():
-    fixture_path = Path("tests/fixtures/analysis_plan_example.yaml")
+def test_preflight_validate_valid_spec(monkeypatch):
+    monkeypatch.chdir(REPO_ROOT)
+    fixture_path = REPO_ROOT / "tests/fixtures/analysis_plan_example.yaml"
     assert fixture_path.exists()
     report = preflight_validate_spec(fixture_path)
     assert report["valid"] is True
@@ -52,12 +59,13 @@ def test_preflight_validate_missing_dataset(tmp_path):
     spec = tmp_path / "plan.yaml"
     spec.write_text(
         """
-project:
-  title: "Test"
+metadata:
+  study_title: "Test"
 data:
-  path: "nonexistent_cohort.csv"
-analyses:
-  - id: "m1"
+  input_path: "nonexistent_cohort.csv"
+models:
+  - name: "m1"
+    type: "logistic"
     outcome: "y"
 """,
         encoding="utf-8",
@@ -65,7 +73,7 @@ analyses:
     report = preflight_validate_spec(spec)
     assert report["valid"] is False
     assert any("dataset file not found" in err.lower() for err in report["errors"])
-    assert any("data.path" in rem for rem in report["agent_remediation"])
+    assert any("data.input_path" in rem for rem in report["agent_remediation"])
 
 
 def test_preflight_validate_missing_columns(tmp_path):
@@ -75,12 +83,13 @@ def test_preflight_validate_missing_columns(tmp_path):
     spec = tmp_path / "plan.yaml"
     spec.write_text(
         f"""
-project:
-  title: "Test"
+metadata:
+  study_title: "Test"
 data:
-  path: "{csv_file}"
-analyses:
-  - id: "m1"
+  input_path: "{csv_file}"
+models:
+  - name: "m1"
+    type: "logistic"
     outcome: "death"
     covariates: ["age", "missing_biomarker"]
 """,
@@ -92,10 +101,34 @@ analyses:
     assert any("missing_biomarker" in rem for rem in report["agent_remediation"])
 
 
-def test_cli_validate_only_flag():
+def test_preflight_validate_analyses_and_data_path_invalid(tmp_path):
+    spec = tmp_path / "legacy_plan.yaml"
+    spec.write_text(
+        """
+project:
+  title: "Legacy"
+data:
+  path: "some_data.csv"
+analyses:
+  - id: "m1"
+    outcome: "death"
+""",
+        encoding="utf-8",
+    )
+    report = preflight_validate_spec(spec)
+    assert report["valid"] is False
+    assert any("input_path" in err.lower() for err in report["errors"])
+
+
+def test_cli_validate_only_flag(monkeypatch):
+    monkeypatch.chdir(REPO_ROOT)
     runner = CliRunner()
     result = runner.invoke(
-        cli, ["--validate-only", "tests/fixtures/analysis_plan_example.yaml"]
+        cli,
+        [
+            "--validate-only",
+            str(REPO_ROOT / "tests/fixtures/analysis_plan_example.yaml"),
+        ],
     )
     assert result.exit_code == 0
     payload = json.loads(result.output)
@@ -120,7 +153,7 @@ def test_emit_agent_actionable_error(capsys):
     payload = json.loads(captured.err)
     assert payload["status"] == "error"
     assert payload["error_type"] == "ValueError"
-    assert any("firth" in rem.lower() for rem in payload["agent_remediation"])
+    assert any("options.method: firth" in rem for rem in payload["agent_remediation"])
 
 
 def test_preflight_validate_duplicate_keys(tmp_path):
@@ -145,3 +178,170 @@ models:
     report = preflight_validate_spec(dup_yaml)
     assert report["valid"] is False
     assert any("duplicate key" in err.lower() for err in report["errors"])
+
+
+def test_preflight_validate_merge_key_override(tmp_path):
+    csv_file = tmp_path / "data.csv"
+    csv_file.write_text("patient_id,x1,x2,y\n1,0,1,0\n2,1,0,1\n", encoding="utf-8")
+    merge_yaml = tmp_path / "merge_plan.yaml"
+    merge_yaml.write_text(
+        f"""
+metadata:
+  study_title: "Merge Test"
+data:
+  input_path: "{csv_file}"
+.base_model: &base_model
+  type: "logistic"
+  outcome: "y"
+  covariates: ["x1"]
+models:
+  - <<: *base_model
+    name: "overridden_model"
+    covariates: ["x1", "x2"]
+""",
+        encoding="utf-8",
+    )
+    report = preflight_validate_spec(merge_yaml)
+    assert report["valid"] is True
+
+
+def test_preflight_validate_unsupported_model_type(tmp_path):
+    spec = tmp_path / "unsupported.yaml"
+    spec.write_text(
+        """
+metadata:
+  study_title: "Test"
+data:
+  input_path: "data.csv"
+models:
+  - name: "m1"
+    type: "deep_learning"
+    outcome: "y"
+""",
+        encoding="utf-8",
+    )
+    report = preflight_validate_spec(spec)
+    assert report["valid"] is False
+    assert any(
+        "unsupported or missing model type" in err.lower() for err in report["errors"]
+    )
+
+
+def test_preflight_validate_non_mapping_model_item(tmp_path):
+    spec = tmp_path / "non_map.yaml"
+    spec.write_text(
+        """
+metadata:
+  study_title: "Test"
+data:
+  input_path: "data.csv"
+models:
+  - "not_a_mapping"
+""",
+        encoding="utf-8",
+    )
+    report = preflight_validate_spec(spec)
+    assert report["valid"] is False
+    assert any(
+        "must be a dictionary/mapping" in err.lower() for err in report["errors"]
+    )
+
+
+def test_preflight_validate_survival_missing_time(tmp_path):
+    spec = tmp_path / "surv_no_time.yaml"
+    spec.write_text(
+        """
+metadata:
+  study_title: "Test"
+data:
+  input_path: "nonexistent.csv"
+models:
+  - name: "surv1"
+    type: "cox"
+    outcome: "death"
+""",
+        encoding="utf-8",
+    )
+    report = preflight_validate_spec(spec)
+    assert report["valid"] is False
+    assert any(
+        "requires a 'time' or 'time_col' specification" in err.lower()
+        for err in report["errors"]
+    )
+
+
+def test_preflight_validate_options_referenced_columns(tmp_path):
+    csv_file = tmp_path / "data.csv"
+    csv_file.write_text("patient_id,death\n1,0\n2,1\n", encoding="utf-8")
+    spec = tmp_path / "opt_spec.yaml"
+    spec.write_text(
+        f"""
+metadata:
+  study_title: "Test"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "recal"
+    type: "recalibration"
+    outcome: "death"
+    options:
+      p_recal: "missing_score_column"
+""",
+        encoding="utf-8",
+    )
+    report = preflight_validate_spec(spec)
+    assert report["valid"] is False
+    assert any("missing_score_column" in err for err in report["errors"])
+
+
+def test_cli_model_spec_failure_emits_json_stderr(tmp_path):
+    bad_spec = tmp_path / "bad_plan.yaml"
+    bad_spec.write_text(
+        """
+metadata:
+  study_title: "Test"
+data:
+  input_path: "nonexistent_file.csv"
+models:
+  - name: "m1"
+    type: "logistic"
+    outcome: "y"
+""",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    result = runner.invoke(cli, ["model", "--spec", str(bad_spec)])
+    assert result.exit_code == 1
+    assert result.stderr != ""
+    payload = json.loads(result.stderr)
+    assert payload["status"] == "error"
+    assert len(payload["agent_remediation"]) > 0
+
+
+def test_get_clinical_columns_formats_and_duplicates(tmp_path):
+    # 1. Parquet
+    df = pd.DataFrame({"col_a": [1, 2], "col_b": [3, 4]})
+    parquet_path = tmp_path / "data.parquet"
+    df.to_parquet(parquet_path)
+    cols = get_clinical_columns(parquet_path)
+    assert cols == ["col_a", "col_b"]
+
+    # 2. Excel .xlsx
+    xlsx_path = tmp_path / "data.xlsx"
+    df.to_excel(xlsx_path, index=False)
+    cols_xlsx = get_clinical_columns(xlsx_path)
+    assert cols_xlsx == ["col_a", "col_b"]
+
+    # 3. Legacy Excel .xls raises ClickException
+    xls_path = tmp_path / "legacy.xls"
+    xls_path.touch()
+    with pytest.raises(click.ClickException, match="Legacy Excel format"):
+        get_clinical_columns(xls_path)
+
+    # 4. Headers duplicated after stripping whitespace
+    dup_csv = tmp_path / "dup.csv"
+    dup_csv.write_text("age , age,gender\n1,2,M\n", encoding="utf-8")
+    with pytest.raises(
+        click.ClickException, match="duplicate column names after normalization"
+    ):
+        get_clinical_columns(dup_csv)

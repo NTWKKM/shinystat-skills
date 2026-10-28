@@ -667,6 +667,10 @@ def fit_competing_risks_cif(
     horizon_table = None
     if horizons:
         h_arr = np.asarray(horizons, dtype=float)
+        if not np.all(np.isfinite(h_arr)) or np.any(h_arr < 0.0):
+            raise ValueError(
+                f"Horizons must be non-negative finite numbers; got {horizons}"
+            )
         h_cif1 = _lookup(ajf1.cumulative_density_, h_arr)
         h_var1 = np.maximum(_lookup(ajf1.variance_, h_arr), 0.0)
         h_naive = np.clip(1.0 - _lookup(km_naive.survival_function_, h_arr), 0.0, 1.0)
@@ -853,8 +857,8 @@ def fit_competing_risks_regression(
         raise ValueError("Competing risks regression requires at least 5 complete observations.")
 
     raw_dur = clean[duration_col].to_numpy(dtype=float)
-    if not np.all(np.isfinite(raw_dur)) or np.any(raw_dur < 0):
-        raise ValueError("duration_col must contain strictly finite, non-negative values.")
+    if not np.all(np.isfinite(raw_dur)) or np.any(raw_dur <= 0):
+        raise ValueError("duration_col must contain strictly finite, positive values (> 0).")
 
     raw_evt = clean[event_col].to_numpy()
     try:
@@ -928,12 +932,8 @@ def fit_competing_risks_regression(
             "fg_se_method": se_method,
             "fg_score_gap": score_gap,
             "confidence_level": 1.0 - alpha,
-            "profile": "Divergent" if (cs_p < 0.05) != (fg_p < 0.05) else "Concordant",
+            "profile": "Divergent" if (cs_p < alpha) != (fg_p < alpha) else "Concordant",
         }
-        # Retain standard 95 alias if alpha is custom
-        if conf_pct != 95:
-            row_dict["cs_95_ci"] = row_dict[cs_ci_key]
-            row_dict["fg_95_ci"] = row_dict[fg_ci_key]
         comp_rows.append(row_dict)
 
     out = pd.DataFrame(comp_rows)

@@ -22,6 +22,8 @@ def calculate_smd(treated: np.ndarray, control: np.ndarray) -> float:
     c = np.asarray(control, dtype=float)
     t = t[~np.isnan(t)]
     c = c[~np.isnan(c)]
+    if not np.all(np.isfinite(t)) or not np.all(np.isfinite(c)):
+        raise ValueError("calculate_smd inputs contain non-finite values (inf or -inf).")
     if len(t) == 0 or len(c) == 0:
         return np.nan
     mean_t, mean_c = np.mean(t), np.mean(c)
@@ -37,6 +39,14 @@ def calculate_binary_smd(p0: float, p1: float) -> float:
     """Calculate Austin (2009) Standardized Mean Difference for binary proportions."""
     if np.isnan(p0) or np.isnan(p1):
         return np.nan
+    if not np.isfinite(p0) or not np.isfinite(p1):
+        raise ValueError(
+            f"calculate_binary_smd inputs must be finite; got p0={p0}, p1={p1}"
+        )
+    if p0 < 0.0 or p0 > 1.0 or p1 < 0.0 or p1 > 1.0:
+        raise ValueError(
+            f"calculate_binary_smd proportions must be in [0, 1]; got p0={p0}, p1={p1}"
+        )
     sd_bin = np.sqrt((p0 * (1.0 - p0) + p1 * (1.0 - p1)) / 2.0)
     if sd_bin == 0:
         return 0.0 if p0 == p1 else np.nan
@@ -138,8 +148,17 @@ def generate_table_one(
         pval = np.nan
         if contingency.size > 0:
             try:
-                if contingency.shape == (2, 2) and (contingency.values < 5).any():
-                    _, pval = stats.fisher_exact(contingency.values)
+                if contingency.shape == (2, 2):
+                    row_sums = contingency.values.sum(axis=1, keepdims=True)
+                    col_sums = contingency.values.sum(axis=0, keepdims=True)
+                    tot = contingency.values.sum()
+                    expected = (
+                        (row_sums * col_sums) / tot if tot > 0 else np.zeros((2, 2))
+                    )
+                    if (expected < 5).any():
+                        _, pval = stats.fisher_exact(contingency.values)
+                    else:
+                        _, pval, _, _ = stats.chi2_contingency(contingency)
                 else:
                     _, pval, _, _ = stats.chi2_contingency(contingency)
             except Exception:
@@ -196,6 +215,13 @@ def littles_mcar_test(
 ) -> dict:
     if not isinstance(max_iter, (int, np.integer)) or isinstance(max_iter, bool) or max_iter < 1:
         raise ValueError(f"max_iter must be an integer >= 1; got {max_iter}")
+    if (
+        not isinstance(tol, (int, float, np.floating, np.integer))
+        or isinstance(tol, bool)
+        or not np.isfinite(tol)
+        or tol < 0
+    ):
+        raise ValueError(f"tol must be a non-negative finite number; got {tol}")
     """Perform Roderick Little's (1988) MCAR test via pattern-grouped EM ML estimation.
 
     Statistical & Regularization Notes:
@@ -563,6 +589,10 @@ def impute_mice_datasets(
             if isinstance(max_value, dict) and feat in max_value
             else (max_value if isinstance(max_value, (int, float)) else None)
         )
+        if low_val is not None and np.isnan(low_val):
+            raise ValueError(f"min_value for feature '{feat}' cannot be NaN.")
+        if high_val is not None and np.isnan(high_val):
+            raise ValueError(f"max_value for feature '{feat}' cannot be NaN.")
         if low_val is not None and high_val is not None and low_val >= high_val:
             raise ValueError(
                 f"Invalid bound ordering for feature '{feat}': min_value ({low_val}) must be strictly less than max_value ({high_val})."
@@ -614,9 +644,11 @@ def impute_mice_datasets(
                 beta_hat = np.linalg.solve(XtX, Xty)
                 residuals = y_obs - X_obs @ beta_hat
                 rss = float(np.sum(residuals**2))
-                if rss <= 1e-12:
+                tss = float(np.sum((y_obs - np.mean(y_obs)) ** 2))
+                scale_ref = max(tss, float(np.sum(y_obs**2)))
+                if scale_ref == 0.0 or (rss / scale_ref) <= 1e-12:
                     raise ValueError(
-                        f"Degenerate residual sum of squares for feature '{feat}' (RSS <= 1e-12). "
+                        f"Degenerate residual sum of squares for feature '{feat}' (relative RSS <= 1e-12). "
                         "The target is perfectly predicted by conditioning features; "
                         "flat-prior Bayesian regression variance posterior is improper for deterministic relationships."
                     )
@@ -939,6 +971,10 @@ def impute_mice_single(
             if isinstance(max_value, dict) and feat in max_value
             else (max_value if isinstance(max_value, (int, float)) else None)
         )
+        if low_val is not None and np.isnan(low_val):
+            raise ValueError(f"min_value for feature '{feat}' cannot be NaN.")
+        if high_val is not None and np.isnan(high_val):
+            raise ValueError(f"max_value for feature '{feat}' cannot be NaN.")
         if low_val is not None and high_val is not None and low_val >= high_val:
             raise ValueError(
                 f"Invalid bound ordering for feature '{feat}': min_value ({low_val}) must be strictly less than max_value ({high_val})."
@@ -985,9 +1021,11 @@ def impute_mice_single(
             beta_hat = np.linalg.solve(XtX, Xty)
             residuals = y_obs - X_obs @ beta_hat
             rss = float(np.sum(residuals**2))
-            if rss <= 1e-12:
+            tss = float(np.sum((y_obs - np.mean(y_obs)) ** 2))
+            scale_ref = max(tss, float(np.sum(y_obs**2)))
+            if scale_ref == 0.0 or (rss / scale_ref) <= 1e-12:
                 raise ValueError(
-                    f"Degenerate residual sum of squares for feature '{feat}' (RSS <= 1e-12). "
+                    f"Degenerate residual sum of squares for feature '{feat}' (relative RSS <= 1e-12). "
                     "The target is perfectly predicted by conditioning features; "
                     "deterministic linear relationships cannot be modeled as continuous stochastic processes."
                 )

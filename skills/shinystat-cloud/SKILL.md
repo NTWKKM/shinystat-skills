@@ -13,18 +13,18 @@ Execute clinical biostatistics in cloud sandboxes through the 5 Decision Pillars
 
 **CRITICAL RULE FOR AGENTS:** Never read all files in `references/` at once. Follow this 2-step loading protocol to preserve context window capacity and prevent parameter drift:
 
-1. **Step 1 (Statistical & Visual Routing):** Identify your exact task in the tables below and read **ONLY** the single matching recipe or reference file.
+1. **Step 1 (Statistical & Visual Routing):** Identify your exact task in the tables below and read the minimum required recipe file and its declared dependencies (e.g., Causal workflows requiring E-values or Prediction Validation combining modeling and calibration). Never load all references at once.
 2. **Step 2 (Execution & Verification):** Execute the standalone Python recipe in your sandbox, verify outputs against integrity rules, and format according to the target journal house style.
 
 ### A. Statistical Code Recipes (`references/recipes/`)
 
-| Clinical / Statistical Task | Target Reference File to Read | Key Methods Covered |
-| :--- | :--- | :--- |
-| **Data Hygiene, Missingness & Table 1** | `references/recipes/01-data-missing-table1.md` | PHI scan, data cleaning, Little's MCAR test, MICE imputation, CONSORT/STROBE flow counts, baseline Table 1 |
-| **Regression, Rare Events & Splines** | `references/recipes/02-regression-firth-ordinal.md` | GLM, Firth penalized logistic/Cox (complete separation), ordinal proportional odds, multilevel mixed models, RCS splines, E-value |
-| **Survival & Competing Risks** | `references/recipes/03-survival-competing-risks.md` | Kaplan-Meier, Cox PH, Schoenfeld residuals, PH violation remedies (stratified/time-varying), Fine-Gray subdistribution hazard |
-| **Causal Inference (Observational)** | `references/recipes/04-causal-iptw-psm.md` | Propensity score matching (PSM), IPTW (stabilized/trimmed weights), SMD balance & Love plots, causal mediation |
-| **Diagnostics, Agreement, Meta & Power** | `references/recipes/05-diagnostic-meta-power.md` | ROC/tdROC, DeLong test, NRI/IDI, calibration, Decision Curve Analysis (DCA), ICC/Kappa/Bland-Altman, meta-analysis, Riley sample size |
+| Clinical / Statistical Task | Target Reference File to Read | Key Methods Covered | Declared Dependencies |
+| :--- | :--- | :--- | :--- |
+| **Data Hygiene, Missingness & Table 1** | `references/recipes/01-data-missing-table1.md` | Data cleaning, Little's MCAR test, Bayesian regression MICE imputation & Rubin's rules pooling, baseline Table 1 & SMD, publication HTML tables | None |
+| **Regression, Rare Events & Splines** | `references/recipes/02-regression-firth-ordinal.md` | Firth penalized logistic regression (profile likelihood CIs), multivariable binary logistic regression table (Crude & Adjusted ORs), E-value sensitivity analysis | None |
+| **Survival & Competing Risks** | `references/recipes/03-survival-competing-risks.md` | Kaplan-Meier, Cox PH, Schoenfeld residuals, PH violation remedies (stratified/time-varying), Fine-Gray subdistribution hazard, Aalen-Johansen CIF | None |
+| **Causal Inference (Observational)** | `references/recipes/04-causal-iptw-psm.md` | Propensity score matching (PSM, 1:1 nearest neighbor), IPTW (ATE/ATT/ATC/ATO, stabilized/truncated weights, Kish Neff), SMD balance & Love plots, weighted outcome models (WLS & Cox) | For sensitivity E-values, also read `02-regression-firth-ordinal.md` (Recipe 9) |
+| **Diagnostics, Agreement, Meta & Power** | `references/recipes/05-diagnostic-meta-power.md` | 2x2 accuracy (Wilson score CIs), ROC/tdROC, single/paired DeLong test, NRI/IDI reclassification, calibration & DCA, Bland-Altman & ICC (1–3k), TRIPOD+AI bootstrap internal validation & uniform shrinkage, model recalibration, Riley sample size & Obuchowski power | For prediction model fitting before validation, also read `02-regression-firth-ordinal.md` (Recipe 10) |
 
 > **Fallback:** If `references/recipes/` is unavailable, report that recipes are unavailable and stop.
 
@@ -74,7 +74,7 @@ Execute clinical biostatistics in cloud sandboxes through the 5 Decision Pillars
 
 5. **Pillar 5: Reporting Integrity, Publication Figures & Multi-Format Documents**
    - **Figure Generation & Journal House Styles (300/600 DPI)**:
-     - *Statistical plots (300 DPI) & Plotly specs*: Read [figures.md](../_shared/references/figures.md).
+     - *Statistical plots (300 DPI) & Plotly specs*: Use cloud-compatible standalone static figure scripts (using standard `matplotlib`, `seaborn`, or `plotly` without importing `medstat`; `medstat` imports are strictly prohibited in cloud sandbox environments). Refer to standalone plotting patterns in `references/recipes/` and house styles in [house-styles.md](../_shared/references/house-styles.md).
      - ***House style** (`NEJM`, `JAMA`, `LANCET`, `BMJ`, `CLINICAL`, `OKABE_ITO`), TrueType vector PDF (`pdf.fonttype=42`), & layout/CVD/Zero-PHI gates*: Read [house-styles.md](../_shared/references/house-styles.md).
      - ***Reconciled** study flows (CONSORT 2025/2010, PRISMA 2020, STARD 2015, STROBE cohort flow, 600 DPI)*: Read [flows.md](../_shared/references/flows.md).
      - ***Schematic** *(conceptual vector mechanism, not to scale or patient imagery, carrying an explicit schematic disclaimer)* illustrations (cells, skin/crater cross-sections, wound phases, vessel stenosis, signaling pathways, 600 DPI)*: Read [illustration.md](../_shared/references/illustration.md).

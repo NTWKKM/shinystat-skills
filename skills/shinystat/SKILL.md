@@ -27,7 +27,7 @@ Execute clinical biostatistics through the 5 Decision Pillars below, exercising 
      `python <skill-dir>/scripts/medstat_cli.py --validate-only <plan.yaml>`
      To inspect the reference schema template or generate starter specs, run:
      `python <skill-dir>/scripts/medstat_cli.py --schema`
-     On non-zero exit or runtime failure, inspect the structured `agent_remediation` JSON field emitted by the CLI or exception to self-heal dataset columns, missingness strategies, or model configurations before retrying.
+     On non-zero exit or runtime failure, inspect the structured `agent_remediation` JSON field emitted by the CLI or exception to self-heal dataset columns, missingness strategies, or model configurations before retrying. Note: The declarative spec executor does not pass strata or time-varying covariates to `fit_cox_ph()`; on proportional-hazards failure in a declarative plan, halt unless a supported remedy (e.g. switching to competing_risk or standalone Python script) is available.
    - **EPV & Sparse-Data Routing** ([decision-heuristics.md §2.A](references/decision-heuristics.md#a-events-per-variable-epv--sparse-data)):
      - Compute $\text{EPV}_{\text{binary}} = \min(N_{\text{events}}, N_{\text{non-events}}) / P_{\text{parameters}}$ (binary logistic) and $\text{EPV}_{\text{Cox}} = N_{\text{failures}} / P_{\text{parameters}}$ (Cox PH), where $P_{\text{parameters}}$ counts $k-1$ factor levels and spline df.
      - Halt at **Grilling Gate #3** when monotone separation is present.

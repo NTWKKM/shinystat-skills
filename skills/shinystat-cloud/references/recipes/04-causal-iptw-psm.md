@@ -48,6 +48,13 @@ def match_propensity_scores(
     clean = (
         df.dropna(subset=[treatment_col] + confounders).copy().reset_index(drop=True)
     )
+    for col in [treatment_col] + confounders:
+        if pd.api.types.is_numeric_dtype(clean[col]):
+            vals = clean[col].to_numpy(dtype=float)
+            if np.isinf(vals).any():
+                raise ValueError(
+                    f"Column '{col}' contains infinite values (inf or -inf)."
+                )
     n_analyzed = len(clean)
     n_excluded = n_initial - n_analyzed
 
@@ -56,6 +63,10 @@ def match_propensity_scores(
     if not np.all(np.isin(treatment_vals, [0, 1])):
         raise ValueError(
             f"Treatment column '{treatment_col}' must contain strictly binary values (0 and 1)."
+        )
+    if set(treatment_vals) != {0, 1}:
+        raise ValueError(
+            f"Treatment column '{treatment_col}' must contain both classes (0 and 1)."
         )
     y = treatment_vals.astype(int)
 
@@ -72,7 +83,7 @@ def match_propensity_scores(
         raise ValueError(
             f"caliper_sd must be finite and non-negative (>= 0); got {caliper_sd}"
         )
-    caliper = caliper_sd * float(np.std(clean["logit_ps"]))
+    caliper = caliper_sd * float(np.std(clean["logit_ps"], ddof=1))
 
     treated = clean[clean[treatment_col] == 1].copy()
     control = clean[clean[treatment_col] == 0].copy()
@@ -103,13 +114,14 @@ def match_propensity_scores(
             avail_ctrl = avail_ctrl.drop(index=best_match_idx)
             pair_counter += 1
 
-    matched_df = pd.DataFrame(matched_records)
-    if len(matched_df) > 0:
+    if len(matched_records) > 0:
+        matched_df = pd.DataFrame(matched_records)
         matched_clean = matched_df.reset_index(drop=True)
         matched_X = pd.get_dummies(
             matched_clean[confounders], drop_first=True, dtype=float
         ).reindex(columns=X_raw.columns, fill_value=0.0)
     else:
+        matched_df = pd.DataFrame(columns=list(clean.columns) + ["pair_id"])
         matched_X = pd.DataFrame(columns=X_raw.columns)
 
     # Compute balance diagnostics across ALL modeled confounders (including dummy-encoded levels)
@@ -201,6 +213,13 @@ def compute_iptw(
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Compute IPTW weights with Kish's Neff, truncation, and positivity diagnostics."""
     clean = df[[treatment_col] + covariates].dropna().copy()
+    for col in [treatment_col] + covariates:
+        if pd.api.types.is_numeric_dtype(clean[col]):
+            vals = clean[col].to_numpy(dtype=float)
+            if np.isinf(vals).any():
+                raise ValueError(
+                    f"Column '{col}' contains infinite values (inf or -inf)."
+                )
     T = clean[treatment_col].to_numpy(dtype=float)
     if not np.all(np.isfinite(T)) or not np.all(np.isin(T, [0.0, 1.0])):
         raise ValueError(
@@ -286,6 +305,9 @@ def calculate_weighted_smd(
     t, c = np.asarray(treated, dtype=float), np.asarray(control, dtype=float)
     wt, wc = np.asarray(weights_treated, dtype=float), np.asarray(weights_control, dtype=float)
 
+    if np.any(wt < 0.0) or np.any(wc < 0.0):
+        raise ValueError("Weights cannot contain negative values.")
+
     mask_t = np.isfinite(t) & np.isfinite(wt) & (wt > 0)
     mask_c = np.isfinite(c) & np.isfinite(wc) & (wc > 0)
     t, wt = t[mask_t], wt[mask_t]
@@ -326,9 +348,21 @@ def fit_weighted_outcome_model(
             f"Weights column '{weights_col}' must contain strictly finite and positive (> 0) values."
         )
     T = clean[treatment_col].to_numpy(dtype=float)
+    if not np.all(np.isfinite(T)) or not np.all(np.isin(T, [0.0, 1.0])):
+        raise ValueError(
+            f"Treatment column '{treatment_col}' must contain strictly finite binary values (0 and 1)."
+        )
+    if set(T) != {0.0, 1.0}:
+        raise ValueError(
+            f"Treatment column '{treatment_col}' must contain both classes (0 and 1)."
+        )
 
     if model_type == "continuous":
         Y = clean[outcome_col].to_numpy(dtype=float)
+        if not np.all(np.isfinite(Y)):
+            raise ValueError(
+                f"Outcome column '{outcome_col}' contains non-finite values (inf or nan)."
+            )
         X = sm.add_constant(T)
         res = sm.WLS(Y, X, weights=weights).fit(cov_type="HC1")
         return {
@@ -364,8 +398,30 @@ def fit_weighted_outcome_model(
     elif model_type == "survival":
         if duration_col is None:
             raise ValueError("duration_col must be specified for survival outcome.")
+        surv_clean = clean.dropna(
+            subset=[duration_col, outcome_col, treatment_col, weights_col]
+        ).copy()
+        raw_dur = surv_clean[duration_col].to_numpy(dtype=float)
+        raw_evt = surv_clean[outcome_col].to_numpy(dtype=float)
+        valid_mask = (
+            np.isfinite(raw_dur)
+            & (raw_dur > 0)
+            & np.isfinite(raw_evt)
+            & np.isin(raw_evt, [0.0, 1.0])
+        )
+        surv_clean = surv_clean[valid_mask].copy()
+        if len(surv_clean) == 0:
+            raise ValueError(
+                "No valid observations remaining for weighted Cox survival model."
+            )
         cph = CoxPHFitter()
-        cph.fit(clean[[duration_col, outcome_col, treatment_col, weights_col]], duration_col=duration_col, event_col=outcome_col, weights_col=weights_col, robust=True)
+        cph.fit(
+            surv_clean[[duration_col, outcome_col, treatment_col, weights_col]],
+            duration_col=duration_col,
+            event_col=outcome_col,
+            weights_col=weights_col,
+            robust=True,
+        )
         hr_val = float(cph.hazard_ratios_[treatment_col])
         ci_row = cph.confidence_intervals_.loc[treatment_col]
         return {

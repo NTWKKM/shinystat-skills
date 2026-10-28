@@ -9,9 +9,29 @@ from __future__ import annotations
 
 import difflib
 from pathlib import Path
+from typing import Any
 
 import click
 import pandas as pd
+
+_READ_ENCODINGS = ["utf-8", "utf-8-sig", "cp1252", "latin1"]
+
+
+def _normalize_columns(raw_cols: list[Any] | pd.Index) -> list[str]:
+    """Strip whitespace and verify header uniqueness."""
+    normalized_cols = [str(c).strip() for c in raw_cols]
+    seen = set()
+    duplicates = []
+    for c in normalized_cols:
+        if c in seen and c not in duplicates:
+            duplicates.append(c)
+        seen.add(c)
+    if duplicates:
+        raise click.ClickException(
+            f"Dataset contains duplicate column names after normalization: {duplicates}. "
+            "Please ensure each column has a unique header in the source file."
+        )
+    return normalized_cols
 
 
 def load_clinical_data(
@@ -47,9 +67,7 @@ def load_clinical_data(
             df = pd.read_parquet(p)
         elif ext in (".csv", ".tsv", ".txt"):
             sep = "\t" if ext == ".tsv" else ","
-            encodings = (
-                [encoding] if encoding else ["utf-8", "utf-8-sig", "cp1252", "latin1"]
-            )
+            encodings = [encoding] if encoding else _READ_ENCODINGS
             df = None
             last_decode_err: Exception | None = None
             for enc in encodings:
@@ -77,20 +95,7 @@ def load_clinical_data(
     except Exception as e:
         raise click.ClickException(f"Failed to load dataset '{path}': {e}")
 
-    # Standardize column headers: strip leading/trailing whitespace
-    normalized_cols = [str(c).strip() for c in df.columns]
-    seen = set()
-    duplicates = []
-    for c in normalized_cols:
-        if c in seen and c not in duplicates:
-            duplicates.append(c)
-        seen.add(c)
-    if duplicates:
-        raise click.ClickException(
-            f"Dataset contains duplicate column names after normalization: {duplicates}. "
-            "Please ensure each column has a unique header in the source file."
-        )
-    df.columns = normalized_cols
+    df.columns = _normalize_columns(df.columns)
     return df
 
 
@@ -113,7 +118,7 @@ def get_clinical_columns(
                 import pyarrow.parquet as pq
 
                 raw_cols = pq.read_schema(p).names
-            except Exception:
+            except ImportError:
                 df_empty = pd.read_parquet(p)
                 raw_cols = list(df_empty.columns)
         elif ext == ".xlsx":
@@ -126,10 +131,9 @@ def get_clinical_columns(
             )
         elif ext in (".csv", ".tsv", ".txt"):
             sep = "\t" if ext == ".tsv" else ","
-            encodings = ["utf-8", "utf-8-sig", "cp1252", "latin1"]
             raw_cols = None
             last_decode_err = None
-            for enc in encodings:
+            for enc in _READ_ENCODINGS:
                 try:
                     df_head = pd.read_csv(p, sep=sep, encoding=enc, nrows=0)
                     raw_cols = list(df_head.columns)
@@ -153,19 +157,7 @@ def get_clinical_columns(
     except Exception as e:
         raise click.ClickException(f"Failed to read columns from '{path}': {e}")
 
-    normalized_cols = [str(c).strip() for c in raw_cols]
-    seen = set()
-    duplicates = []
-    for c in normalized_cols:
-        if c in seen and c not in duplicates:
-            duplicates.append(c)
-        seen.add(c)
-    if duplicates:
-        raise click.ClickException(
-            f"Dataset contains duplicate column names after normalization: {duplicates}. "
-            "Please ensure each column has a unique header in the source file."
-        )
-    return normalized_cols
+    return _normalize_columns(raw_cols)
 
 
 def validate_columns(

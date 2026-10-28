@@ -705,7 +705,7 @@ def test_each_recipe_is_self_contained():
     parts = [p.read_text(encoding="utf-8") for p in recipe_files]
     content = "\n\n".join(parts)
     blocks = re.findall(r"```python\n(.*?)\n```", content, re.DOTALL)
-    assert len(blocks) >= 17, f"Expected at least 17 recipes, got {len(blocks)}"
+    assert len(blocks) >= 20, f"Expected at least 20 recipes, got {len(blocks)}"
     for idx, block in enumerate(blocks, start=1):
         isolated_ns = {}
         try:
@@ -946,6 +946,50 @@ def test_each_recipe_is_self_contained():
                 )
                 assert "trajectory" in res17
                 assert "results_by_horizon" in res17
+            elif "bootstrap_internal_validation" in isolated_ns:
+                np.random.seed(42)
+                n_b = 50
+                x1 = np.random.normal(0, 1, n_b)
+                x2 = np.random.normal(0, 1, n_b)
+                y = (x1 + x2 + np.random.normal(0, 1, n_b) > 0).astype(int)
+                df18 = pd.DataFrame({"y": y, "x1": x1, "x2": x2})
+                res18 = isolated_ns["bootstrap_internal_validation"](
+                    df18,
+                    outcome="y",
+                    predictors=["x1", "x2"],
+                    n_bootstrap=2,
+                    random_state=42,
+                )
+                assert "apparent_metrics" in res18
+                assert "metrics" in res18
+                assert "shrinkage_factor" in res18
+            elif "recalibrate_prediction_model" in isolated_ns:
+                np.random.seed(42)
+                n_recal = 30
+                x_recal = np.random.normal(0, 1, size=n_recal)
+                p_true = 1.0 / (1.0 + np.exp(-(0.5 + 1.2 * x_recal)))
+                y19 = (np.random.uniform(size=n_recal) < p_true).astype(int)
+                p19 = np.clip(1.0 / (1.0 + np.exp(-(-1.5 + 2.5 * x_recal))), 0.05, 0.95)
+                res19 = isolated_ns["recalibrate_prediction_model"](
+                    y19, p19, method="logistic"
+                )
+                assert "pre" in res19
+                assert "post" in res19
+                assert "recalibration_parameters" in res19
+            elif "calculate_riley_sample_size" in isolated_ns:
+                res20 = isolated_ns["calculate_riley_sample_size"](
+                    n_parameters=5, prevalence=0.2, cox_snell_r2=0.15
+                )
+                assert "n_total" in res20
+                assert "n_events" in res20
+                res20_diag = isolated_ns["calculate_diagnostic_auroc_sample_size"](
+                    auroc_expected=0.85, auroc_null=0.50, prevalence=0.30
+                )
+                assert "total_n" in res20_diag
+            else:
+                pytest.fail(
+                    f"Recipe {idx} had no matching execution branch in isolated test harness"
+                )
         except Exception as e:
             pytest.fail(
                 f"Recipe {idx} failed to run with valid test fixture in an isolated namespace: {e}"

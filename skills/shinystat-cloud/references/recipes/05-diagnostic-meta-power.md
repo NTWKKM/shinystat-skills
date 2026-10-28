@@ -145,6 +145,10 @@ def auc_ci_delong(
     y_true, y_score, direction: str = "high", alpha: float = 0.05
 ) -> dict:
     """Compute empirical AUC and DeLong analytical 95% confidence interval with directionality."""
+    if not (0.0 < alpha < 1.0):
+        raise ValueError(f"alpha must be strictly between 0 and 1; got {alpha}")
+    if direction not in ("high", "low"):
+        raise ValueError(f"direction must be 'high' or 'low'; got '{direction}'")
     y_raw = np.asarray(y_true, dtype=float)
     s_raw = np.asarray(y_score, dtype=float)
     if len(y_raw) != len(s_raw):
@@ -208,6 +212,8 @@ def auc_ci_delong(
 
 def delong_paired_test(y_true, score1, score2, alpha: float = 0.05) -> dict:
     """Paired DeLong comparative test between two correlated ROC curves on the same cohort."""
+    if not (0.0 < alpha < 1.0):
+        raise ValueError(f"alpha must be strictly between 0 and 1; got {alpha}")
     y_raw = np.asarray(y_true, dtype=float)
     s1_raw = np.asarray(score1, dtype=float)
     s2_raw = np.asarray(score2, dtype=float)
@@ -284,6 +290,10 @@ def evaluate_calibration(y_true, y_pred) -> dict:
         )
     valid = ~(np.isnan(y_raw) | np.isnan(p_raw))
     y_valid = y_raw[valid]
+    if len(y_valid) == 0:
+        raise ValueError(
+            "No complete-case observations remaining for calibration evaluation."
+        )
     if not np.all(np.isin(y_valid, [0, 1])):
         raise ValueError(
             "Binary outcome y_true must contain strictly binary values (0 and 1)."
@@ -468,13 +478,15 @@ import scipy.stats as stats
 
 def calculate_bland_altman(m1, m2, ci: float = 0.95) -> dict:
     """Compute Bland-Altman mean difference and 95% Limits of Agreement with 1999 large-sample CIs."""
+    if not (0.0 < ci < 1.0):
+        raise ValueError(f"ci must be strictly between 0 and 1; got {ci}")
     v1 = np.asarray(m1, dtype=float)
     v2 = np.asarray(m2, dtype=float)
     if len(v1) != len(v2):
         raise ValueError(
             f"Length mismatch: m1 ({len(v1)}) and m2 ({len(v2)}) must have identical lengths."
         )
-    valid = ~(np.isnan(v1) | np.isnan(v2))
+    valid = np.isfinite(v1) & np.isfinite(v2)
     diffs = v1[valid] - v2[valid]
     means = (v1[valid] + v2[valid]) / 2.0
     n = len(diffs)
@@ -528,10 +540,14 @@ def calculate_bland_altman(m1, m2, ci: float = 0.95) -> dict:
 
 def calculate_icc_matrix(values: np.ndarray, alpha: float = 0.05) -> pd.DataFrame:
     """Compute all 6 Shrout & Fleiss (1979) ICC variants with exact F-distribution 95% CIs."""
+    if not (0.0 < alpha < 1.0):
+        raise ValueError(f"alpha must be strictly between 0 and 1; got {alpha}")
     mat = np.asarray(values, dtype=float)
-    if np.isnan(mat).any():
+    if mat.ndim != 2:
+        raise ValueError(f"ICC input must be a 2D matrix; got ndim={mat.ndim}")
+    if not np.all(np.isfinite(mat)):
         raise ValueError(
-            "ICC matrix contains missing values. Impute or subset complete cases."
+            "ICC matrix contains missing or non-finite values. Impute or subset complete cases."
         )
     n, k = mat.shape
     if n < 2 or k < 2:
@@ -899,9 +915,9 @@ def compute_reclassification_metrics(
 
     if thresholds is not None and len(thresholds) > 0:
         sorted_thresh = sorted(list({float(t) for t in thresholds}))
-        if any(t <= 0.0 or t >= 1.0 for t in sorted_thresh):
+        if any(not np.isfinite(t) or t <= 0.0 or t >= 1.0 for t in sorted_thresh):
             raise ValueError(
-                "Categorical NRI thresholds must be strictly within (0, 1)."
+                "Categorical NRI thresholds must be finite and strictly within (0, 1)."
             )
 
         cat_old = np.digitize(p_0, sorted_thresh, right=False)
@@ -1281,10 +1297,6 @@ def _calc_ipcw_roc_point(
     fpr_arr = np.array(fpr_list)
     best_idx = int(np.argmax(tpr_arr - fpr_arr))
     opt_th = th_list[best_idx]
-    if np.isneginf(opt_th):
-        opt_th = float(unique_th[-1]) if len(unique_th) > 0 else 0.0
-    elif np.isposinf(opt_th):
-        opt_th = float(unique_th[0]) if len(unique_th) > 0 else 0.0
 
     return {
         "horizon": t,
@@ -1315,6 +1327,10 @@ def compute_time_dependent_roc(
     """Cumulative/Dynamic IPCW Time-Dependent ROC suite."""
     dur_arr = pd.Series(durations).to_numpy(dtype=float)
     ev_arr = pd.Series(events).to_numpy(dtype=float)
+    if len(dur_arr) != len(ev_arr):
+        raise ValueError(
+            f"Length mismatch: durations ({len(dur_arr)}) and events ({len(ev_arr)}) must have identical lengths."
+        )
 
     allowed_event_codes = (
         {0.0, 1.0}
@@ -1336,36 +1352,70 @@ def compute_time_dependent_roc(
         is_comparison = True
         s_old = pd.Series(scores_old).to_numpy(dtype=float)
         s_new = pd.Series(scores_new).to_numpy(dtype=float)
-        valid = ~(np.isnan(dur_arr) | np.isnan(ev_arr) | np.isnan(s_old) | np.isnan(s_new))
+        if len(s_old) != len(dur_arr) or len(s_new) != len(dur_arr):
+            raise ValueError(
+                f"Length mismatch: durations ({len(dur_arr)}), scores_old ({len(s_old)}), and scores_new ({len(s_new)}) must have identical lengths."
+            )
+        valid = ~(
+            np.isnan(dur_arr)
+            | np.isnan(ev_arr)
+            | np.isnan(s_old)
+            | np.isnan(s_new)
+        )
         dur_arr, ev_arr, s_old, s_new = (
             dur_arr[valid],
             _validate_and_cast_events(ev_arr[valid]),
             s_old[valid],
             s_new[valid],
         )
+        if np.isinf(dur_arr).any():
+            raise ValueError("Time-dependent ROC durations contain infinite values.")
+        if np.isinf(s_old).any() or np.isinf(s_new).any():
+            raise ValueError("Time-dependent ROC scores contain infinite values.")
         s_arr = s_new
     elif isinstance(scores, dict):
         is_comparison = True
         s_old = pd.Series(scores.get("old", scores.get("baseline"))).to_numpy(dtype=float)
         s_new = pd.Series(scores.get("new", scores.get("updated"))).to_numpy(dtype=float)
-        valid = ~(np.isnan(dur_arr) | np.isnan(ev_arr) | np.isnan(s_old) | np.isnan(s_new))
+        if len(s_old) != len(dur_arr) or len(s_new) != len(dur_arr):
+            raise ValueError(
+                f"Length mismatch: durations ({len(dur_arr)}), scores['old'] ({len(s_old)}), and scores['new'] ({len(s_new)}) must have identical lengths."
+            )
+        valid = ~(
+            np.isnan(dur_arr)
+            | np.isnan(ev_arr)
+            | np.isnan(s_old)
+            | np.isnan(s_new)
+        )
         dur_arr, ev_arr, s_old, s_new = (
             dur_arr[valid],
             _validate_and_cast_events(ev_arr[valid]),
             s_old[valid],
             s_new[valid],
         )
+        if np.isinf(dur_arr).any():
+            raise ValueError("Time-dependent ROC durations contain infinite values.")
+        if np.isinf(s_old).any() or np.isinf(s_new).any():
+            raise ValueError("Time-dependent ROC scores contain infinite values.")
         s_arr = s_new
     else:
         if scores is None:
             raise ValueError("Must provide scores or both scores_old and scores_new.")
         s_arr = pd.Series(scores).to_numpy(dtype=float)
+        if len(s_arr) != len(dur_arr):
+            raise ValueError(
+                f"Length mismatch: durations ({len(dur_arr)}) and scores ({len(s_arr)}) must have identical lengths."
+            )
         valid = ~(np.isnan(dur_arr) | np.isnan(ev_arr) | np.isnan(s_arr))
         dur_arr, ev_arr, s_arr = (
             dur_arr[valid],
             _validate_and_cast_events(ev_arr[valid]),
             s_arr[valid],
         )
+        if np.isinf(dur_arr).any():
+            raise ValueError("Time-dependent ROC durations contain infinite values.")
+        if np.isinf(s_arr).any():
+            raise ValueError("Time-dependent ROC scores contain infinite values.")
         s_old, s_new = None, None
 
     if (dur_arr < 0).any():
@@ -1602,13 +1652,20 @@ def bootstrap_internal_validation(
     missing_counts = {
         c: int(df[c].isna().sum()) for c in cols if df[c].isna().sum() > 0
     }
-    sub_df = df[cols].dropna()
+    valid_mask = ~df[cols].isna().any(axis=1)
+    for c in cols:
+        if pd.api.types.is_numeric_dtype(df[c]):
+            inf_mask = np.isinf(df[c].to_numpy(dtype=float))
+            valid_mask &= ~inf_mask
+            if inf_mask.sum() > 0:
+                missing_counts[f"{c}_inf"] = int(inf_mask.sum())
+    sub_df = df.loc[valid_mask, cols].copy()
     n_excluded = n_initial - len(sub_df)
 
     if n_excluded > 0 and norm_strat == "error":
         counts_str = ", ".join(f"{c} ({cnt})" for c, cnt in missing_counts.items())
         raise ValueError(
-            f"Missing values detected in input columns: {counts_str}. "
+            f"Missing or non-finite values detected in input columns: {counts_str}. "
             "Please perform complete-case filtering or multiple imputation before running internal validation."
         )
 
