@@ -438,6 +438,10 @@ models:
     outcome: "dead"
     options:
       time_col: "ignored_time"
+  - name: "logistic_ignore_top_time_col"
+    type: "logistic"
+    time_col: "ignored_top_time"
+    outcome: "dead"
 """,
         encoding="utf-8",
     )
@@ -445,6 +449,7 @@ models:
     assert plan2.models[0].time == "primary_time"
     assert plan2.models[1].time == "options_time"
     assert plan2.models[2].time is None
+    assert plan2.models[3].time is None
 
 
 def test_actionable_error_ph_and_competing_risk_remediation(capsys):

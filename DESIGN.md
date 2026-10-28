@@ -1554,8 +1554,8 @@ In the latest review round on PR #22 by `coderabbitai`:
 4. Recipe 11 parity test: The parity test in `tests/unit/test_ph_violation_remedies.py` was referencing the removed/decomposed `skills/shinystat-cloud/references/python-recipes.md` document instead of the modular `03-survival-competing-risks.md`.
 
 ### Decision
-1. **Per-Arm Survival Event Guard**: In `fit_weighted_outcome_model`, added verification that `surv_clean.groupby(treatment_col)[outcome_col]` has $\ge 1$ observed event in every treatment class, preserving the existing overall cohort event check.
-2. **Survival Model Time Resolution**: Added `_SURVIVAL_MODEL_TYPES` set and resolved `ModelSpec.time` from `options.time_col` when `time` and `time_col` are unset strictly for survival model types.
+1. **Per-Arm Survival Event Guard**: In `fit_weighted_outcome_model`, added verification that `surv_clean.groupby(treatment_col)[outcome_col]` has $\ge 1$ observed event in every treatment class, preserving the existing overall cohort event check. Parameterized test coverage verifies rejection across all treatment classes.
+2. **Survival Model Time Resolution**: Added `_SURVIVAL_MODEL_TYPES` set and resolved `ModelSpec.time` from `time_col` and `options.time_col` strictly for survival model types when `time` is unset, preserving `time` precedence and ensuring non-survival models (e.g. logistic) do not populate `time` from `time_col`.
 3. **Parquet RangeIndex Kind Filter**: Updated pandas metadata dictionary handling in `get_clinical_columns` to check `idx_col.get("kind") != "range"` before adding to `index_cols`.
 4. **Recipe 11 Source Alignment**: Updated `test_recipe_11_equals_src_functions()` to read `skills/shinystat-cloud/references/recipes/03-survival-competing-risks.md`.
 

@@ -234,11 +234,13 @@ class AnalysisPlan:
         models = []
         for m in data.get("models", []):
             m_type = str(m.get("type", "logistic")).lower().strip()
-            time_val = m.get("time") if m.get("time") is not None else m.get("time_col")
+            time_val = m.get("time")
             if time_val is None and m_type in _SURVIVAL_MODEL_TYPES:
-                opts = m.get("options")
-                if isinstance(opts, dict):
-                    time_val = opts.get("time_col")
+                time_val = m.get("time_col")
+                if time_val is None:
+                    opts = m.get("options")
+                    if isinstance(opts, dict):
+                        time_val = opts.get("time_col")
 
             models.append(
                 ModelSpec(
