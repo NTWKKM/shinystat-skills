@@ -2,6 +2,7 @@
 tests/unit/test_shinystat_skill.py: Multi-agent mirror parity and schema test for shinystat skill.
 """
 
+import os
 from pathlib import Path
 
 import yaml
@@ -175,9 +176,27 @@ def test_shinystat_cloud_canonical_skill_exists_and_valid():
     for rel_path in canonical_files:
         canon_file = canonical_cloud / rel_path
         pack_file = packaging_cloud / rel_path
-        assert pack_file.read_bytes() == canon_file.read_bytes(), (
-            f"Byte mismatch in {rel_path} between skills/shinystat-cloud and packaging/cloud/shinystat-cloud"
-        )
+        if pack_file.read_bytes() == canon_file.read_bytes():
+            continue
+        # In packaged standalone distributions, relative links to _shared references
+        # are rewritten to resolve to the packaged copies under references/
+        if rel_path.suffix == ".md":
+            ref_rel = os.path.relpath(packaging_cloud / "references", pack_file.parent)
+            prefix = "" if ref_rel == "." else f"{ref_rel}/"
+            expected = (
+                canon_file.read_text(encoding="utf-8")
+                .replace("../../../_shared/references/", prefix)
+                .replace("../../_shared/references/", prefix)
+                .replace("../_shared/references/", prefix)
+                .replace("(`../_shared/references/`)", f"(`{prefix}`)")
+            )
+            assert pack_file.read_text(encoding="utf-8") == expected, (
+                f"Content mismatch in {rel_path} between skills/shinystat-cloud and packaging/cloud/shinystat-cloud"
+            )
+        else:
+            assert pack_file.read_bytes() == canon_file.read_bytes(), (
+                f"Byte mismatch in {rel_path} between skills/shinystat-cloud and packaging/cloud/shinystat-cloud"
+            )
 
 
 def test_shinystat_reference_manual_exists():

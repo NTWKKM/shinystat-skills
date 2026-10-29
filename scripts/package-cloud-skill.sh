@@ -40,6 +40,29 @@ if [[ -d "$RECIPES_DIR" ]]; then
     cp "$COMBINED_RECIPES" "$SRC_SKILL/references/python-recipes.md"
 fi
 
+echo "[2.5/3] Rewriting shared-reference links in packaged Markdown files..."
+TARGET_SKILL="$TARGET_SKILL" python3 - <<'PY'
+import os
+from pathlib import Path
+
+target_dir = Path(os.environ["TARGET_SKILL"])
+for md_file in target_dir.rglob("*.md"):
+    if not md_file.is_file():
+        continue
+    content = md_file.read_text(encoding="utf-8")
+    ref_rel = os.path.relpath(target_dir / "references", md_file.parent)
+    prefix = "" if ref_rel == "." else f"{ref_rel}/"
+
+    new_content = content
+    new_content = new_content.replace("../../../_shared/references/", prefix)
+    new_content = new_content.replace("../../_shared/references/", prefix)
+    new_content = new_content.replace("../_shared/references/", prefix)
+    new_content = new_content.replace("(`../_shared/references/`)", f"(`{prefix}`)")
+
+    if new_content != content:
+        md_file.write_text(new_content, encoding="utf-8")
+PY
+
 echo "[3/3] Creating distributable zip archive..."
 (cd "$DIST_DIR" && zip -rq "shinystat-cloud.zip" "shinystat-cloud")
 

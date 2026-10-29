@@ -1515,6 +1515,26 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
                     f"or 'method: iptw' in options for diagnostic model '{item.get('name', 'unnamed')}'."
                 )
 
+            if m_type == "reclassification" and not is_iptw and not is_reclass:
+                report["valid"] = False
+                report["errors"].append(
+                    f"Reclassification model '{item.get('name', 'unnamed')}' specifies 'type: reclassification' but lacks reclassification options (e.g., 'p_old_col' or 'p_old')."
+                )
+                report["agent_remediation"].append(
+                    f"Specify 'p_old_col' (or 'p_old') and 'p_new_col' (or 'p_new') in options for model '{item.get('name', 'unnamed')}'."
+                )
+
+            if is_reclass and not (
+                opts_dict.get("p_new_col") or opts_dict.get("p_new")
+            ):
+                report["valid"] = False
+                report["errors"].append(
+                    f"Reclassification model '{item.get('name', 'unnamed')}' requires a new predicted probability column via 'p_new_col' or 'p_new'."
+                )
+                report["agent_remediation"].append(
+                    f"Specify 'p_new_col' or 'p_new' in options for model '{item.get('name', 'unnamed')}'."
+                )
+
             # Resolve duration once using identical precedence to from_yaml()
             supports_time = False
             if is_iptw:

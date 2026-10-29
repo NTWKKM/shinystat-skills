@@ -1622,6 +1622,28 @@ In the latest CodeRabbit review round on PR #22:
 - **Status**: Accepted & Fully Verified.
 - **Verification**: 720 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
 
+---
+
+## ADR 56: PR #22 CodeRabbit Follow-Up: Reclassification Preflight Requirements & Packaged Markdown Link Rewriting
+
+### Context
+In the latest CodeRabbit review round on PR #22:
+1. `src/medstat/cli/spec.py`: Preflight validation did not reject `type: reclassification` when no reclassification selector was specified (which later failed during execution with an unsupported model error). Additionally, plans with `p_old_col` were accepted even when both `p_new_col` and `p_new` were omitted, causing a `KeyError: None` during execution.
+2. `scripts/package-cloud-skill.sh`: In packaged standalone distributions under `packaging/cloud/shinystat-cloud`, markdown files still referenced `../_shared/references/` or `../../../_shared/references/`, which broke relative link navigation once unzipped or distributed outside the monorepo.
+
+### Decision
+1. **Reclassification Preflight Requirements**:
+   - In `preflight_validate_spec()`, rejected `type: reclassification` without a reclassification selector (`p_old_col`, `p_old`, or `reclassification: true`) unless `options.method: iptw` is selected.
+   - When `is_reclass` is active, verified that either `p_new_col` or `p_new` is provided; if both are missing, rejected with an actionable error and remediation. Preserved valid plans specifying either new-score option.
+2. **Packaged Markdown Link Rewriting**:
+   - In `scripts/package-cloud-skill.sh`, rewrote shared-reference links in Markdown files under `TARGET_SKILL` so that `../_shared/references/` becomes `references/` in `SKILL.md` and `../../../_shared/references/` becomes `../` in recipes.
+   - Applied rewrites strictly to `TARGET_SKILL`, keeping the canonical `skills/shinystat-cloud` source tree unchanged.
+   - Updated `test_shinystat_cloud_canonical_skill_exists_and_valid()` to verify tree and content parity against standalone rewritten reference links.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 724 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
+
 
 
 

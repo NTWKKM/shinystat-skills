@@ -1186,3 +1186,137 @@ models:
     assert "dead" in captured_req_cols[0]
     assert "age" in captured_req_cols[0]
     assert res["model_flow"]["log_model"]["final_n"] == 10
+
+
+def test_preflight_validate_reclassification_missing_p_new_rejected(tmp_path):
+    """Reclassification plans with p_old_col but missing both p_new_col and p_new are rejected."""
+    csv_file = tmp_path / "data.csv"
+    csv_file.write_text(
+        "patient_id,dead,old_score\n1,0,0.2\n2,1,0.8\n", encoding="utf-8"
+    )
+    spec = tmp_path / "spec_missing_p_new.yaml"
+    spec.write_text(
+        f"""
+metadata:
+  study_title: "Reclassification Missing P New"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "reclass_model"
+    type: "diagnostic"
+    outcome: "dead"
+    options:
+      p_old_col: "old_score"
+""",
+        encoding="utf-8",
+    )
+    report = preflight_validate_spec(spec)
+    assert report["valid"] is False
+    assert any(
+        "requires a new predicted probability column via 'p_new_col' or 'p_new'" in err
+        for err in report["errors"]
+    )
+    assert any("p_new_col" in rem for rem in report["agent_remediation"])
+
+
+def test_preflight_validate_reclassification_valid_options_preserved(tmp_path):
+    """Reclassification plans providing either p_new_col or p_new are accepted."""
+    csv_file = tmp_path / "data.csv"
+    csv_file.write_text(
+        "patient_id,dead,old_score,new_score\n1,0,0.2,0.3\n2,1,0.8,0.9\n",
+        encoding="utf-8",
+    )
+    # Using p_new_col
+    spec1 = tmp_path / "spec_p_new_col.yaml"
+    spec1.write_text(
+        f"""
+metadata:
+  study_title: "Reclass with p_new_col"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "reclass_1"
+    type: "diagnostic"
+    outcome: "dead"
+    options:
+      p_old_col: "old_score"
+      p_new_col: "new_score"
+""",
+        encoding="utf-8",
+    )
+    report1 = preflight_validate_spec(spec1)
+    assert report1["valid"] is True, f"Validation failed: {report1['errors']}"
+
+    # Using p_new
+    spec2 = tmp_path / "spec_p_new.yaml"
+    spec2.write_text(
+        f"""
+metadata:
+  study_title: "Reclass with p_new"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "reclass_2"
+    type: "reclassification"
+    outcome: "dead"
+    options:
+      p_old: "old_score"
+      p_new: "new_score"
+""",
+        encoding="utf-8",
+    )
+    report2 = preflight_validate_spec(spec2)
+    assert report2["valid"] is True, f"Validation failed: {report2['errors']}"
+
+
+def test_preflight_validate_reclassification_without_selector_rejected(tmp_path):
+    """type: reclassification without reclassification selector is rejected during preflight."""
+    csv_file = tmp_path / "data.csv"
+    csv_file.write_text("patient_id,dead\n1,0\n2,1\n", encoding="utf-8")
+    spec = tmp_path / "spec_bare_reclass.yaml"
+    spec.write_text(
+        f"""
+metadata:
+  study_title: "Bare Reclassification"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "bare_reclass"
+    type: "reclassification"
+    outcome: "dead"
+""",
+        encoding="utf-8",
+    )
+    report = preflight_validate_spec(spec)
+    assert report["valid"] is False
+    assert any("lacks reclassification options" in err for err in report["errors"])
+
+
+def test_preflight_validate_reclassification_method_iptw_preserved(tmp_path):
+    """type: reclassification with options.method: iptw preserves the IPTW execution path."""
+    csv_file = tmp_path / "data.csv"
+    csv_file.write_text(
+        "patient_id,dead,treatment,age\n1,0,0,50\n2,1,1,60\n",
+        encoding="utf-8",
+    )
+    spec = tmp_path / "spec_reclass_iptw.yaml"
+    spec.write_text(
+        f"""
+metadata:
+  study_title: "Reclass IPTW"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "reclass_iptw"
+    type: "reclassification"
+    outcome: "dead"
+    exposure: "treatment"
+    covariates: ["age"]
+    options:
+      method: "iptw"
+      outcome_type: "binary"
+""",
+        encoding="utf-8",
+    )
+    report = preflight_validate_spec(spec)
+    assert report["valid"] is True, f"Validation failed: {report['errors']}"
