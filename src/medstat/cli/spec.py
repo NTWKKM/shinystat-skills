@@ -247,8 +247,14 @@ class AnalysisPlan:
 
             is_survival = m_type in _SURVIVAL_MODEL_TYPES
             is_iptw = m_type in ("iptw", "causal_iptw") or m_method == "iptw"
+            is_reclass = m_type in ("reclassification", "diagnostic", "diag") and bool(
+                opts_dict.get("p_old_col")
+                or opts_dict.get("p_old")
+                or opts_dict.get("reclassification")
+            )
             is_td_roc = m_type in ("time_dependent_roc", "td_roc") or (
                 m_type in ("diagnostic", "diag")
+                and not is_reclass
                 and bool(
                     opts_dict.get("time_dependent_roc")
                     or opts_dict.get("time_horizons")
@@ -264,7 +270,7 @@ class AnalysisPlan:
                 if outcome_type not in ("binary", "continuous"):
                     supports_time = True
 
-            time_val = m.get("time")
+            time_val = m.get("time") if not is_reclass else None
             if time_val is None and supports_time:
                 time_val = m.get("time_col")
                 if time_val is None:
@@ -358,6 +364,16 @@ class AnalysisPlan:
 
         # 3. Execute Pre-specified Models
         for model_spec in self.models:
+            mod_type = model_spec.type.lower().strip()
+            is_reclass_exec = mod_type in (
+                "reclassification",
+                "diagnostic",
+                "diag",
+            ) and bool(
+                model_spec.options.get("p_old_col")
+                or model_spec.options.get("p_old")
+                or model_spec.options.get("reclassification")
+            )
             req_cols = [model_spec.outcome]
             if model_spec.exposure:
                 req_cols.append(model_spec.exposure)
@@ -378,7 +394,9 @@ class AnalysisPlan:
                 "p_pred",
                 "score",
             ):
-                if opt_key == "time_col" and model_spec.time:
+                if opt_key == "time_col" and (model_spec.time or is_reclass_exec):
+                    continue
+                if opt_key == "event_col" and is_reclass_exec:
                     continue
                 val = model_spec.options.get(opt_key)
                 if val and isinstance(val, str) and val in current_df.columns:

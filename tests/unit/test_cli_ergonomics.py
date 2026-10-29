@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import click
+import numpy as np
 import pandas as pd
 import pytest
 from click.testing import CliRunner
@@ -499,6 +500,20 @@ models:
     type: "diagnostic"
     time_col: "diag_ignored_time"
     outcome: "dead"
+  - name: "diagnostic_reclass_with_td_roc_and_time_col"
+    type: "diagnostic"
+    time_col: "diag_reclass_time"
+    outcome: "dead"
+    options:
+      p_old_col: "pred_old"
+      p_new_col: "pred_new"
+      time_dependent_roc: true
+  - name: "td_roc_with_p_old_col"
+    type: "time_dependent_roc"
+    time_col: "td_roc_time"
+    outcome: "dead"
+    options:
+      p_old_col: "pred_old"
 """,
         encoding="utf-8",
     )
@@ -518,6 +533,10 @@ models:
     assert plan2.models[12].time is None  # options.method: iptw + binary outcome
     assert plan2.models[13].time == "diag_td_time"  # diagnostic with time_dependent_roc
     assert plan2.models[14].time is None  # ordinary diagnostic without td roc
+    assert plan2.models[15].time is None  # diagnostic reclassification ignores duration
+    assert (
+        plan2.models[16].time == "td_roc_time"
+    )  # td_roc model retains duration even with p_old_col
 
 
 def test_execute_required_cols_duration_dedup(tmp_path, monkeypatch):
@@ -568,6 +587,73 @@ models:
     assert len(captured_req_cols) == 1
     assert "time_top" in captured_req_cols[0]
     assert "time_stale" not in captured_req_cols[0]
+
+
+def test_diagnostic_reclassification_does_not_require_duration(tmp_path, monkeypatch):
+    """Diagnostic reclassification models using p_old_col omit duration columns during cohort preparation."""
+    import medstat.cli.spec as spec_mod
+
+    captured_req_cols = []
+    orig_prepare = spec_mod.prepare_data_for_analysis
+
+    def mock_prepare(*args, **kwargs):
+        captured_req_cols.append(kwargs.get("required_cols"))
+        return orig_prepare(*args, **kwargs)
+
+    monkeypatch.setattr(spec_mod, "prepare_data_for_analysis", mock_prepare)
+
+    csv_path = tmp_path / "reclass_data.csv"
+    pd.DataFrame(
+        {
+            "patient_id": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            "dead": [0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+            "p_old": [0.2, 0.4, 0.3, 0.7, 0.1, 0.8, 0.2, 0.6, 0.3, 0.9],
+            "p_new": [0.1, 0.5, 0.2, 0.8, 0.2, 0.9, 0.1, 0.7, 0.4, 0.95],
+            "time_duration": [
+                10.0,
+                20.0,
+                np.nan,
+                40.0,
+                np.nan,
+                15.0,
+                25.0,
+                np.nan,
+                45.0,
+                55.0,
+            ],
+        }
+    ).to_csv(csv_path, index=False)
+
+    plan_yaml = tmp_path / "reclass_plan.yaml"
+    plan_yaml.write_text(
+        f"""
+metadata:
+  study_title: "Reclassification Spec Test"
+data:
+  input_path: "{csv_path}"
+models:
+  - name: "reclass_model"
+    type: "diagnostic"
+    time_col: "time_duration"
+    outcome: "dead"
+    options:
+      p_old_col: "p_old"
+      p_new_col: "p_new"
+      time_dependent_roc: true
+""",
+        encoding="utf-8",
+    )
+
+    plan = AnalysisPlan.from_yaml(plan_yaml)
+    assert plan.models[0].time is None
+    res = plan.execute()
+    assert len(captured_req_cols) == 1
+    assert "time_duration" not in captured_req_cols[0]
+    assert "p_old" in captured_req_cols[0]
+    assert "p_new" in captured_req_cols[0]
+    assert "reclass_model" in res["models"]
+    assert "reclassification" in res["models"]["reclass_model"]
+    assert res["model_flow"]["reclass_model"]["final_n"] == 10
 
 
 def test_actionable_error_ph_and_competing_risk_remediation(capsys):
