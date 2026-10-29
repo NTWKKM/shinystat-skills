@@ -938,3 +938,99 @@ def test_actionable_error_ph_and_competing_risk_remediation(capsys):
         "Declarative plan cannot apply time-varying covariates or strata; halt" in rem
         for rem in payload["agent_remediation"]
     )
+
+
+def test_preflight_validate_survival_iptw_binary_no_duration_required(tmp_path):
+    """Preflight validation does not require time or score_col for survival IPTW with binary outcome."""
+    csv_file = tmp_path / "data.csv"
+    csv_file.write_text(
+        "patient_id,dead,treatment,age\n1,0,0,50\n2,1,1,60\n", encoding="utf-8"
+    )
+    spec = tmp_path / "spec.yaml"
+    spec.write_text(
+        f"""
+metadata:
+  study_title: "Survival IPTW Binary Test"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "iptw_binary"
+    type: "survival"
+    outcome: "dead"
+    exposure: "treatment"
+    covariates: ["age"]
+    options:
+      method: "iptw"
+      outcome_type: "binary"
+      score_col: "missing_score_column"
+      time_col: "missing_time_column"
+""",
+        encoding="utf-8",
+    )
+    report = preflight_validate_spec(spec)
+    assert report["valid"] is True, (
+        f"Validation failed unexpectedly: {report['errors']}"
+    )
+    assert "missing_score_column" not in report.get("errors", [])
+    assert "missing_time_column" not in report.get("errors", [])
+
+
+def test_preflight_validate_duration_precedence_and_single_collection(tmp_path):
+    """Preflight collects only resolved duration once, and ignores time_col for non-survival models."""
+    csv_file = tmp_path / "data.csv"
+    csv_file.write_text(
+        "patient_id,dead,followup_time,treatment,age\n1,0,10.5,0,50\n2,1,5.2,1,60\n",
+        encoding="utf-8",
+    )
+    # 1. Spec with ordinary logistic and diagnostic having ignored time_col not in data
+    spec = tmp_path / "spec_ignored_time.yaml"
+    spec.write_text(
+        f"""
+metadata:
+  study_title: "Duration Precedence Test"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "log_model"
+    type: "logistic"
+    outcome: "dead"
+    covariates: ["age"]
+    time_col: "ignored_log_time"
+  - name: "diag_model"
+    type: "diagnostic"
+    outcome: "dead"
+    covariates: ["age"]
+    time_col: "ignored_diag_time"
+  - name: "surv_model"
+    type: "cox"
+    outcome: "dead"
+    covariates: ["age"]
+    time_col: "followup_time"
+""",
+        encoding="utf-8",
+    )
+    report = preflight_validate_spec(spec)
+    assert report["valid"] is True, (
+        f"Validation failed unexpectedly: {report['errors']}"
+    )
+
+    # 2. Survival model missing resolved duration from data
+    spec_missing_dur = tmp_path / "spec_missing_dur.yaml"
+    spec_missing_dur.write_text(
+        f"""
+metadata:
+  study_title: "Survival Missing Duration Test"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "surv_model"
+    type: "cox"
+    outcome: "dead"
+    covariates: ["age"]
+    time_col: "nonexistent_surv_time"
+""",
+        encoding="utf-8",
+    )
+    report_missing = preflight_validate_spec(spec_missing_dur)
+    assert report_missing["valid"] is False
+    assert any("nonexistent_surv_time" in err for err in report_missing["errors"])

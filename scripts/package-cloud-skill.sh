@@ -9,11 +9,13 @@ DIST_DIR="$REPO_ROOT/packaging/cloud"
 TARGET_SKILL="$DIST_DIR/shinystat-cloud"
 
 echo "[1/3] Preparing clean build directory at $TARGET_SKILL..."
-rm -rf "$TARGET_SKILL"
 mkdir -p "$DIST_DIR"
 
 # Ensure local symlinks (shared references) are up to date before dereferencing
 "$REPO_ROOT/scripts/install-skills.sh" --symlink >/dev/null
+
+# Remove TARGET_SKILL (which install-skills.sh created as a symlink) before copying so cp -RL creates a standalone directory
+rm -rf "$TARGET_SKILL"
 
 # Copy with -L to dereference all symlinks into standalone physical files
 cp -RL "$SRC_SKILL" "$TARGET_SKILL"

@@ -1434,8 +1434,6 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
             for key in (
                 "outcome",
                 "exposure",
-                "time_col",
-                "time",
                 "event_col",
                 "cluster_col",
             ):
@@ -1444,39 +1442,107 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
             if "covariates" in item:
                 _add_col_ref(item["covariates"], "models.covariates")
 
-            opts = item.get("options", {})
-            if isinstance(opts, dict):
-                for opt_key in (
-                    "p_old",
-                    "p_old_col",
-                    "score_old",
-                    "p_new",
-                    "p_new_col",
-                    "score_new",
-                    "score_col",
-                    "time_col",
-                    "event_col",
-                    "p_recal",
-                    "p_pred",
-                    "score",
-                ):
-                    if opt_key in opts:
-                        _add_col_ref(opts[opt_key], f"models.options.{opt_key}")
-
             m_type = str(item.get("type", "")).lower().strip()
-            if m_type in _SURVIVAL_MODEL_TYPES:
-                time_var = (
-                    item.get("time")
-                    or item.get("time_col")
-                    or (opts.get("time_col") if isinstance(opts, dict) else None)
+            opts = item.get("options")
+            opts_dict = opts if isinstance(opts, dict) else {}
+            m_method = str(opts_dict.get("method", "")).lower().strip()
+
+            is_survival = m_type in _SURVIVAL_MODEL_TYPES
+            is_iptw = m_type in ("iptw", "causal_iptw") or m_method == "iptw"
+            is_reclass = (
+                not is_iptw
+                and m_type in ("reclassification", "diagnostic", "diag")
+                and bool(
+                    opts_dict.get("p_old_col")
+                    or opts_dict.get("p_old")
+                    or opts_dict.get("reclassification")
                 )
-                if time_var:
-                    _add_col_ref(time_var, "models.time")
-                else:
-                    report["valid"] = False
-                    report["errors"].append(
-                        f"Survival model '{item.get('name', 'unnamed')}' requires a 'time' or 'time_col' specification."
+            )
+            is_td_roc = not is_iptw and (
+                m_type in ("time_dependent_roc", "td_roc")
+                or (
+                    m_type in ("diagnostic", "diag")
+                    and not is_reclass
+                    and bool(
+                        opts_dict.get("time_dependent_roc")
+                        or opts_dict.get("time_horizons")
+                        or opts_dict.get("horizons")
                     )
+                )
+            )
+
+            # Resolve duration once using identical precedence to from_yaml()
+            supports_time = False
+            if is_iptw:
+                outcome_type = str(opts_dict.get("outcome_type", "")).lower().strip()
+                if outcome_type not in ("binary", "continuous"):
+                    supports_time = True
+            elif is_survival:
+                supports_time = True
+            elif is_td_roc:
+                supports_time = True
+
+            if is_iptw and str(opts_dict.get("outcome_type", "")).lower().strip() in (
+                "binary",
+                "continuous",
+            ):
+                time_val = None
+            else:
+                time_val = item.get("time") if not is_reclass else None
+            if time_val is None and supports_time:
+                time_val = item.get("time_col")
+                if time_val is None:
+                    time_val = opts_dict.get("time_col")
+
+            if time_val:
+                _add_col_ref(time_val, "models.time")
+
+            requires_survival_time = is_survival and not (
+                is_iptw
+                and str(opts_dict.get("outcome_type", "")).lower().strip()
+                in ("binary", "continuous")
+            )
+            if requires_survival_time and not time_val:
+                report["valid"] = False
+                report["errors"].append(
+                    f"Survival model '{item.get('name', 'unnamed')}' requires a 'time' or 'time_col' specification."
+                )
+
+            # Collect model options column references
+            for opt_key in (
+                "p_old",
+                "p_old_col",
+                "score_old",
+                "p_new",
+                "p_new_col",
+                "score_new",
+                "score_col",
+                "event_col",
+                "p_recal",
+                "p_pred",
+                "score",
+            ):
+                if opt_key == "event_col" and (is_reclass or is_iptw):
+                    continue
+                if (
+                    opt_key
+                    in (
+                        "p_old",
+                        "p_old_col",
+                        "score_old",
+                        "p_new",
+                        "p_new_col",
+                        "score_new",
+                        "score_col",
+                        "score",
+                        "p_recal",
+                        "p_pred",
+                    )
+                    and is_iptw
+                ):
+                    continue
+                if opt_key in opts_dict:
+                    _add_col_ref(opts_dict[opt_key], f"models.options.{opt_key}")
 
     variables_list = raw_spec.get("variables", [])
     if isinstance(variables_list, list):

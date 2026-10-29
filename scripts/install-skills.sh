@@ -45,11 +45,21 @@ for hdir in "${HARNESS_DIRS[@]}"; do
     mkdir -p "$hdir"
     link_or_copy "$REPO_ROOT/skills/shinystat" "$hdir/shinystat"
     link_or_copy "$REPO_ROOT/skills/shinystat-cloud" "$hdir/shinystat-cloud"
+    if [[ "$MODE" == "--copy" ]]; then
+        link_or_copy "$REPO_ROOT/skills/_shared" "$hdir/_shared"
+    else
+        rm -rf "$hdir/_shared"
+    fi
 done
 
 echo "[3.5/4] Installing cloud skill into packaging/cloud..."
 mkdir -p "$REPO_ROOT/packaging/cloud"
 link_or_copy "$REPO_ROOT/skills/shinystat-cloud" "$REPO_ROOT/packaging/cloud/shinystat-cloud"
+if [[ "$MODE" == "--copy" ]]; then
+    link_or_copy "$REPO_ROOT/skills/_shared" "$REPO_ROOT/packaging/cloud/_shared"
+else
+    rm -rf "$REPO_ROOT/packaging/cloud/_shared"
+fi
 
 echo "[4/4] Linking sub-agents (figure-tester.md)..."
 CANONICAL_AGENT="$REPO_ROOT/agents/figure-tester.md"

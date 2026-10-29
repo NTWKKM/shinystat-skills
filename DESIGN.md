@@ -1571,6 +1571,32 @@ In the latest review round on PR #22 by `coderabbitai`:
 - **Status**: Accepted & Fully Verified.
 - **Verification**: 715 unit and integration tests passing, ruff lint and format clean, 0 regressions.
 
+---
+
+## ADR 54: PR #22 CodeRabbit AI Follow-Up: Preflight Spec Duration Alignment, Standalone Packaging, and Copy-Mode Harness Mirrors
+
+### Context
+In the latest CodeRabbit AI review on PR #22:
+1. `src/medstat/cli/spec.py`: `preflight_validate_spec()` independently collected `time_col` and `options.time_col`, requiring duration for survival models even when declared with `options.method: iptw` and `options.outcome_type: binary`, and collected unused columns like `options.score_col` into required dataset fields.
+2. `scripts/package-cloud-skill.sh`: `install-skills.sh --symlink` symlinked `packaging/cloud/shinystat-cloud` to `skills/shinystat-cloud`. The subsequent `cp -RL "$SRC_SKILL" "$TARGET_SKILL"` followed the symlink and attempted to copy into the source directory itself, failing with duplicate/identical file errors.
+3. `skills/shinystat-cloud/SKILL.md` / `scripts/install-skills.sh`: In `--copy` mode, relative references to `../_shared/references/` in `shinystat-cloud` broke because `_shared` was not copied beside `shinystat-cloud` in harness mirrors (`.agent`, `.agents`, `.claude`, `.cursor`) or `packaging/cloud`.
+
+### Decision
+1. **Preflight Spec Duration & Option Alignment**:
+   - Updated `preflight_validate_spec()` to resolve the duration column once using the exact same `is_iptw`, `is_survival`, and `is_td_roc` precedence as `AnalysisPlan.from_yaml()`.
+   - Collected only that single resolved column under `"models.time"` instead of independently collecting `models.time_col` and `models.options.time_col`.
+   - Survival IPTW with binary/continuous outcome (`outcome_type in ("binary", "continuous")`) no longer requires duration or `options.score_col`.
+   - Excluded unused options (`score_col`, `score`, `p_old`, `p_new`, `p_recal`, `p_pred`, `event_col`) from referenced columns when `is_iptw` is active.
+2. **Standalone Cloud Packaging**:
+   - In `scripts/package-cloud-skill.sh`, added `rm -rf "$TARGET_SKILL"` immediately after invoking `install-skills.sh --symlink`, removing the symlink before `cp -RL "$SRC_SKILL" "$TARGET_SKILL"` runs. This guarantees `cp -RL` creates a standalone physical directory.
+3. **Copy-Mode Harness Shared References**:
+   - In `scripts/install-skills.sh`, when `MODE == "--copy"`, copied `$REPO_ROOT/skills/_shared` beside each copied `shinystat-cloud` skill in each harness directory (`$hdir/_shared`) and in `packaging/cloud/_shared`, ensuring relative links `../_shared/references/` resolve.
+   - In symlink mode, explicitly purged `$hdir/_shared` and `packaging/cloud/_shared`, preserving exact byte-identical parity with the canonical `skills/` directory.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 717 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
+
 
 
 
