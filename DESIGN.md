@@ -1597,6 +1597,31 @@ In the latest CodeRabbit AI review on PR #22:
 - **Status**: Accepted & Fully Verified.
 - **Verification**: 717 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
 
+---
+
+## ADR 55: PR #22 CodeRabbit Follow-Up: Survival IPTW Preflight Duration, Diagnostic Operation Guard, and Execution Duration Scoping
+
+### Context
+In the latest CodeRabbit review round on PR #22:
+1. `src/medstat/cli/spec.py`: `requires_survival_time` only checked `is_survival` (`m_type in _SURVIVAL_MODEL_TYPES`), so models declared with `type: iptw` or `options.method: iptw` and `outcome_type: survival` did not require `time` or `time_col` during preflight.
+2. `tests/unit/test_cli_ergonomics.py` & `src/medstat/cli/spec.py`: `type: diagnostic` models without an operation option fell through in `execute()` to an unsupported model type error. Preflight validation accepted bare diagnostic models without checking for a supported operation.
+3. `src/medstat/cli/spec.py`: In `execute()`, `options.time_col` was added to `req_cols` for ordinary logistic models whenever `model_spec.time` was unset, causing listwise exclusion of patients with missing durations even though ordinary logistic regression does not use duration.
+
+### Decision
+1. **Survival IPTW Preflight Duration**:
+   - Updated `requires_survival_time` to `(is_survival and iptw_outcome_type not in ("binary", "continuous")) or (is_iptw and iptw_outcome_type == "survival")`.
+   - Survival IPTW models (either `type: iptw` or `options.method: iptw`) with `outcome_type: survival` now require a resolved duration column during preflight.
+2. **Diagnostic Operation Validation**:
+   - In `preflight_validate_spec()`, validated that `m_type in ("diagnostic", "diag")` specifies a supported operation (`is_iptw`, `is_reclass`, `is_td_roc`, `internal_validation`, or `recalibration`). Rejected unconfigured diagnostic models with actionable remediation.
+   - Updated the `diag_model` fixture in `test_cli_ergonomics.py` to specify `options: internal_validation: true`.
+3. **Execution Duration Scoping**:
+   - In `AnalysisPlan.execute()`, computed `is_duration_dependent` from `is_survival_exec`, `is_td_roc_exec`, and `is_iptw_survival_exec`.
+   - Excluded `options.time_col` from `req_cols` whenever `not is_duration_dependent or model_spec.time`, preventing ordinary logistic preparation from dropping patients with missing follow-up durations.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 720 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
+
 
 
 

@@ -1001,6 +1001,8 @@ models:
     outcome: "dead"
     covariates: ["age"]
     time_col: "ignored_diag_time"
+    options:
+      internal_validation: true
   - name: "surv_model"
     type: "cox"
     outcome: "dead"
@@ -1034,3 +1036,153 @@ models:
     report_missing = preflight_validate_spec(spec_missing_dur)
     assert report_missing["valid"] is False
     assert any("nonexistent_surv_time" in err for err in report_missing["errors"])
+
+
+def test_preflight_validate_diagnostic_missing_operation_rejected(tmp_path):
+    """Diagnostic models without a supported operation in options are rejected during preflight."""
+    csv_file = tmp_path / "data.csv"
+    csv_file.write_text("patient_id,dead,age\n1,0,50\n2,1,60\n", encoding="utf-8")
+    spec = tmp_path / "spec_unsupported_diag.yaml"
+    spec.write_text(
+        f"""
+metadata:
+  study_title: "Unsupported Diagnostic Test"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "unsupported_diag"
+    type: "diagnostic"
+    outcome: "dead"
+    covariates: ["age"]
+""",
+        encoding="utf-8",
+    )
+    report = preflight_validate_spec(spec)
+    assert report["valid"] is False
+    assert any(
+        "must specify a supported diagnostic operation" in err
+        for err in report["errors"]
+    )
+
+
+def test_preflight_validate_iptw_survival_requires_duration(tmp_path):
+    """Survival models declared with type: iptw or options.method: iptw require resolved duration."""
+    csv_file = tmp_path / "data.csv"
+    csv_file.write_text(
+        "patient_id,dead,treatment,age\n1,0,0,50\n2,1,1,60\n", encoding="utf-8"
+    )
+    # 1. type: iptw with outcome_type: survival but no time or time_col
+    spec1 = tmp_path / "spec_iptw_surv_no_time.yaml"
+    spec1.write_text(
+        f"""
+metadata:
+  study_title: "IPTW Survival No Time Test"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "iptw_surv"
+    type: "iptw"
+    outcome: "dead"
+    exposure: "treatment"
+    covariates: ["age"]
+    options:
+      outcome_type: "survival"
+""",
+        encoding="utf-8",
+    )
+    report1 = preflight_validate_spec(spec1)
+    assert report1["valid"] is False
+    assert any(
+        "requires a 'time' or 'time_col' specification" in err
+        for err in report1["errors"]
+    )
+
+    # 2. options.method: iptw with outcome_type: survival but no time or time_col
+    spec2 = tmp_path / "spec_method_iptw_surv_no_time.yaml"
+    spec2.write_text(
+        f"""
+metadata:
+  study_title: "Method IPTW Survival No Time Test"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "method_iptw_surv"
+    type: "survival"
+    outcome: "dead"
+    exposure: "treatment"
+    covariates: ["age"]
+    options:
+      method: "iptw"
+      outcome_type: "survival"
+""",
+        encoding="utf-8",
+    )
+    report2 = preflight_validate_spec(spec2)
+    assert report2["valid"] is False
+    assert any(
+        "requires a 'time' or 'time_col' specification" in err
+        for err in report2["errors"]
+    )
+
+
+def test_execute_required_cols_ignores_time_col_for_ordinary_logistic(
+    tmp_path, monkeypatch
+):
+    """AnalysisPlan.execute excludes options.time_col for ordinary logistic models so missing duration does not drop patients."""
+    import medstat.cli.spec as spec_mod
+
+    captured_req_cols = []
+    orig_prepare = spec_mod.prepare_data_for_analysis
+
+    def mock_prepare(*args, **kwargs):
+        captured_req_cols.append(kwargs.get("required_cols"))
+        return orig_prepare(*args, **kwargs)
+
+    monkeypatch.setattr(spec_mod, "prepare_data_for_analysis", mock_prepare)
+
+    csv_path = tmp_path / "logistic_time_data.csv"
+    pd.DataFrame(
+        {
+            "patient_id": list(range(1, 11)),
+            "dead": [0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+            "age": [50, 60, 55, 65, 70, 45, 52, 63, 68, 72],
+            "time_duration": [
+                10.0,
+                None,
+                30.0,
+                None,
+                50.0,
+                15.0,
+                25.0,
+                35.0,
+                None,
+                55.0,
+            ],
+        }
+    ).to_csv(csv_path, index=False)
+
+    plan_yaml = tmp_path / "logistic_plan.yaml"
+    plan_yaml.write_text(
+        f"""
+metadata:
+  study_title: "Logistic Time Option Test"
+data:
+  input_path: "{csv_path}"
+models:
+  - name: "log_model"
+    type: "logistic"
+    outcome: "dead"
+    covariates: ["age"]
+    options:
+      time_col: "time_duration"
+""",
+        encoding="utf-8",
+    )
+
+    plan = AnalysisPlan.from_yaml(plan_yaml)
+    res = plan.execute()
+    assert len(captured_req_cols) == 1
+    assert "time_duration" not in captured_req_cols[0]
+    assert "dead" in captured_req_cols[0]
+    assert "age" in captured_req_cols[0]
+    assert res["model_flow"]["log_model"]["final_n"] == 10

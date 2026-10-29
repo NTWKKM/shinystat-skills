@@ -392,6 +392,29 @@ class AnalysisPlan:
                     or m_opts.get("reclassification")
                 )
             )
+            is_survival_exec = mod_type in _SURVIVAL_MODEL_TYPES and not (
+                is_iptw_exec
+                and str(m_opts.get("outcome_type", "")).lower().strip()
+                in ("binary", "continuous")
+            )
+            is_td_roc_exec = not is_iptw_exec and (
+                mod_type in ("time_dependent_roc", "td_roc")
+                or (
+                    mod_type in ("diagnostic", "diag")
+                    and not is_reclass_exec
+                    and bool(
+                        m_opts.get("time_dependent_roc")
+                        or m_opts.get("time_horizons")
+                        or m_opts.get("horizons")
+                    )
+                )
+            )
+            is_iptw_survival_exec = is_iptw_exec and str(
+                m_opts.get("outcome_type", "")
+            ).lower().strip() not in ("binary", "continuous")
+            is_duration_dependent = (
+                is_survival_exec or is_td_roc_exec or is_iptw_survival_exec
+            )
             req_cols = [model_spec.outcome]
             if model_spec.exposure:
                 req_cols.append(model_spec.exposure)
@@ -413,7 +436,7 @@ class AnalysisPlan:
                 "score",
             ):
                 if opt_key == "time_col" and (
-                    model_spec.time or is_reclass_exec or is_iptw_exec
+                    not is_duration_dependent or model_spec.time
                 ):
                     continue
                 if opt_key == "event_col" and (is_reclass_exec or is_iptw_exec):
@@ -1471,6 +1494,27 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
                 )
             )
 
+            is_diagnostic_type = m_type in ("diagnostic", "diag")
+            is_valid_diagnostic_op = (
+                is_iptw
+                or is_reclass
+                or is_td_roc
+                or bool(
+                    opts_dict.get("internal_validation") or opts_dict.get("validation")
+                )
+                or bool(opts_dict.get("recalibration"))
+            )
+            if is_diagnostic_type and not is_valid_diagnostic_op:
+                report["valid"] = False
+                report["errors"].append(
+                    f"Diagnostic model '{item.get('name', 'unnamed')}' must specify a supported diagnostic operation in options "
+                    "(e.g., 'internal_validation', 'reclassification', 'time_dependent_roc', 'recalibration', or 'method: iptw')."
+                )
+                report["agent_remediation"].append(
+                    f"Set one of 'internal_validation: true', 'p_old_col', 'time_dependent_roc: true', 'recalibration: true', "
+                    f"or 'method: iptw' in options for diagnostic model '{item.get('name', 'unnamed')}'."
+                )
+
             # Resolve duration once using identical precedence to from_yaml()
             supports_time = False
             if is_iptw:
@@ -1497,11 +1541,14 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
             if time_val:
                 _add_col_ref(time_val, "models.time")
 
-            requires_survival_time = is_survival and not (
-                is_iptw
-                and str(opts_dict.get("outcome_type", "")).lower().strip()
-                in ("binary", "continuous")
+            iptw_outcome_type = (
+                str(opts_dict.get("outcome_type", "")).lower().strip()
+                if is_iptw
+                else ""
             )
+            requires_survival_time = (
+                is_survival and iptw_outcome_type not in ("binary", "continuous")
+            ) or (is_iptw and iptw_outcome_type == "survival")
             if requires_survival_time and not time_val:
                 report["valid"] = False
                 report["errors"].append(
