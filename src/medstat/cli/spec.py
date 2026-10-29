@@ -247,10 +247,14 @@ class AnalysisPlan:
 
             is_survival = m_type in _SURVIVAL_MODEL_TYPES
             is_iptw = m_type in ("iptw", "causal_iptw") or m_method == "iptw"
-            is_reclass = m_type in ("reclassification", "diagnostic", "diag") and bool(
-                opts_dict.get("p_old_col")
-                or opts_dict.get("p_old")
-                or opts_dict.get("reclassification")
+            is_reclass = (
+                not is_iptw
+                and m_type in ("reclassification", "diagnostic", "diag")
+                and bool(
+                    opts_dict.get("p_old_col")
+                    or opts_dict.get("p_old")
+                    or opts_dict.get("reclassification")
+                )
             )
             is_td_roc = m_type in ("time_dependent_roc", "td_roc") or (
                 m_type in ("diagnostic", "diag")
@@ -365,14 +369,17 @@ class AnalysisPlan:
         # 3. Execute Pre-specified Models
         for model_spec in self.models:
             mod_type = model_spec.type.lower().strip()
-            is_reclass_exec = mod_type in (
-                "reclassification",
-                "diagnostic",
-                "diag",
-            ) and bool(
-                model_spec.options.get("p_old_col")
-                or model_spec.options.get("p_old")
-                or model_spec.options.get("reclassification")
+            m_opts = model_spec.options if isinstance(model_spec.options, dict) else {}
+            m_method = str(m_opts.get("method", "")).lower().strip()
+            is_iptw_exec = mod_type in ("iptw", "causal_iptw") or m_method == "iptw"
+            is_reclass_exec = (
+                not is_iptw_exec
+                and mod_type in ("reclassification", "diagnostic", "diag")
+                and bool(
+                    m_opts.get("p_old_col")
+                    or m_opts.get("p_old")
+                    or m_opts.get("reclassification")
+                )
             )
             req_cols = [model_spec.outcome]
             if model_spec.exposure:

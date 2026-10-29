@@ -1559,6 +1559,7 @@ In the latest review round on PR #22 by `coderabbitai`:
    - Resolved `ModelSpec.time` from top-level `time_col` or `options.time_col` when explicit `time` is unset for survival models, time-dependent ROC models (including `diagnostic` models with `options.time_dependent_roc: true`), and IPTW models (both `type: "iptw"/"causal_iptw"` and `options.method: "iptw"`).
    - If an IPTW model explicitly declares a binary or continuous `outcome_type`, `time_col` is not inherited into `ModelSpec.time`.
    - For diagnostic models configured for reclassification (`p_old_col`, `p_old`, or `reclassification`), time-selection follows the executing reclassification branch (`is_td_roc` is disabled, `time_val` remains `None`), preventing duration column requirements during sample preparation even if `time_col` or `time_dependent_roc` is present.
+   - Guarded `is_reclass` and `is_reclass_exec` with `not is_iptw` so option-selected IPTW models (`options.method: "iptw"`) take IPTW execution precedence, preserving duration inheritance for survival IPTW and preventing misclassification as reclassification.
    - Ordinary logistic, linear, and non-time diagnostic models do not inherit `time_col`.
 3. **Execution Duration Column Deduplication**: In `AnalysisPlan.execute`, `options["time_col"]` is skipped in `req_cols` construction whenever `model_spec.time` is already set or when executing reclassification, preventing stale or overridden option values from interfering with sample preparation.
 4. **Parquet RangeIndex Kind Filter**: Updated pandas metadata dictionary handling in `get_clinical_columns` to check `idx_col.get("kind") != "range"` before adding to `index_cols`.
@@ -1566,7 +1567,7 @@ In the latest review round on PR #22 by `coderabbitai`:
 
 ### Consequences
 - **Status**: Accepted & Fully Verified.
-- **Verification**: 480 unit tests passing, ruff lint and format clean, 0 regressions.
+- **Verification**: 481 unit tests passing, ruff lint and format clean, 0 regressions.
 
 
 

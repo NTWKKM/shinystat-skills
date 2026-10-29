@@ -514,6 +514,22 @@ models:
     outcome: "dead"
     options:
       p_old_col: "pred_old"
+  - name: "diagnostic_iptw_survival_with_p_old_col"
+    type: "diagnostic"
+    time_col: "diag_iptw_time"
+    outcome: "dead"
+    options:
+      method: "iptw"
+      p_old_col: "pred_old"
+      outcome_type: "survival"
+  - name: "diagnostic_iptw_binary_with_p_old_col"
+    type: "diagnostic"
+    time_col: "diag_iptw_bin_time"
+    outcome: "dead"
+    options:
+      method: "iptw"
+      p_old_col: "pred_old"
+      outcome_type: "binary"
 """,
         encoding="utf-8",
     )
@@ -537,6 +553,12 @@ models:
     assert (
         plan2.models[16].time == "td_roc_time"
     )  # td_roc model retains duration even with p_old_col
+    assert (
+        plan2.models[17].time == "diag_iptw_time"
+    )  # diagnostic with options.method: iptw + survival outcome inherits time
+    assert (
+        plan2.models[18].time is None
+    )  # diagnostic with options.method: iptw + binary outcome ignores time
 
 
 def test_execute_required_cols_duration_dedup(tmp_path, monkeypatch):
@@ -654,6 +676,74 @@ models:
     assert "reclass_model" in res["models"]
     assert "reclassification" in res["models"]["reclass_model"]
     assert res["model_flow"]["reclass_model"]["final_n"] == 10
+
+
+def test_diagnostic_method_iptw_with_p_old_col_executes_iptw(tmp_path, monkeypatch):
+    """When options.method selects IPTW, diagnostic type is not treated as reclassification and executes IPTW."""
+    import medstat.cli.spec as spec_mod
+
+    captured_req_cols = []
+    orig_prepare = spec_mod.prepare_data_for_analysis
+
+    def mock_prepare(*args, **kwargs):
+        captured_req_cols.append(kwargs.get("required_cols"))
+        return orig_prepare(*args, **kwargs)
+
+    monkeypatch.setattr(spec_mod, "prepare_data_for_analysis", mock_prepare)
+
+    csv_path = tmp_path / "iptw_diag_data.csv"
+    pd.DataFrame(
+        {
+            "patient_id": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            "dead": [0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+            "tx": [1, 1, 1, 1, 1, 0, 0, 0, 0, 0],
+            "age": [50, 60, 55, 65, 70, 45, 52, 63, 68, 72],
+            "p_old": [0.2, 0.4, 0.3, 0.7, 0.1, 0.8, 0.2, 0.6, 0.3, 0.9],
+            "time_duration": [
+                10.0,
+                20.0,
+                30.0,
+                40.0,
+                50.0,
+                15.0,
+                25.0,
+                35.0,
+                45.0,
+                55.0,
+            ],
+        }
+    ).to_csv(csv_path, index=False)
+
+    plan_yaml = tmp_path / "iptw_diag_plan.yaml"
+    plan_yaml.write_text(
+        f"""
+metadata:
+  study_title: "IPTW Diagnostic Spec Test"
+data:
+  input_path: "{csv_path}"
+models:
+  - name: "iptw_model"
+    type: "diagnostic"
+    time_col: "time_duration"
+    outcome: "dead"
+    exposure: "tx"
+    covariates: ["age"]
+    options:
+      method: "iptw"
+      p_old_col: "p_old"
+      outcome_type: "survival"
+""",
+        encoding="utf-8",
+    )
+
+    plan = AnalysisPlan.from_yaml(plan_yaml)
+    assert plan.models[0].time == "time_duration"
+    res = plan.execute()
+    assert len(captured_req_cols) == 1
+    assert "time_duration" in captured_req_cols[0]
+    assert "tx" in captured_req_cols[0]
+    assert "iptw_model" in res["models"]
+    assert "balance_table" in res["models"]["iptw_model"]
 
 
 def test_actionable_error_ph_and_competing_risk_remediation(capsys):
