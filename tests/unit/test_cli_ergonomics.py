@@ -531,6 +531,13 @@ models:
       p_old_col: "pred_old"
       time_dependent_roc: true
       outcome_type: "binary"
+  - name: "survival_type_method_iptw_binary"
+    type: "survival"
+    time_col: "surv_iptw_bin_time"
+    outcome: "dead"
+    options:
+      method: "iptw"
+      outcome_type: "binary"
 """,
         encoding="utf-8",
     )
@@ -560,6 +567,9 @@ models:
     assert (
         plan2.models[18].time is None
     )  # diagnostic with options.method: iptw + binary outcome ignores time
+    assert (
+        plan2.models[19].time is None
+    )  # survival type with options.method: iptw + binary outcome ignores time
 
 
 def test_execute_required_cols_duration_dedup(tmp_path, monkeypatch):
@@ -824,6 +834,77 @@ models:
     assert "odds_ratio" in res["models"]["iptw_binary_model"]
     assert "reclassification" not in res["models"]["iptw_binary_model"]
     assert res["model_flow"]["iptw_binary_model"]["final_n"] == 10
+
+
+def test_iptw_plan_with_score_col_missing_values_retains_patients(
+    tmp_path, monkeypatch
+):
+    """When an IPTW plan specifies options.score_col, score_col is excluded from required_cols
+    during IPTW preparation and patients with missing values in score_col remain included."""
+    import medstat.cli.spec as spec_mod
+
+    captured_req_cols = []
+    orig_prepare = spec_mod.prepare_data_for_analysis
+
+    def mock_prepare(*args, **kwargs):
+        captured_req_cols.append(kwargs.get("required_cols"))
+        return orig_prepare(*args, **kwargs)
+
+    monkeypatch.setattr(spec_mod, "prepare_data_for_analysis", mock_prepare)
+
+    csv_path = tmp_path / "iptw_score_col_missing_data.csv"
+    pd.DataFrame(
+        {
+            "patient_id": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            "dead": [0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+            "tx": [1, 1, 1, 1, 1, 0, 0, 0, 0, 0],
+            "age": [50, 60, 55, 65, 70, 45, 52, 63, 68, 72],
+            "risk_score": [
+                1.2,
+                np.nan,
+                2.3,
+                np.nan,
+                3.1,
+                np.nan,
+                2.5,
+                1.9,
+                np.nan,
+                2.8,
+            ],
+        }
+    ).to_csv(csv_path, index=False)
+
+    plan_yaml = tmp_path / "iptw_score_plan.yaml"
+    plan_yaml.write_text(
+        f"""
+metadata:
+  study_title: "IPTW Score Col Missing Test"
+data:
+  input_path: "{csv_path}"
+models:
+  - name: "iptw_score_model"
+    type: "iptw"
+    outcome: "dead"
+    exposure: "tx"
+    covariates: ["age"]
+    options:
+      score_col: "risk_score"
+      outcome_type: "binary"
+""",
+        encoding="utf-8",
+    )
+
+    plan = AnalysisPlan.from_yaml(plan_yaml)
+    res = plan.execute()
+    assert len(captured_req_cols) == 1
+    assert "risk_score" not in captured_req_cols[0]
+    assert "dead" in captured_req_cols[0]
+    assert "tx" in captured_req_cols[0]
+    assert "age" in captured_req_cols[0]
+    assert "iptw_score_model" in res["models"]
+    assert "balance_table" in res["models"]["iptw_score_model"]
+    assert "odds_ratio" in res["models"]["iptw_score_model"]
+    assert res["model_flow"]["iptw_score_model"]["final_n"] == 10
 
 
 def test_actionable_error_ph_and_competing_risk_remediation(capsys):

@@ -270,12 +270,12 @@ class AnalysisPlan:
             )
 
             supports_time = False
-            if is_survival:
-                supports_time = True
-            elif is_iptw:
+            if is_iptw:
                 outcome_type = str(opts_dict.get("outcome_type", "")).lower().strip()
                 if outcome_type not in ("binary", "continuous"):
                     supports_time = True
+            elif is_survival:
+                supports_time = True
             elif is_td_roc:
                 supports_time = True
 
@@ -427,6 +427,10 @@ class AnalysisPlan:
                         "p_new",
                         "p_new_col",
                         "score_new",
+                        "score_col",
+                        "score",
+                        "p_recal",
+                        "p_pred",
                     )
                     and is_iptw_exec
                 ):
