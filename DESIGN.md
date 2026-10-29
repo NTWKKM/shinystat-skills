@@ -1560,14 +1560,16 @@ In the latest review round on PR #22 by `coderabbitai`:
    - If an IPTW model explicitly declares a binary or continuous `outcome_type`, `time_col` is not inherited into `ModelSpec.time`.
    - For diagnostic models configured for reclassification (`p_old_col`, `p_old`, or `reclassification`), time-selection follows the executing reclassification branch (`is_td_roc` is disabled, `time_val` remains `None`), preventing duration column requirements during sample preparation even if `time_col` or `time_dependent_roc` is present.
    - Guarded `is_reclass` and `is_reclass_exec` with `not is_iptw` so option-selected IPTW models (`options.method: "iptw"`) take IPTW execution precedence, preserving duration inheritance for survival IPTW and preventing misclassification as reclassification.
+   - Guarded `is_td_roc` with `not is_iptw` and gave IPTW outcome selection precedence over diagnostic ROC hints in `supports_time`, ensuring `ModelSpec.time` remains `None` for binary and continuous IPTW models even when `time_dependent_roc: true` or `time_col` is present.
+   - Aligned execution dispatch to `if is_iptw_exec:` and `elif is_reclass_exec:`, ensuring normalized method values (e.g. `options.method: "IPTW"`) execute IPTW rather than falling through to reclassification.
    - Ordinary logistic, linear, and non-time diagnostic models do not inherit `time_col`.
-3. **Execution Duration Column Deduplication**: In `AnalysisPlan.execute`, `options["time_col"]` is skipped in `req_cols` construction whenever `model_spec.time` is already set or when executing reclassification, preventing stale or overridden option values from interfering with sample preparation.
+3. **Execution Duration Column Deduplication & Option Filtering**: In `AnalysisPlan.execute`, `options["time_col"]` is skipped in `req_cols` construction whenever `model_spec.time` is already set, when executing reclassification, or when executing IPTW (`is_iptw_exec`), and reclassification scoring columns are omitted for IPTW, preventing stale options from requiring duration or excluding patients with missing follow-up time.
 4. **Parquet RangeIndex Kind Filter**: Updated pandas metadata dictionary handling in `get_clinical_columns` to check `idx_col.get("kind") != "range"` before adding to `index_cols`.
 5. **Recipe 11 Source Alignment**: Updated `test_recipe_11_equals_src_functions()` to read `skills/shinystat-cloud/references/recipes/03-survival-competing-risks.md`.
 
 ### Consequences
 - **Status**: Accepted & Fully Verified.
-- **Verification**: 481 unit tests passing, ruff lint and format clean, 0 regressions.
+- **Verification**: 714 unit and integration tests passing, ruff lint and format clean, 0 regressions.
 
 
 

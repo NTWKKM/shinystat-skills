@@ -529,6 +529,7 @@ models:
     options:
       method: "iptw"
       p_old_col: "pred_old"
+      time_dependent_roc: true
       outcome_type: "binary"
 """,
         encoding="utf-8",
@@ -729,7 +730,7 @@ models:
     exposure: "tx"
     covariates: ["age"]
     options:
-      method: "iptw"
+      method: "IPTW"
       p_old_col: "p_old"
       outcome_type: "survival"
 """,
@@ -744,6 +745,85 @@ models:
     assert "tx" in captured_req_cols[0]
     assert "iptw_model" in res["models"]
     assert "balance_table" in res["models"]["iptw_model"]
+
+
+def test_diagnostic_method_iptw_binary_with_missing_duration_retains_patients(
+    tmp_path, monkeypatch
+):
+    """When a diagnostic plan sets method: IPTW, outcome_type: binary, p_old_col, and time_dependent_roc: true,
+    IPTW outcome selection takes precedence over diagnostic ROC hints, ModelSpec.time is None,
+    duration is excluded from required_cols, and patients with missing duration are not excluded."""
+    import medstat.cli.spec as spec_mod
+
+    captured_req_cols = []
+    orig_prepare = spec_mod.prepare_data_for_analysis
+
+    def mock_prepare(*args, **kwargs):
+        captured_req_cols.append(kwargs.get("required_cols"))
+        return orig_prepare(*args, **kwargs)
+
+    monkeypatch.setattr(spec_mod, "prepare_data_for_analysis", mock_prepare)
+
+    csv_path = tmp_path / "iptw_binary_missing_time_data.csv"
+    pd.DataFrame(
+        {
+            "patient_id": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            "dead": [0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+            "tx": [1, 1, 1, 1, 1, 0, 0, 0, 0, 0],
+            "age": [50, 60, 55, 65, 70, 45, 52, 63, 68, 72],
+            "p_old": [0.2, 0.4, 0.3, 0.7, 0.1, 0.8, 0.2, 0.6, 0.3, 0.9],
+            "p_new": [0.3, 0.5, 0.4, 0.8, 0.2, 0.7, 0.3, 0.5, 0.4, 0.8],
+            "time_duration": [
+                10.0,
+                20.0,
+                np.nan,
+                40.0,
+                np.nan,
+                15.0,
+                25.0,
+                np.nan,
+                45.0,
+                55.0,
+            ],
+        }
+    ).to_csv(csv_path, index=False)
+
+    plan_yaml = tmp_path / "iptw_binary_plan.yaml"
+    plan_yaml.write_text(
+        f"""
+metadata:
+  study_title: "IPTW Binary Missing Time Spec Test"
+data:
+  input_path: "{csv_path}"
+models:
+  - name: "iptw_binary_model"
+    type: "diagnostic"
+    time_col: "time_duration"
+    outcome: "dead"
+    exposure: "tx"
+    covariates: ["age"]
+    options:
+      method: "IPTW"
+      p_old_col: "p_old"
+      p_new_col: "p_new"
+      time_dependent_roc: true
+      outcome_type: "binary"
+""",
+        encoding="utf-8",
+    )
+
+    plan = AnalysisPlan.from_yaml(plan_yaml)
+    assert plan.models[0].time is None
+    res = plan.execute()
+    assert len(captured_req_cols) == 1
+    assert "time_duration" not in captured_req_cols[0]
+    assert "tx" in captured_req_cols[0]
+    assert "dead" in captured_req_cols[0]
+    assert "iptw_binary_model" in res["models"]
+    assert "balance_table" in res["models"]["iptw_binary_model"]
+    assert "odds_ratio" in res["models"]["iptw_binary_model"]
+    assert "reclassification" not in res["models"]["iptw_binary_model"]
+    assert res["model_flow"]["iptw_binary_model"]["final_n"] == 10
 
 
 def test_actionable_error_ph_and_competing_risk_remediation(capsys):

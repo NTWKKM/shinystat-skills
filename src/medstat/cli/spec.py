@@ -256,25 +256,36 @@ class AnalysisPlan:
                     or opts_dict.get("reclassification")
                 )
             )
-            is_td_roc = m_type in ("time_dependent_roc", "td_roc") or (
-                m_type in ("diagnostic", "diag")
-                and not is_reclass
-                and bool(
-                    opts_dict.get("time_dependent_roc")
-                    or opts_dict.get("time_horizons")
-                    or opts_dict.get("horizons")
+            is_td_roc = not is_iptw and (
+                m_type in ("time_dependent_roc", "td_roc")
+                or (
+                    m_type in ("diagnostic", "diag")
+                    and not is_reclass
+                    and bool(
+                        opts_dict.get("time_dependent_roc")
+                        or opts_dict.get("time_horizons")
+                        or opts_dict.get("horizons")
+                    )
                 )
             )
 
             supports_time = False
-            if is_survival or is_td_roc:
+            if is_survival:
                 supports_time = True
             elif is_iptw:
                 outcome_type = str(opts_dict.get("outcome_type", "")).lower().strip()
                 if outcome_type not in ("binary", "continuous"):
                     supports_time = True
+            elif is_td_roc:
+                supports_time = True
 
-            time_val = m.get("time") if not is_reclass else None
+            if is_iptw and str(opts_dict.get("outcome_type", "")).lower().strip() in (
+                "binary",
+                "continuous",
+            ):
+                time_val = None
+            else:
+                time_val = m.get("time") if not is_reclass else None
             if time_val is None and supports_time:
                 time_val = m.get("time_col")
                 if time_val is None:
@@ -401,9 +412,24 @@ class AnalysisPlan:
                 "p_pred",
                 "score",
             ):
-                if opt_key == "time_col" and (model_spec.time or is_reclass_exec):
+                if opt_key == "time_col" and (
+                    model_spec.time or is_reclass_exec or is_iptw_exec
+                ):
                     continue
-                if opt_key == "event_col" and is_reclass_exec:
+                if opt_key == "event_col" and (is_reclass_exec or is_iptw_exec):
+                    continue
+                if (
+                    opt_key
+                    in (
+                        "p_old",
+                        "p_old_col",
+                        "score_old",
+                        "p_new",
+                        "p_new_col",
+                        "score_new",
+                    )
+                    and is_iptw_exec
+                ):
                     continue
                 val = model_spec.options.get(opt_key)
                 if val and isinstance(val, str) and val in current_df.columns:
@@ -442,10 +468,7 @@ class AnalysisPlan:
                 adjusted_for=model_spec.covariates,
             )
 
-            if (
-                mod_type in ("iptw", "causal_iptw")
-                or model_spec.options.get("method") == "iptw"
-            ):
+            if is_iptw_exec:
                 estimand = str(model_spec.options.get("estimand", "ATE")).upper()
                 stabilized = bool(model_spec.options.get("stabilized", True))
                 t_quantiles = model_spec.options.get("truncate_quantiles", (0.01, 0.99))
@@ -975,11 +998,7 @@ class AnalysisPlan:
                                 scale="Beta",
                             )
                         )
-            elif mod_type in ("reclassification", "diagnostic", "diag") and (
-                model_spec.options.get("p_old_col")
-                or model_spec.options.get("p_old")
-                or model_spec.options.get("reclassification")
-            ):
+            elif is_reclass_exec:
                 p_old_c = model_spec.options.get(
                     "p_old_col", model_spec.options.get("p_old")
                 )
