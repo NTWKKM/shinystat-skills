@@ -1672,6 +1672,30 @@ In the latest CodeRabbit review round on PR #22:
 - **Status**: Accepted & Fully Verified.
 - **Verification**: 725 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
 
+---
+
+## ADR 58: PR #22 CodeRabbit Follow-Up: Reclassification Null Alias Fallback & Comprehensive Markdown Link Validation
+
+### Context
+In the latest CodeRabbit review round on PR #22:
+1. `src/medstat/cli/spec.py`: In `AnalysisPlan.execute`, `p_old_col` and `p_new_col` were resolved using `dict.get("p_old_col", dict.get("p_old"))`. When a YAML spec explicitly set `p_old_col: null` while providing `p_old: "old_score"` (and similarly for `p_new_col`), `dict.get("p_old_col", ...)` returned `None` instead of evaluating the fallback, causing execution to fail with `KeyError: None` despite preflight validation accepting the specification.
+2. `tests/unit/test_shinystat_skill.py`:
+   - Shared reference existence checks in `test_shinystat_cloud_canonical_skill_exists_and_valid()` only verified three hard-coded markdown files instead of dynamically covering all shared references linked in the `SKILL.md` body.
+   - The packaged markdown test relied solely on string substitution comparisons and did not independently verify that all local relative markdown links resolve to valid, existing files within the standalone package.
+
+### Decision
+1. **Reclassification Null Alias Fallback in Execution**:
+   - In `AnalysisPlan.execute`, resolved `p_old_c = model_spec.options.get("p_old_col") or model_spec.options.get("p_old")` and `p_new_c = model_spec.options.get("p_new_col") or model_spec.options.get("p_new")`, matching the `or` fallback semantics of preflight validation.
+   - Symmetrically updated `horizons` and `p_old_col` in time-dependent ROC execution to ensure explicit null options fall back to aliases (`horizons` and `score_old`).
+   - Added regression test `test_reclassification_execute_with_explicit_null_aliases` in `tests/unit/test_cli_ergonomics.py`.
+2. **Dynamic Shared Reference & Independent Markdown Link Validation**:
+   - Updated `test_shinystat_cloud_canonical_skill_exists_and_valid()` to dynamically parse all `_shared/references/*.md` links from the `SKILL.md` body and verify their existence in `skills/_shared/references/`.
+   - Added independent regex-based link validation iterating over all `.md` files in `packaging/cloud/shinystat-cloud` to confirm that every local relative link resolves to a valid, existing target strictly contained within the standalone package root.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 726 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
+
 
 
 

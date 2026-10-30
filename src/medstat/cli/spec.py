@@ -1026,11 +1026,11 @@ class AnalysisPlan:
                             )
                         )
             elif is_reclass_exec:
-                p_old_c = model_spec.options.get(
-                    "p_old_col", model_spec.options.get("p_old")
+                p_old_c = model_spec.options.get("p_old_col") or model_spec.options.get(
+                    "p_old"
                 )
-                p_new_c = model_spec.options.get(
-                    "p_new_col", model_spec.options.get("p_new")
+                p_new_c = model_spec.options.get("p_new_col") or model_spec.options.get(
+                    "p_new"
                 )
                 th_list = model_spec.options.get("thresholds")
                 y_out = clean_df[model_spec.outcome].values
@@ -1066,12 +1066,12 @@ class AnalysisPlan:
                     or (model_spec.covariates[0] if model_spec.covariates else None)
                 )
                 horizons = model_spec.options.get(
-                    "time_horizons", model_spec.options.get("horizons")
-                )
+                    "time_horizons"
+                ) or model_spec.options.get("horizons")
                 comp_ev = model_spec.options.get("competing_event")
                 p_old_col = model_spec.options.get(
-                    "p_old_col", model_spec.options.get("score_old")
-                )
+                    "p_old_col"
+                ) or model_spec.options.get("score_old")
                 fit_res = compute_time_dependent_roc(
                     durations=clean_df[dur_col].values,
                     events=clean_df[ev_col].values,

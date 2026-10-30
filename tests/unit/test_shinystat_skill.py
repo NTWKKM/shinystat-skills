@@ -3,6 +3,7 @@ tests/unit/test_shinystat_skill.py: Multi-agent mirror parity and schema test fo
 """
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -150,11 +151,16 @@ def test_shinystat_cloud_canonical_skill_exists_and_valid():
     assert "references/recipes/01-data-missing-table1.md" in body
     assert "_shared/references/report-builder.md" in body
 
-    # References existence check
+    # References existence check: verify all shared references linked in body exist under shared_ref_dir
     shared_ref_dir = repo_root / "skills" / "_shared" / "references"
-    assert (shared_ref_dir / "decision-heuristics.md").exists()
-    assert (shared_ref_dir / "figures.md").exists()
-    assert (shared_ref_dir / "report-builder.md").exists()
+    shared_ref_links = set(re.findall(r"_shared/references/([\w.-]+\.md)", body))
+    assert shared_ref_links, (
+        "Expected at least one shared reference linked in SKILL.md body"
+    )
+    for ref_name in sorted(shared_ref_links):
+        assert (shared_ref_dir / ref_name).exists(), (
+            f"Linked shared reference '{ref_name}' missing from {shared_ref_dir}"
+        )
 
     recipes_dir = cloud_skill.parent / "references" / "recipes"
     for r_num in range(1, 6):
@@ -205,6 +211,39 @@ def test_shinystat_cloud_canonical_skill_exists_and_valid():
             assert pack_file.read_bytes() == canon_file.read_bytes(), (
                 f"Byte mismatch in {rel_path} between skills/shinystat-cloud and packaging/cloud/shinystat-cloud"
             )
+
+    # Independent validation: verify every local relative Markdown link resolves to an
+    # existing target strictly within packaging_cloud, without relying on string replacement
+    md_link_pattern = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+    resolved_links_count = 0
+    for pack_file in packaging_cloud.rglob("*.md"):
+        if not pack_file.is_file():
+            continue
+        text = pack_file.read_text(encoding="utf-8")
+        for match in md_link_pattern.finditer(text):
+            target = match.group(2).strip()
+            if target.startswith(("http://", "https://", "mailto:", "#")):
+                continue
+            target_path = target.split()[0].split("#")[0].strip()
+            if not target_path:
+                continue
+            resolved_target = (pack_file.parent / target_path).resolve()
+            assert resolved_target.exists(), (
+                f"Broken relative link in {pack_file.relative_to(packaging_cloud)}: "
+                f"target '{target}' does not exist at {resolved_target}"
+            )
+            assert (
+                packaging_cloud.resolve() in resolved_target.parents
+                or resolved_target == packaging_cloud.resolve()
+            ), (
+                f"Escaping relative link in {pack_file.relative_to(packaging_cloud)}: "
+                f"target '{target}' resolves outside packaging directory at {resolved_target}"
+            )
+            resolved_links_count += 1
+
+    assert resolved_links_count > 0, (
+        "Expected at least one relative Markdown link in packaged cloud skill"
+    )
 
 
 def test_shinystat_reference_manual_exists():
