@@ -1822,6 +1822,28 @@ In the latest CodeRabbit review round on PR #22:
 - **Status**: Accepted & Fully Verified.
 - **Verification**: 737 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
 
+---
+
+## ADR 64: PR #22 CodeRabbit Follow-Up: Preflight Rejection of Missing, Null, or Blank Model Outcomes
+
+### Context
+In the latest CodeRabbit review round on PR #22:
+- `src/medstat/cli/spec.py` (Line 1612): In `preflight_validate_spec()`, the outcome check was guarded by `if "outcome" in item:`. When a model definition omitted the `outcome` field entirely, or specified `outcome: null`, `outcome: ""`, or `outcome: "   "`, preflight skipped validation and returned `valid: true`. Downstream, `AnalysisPlan.execute()` accessed the unvalidated outcome column, triggering a `KeyError: "[''] not in index"` during dataset subsetting.
+
+### Decision
+1. **Preflight Validation of Mandatory Non-Blank Outcomes**:
+   - In `preflight_validate_spec()`, retrieved `raw_outcome = item.get("outcome")`.
+   - If `raw_outcome` is missing (`None`), null, or blank/whitespace-only, marks `report["valid"] = False` with an actionable validation error and remediation advising a valid outcome column name string.
+   - Retained explicit rejections for list-valued outcomes and non-string types.
+   - In `AnalysisPlan.execute()`, added defensive validation verifying that `model_spec.outcome` is a non-empty string before DataFrame indexing, raising a clear `ValueError` if an invalid model spec is executed directly.
+2. **Unit Tests Added**:
+   - `test_preflight_validate_missing_null_blank_outcome_rejected`: verifies preflight invalidity for missing, null, empty string, and whitespace-only outcomes.
+   - `test_execute_blank_outcome_raises_value_error`: verifies `AnalysisPlan.execute()` raises `ValueError` before DataFrame indexing when `outcome` is blank or None.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 739 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
+
 
 
 

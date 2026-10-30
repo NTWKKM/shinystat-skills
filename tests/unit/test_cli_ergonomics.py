@@ -1738,6 +1738,126 @@ models:
     assert not any("Columns missing from dataset" in err for err in report["errors"])
 
 
+def test_preflight_validate_missing_null_blank_outcome_rejected(tmp_path):
+    """Preflight rejects missing, null, and blank outcome specifications."""
+    csv_file = tmp_path / "data_outcome_checks.csv"
+    csv_file.write_text("patient_id,dead,x\n1,0,1\n2,1,2\n", encoding="utf-8")
+
+    # 1. Missing outcome field
+    spec_missing = tmp_path / "spec_missing_outcome.yaml"
+    spec_missing.write_text(
+        f"""
+metadata:
+  study_title: "Missing Outcome Test"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "model_no_outcome"
+    type: "logistic"
+    exposure: "x"
+""",
+        encoding="utf-8",
+    )
+    report1 = preflight_validate_spec(spec_missing)
+    assert report1["valid"] is False
+    assert any(
+        "requires a non-blank 'outcome' column name" in err for err in report1["errors"]
+    )
+    assert any("outcome" in rem for rem in report1["agent_remediation"])
+
+    # 2. Null outcome field
+    spec_null = tmp_path / "spec_null_outcome.yaml"
+    spec_null.write_text(
+        f"""
+metadata:
+  study_title: "Null Outcome Test"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "model_null_outcome"
+    type: "logistic"
+    outcome: null
+    exposure: "x"
+""",
+        encoding="utf-8",
+    )
+    report2 = preflight_validate_spec(spec_null)
+    assert report2["valid"] is False
+    assert any(
+        "requires a non-blank 'outcome' column name" in err for err in report2["errors"]
+    )
+
+    # 3. Empty string outcome field
+    spec_empty = tmp_path / "spec_empty_outcome.yaml"
+    spec_empty.write_text(
+        f"""
+metadata:
+  study_title: "Empty Outcome Test"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "model_empty_outcome"
+    type: "logistic"
+    outcome: ""
+    exposure: "x"
+""",
+        encoding="utf-8",
+    )
+    report3 = preflight_validate_spec(spec_empty)
+    assert report3["valid"] is False
+    assert any(
+        "requires a non-blank 'outcome' column name" in err for err in report3["errors"]
+    )
+
+    # 4. Whitespace outcome field
+    spec_ws = tmp_path / "spec_ws_outcome.yaml"
+    spec_ws.write_text(
+        f"""
+metadata:
+  study_title: "Whitespace Outcome Test"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "model_ws_outcome"
+    type: "logistic"
+    outcome: "   "
+    exposure: "x"
+""",
+        encoding="utf-8",
+    )
+    report4 = preflight_validate_spec(spec_ws)
+    assert report4["valid"] is False
+    assert any(
+        "requires a non-blank 'outcome' column name" in err for err in report4["errors"]
+    )
+
+
+def test_execute_blank_outcome_raises_value_error(tmp_path):
+    """AnalysisPlan.execute raises ValueError when outcome is blank or None."""
+    csv_file = tmp_path / "data_exec_outcome.csv"
+    csv_file.write_text("patient_id,dead,x\n1,0,1\n2,1,2\n", encoding="utf-8")
+    spec_file = tmp_path / "spec_blank_exec.yaml"
+    spec_file.write_text(
+        f"""
+metadata:
+  study_title: "Exec Blank Outcome"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "model_blank_exec"
+    type: "logistic"
+    outcome: "   "
+    exposure: "x"
+""",
+        encoding="utf-8",
+    )
+    plan = AnalysisPlan.from_yaml(spec_file)
+    with pytest.raises(
+        ValueError, match="requires a non-blank string 'outcome' column name"
+    ):
+        plan.execute()
+
+
 def test_time_dependent_roc_execute_missing_p_old_col_rejected(tmp_path):
     """Execution raises ValueError when requested TD-ROC comparison score column is missing."""
     csv_file = tmp_path / "td_data_exec.csv"

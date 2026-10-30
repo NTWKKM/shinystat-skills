@@ -491,6 +491,10 @@ class AnalysisPlan:
             is_duration_dependent = (
                 is_survival_exec or is_td_roc_exec or is_iptw_survival_exec
             )
+            if not model_spec.outcome or not isinstance(model_spec.outcome, str):
+                raise ValueError(
+                    f"Model '{model_spec.name}' requires a non-blank string 'outcome' column name, got: {model_spec.outcome!r}."
+                )
             req_cols = [model_spec.outcome]
             if model_spec.exposure:
                 req_cols.append(model_spec.exposure)
@@ -1609,26 +1613,35 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
 
     for item in models_list:
         if isinstance(item, dict):
-            if "outcome" in item:
-                raw_outcome = item["outcome"]
-                if isinstance(raw_outcome, list):
-                    report["valid"] = False
-                    report["errors"].append(
-                        f"Model '{item.get('name', 'unnamed')}' outcome must be a string column name, not a list: {raw_outcome}."
-                    )
-                    report["agent_remediation"].append(
-                        f"Specify a single string column name for 'outcome' in model '{item.get('name', 'unnamed')}'."
-                    )
-                elif raw_outcome is not None and not isinstance(raw_outcome, str):
-                    report["valid"] = False
-                    report["errors"].append(
-                        f"Model '{item.get('name', 'unnamed')}' outcome must be a string column name, got {type(raw_outcome).__name__}: {raw_outcome}."
-                    )
-                    report["agent_remediation"].append(
-                        f"Specify a single string column name for 'outcome' in model '{item.get('name', 'unnamed')}'."
-                    )
-                else:
-                    _add_col_ref(raw_outcome, "models.outcome")
+            raw_outcome = item.get("outcome")
+            if raw_outcome is None or (
+                isinstance(raw_outcome, str) and not raw_outcome.strip()
+            ):
+                report["valid"] = False
+                report["errors"].append(
+                    f"Model '{item.get('name', 'unnamed')}' requires a non-blank 'outcome' column name."
+                )
+                report["agent_remediation"].append(
+                    f"Specify a valid outcome column name string for 'outcome' in model '{item.get('name', 'unnamed')}'."
+                )
+            elif isinstance(raw_outcome, list):
+                report["valid"] = False
+                report["errors"].append(
+                    f"Model '{item.get('name', 'unnamed')}' outcome must be a string column name, not a list: {raw_outcome}."
+                )
+                report["agent_remediation"].append(
+                    f"Specify a single string column name for 'outcome' in model '{item.get('name', 'unnamed')}'."
+                )
+            elif not isinstance(raw_outcome, str):
+                report["valid"] = False
+                report["errors"].append(
+                    f"Model '{item.get('name', 'unnamed')}' outcome must be a string column name, got {type(raw_outcome).__name__}: {raw_outcome}."
+                )
+                report["agent_remediation"].append(
+                    f"Specify a single string column name for 'outcome' in model '{item.get('name', 'unnamed')}'."
+                )
+            else:
+                _add_col_ref(raw_outcome, "models.outcome")
 
             for key in (
                 "exposure",
