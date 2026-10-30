@@ -1772,18 +1772,32 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
                     _add_col_ref(resolved_p_new, "models.options.p_new_col")
             elif is_td_roc:
                 raw_td_old = opts_dict.get("p_old_col")
-                if isinstance(raw_td_old, list):
+                raw_score_old = opts_dict.get("score_old")
+                if raw_td_old is not None and not isinstance(raw_td_old, str):
                     report["valid"] = False
                     report["errors"].append(
-                        f"Time-dependent ROC model '{item.get('name', 'unnamed')}' option 'p_old_col' must be a scalar column name, got list: {raw_td_old}."
+                        f"Time-dependent ROC model '{item.get('name', 'unnamed')}' option 'p_old_col' must be a scalar column name, got {type(raw_td_old).__name__}: {raw_td_old}."
                     )
                     report["agent_remediation"].append(
                         f"Provide a single string column name for 'p_old_col' in model '{item.get('name', 'unnamed')}'."
                     )
-                else:
-                    resolved_td_old = _resolve_col_alias(
-                        opts_dict.get("p_old_col"), opts_dict.get("score_old")
+                elif (
+                    (
+                        raw_td_old is None
+                        or (isinstance(raw_td_old, str) and not raw_td_old.strip())
                     )
+                    and raw_score_old is not None
+                    and not isinstance(raw_score_old, str)
+                ):
+                    report["valid"] = False
+                    report["errors"].append(
+                        f"Time-dependent ROC model '{item.get('name', 'unnamed')}' option 'score_old' must be a scalar column name, got {type(raw_score_old).__name__}: {raw_score_old}."
+                    )
+                    report["agent_remediation"].append(
+                        f"Provide a single string column name for 'score_old' in model '{item.get('name', 'unnamed')}'."
+                    )
+                else:
+                    resolved_td_old = _resolve_col_alias(raw_td_old, raw_score_old)
                     if isinstance(resolved_td_old, str) and resolved_td_old:
                         _add_col_ref(resolved_td_old, "models.options.p_old_col")
 

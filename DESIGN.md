@@ -1777,6 +1777,28 @@ In the latest CodeRabbit review round on PR #22:
 - **Status**: Accepted & Fully Verified.
 - **Verification**: 734 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
 
+---
+
+## ADR 62: PR #22 CodeRabbit Follow-Up: Preflight Rejection of Non-String Fallback Score Aliases in Time-Dependent ROC
+
+### Context
+In the latest CodeRabbit review round on PR #22:
+- `src/medstat/cli/spec.py` (Line 1784-1788): When validating time-dependent ROC models during preflight, `_resolve_col_alias` returns `None` when given a non-string `score_old` value (such as a list, dict, or non-scalar). Because `p_old_col` was absent, `resolved_td_old` evaluated to `None`, which bypassed column registration (`_add_col_ref`). Furthermore, `score_old` was skipped in the generic option iteration loop. As a result, malformed non-string `score_old` values silently passed preflight validation (`valid: true`), leading to mid-run `ValueError` failures during plan execution.
+
+### Decision
+1. **Defensive Validation for Fallback Score Aliases in TD-ROC**:
+   - In `preflight_validate_spec()`, when `is_td_roc` is active:
+     - If `p_old_col` is provided and is not a string, reject it with an actionable validation error and remediation advising a single scalar string column name.
+     - If `p_old_col` is absent (or empty/whitespace) and `score_old` is provided, verify `score_old` is a string; if it is a non-string (e.g. list, dict), reject the specification with an explicit validation error and remediation advice.
+     - When `score_old` is a valid scalar string column name, resolve it via `_resolve_col_alias` and add it to `referenced_cols` so preflight checks its presence in the dataset.
+2. **Unit Tests Added**:
+   - `test_preflight_validate_time_dependent_roc_non_string_score_old_rejected`: verifies preflight rejects non-string `score_old` (e.g. list `["old_a", "old_b"]`) when `p_old_col` is absent.
+   - `test_preflight_validate_time_dependent_roc_valid_score_old_accepted`: verifies preflight accepts valid scalar string `score_old` when `p_old_col` is absent and validates its existence in the dataset.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 736 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
+
 
 
 

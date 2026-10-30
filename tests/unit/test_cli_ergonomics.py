@@ -1617,6 +1617,73 @@ models:
     assert any("nonexistent_old_score" in rem for rem in report["agent_remediation"])
 
 
+def test_preflight_validate_time_dependent_roc_non_string_score_old_rejected(tmp_path):
+    """Preflight rejects non-string score_old when p_old_col is absent."""
+    csv_file = tmp_path / "td_data_list_score.csv"
+    csv_file.write_text(
+        "patient_id,time,dead,marker\n1,10,0,0.2\n2,15,1,0.8\n",
+        encoding="utf-8",
+    )
+    spec_file = tmp_path / "spec_td_list_score_old.yaml"
+    spec_file.write_text(
+        f"""
+metadata:
+  study_title: "TD ROC List score_old"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "td_list_score"
+    type: "time_dependent_roc"
+    outcome: "dead"
+    time: "time"
+    exposure: "marker"
+    options:
+      score_old: ["old_a", "old_b"]
+      time_horizons: [15]
+""",
+        encoding="utf-8",
+    )
+    report = preflight_validate_spec(spec_file)
+    assert report["valid"] is False
+    assert any(
+        "option 'score_old' must be a scalar column name" in err
+        for err in report["errors"]
+    )
+    assert any("score_old" in rem for rem in report["agent_remediation"])
+
+
+def test_preflight_validate_time_dependent_roc_valid_score_old_accepted(tmp_path):
+    """Preflight accepts valid string score_old when p_old_col is absent and checks existence."""
+    csv_file = tmp_path / "td_data_valid_score.csv"
+    csv_file.write_text(
+        "patient_id,time,dead,marker,old_marker\n1,10,0,0.2,0.1\n2,15,1,0.8,0.7\n",
+        encoding="utf-8",
+    )
+    spec_file = tmp_path / "spec_td_valid_score_old.yaml"
+    spec_file.write_text(
+        f"""
+metadata:
+  study_title: "TD ROC Valid score_old"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "td_valid_score"
+    type: "time_dependent_roc"
+    outcome: "dead"
+    time: "time"
+    exposure: "marker"
+    options:
+      score_old: "old_marker"
+      time_horizons: [15]
+""",
+        encoding="utf-8",
+    )
+    report = preflight_validate_spec(spec_file)
+    assert report["valid"] is True, (
+        f"Preflight rejected valid score_old: {report['errors']}"
+    )
+
+
 def test_time_dependent_roc_execute_missing_p_old_col_rejected(tmp_path):
     """Execution raises ValueError when requested TD-ROC comparison score column is missing."""
     csv_file = tmp_path / "td_data_exec.csv"
