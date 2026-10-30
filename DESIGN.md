@@ -1799,6 +1799,29 @@ In the latest CodeRabbit review round on PR #22:
 - **Status**: Accepted & Fully Verified.
 - **Verification**: 736 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
 
+---
+
+## ADR 63: PR #22 CodeRabbit Follow-Up: Preflight Rejection of List-Valued Model Outcomes & TD-ROC Missing Score Control
+
+### Context
+In the latest CodeRabbit review round on PR #22:
+1. `src/medstat/cli/spec.py` (Line 1576-1622): In `preflight_validate_spec()`, model `outcome` was processed through the generic `_add_col_ref()` helper alongside multi-column fields like `covariates`. When a YAML plan specified a list-valued `outcome` (e.g. `outcome: ["dead", "death"]`), `_add_col_ref()` unpacked the list items into `referenced_cols` and passed preflight with `valid: true`. Downstream, `AnalysisPlan.execute()` expects a scalar string outcome, resulting in an unhandled `AttributeError` or DataFrame dimension mismatch during execution.
+2. `tests/unit/test_cli_ergonomics.py` (Line 1681-1684): `test_preflight_validate_time_dependent_roc_valid_score_old_accepted` only tested valid column acceptance, lacking an explicit negative control asserting that a nonexistent `score_old` column is flagged as missing.
+
+### Decision
+1. **Preflight Rejection of List-Valued Model Outcomes**:
+   - In `preflight_validate_spec()`, explicitly inspected `item.get("outcome")`:
+     - If `outcome` is a list, marks `report["valid"] = False` with an actionable error and remediation advice instructing the user to provide a single scalar string, bypassing `_add_col_ref()`.
+     - If `outcome` is non-string (and non-None), marks `report["valid"] = False` with explicit type error.
+     - Preserves standard `_add_col_ref()` registration for valid scalar string outcomes and all other model fields (`exposure`, `event_col`, `cluster_col`, `covariates`).
+2. **Missing-Column Control in Preflight Unit Test**:
+   - Updated `test_preflight_validate_time_dependent_roc_valid_score_old_accepted` to verify a negative control: when `score_old: "missing_marker"`, `preflight_validate_spec()` returns `valid: False` and identifies `"missing_marker"` in `report["errors"]` and `report["agent_remediation"]`.
+   - Added unit test `test_preflight_validate_list_outcome_rejected` asserting that list-valued outcomes are rejected during preflight without leaking list items into `referenced_cols`.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 737 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
+
 
 
 

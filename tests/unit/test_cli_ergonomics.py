@@ -1683,6 +1683,60 @@ models:
         f"Preflight rejected valid score_old: {report['errors']}"
     )
 
+    # Missing-column control: score_old pointing to missing_marker must report invalidity
+    spec_missing = tmp_path / "spec_td_missing_score_old.yaml"
+    spec_missing.write_text(
+        f"""
+metadata:
+  study_title: "TD ROC Missing score_old"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "td_missing_score"
+    type: "time_dependent_roc"
+    outcome: "dead"
+    time: "time"
+    exposure: "marker"
+    options:
+      score_old: "missing_marker"
+      time_horizons: [15]
+""",
+        encoding="utf-8",
+    )
+    report_missing = preflight_validate_spec(spec_missing)
+    assert report_missing["valid"] is False
+    assert any("missing_marker" in err for err in report_missing["errors"])
+    assert any("missing_marker" in rem for rem in report_missing["agent_remediation"])
+
+
+def test_preflight_validate_list_outcome_rejected(tmp_path):
+    """Preflight rejects list-valued outcome field as non-string."""
+    csv_file = tmp_path / "data_list_outcome.csv"
+    csv_file.write_text("patient_id,dead,death,x\n1,0,0,1\n2,1,1,2\n", encoding="utf-8")
+    spec_file = tmp_path / "spec_list_outcome.yaml"
+    spec_file.write_text(
+        f"""
+metadata:
+  study_title: "List Outcome Test"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "model_list_out"
+    type: "logistic"
+    outcome: ["dead", "death"]
+    exposure: "x"
+""",
+        encoding="utf-8",
+    )
+    report = preflight_validate_spec(spec_file)
+    assert report["valid"] is False
+    assert any(
+        "outcome must be a string column name, not a list" in err
+        for err in report["errors"]
+    )
+    assert any("outcome" in rem for rem in report["agent_remediation"])
+    assert not any("Columns missing from dataset" in err for err in report["errors"])
+
 
 def test_time_dependent_roc_execute_missing_p_old_col_rejected(tmp_path):
     """Execution raises ValueError when requested TD-ROC comparison score column is missing."""
