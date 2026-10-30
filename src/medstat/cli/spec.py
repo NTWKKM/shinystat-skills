@@ -81,6 +81,21 @@ class _UniqueKeyLoader(yaml.SafeLoader):
     pass
 
 
+def _resolve_col_alias(primary: Any, fallback: Any) -> Any:
+    """Resolve an option value with fallback, treating None and empty strings as absent."""
+    if isinstance(primary, str):
+        if primary.strip():
+            return primary.strip()
+    elif primary is not None and bool(primary):
+        return primary
+    if isinstance(fallback, str):
+        if fallback.strip():
+            return fallback.strip()
+    elif fallback is not None and bool(fallback):
+        return fallback
+    return None
+
+
 def _construct_unique_mapping(
     loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False
 ) -> dict[str, Any]:
@@ -247,14 +262,13 @@ class AnalysisPlan:
 
             is_survival = m_type in _SURVIVAL_MODEL_TYPES
             is_iptw = m_type in ("iptw", "causal_iptw") or m_method == "iptw"
+            resolved_p_old = _resolve_col_alias(
+                opts_dict.get("p_old_col"), opts_dict.get("p_old")
+            )
             is_reclass = (
                 not is_iptw
                 and m_type in ("reclassification", "diagnostic", "diag")
-                and bool(
-                    opts_dict.get("p_old_col")
-                    or opts_dict.get("p_old")
-                    or opts_dict.get("reclassification")
-                )
+                and bool(resolved_p_old or opts_dict.get("reclassification"))
             )
             is_td_roc = not is_iptw and (
                 m_type in ("time_dependent_roc", "td_roc")
@@ -383,14 +397,13 @@ class AnalysisPlan:
             m_opts = model_spec.options if isinstance(model_spec.options, dict) else {}
             m_method = str(m_opts.get("method", "")).lower().strip()
             is_iptw_exec = mod_type in ("iptw", "causal_iptw") or m_method == "iptw"
+            resolved_p_old_exec = _resolve_col_alias(
+                m_opts.get("p_old_col"), m_opts.get("p_old")
+            )
             is_reclass_exec = (
                 not is_iptw_exec
                 and mod_type in ("reclassification", "diagnostic", "diag")
-                and bool(
-                    m_opts.get("p_old_col")
-                    or m_opts.get("p_old")
-                    or m_opts.get("reclassification")
-                )
+                and bool(resolved_p_old_exec or m_opts.get("reclassification"))
             )
             is_survival_exec = mod_type in _SURVIVAL_MODEL_TYPES and not (
                 is_iptw_exec
@@ -1026,11 +1039,11 @@ class AnalysisPlan:
                             )
                         )
             elif is_reclass_exec:
-                p_old_c = model_spec.options.get("p_old_col") or model_spec.options.get(
-                    "p_old"
+                p_old_c = _resolve_col_alias(
+                    model_spec.options.get("p_old_col"), model_spec.options.get("p_old")
                 )
-                p_new_c = model_spec.options.get("p_new_col") or model_spec.options.get(
-                    "p_new"
+                p_new_c = _resolve_col_alias(
+                    model_spec.options.get("p_new_col"), model_spec.options.get("p_new")
                 )
                 th_list = model_spec.options.get("thresholds")
                 y_out = clean_df[model_spec.outcome].values
@@ -1429,11 +1442,15 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
         if val is None:
             return
         if isinstance(val, str):
-            referenced_cols.add(val)
+            s = val.strip()
+            if s:
+                referenced_cols.add(s)
         elif isinstance(val, list):
             for elem in val:
                 if isinstance(elem, str):
-                    referenced_cols.add(elem)
+                    s = elem.strip()
+                    if s:
+                        referenced_cols.add(s)
                 else:
                     report["valid"] = False
                     report["errors"].append(
@@ -1472,8 +1489,14 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
 
             is_survival = m_type in _SURVIVAL_MODEL_TYPES
             is_iptw = m_type in ("iptw", "causal_iptw") or m_method == "iptw"
-            has_old = bool(opts_dict.get("p_old_col") or opts_dict.get("p_old"))
-            has_new = bool(opts_dict.get("p_new_col") or opts_dict.get("p_new"))
+            resolved_p_old = _resolve_col_alias(
+                opts_dict.get("p_old_col"), opts_dict.get("p_old")
+            )
+            resolved_p_new = _resolve_col_alias(
+                opts_dict.get("p_new_col"), opts_dict.get("p_new")
+            )
+            has_old = bool(resolved_p_old)
+            has_new = bool(resolved_p_new)
             is_reclass = (
                 not is_iptw
                 and m_type in ("reclassification", "diagnostic", "diag")
@@ -1595,6 +1618,12 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
                 )
 
             # Collect model options column references
+            if is_reclass:
+                if resolved_p_old:
+                    _add_col_ref(resolved_p_old, "models.options.p_old_col")
+                if resolved_p_new:
+                    _add_col_ref(resolved_p_new, "models.options.p_new_col")
+
             for opt_key in (
                 "p_old",
                 "p_old_col",
@@ -1608,6 +1637,13 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
                 "p_pred",
                 "score",
             ):
+                if is_reclass and opt_key in (
+                    "p_old",
+                    "p_old_col",
+                    "p_new",
+                    "p_new_col",
+                ):
+                    continue
                 if opt_key == "event_col" and (is_reclass or is_iptw):
                     continue
                 if (
@@ -1628,7 +1664,10 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
                 ):
                     continue
                 if opt_key in opts_dict:
-                    _add_col_ref(opts_dict[opt_key], f"models.options.{opt_key}")
+                    val = opts_dict[opt_key]
+                    if isinstance(val, str) and not val.strip():
+                        continue
+                    _add_col_ref(val, f"models.options.{opt_key}")
 
     variables_list = raw_spec.get("variables", [])
     if isinstance(variables_list, list):

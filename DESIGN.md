@@ -1696,6 +1696,30 @@ In the latest CodeRabbit review round on PR #22:
 - **Status**: Accepted & Fully Verified.
 - **Verification**: 726 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
 
+---
+
+## ADR 59: PR #22 CodeRabbit Follow-Up: Preflight Column Reference Alias Resolution & Discriminative Reclassification Assertion
+
+### Context
+In the latest CodeRabbit review round on PR #22:
+1. `src/medstat/cli/spec.py`: Preflight validation collected option column references by iterating over declared keys (`p_old_col`, `p_old`, `p_new_col`, `p_new`) independently without resolving aliases or discarding empty strings. When a plan specified an empty string alias (e.g. `p_old_col: ""`) alongside a valid fallback (`p_old: "old_score"`), preflight collected `""` as a required dataset column and failed validation, diverging from `AnalysisPlan.execute` which treats empty strings as absent and falls back to `p_old` / `p_new`.
+2. `tests/unit/test_cli_ergonomics.py`: `test_reclassification_execute_with_explicit_null_aliases` tested only execution status and `final_n` without verifying the computed IDI estimate against the known fixture value ($\text{IDI} \approx 0.1$), failing to guard against column swaps or misallocated predictions.
+
+### Decision
+1. **Preflight Column Reference Alias Resolution**:
+   - Introduced `_resolve_col_alias(primary, fallback)` treating `None` and empty/whitespace strings as absent.
+   - In `preflight_validate_spec()`, resolved `resolved_p_old` and `resolved_p_new` before collecting column references.
+   - When `is_reclass` is active, collected only the resolved column names and bypassed raw `p_old`, `p_old_col`, `p_new`, and `p_new_col` keys in the generic option collection loop.
+   - Updated `_add_col_ref()` to strip whitespace and discard empty string entries so blank strings are never recorded as required dataset columns.
+   - Applied identical `_resolve_col_alias` logic across `from_yaml()` and `AnalysisPlan.execute()` for end-to-end consistency.
+2. **Discriminative Reclassification Verification**:
+   - Updated `test_reclassification_execute_with_explicit_null_aliases` in `tests/unit/test_cli_ergonomics.py` to assert that `res["models"]["reclass_null_alias_model"]["reclassification"]["idi"]["estimate"] == pytest.approx(0.1, abs=1e-4)`.
+   - Added `test_reclassification_execute_with_empty_string_aliases` to verify that both preflight validation and plan execution seamlessly resolve empty string aliases (`p_old_col: ""`, `p_new_col: "   "`).
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 727 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
+
 
 
 

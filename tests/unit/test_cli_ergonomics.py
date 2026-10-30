@@ -1395,5 +1395,56 @@ models:
     res = plan.execute()
     assert "reclass_null_alias_model" in res["models"]
     assert "delong" in res["models"]["reclass_null_alias_model"]
+    idi_est = res["models"]["reclass_null_alias_model"]["reclassification"]["idi"][
+        "estimate"
+    ]
+    assert idi_est == pytest.approx(0.1, abs=1e-4)
     assert res["model_flow"]["reclass_null_alias_model"]["final_n"] == 6
     assert "reclass_null_alias_model" in res["reports"]
+
+
+def test_reclassification_execute_with_empty_string_aliases(tmp_path):
+    """AnalysisPlan.execute and preflight resolve p_old and p_new when p_old_col and p_new_col are empty strings."""
+    csv_file = tmp_path / "reclass_data_empty_str.csv"
+    csv_file.write_text(
+        "patient_id,dead,old_score,new_score\n"
+        "1,0,0.1,0.2\n"
+        "2,0,0.2,0.3\n"
+        "3,1,0.7,0.8\n"
+        "4,1,0.8,0.9\n"
+        "5,0,0.3,0.1\n"
+        "6,1,0.6,0.7\n",
+        encoding="utf-8",
+    )
+    plan_yaml = tmp_path / "plan_reclass_empty_str_aliases.yaml"
+    plan_yaml.write_text(
+        f"""
+metadata:
+  study_title: "Reclassification Empty String Aliases"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "reclass_empty_alias_model"
+    type: "reclassification"
+    outcome: "dead"
+    options:
+      p_old_col: ""
+      p_old: "old_score"
+      p_new_col: "   "
+      p_new: "new_score"
+""",
+        encoding="utf-8",
+    )
+    # 1. Preflight must accept this spec and NOT fail on empty-string column name
+    report = preflight_validate_spec(plan_yaml)
+    assert report["valid"] is True, f"Preflight rejected: {report.get('errors')}"
+
+    # 2. Execution must succeed and resolve p_old / p_new, verifying IDI ~ 0.1
+    plan = AnalysisPlan.from_yaml(plan_yaml)
+    res = plan.execute()
+    assert "reclass_empty_alias_model" in res["models"]
+    idi_est = res["models"]["reclass_empty_alias_model"]["reclassification"]["idi"][
+        "estimate"
+    ]
+    assert idi_est == pytest.approx(0.1, abs=1e-4)
+    assert res["model_flow"]["reclass_empty_alias_model"]["final_n"] == 6
