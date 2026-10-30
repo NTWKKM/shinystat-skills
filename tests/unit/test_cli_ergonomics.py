@@ -1448,3 +1448,138 @@ models:
     ]
     assert idi_est == pytest.approx(0.1, abs=1e-4)
     assert res["model_flow"]["reclass_empty_alias_model"]["final_n"] == 6
+
+
+def test_preflight_validate_reclassification_list_options_rejected(tmp_path):
+    """Preflight validation rejects list-valued p_old_col and p_new_col with remediation."""
+    csv_file = tmp_path / "data.csv"
+    csv_file.write_text(
+        "patient_id,dead,score_a,score_b\n1,0,0.1,0.2\n", encoding="utf-8"
+    )
+
+    # 1. p_old_col as a list
+    spec_list_old = tmp_path / "spec_list_old.yaml"
+    spec_list_old.write_text(
+        f"""
+metadata:
+  study_title: "List Old Score"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "reclass_list_old"
+    type: "reclassification"
+    outcome: "dead"
+    options:
+      p_old_col: ["score_a", "score_b"]
+      p_new_col: "score_b"
+""",
+        encoding="utf-8",
+    )
+    report1 = preflight_validate_spec(spec_list_old)
+    assert report1["valid"] is False
+    assert any(
+        "must be a single column string, not a list" in err for err in report1["errors"]
+    )
+    assert any("p_old_col" in rem for rem in report1["agent_remediation"])
+    # Verify list items were not added as spurious column references
+    assert not any("Columns missing from dataset" in err for err in report1["errors"])
+
+    # 2. p_new_col as a list
+    spec_list_new = tmp_path / "spec_list_new.yaml"
+    spec_list_new.write_text(
+        f"""
+metadata:
+  study_title: "List New Score"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "reclass_list_new"
+    type: "reclassification"
+    outcome: "dead"
+    options:
+      p_old_col: "score_a"
+      p_new_col: ["score_b"]
+""",
+        encoding="utf-8",
+    )
+    report2 = preflight_validate_spec(spec_list_new)
+    assert report2["valid"] is False
+    assert any(
+        "must be a single column string, not a list" in err for err in report2["errors"]
+    )
+    assert any("p_new_col" in rem for rem in report2["agent_remediation"])
+
+
+def test_reclassification_padded_column_references_normalized(tmp_path):
+    """Padded column references in ModelSpec are normalized before clean_df construction and execution."""
+    csv_file = tmp_path / "data_padded.csv"
+    csv_file.write_text(
+        "patient_id,dead,old_score,new_score\n"
+        "1,0,0.1,0.2\n"
+        "2,0,0.2,0.3\n"
+        "3,1,0.7,0.8\n"
+        "4,1,0.8,0.9\n"
+        "5,0,0.3,0.1\n"
+        "6,1,0.6,0.7\n",
+        encoding="utf-8",
+    )
+    spec_padded = tmp_path / "spec_padded.yaml"
+    spec_padded.write_text(
+        f"""
+metadata:
+  study_title: "Padded References Test"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "reclass_padded"
+    type: "reclassification"
+    outcome: "  dead  "
+    options:
+      p_old_col: "  old_score  "
+      p_new_col: "  new_score  "
+""",
+        encoding="utf-8",
+    )
+    # Preflight validation accepts padded references
+    report = preflight_validate_spec(spec_padded)
+    assert report["valid"] is True, f"Preflight rejected: {report.get('errors')}"
+
+    # Plan normalizes outcome and score columns
+    plan = AnalysisPlan.from_yaml(spec_padded)
+    assert plan.models[0].outcome == "dead"
+    assert plan.models[0].options["p_old_col"] == "old_score"
+    assert plan.models[0].options["p_new_col"] == "new_score"
+
+    # Execution builds clean_df and computes IDI ~ 0.1
+    res = plan.execute()
+    assert "reclass_padded" in res["models"]
+    idi_est = res["models"]["reclass_padded"]["reclassification"]["idi"]["estimate"]
+    assert idi_est == pytest.approx(0.1, abs=1e-4)
+
+
+def test_reclassification_execute_invalid_column_rejected_before_roc(tmp_path):
+    """AnalysisPlan.execute rejects missing score columns with ValueError before ROC calculation."""
+    csv_file = tmp_path / "data_valid.csv"
+    csv_file.write_text("patient_id,dead,score_a\n1,0,0.5\n", encoding="utf-8")
+    spec_missing = tmp_path / "spec_missing_c.yaml"
+    spec_missing.write_text(
+        f"""
+metadata:
+  study_title: "Missing Score Col"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "reclass_missing"
+    type: "reclassification"
+    outcome: "dead"
+    options:
+      p_old_col: "score_a"
+      p_new_col: "nonexistent_score"
+""",
+        encoding="utf-8",
+    )
+    plan = AnalysisPlan.from_yaml(spec_missing)
+    with pytest.raises(
+        ValueError, match="requires a valid new predicted probability column"
+    ):
+        plan.execute()

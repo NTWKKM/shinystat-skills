@@ -81,18 +81,16 @@ class _UniqueKeyLoader(yaml.SafeLoader):
     pass
 
 
-def _resolve_col_alias(primary: Any, fallback: Any) -> Any:
+def _resolve_col_alias(primary: Any, fallback: Any) -> str | None:
     """Resolve an option value with fallback, treating None and empty strings as absent."""
     if isinstance(primary, str):
-        if primary.strip():
-            return primary.strip()
-    elif primary is not None and bool(primary):
-        return primary
+        s = primary.strip()
+        if s:
+            return s
     if isinstance(fallback, str):
-        if fallback.strip():
-            return fallback.strip()
-    elif fallback is not None and bool(fallback):
-        return fallback
+        s = fallback.strip()
+        if s:
+            return s
     return None
 
 
@@ -157,6 +155,42 @@ class ModelSpec:
     missing_strategy: str = "complete-case"
     missing_justification: str = "Complete-case analysis prespecified"
     options: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if isinstance(self.name, str):
+            self.name = self.name.strip()
+        if isinstance(self.type, str):
+            self.type = self.type.strip()
+        if isinstance(self.outcome, str):
+            self.outcome = self.outcome.strip()
+        if isinstance(self.exposure, str):
+            self.exposure = self.exposure.strip()
+        if isinstance(self.time, str):
+            self.time = self.time.strip()
+        if isinstance(self.covariates, list):
+            self.covariates = [
+                c.strip() if isinstance(c, str) else c for c in self.covariates
+            ]
+        if isinstance(self.options, dict):
+            norm_opts = dict(self.options)
+            for k in (
+                "p_old",
+                "p_old_col",
+                "score_old",
+                "p_new",
+                "p_new_col",
+                "score_new",
+                "score_col",
+                "time_col",
+                "event_col",
+                "cluster_col",
+                "p_recal",
+                "p_pred",
+                "score",
+            ):
+                if k in norm_opts and isinstance(norm_opts[k], str):
+                    norm_opts[k] = norm_opts[k].strip()
+            self.options = norm_opts
 
 
 @dataclass
@@ -434,6 +468,18 @@ class AnalysisPlan:
             if model_spec.time:
                 req_cols.append(model_spec.time)
             req_cols.extend(model_spec.covariates)
+            if is_reclass_exec:
+                p_old_c = _resolve_col_alias(
+                    m_opts.get("p_old_col"), m_opts.get("p_old")
+                )
+                p_new_c = _resolve_col_alias(
+                    m_opts.get("p_new_col"), m_opts.get("p_new")
+                )
+                if p_old_c and p_old_c in current_df.columns:
+                    req_cols.append(p_old_c)
+                if p_new_c and p_new_c in current_df.columns:
+                    req_cols.append(p_new_c)
+
             for opt_key in (
                 "p_old",
                 "p_old_col",
@@ -442,12 +488,18 @@ class AnalysisPlan:
                 "p_new_col",
                 "score_new",
                 "score_col",
-                "time_col",
                 "event_col",
                 "p_recal",
                 "p_pred",
                 "score",
             ):
+                if is_reclass_exec and opt_key in (
+                    "p_old",
+                    "p_old_col",
+                    "p_new",
+                    "p_new_col",
+                ):
+                    continue
                 if opt_key == "time_col" and (
                     not is_duration_dependent or model_spec.time
                 ):
@@ -472,8 +524,10 @@ class AnalysisPlan:
                 ):
                     continue
                 val = model_spec.options.get(opt_key)
-                if val and isinstance(val, str) and val in current_df.columns:
-                    req_cols.append(val)
+                if val and isinstance(val, str):
+                    val = val.strip()
+                    if val in current_df.columns:
+                        req_cols.append(val)
             req_cols = list(dict.fromkeys(req_cols))
 
             # Clean and handle missingness with explicit justification
@@ -1045,6 +1099,16 @@ class AnalysisPlan:
                 p_new_c = _resolve_col_alias(
                     model_spec.options.get("p_new_col"), model_spec.options.get("p_new")
                 )
+                if not p_old_c or p_old_c not in clean_df.columns:
+                    raise ValueError(
+                        f"Reclassification model '{model_spec.name}' requires a valid initial predicted probability column. "
+                        f"Resolved '{p_old_c}', which was not found in dataset columns: {list(clean_df.columns)}."
+                    )
+                if not p_new_c or p_new_c not in clean_df.columns:
+                    raise ValueError(
+                        f"Reclassification model '{model_spec.name}' requires a valid new predicted probability column. "
+                        f"Resolved '{p_new_c}', which was not found in dataset columns: {list(clean_df.columns)}."
+                    )
                 th_list = model_spec.options.get("thresholds")
                 y_out = clean_df[model_spec.outcome].values
                 fit_res = compare_diagnostic_models(
@@ -1487,6 +1551,19 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
             opts_dict = opts if isinstance(opts, dict) else {}
             m_method = str(opts_dict.get("method", "")).lower().strip()
 
+            has_list_reclass_option = False
+            for opt_key in ("p_old_col", "p_old", "p_new_col", "p_new"):
+                val = opts_dict.get(opt_key)
+                if isinstance(val, list):
+                    has_list_reclass_option = True
+                    report["valid"] = False
+                    report["errors"].append(
+                        f"Reclassification option '{opt_key}' for model '{item.get('name', 'unnamed')}' must be a single column string, not a list: {val}."
+                    )
+                    report["agent_remediation"].append(
+                        f"Specify a single column name string for '{opt_key}' in options for model '{item.get('name', 'unnamed')}'."
+                    )
+
             is_survival = m_type in _SURVIVAL_MODEL_TYPES
             is_iptw = m_type in ("iptw", "causal_iptw") or m_method == "iptw"
             resolved_p_old = _resolve_col_alias(
@@ -1511,6 +1588,10 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
                     or has_new
                     or opts_dict.get("reclassification")
                     or m_type == "reclassification"
+                    or any(
+                        k in opts_dict
+                        for k in ("p_old_col", "p_old", "p_new_col", "p_new")
+                    )
                 )
             )
             is_td_roc = not is_iptw and (
@@ -1551,7 +1632,7 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
                     f"or 'method: iptw' in options for diagnostic model '{item.get('name', 'unnamed')}'."
                 )
 
-            if has_reclass_intent and not is_reclass:
+            if has_reclass_intent and not is_reclass and not has_list_reclass_option:
                 if not has_old and not has_new:
                     report["valid"] = False
                     report["errors"].append(
@@ -1619,9 +1700,9 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
 
             # Collect model options column references
             if is_reclass:
-                if resolved_p_old:
+                if isinstance(resolved_p_old, str) and resolved_p_old:
                     _add_col_ref(resolved_p_old, "models.options.p_old_col")
-                if resolved_p_new:
+                if isinstance(resolved_p_new, str) and resolved_p_new:
                     _add_col_ref(resolved_p_new, "models.options.p_new_col")
 
             for opt_key in (
@@ -1637,7 +1718,7 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
                 "p_pred",
                 "score",
             ):
-                if is_reclass and opt_key in (
+                if opt_key in (
                     "p_old",
                     "p_old_col",
                     "p_new",

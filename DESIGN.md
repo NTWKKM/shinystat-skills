@@ -1720,6 +1720,30 @@ In the latest CodeRabbit review round on PR #22:
 - **Status**: Accepted & Fully Verified.
 - **Verification**: 727 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
 
+---
+
+## ADR 60: PR #22 CodeRabbit Follow-Up: Column Reference Normalization & Preflight Rejection of List-Valued Score Options
+
+### Context
+In the latest CodeRabbit review round on PR #22:
+1. `src/medstat/cli/spec.py`: When creating `ModelSpec` (and in `from_yaml`), whitespace-padded strings (e.g. `outcome: " dead "`, `p_old_col: " old_score "`) were stored verbatim without trimming. While preflight validation stripped string column references when checking dataset existence, execution looked up the untrimmed values in `current_df.columns` when populating `req_cols`, causing `req_cols` to omit or misallocate required columns before building `clean_df`.
+2. `src/medstat/cli/spec.py`: In `_resolve_col_alias`, a fallback branch (`elif primary is not None and bool(primary): return primary`) returned truthy non-strings (such as lists `["score1", "score2"]`). In preflight validation, list-valued `p_old_col` or `p_new_col` were passed to `_add_col_ref`, which silently unpacked list elements into `referenced_cols` rather than rejecting list-valued scalar score options with clear validation errors and actionable remediation prior to dataframe access or ROC computation.
+
+### Decision
+1. **ModelSpec Column Reference Normalization**:
+   - Added `__post_init__` to `ModelSpec` to trim and normalize `name`, `type`, `outcome`, `exposure`, `time`, `covariates`, and column-referencing keys in `options` (`p_old`, `p_old_col`, `p_new`, `p_new_col`, `score_old`, `score_new`, `score_col`, `time_col`, `event_col`, `cluster_col`, `p_recal`, `p_pred`, `score`).
+   - In `AnalysisPlan.execute`, ensured `outcome`, `p_old_c`, and `p_new_c` are normalized before `req_cols` builds `clean_df`.
+   - Added defensive checks in `AnalysisPlan.execute` verifying `p_old_c` and `p_new_c` are valid columns in `clean_df.columns` before calling `compare_diagnostic_models`.
+2. **Rejection of List-Valued Reclassification Options & Strict Scalar Aliases**:
+   - Updated `_resolve_col_alias` to strictly return `str | None`, eliminating non-string truthy passthroughs.
+   - In `preflight_validate_spec()`, explicitly detected and rejected list-valued `p_old_col`, `p_old`, `p_new_col`, and `p_new` with clear errors and actionable remediations.
+   - Excluded raw `p_old`, `p_old_col`, `p_new`, and `p_new_col` from generic preflight option iteration, adding only resolved scalar aliases to `referenced_cols` when `is_reclass` is active.
+   - Added unit tests `test_preflight_validate_reclassification_list_options_rejected`, `test_reclassification_padded_column_references_normalized`, and `test_reclassification_execute_invalid_column_rejected_before_roc` in `tests/unit/test_cli_ergonomics.py`.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 730 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
+
 
 
 
