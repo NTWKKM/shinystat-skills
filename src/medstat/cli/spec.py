@@ -94,6 +94,43 @@ def _resolve_col_alias(primary: Any, fallback: Any) -> str | None:
     return None
 
 
+def _resolve_duration_col(
+    model_dict: dict[str, Any],
+    opts_dict: dict[str, Any],
+    supports_time: bool,
+    is_reclass: bool,
+    is_iptw: bool,
+) -> str | None:
+    """Resolve duration column with identical precedence across from_yaml and preflight."""
+    if is_iptw and str(opts_dict.get("outcome_type", "")).lower().strip() in (
+        "binary",
+        "continuous",
+    ):
+        return None
+
+    raw_time = model_dict.get("time") if not is_reclass else None
+    if isinstance(raw_time, str):
+        raw_time = raw_time.strip() or None
+    elif raw_time is not None:
+        raw_time = str(raw_time).strip() or None
+
+    if raw_time is not None:
+        return raw_time
+
+    if supports_time:
+        for candidate in (model_dict.get("time_col"), opts_dict.get("time_col")):
+            if isinstance(candidate, str):
+                c = candidate.strip()
+                if c:
+                    return c
+            elif candidate is not None:
+                c = str(candidate).strip()
+                if c:
+                    return c
+
+    return None
+
+
 def _construct_unique_mapping(
     loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False
 ) -> dict[str, Any]:
@@ -327,17 +364,9 @@ class AnalysisPlan:
             elif is_td_roc:
                 supports_time = True
 
-            if is_iptw and str(opts_dict.get("outcome_type", "")).lower().strip() in (
-                "binary",
-                "continuous",
-            ):
-                time_val = None
-            else:
-                time_val = m.get("time") if not is_reclass else None
-            if time_val is None and supports_time:
-                time_val = m.get("time_col")
-                if time_val is None:
-                    time_val = opts_dict.get("time_col")
+            time_val = _resolve_duration_col(
+                m, opts_dict, supports_time, is_reclass, is_iptw
+            )
 
             models.append(
                 ModelSpec(
@@ -479,6 +508,12 @@ class AnalysisPlan:
                     req_cols.append(p_old_c)
                 if p_new_c and p_new_c in current_df.columns:
                     req_cols.append(p_new_c)
+            elif is_td_roc_exec:
+                td_old_c = _resolve_col_alias(
+                    m_opts.get("p_old_col"), m_opts.get("score_old")
+                )
+                if td_old_c and td_old_c in current_df.columns:
+                    req_cols.append(td_old_c)
 
             for opt_key in (
                 "p_old",
@@ -498,6 +533,25 @@ class AnalysisPlan:
                     "p_old_col",
                     "p_new",
                     "p_new_col",
+                ):
+                    continue
+                if is_td_roc_exec and opt_key in (
+                    "p_old",
+                    "p_old_col",
+                    "score_old",
+                ):
+                    continue
+                if (
+                    not is_reclass_exec
+                    and not is_td_roc_exec
+                    and opt_key
+                    in (
+                        "p_old",
+                        "p_old_col",
+                        "score_old",
+                        "p_new",
+                        "p_new_col",
+                    )
                 ):
                     continue
                 if opt_key == "time_col" and (
@@ -1133,10 +1187,22 @@ class AnalysisPlan:
                     or model_spec.options.get("horizons")
                 )
             ):
-                dur_col = model_spec.time or model_spec.options.get("time_col", "time")
+                dur_col = (
+                    model_spec.time
+                    or _resolve_col_alias(model_spec.options.get("time_col"), None)
+                    or "time"
+                )
+                if dur_col not in clean_df.columns:
+                    raise ValueError(
+                        f"Time-dependent ROC model '{model_spec.name}' duration column '{dur_col}' not found in dataset columns: {list(clean_df.columns)}."
+                    )
                 ev_col = model_spec.outcome or model_spec.options.get(
                     "event_col", "event"
                 )
+                if ev_col not in clean_df.columns:
+                    raise ValueError(
+                        f"Time-dependent ROC model '{model_spec.name}' event column '{ev_col}' not found in dataset columns: {list(clean_df.columns)}."
+                    )
                 sc_col = (
                     model_spec.exposure
                     or model_spec.options.get("score_col")
@@ -1146,9 +1212,17 @@ class AnalysisPlan:
                     "time_horizons"
                 ) or model_spec.options.get("horizons")
                 comp_ev = model_spec.options.get("competing_event")
-                p_old_col = model_spec.options.get(
+                raw_td_old = model_spec.options.get(
                     "p_old_col"
                 ) or model_spec.options.get("score_old")
+                p_old_col = _resolve_col_alias(
+                    model_spec.options.get("p_old_col"),
+                    model_spec.options.get("score_old"),
+                )
+                if raw_td_old and (not p_old_col or p_old_col not in clean_df.columns):
+                    raise ValueError(
+                        f"Time-dependent ROC model '{model_spec.name}' comparison score column '{raw_td_old}' not found in dataset columns: {list(clean_df.columns)}."
+                    )
                 fit_res = compute_time_dependent_roc(
                     durations=clean_df[dur_col].values,
                     events=clean_df[ev_col].values,
@@ -1669,17 +1743,9 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
             elif is_td_roc:
                 supports_time = True
 
-            if is_iptw and str(opts_dict.get("outcome_type", "")).lower().strip() in (
-                "binary",
-                "continuous",
-            ):
-                time_val = None
-            else:
-                time_val = item.get("time") if not is_reclass else None
-            if time_val is None and supports_time:
-                time_val = item.get("time_col")
-                if time_val is None:
-                    time_val = opts_dict.get("time_col")
+            time_val = _resolve_duration_col(
+                item, opts_dict, supports_time, is_reclass, is_iptw
+            )
 
             if time_val:
                 _add_col_ref(time_val, "models.time")
@@ -1704,6 +1770,22 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
                     _add_col_ref(resolved_p_old, "models.options.p_old_col")
                 if isinstance(resolved_p_new, str) and resolved_p_new:
                     _add_col_ref(resolved_p_new, "models.options.p_new_col")
+            elif is_td_roc:
+                raw_td_old = opts_dict.get("p_old_col")
+                if isinstance(raw_td_old, list):
+                    report["valid"] = False
+                    report["errors"].append(
+                        f"Time-dependent ROC model '{item.get('name', 'unnamed')}' option 'p_old_col' must be a scalar column name, got list: {raw_td_old}."
+                    )
+                    report["agent_remediation"].append(
+                        f"Provide a single string column name for 'p_old_col' in model '{item.get('name', 'unnamed')}'."
+                    )
+                else:
+                    resolved_td_old = _resolve_col_alias(
+                        opts_dict.get("p_old_col"), opts_dict.get("score_old")
+                    )
+                    if isinstance(resolved_td_old, str) and resolved_td_old:
+                        _add_col_ref(resolved_td_old, "models.options.p_old_col")
 
             for opt_key in (
                 "p_old",
@@ -1718,11 +1800,30 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
                 "p_pred",
                 "score",
             ):
-                if opt_key in (
+                if is_reclass and opt_key in (
                     "p_old",
                     "p_old_col",
                     "p_new",
                     "p_new_col",
+                ):
+                    continue
+                if is_td_roc and opt_key in (
+                    "p_old",
+                    "p_old_col",
+                    "score_old",
+                ):
+                    continue
+                if (
+                    not is_reclass
+                    and not is_td_roc
+                    and opt_key
+                    in (
+                        "p_old",
+                        "p_old_col",
+                        "score_old",
+                        "p_new",
+                        "p_new_col",
+                    )
                 ):
                     continue
                 if opt_key == "event_col" and (is_reclass or is_iptw):
@@ -1730,11 +1831,6 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
                 if (
                     opt_key
                     in (
-                        "p_old",
-                        "p_old_col",
-                        "score_old",
-                        "p_new",
-                        "p_new_col",
                         "score_new",
                         "score_col",
                         "score",

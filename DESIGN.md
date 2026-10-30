@@ -1744,6 +1744,39 @@ In the latest CodeRabbit review round on PR #22:
 - **Status**: Accepted & Fully Verified.
 - **Verification**: 730 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
 
+---
+
+## ADR 61: PR #22 CodeRabbit Follow-Up: Unified Duration Selection Across Whitespace Fallbacks & Preflight Validation of Time-Dependent ROC Comparison Scores
+
+### Context
+In the latest CodeRabbit review round on PR #22:
+1. `src/medstat/cli/spec.py` (Line 169): In `from_yaml` and the preflight validation path, duration column fallback was gated on `time_val is None`. When a YAML spec contained whitespace-only duration values (e.g. `time: "   "`), `time_val` was treated as present, blocking fallback to a configured `time_col` (such as `follow_up`). Later, `ModelSpec.__post_init__` stripped the string to `None` or `""`, causing execution in `execute()` to fall back to the default `"time"` rather than the configured `time_col: "follow_up"`.
+2. `src/medstat/cli/spec.py` (Line 1721): The generic option collection loop in `preflight_validate_spec()` unconditionally skipped `"p_old"`, `"p_old_col"`, `"p_new"`, `"p_new_col"` regardless of model type. When a time-dependent ROC model specified `options.p_old_col` (or `score_old`) for baseline model comparison, preflight never added the comparison score column to `referenced_cols`, allowing specs referencing nonexistent columns to return `valid: true`.
+
+### Decision
+1. **Unified Duration Column Resolution Helper**:
+   - Implemented `_resolve_duration_col(model_dict, opts_dict, supports_time, is_reclass, is_iptw) -> str | None` in `src/medstat/cli/spec.py` to standardize duration column precedence across `from_yaml()` and `preflight_validate_spec()`.
+   - Stripped whitespace from `time` before evaluating presence; if absent or whitespace-only, seamlessly checked `time_col` on the model item and `time_col` in model `options`.
+   - Ensured both `from_yaml()` and `preflight_validate_spec()` select the identical duration column name, rejecting whitespace-only duration values without fallback during preflight for survival models with an actionable remediation.
+2. **Preflight Validation & Execution Guards for Time-Dependent ROC Comparison Scores**:
+   - In `preflight_validate_spec()`, when `is_td_roc` is active:
+     - Rejected list-valued `p_old_col` with a clear validation error and remediation hint.
+     - Resolved `resolved_td_old` via `_resolve_col_alias(opts_dict.get("p_old_col"), opts_dict.get("score_old"))` and registered it via `_add_col_ref(resolved_td_old, "models.options.p_old_col")`.
+   - Updated the `opt_key` skip logic so old-score aliases (`"p_old"`, `"p_old_col"`, `"score_old"`) and new-score aliases (`"p_new"`, `"p_new_col"`) are skipped only when unused by other models, or skipped in generic iteration because already collected by `is_reclass` or `is_td_roc`.
+   - In `AnalysisPlan.execute()`:
+     - Added `td_old_c` to `req_cols` when `is_td_roc_exec` is active.
+     - Resolved `dur_col` with whitespace fallback defensive guards.
+     - In the TD-ROC computation block, verified that when an old comparison score is requested (`raw_td_old`), it raises `ValueError` if the resolved column is missing or not present in `clean_df.columns`.
+3. **Unit Tests Added**:
+   - `test_preflight_validate_time_dependent_roc_missing_p_old_col_rejected`: verifies preflight rejects TD-ROC plans referencing missing comparison score columns with `valid: false`.
+   - `test_time_dependent_roc_execute_missing_p_old_col_rejected`: verifies execution raises `ValueError` before fitting TD-ROC when comparison score column is missing.
+   - `test_duration_selection_whitespace_time_falls_back_to_time_col`: verifies whitespace-only `time` falls back to `time_col: "follow_up"` across `from_yaml` and preflight, and executes cleanly.
+   - `test_preflight_validate_whitespace_time_without_time_col_rejected`: verifies whitespace-only `time` without `time_col` fails preflight validation for survival models.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 734 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
+
 
 
 

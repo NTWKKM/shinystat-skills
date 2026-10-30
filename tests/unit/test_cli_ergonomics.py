@@ -1583,3 +1583,138 @@ models:
         ValueError, match="requires a valid new predicted probability column"
     ):
         plan.execute()
+
+
+def test_preflight_validate_time_dependent_roc_missing_p_old_col_rejected(tmp_path):
+    """Preflight rejects time-dependent ROC spec referencing missing comparison score column."""
+    csv_file = tmp_path / "td_data.csv"
+    csv_file.write_text(
+        "patient_id,time,dead,marker\n1,10,0,0.2\n2,15,1,0.8\n3,20,1,0.6\n",
+        encoding="utf-8",
+    )
+    spec_file = tmp_path / "spec_td_missing_old.yaml"
+    spec_file.write_text(
+        f"""
+metadata:
+  study_title: "TD ROC Missing Old Score"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "td_comp"
+    type: "time_dependent_roc"
+    outcome: "dead"
+    time: "time"
+    exposure: "marker"
+    options:
+      p_old_col: "nonexistent_old_score"
+      time_horizons: [15]
+""",
+        encoding="utf-8",
+    )
+    report = preflight_validate_spec(spec_file)
+    assert report["valid"] is False
+    assert any("nonexistent_old_score" in err for err in report["errors"])
+    assert any("nonexistent_old_score" in rem for rem in report["agent_remediation"])
+
+
+def test_time_dependent_roc_execute_missing_p_old_col_rejected(tmp_path):
+    """Execution raises ValueError when requested TD-ROC comparison score column is missing."""
+    csv_file = tmp_path / "td_data_exec.csv"
+    csv_file.write_text(
+        "patient_id,time,dead,marker\n1,10,0,0.2\n2,15,1,0.8\n3,20,1,0.6\n",
+        encoding="utf-8",
+    )
+    spec_file = tmp_path / "spec_td_exec_missing.yaml"
+    spec_file.write_text(
+        f"""
+metadata:
+  study_title: "TD ROC Exec Missing"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "td_comp_exec"
+    type: "time_dependent_roc"
+    outcome: "dead"
+    time: "time"
+    exposure: "marker"
+    options:
+      p_old_col: "nonexistent_old_score"
+      time_horizons: [15]
+""",
+        encoding="utf-8",
+    )
+    plan = AnalysisPlan.from_yaml(spec_file)
+    with pytest.raises(
+        ValueError,
+        match="comparison score column 'nonexistent_old_score' not found in dataset columns",
+    ):
+        plan.execute()
+
+
+def test_duration_selection_whitespace_time_falls_back_to_time_col(tmp_path):
+    """Whitespace-only time falls back to time_col in both from_yaml and preflight."""
+    csv_file = tmp_path / "surv_data.csv"
+    csv_file.write_text(
+        "patient_id,follow_up,dead,stage\n"
+        "1,10,0,1\n"
+        "2,15,1,2\n"
+        "3,20,1,1\n"
+        "4,25,0,2\n"
+        "5,30,1,1\n"
+        "6,35,0,2\n",
+        encoding="utf-8",
+    )
+    spec_file = tmp_path / "spec_surv_ws.yaml"
+    spec_file.write_text(
+        f"""
+metadata:
+  study_title: "Whitespace Time Fallback Test"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "cox_fallback"
+    type: "cox"
+    outcome: "dead"
+    exposure: "stage"
+    time: "   "
+    time_col: "follow_up"
+""",
+        encoding="utf-8",
+    )
+    report = preflight_validate_spec(spec_file)
+    assert report["valid"] is True, f"Preflight errors: {report.get('errors')}"
+    assert len(report["errors"]) == 0
+
+    plan = AnalysisPlan.from_yaml(spec_file)
+    assert plan.models[0].time == "follow_up"
+
+    res = plan.execute()
+    assert "cox_fallback" in res["models"]
+
+
+def test_preflight_validate_whitespace_time_without_time_col_rejected(tmp_path):
+    """Whitespace-only time without time_col fails preflight validation for survival models."""
+    csv_file = tmp_path / "surv_no_time.csv"
+    csv_file.write_text("patient_id,dead,stage\n1,0,1\n", encoding="utf-8")
+    spec_file = tmp_path / "spec_surv_no_fallback.yaml"
+    spec_file.write_text(
+        f"""
+metadata:
+  study_title: "No Duration Test"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "cox_no_dur"
+    type: "cox"
+    outcome: "dead"
+    exposure: "stage"
+    time: "   "
+""",
+        encoding="utf-8",
+    )
+    report = preflight_validate_spec(spec_file)
+    assert report["valid"] is False
+    assert any(
+        "requires a 'time' or 'time_col' specification" in err
+        for err in report["errors"]
+    )
