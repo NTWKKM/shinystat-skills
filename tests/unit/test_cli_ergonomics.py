@@ -1219,6 +1219,38 @@ models:
     assert any("p_new_col" in rem for rem in report["agent_remediation"])
 
 
+def test_preflight_validate_reclassification_missing_p_old_rejected(tmp_path):
+    """Reclassification plans with p_new_col but missing both p_old_col and p_old are rejected."""
+    csv_file = tmp_path / "data.csv"
+    csv_file.write_text(
+        "patient_id,dead,new_score\n1,0,0.3\n2,1,0.9\n", encoding="utf-8"
+    )
+    spec = tmp_path / "spec_missing_p_old.yaml"
+    spec.write_text(
+        f"""
+metadata:
+  study_title: "Reclassification Missing P Old"
+data:
+  input_path: "{csv_file}"
+models:
+  - name: "reclass_model"
+    type: "diagnostic"
+    outcome: "dead"
+    options:
+      p_new_col: "new_score"
+""",
+        encoding="utf-8",
+    )
+    report = preflight_validate_spec(spec)
+    assert report["valid"] is False
+    assert any(
+        "requires an initial predicted probability/score column via 'p_old_col' or 'p_old'"
+        in err
+        for err in report["errors"]
+    )
+    assert any("p_old_col" in rem for rem in report["agent_remediation"])
+
+
 def test_preflight_validate_reclassification_valid_options_preserved(tmp_path):
     """Reclassification plans providing either p_new_col or p_new are accepted."""
     csv_file = tmp_path / "data.csv"

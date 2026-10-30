@@ -3,6 +3,7 @@ tests/unit/test_shinystat_skill.py: Multi-agent mirror parity and schema test fo
 """
 
 import os
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -162,6 +163,13 @@ def test_shinystat_cloud_canonical_skill_exists_and_valid():
         assert len(matched) == 1, (
             f"Expected 1 recipe file matching {pattern}, found {len(matched)}"
         )
+
+    # Ensure standalone cloud package is generated via the supported packaging workflow
+    package_script = repo_root / "scripts" / "package-cloud-skill.sh"
+    assert package_script.exists(), "scripts/package-cloud-skill.sh not found"
+    subprocess.run(
+        ["bash", str(package_script)], check=True, cwd=repo_root, capture_output=True
+    )
 
     # Full tree and content parity with packaging/cloud/shinystat-cloud
     assert packaging_cloud.exists(), "packaging/cloud/shinystat-cloud not found"

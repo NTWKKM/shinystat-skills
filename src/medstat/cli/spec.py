@@ -1472,13 +1472,22 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
 
             is_survival = m_type in _SURVIVAL_MODEL_TYPES
             is_iptw = m_type in ("iptw", "causal_iptw") or m_method == "iptw"
+            has_old = bool(opts_dict.get("p_old_col") or opts_dict.get("p_old"))
+            has_new = bool(opts_dict.get("p_new_col") or opts_dict.get("p_new"))
             is_reclass = (
                 not is_iptw
                 and m_type in ("reclassification", "diagnostic", "diag")
+                and has_old
+                and has_new
+            )
+            has_reclass_intent = (
+                not is_iptw
+                and m_type in ("reclassification", "diagnostic", "diag")
                 and bool(
-                    opts_dict.get("p_old_col")
-                    or opts_dict.get("p_old")
+                    has_old
+                    or has_new
                     or opts_dict.get("reclassification")
+                    or m_type == "reclassification"
                 )
             )
             is_td_roc = not is_iptw and (
@@ -1504,7 +1513,11 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
                 )
                 or bool(opts_dict.get("recalibration"))
             )
-            if is_diagnostic_type and not is_valid_diagnostic_op:
+            if (
+                is_diagnostic_type
+                and not is_valid_diagnostic_op
+                and not has_reclass_intent
+            ):
                 report["valid"] = False
                 report["errors"].append(
                     f"Diagnostic model '{item.get('name', 'unnamed')}' must specify a supported diagnostic operation in options "
@@ -1515,25 +1528,31 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
                     f"or 'method: iptw' in options for diagnostic model '{item.get('name', 'unnamed')}'."
                 )
 
-            if m_type == "reclassification" and not is_iptw and not is_reclass:
-                report["valid"] = False
-                report["errors"].append(
-                    f"Reclassification model '{item.get('name', 'unnamed')}' specifies 'type: reclassification' but lacks reclassification options (e.g., 'p_old_col' or 'p_old')."
-                )
-                report["agent_remediation"].append(
-                    f"Specify 'p_old_col' (or 'p_old') and 'p_new_col' (or 'p_new') in options for model '{item.get('name', 'unnamed')}'."
-                )
-
-            if is_reclass and not (
-                opts_dict.get("p_new_col") or opts_dict.get("p_new")
-            ):
-                report["valid"] = False
-                report["errors"].append(
-                    f"Reclassification model '{item.get('name', 'unnamed')}' requires a new predicted probability column via 'p_new_col' or 'p_new'."
-                )
-                report["agent_remediation"].append(
-                    f"Specify 'p_new_col' or 'p_new' in options for model '{item.get('name', 'unnamed')}'."
-                )
+            if has_reclass_intent and not is_reclass:
+                if not has_old and not has_new:
+                    report["valid"] = False
+                    report["errors"].append(
+                        f"Reclassification model '{item.get('name', 'unnamed')}' specifies 'type: reclassification' but lacks reclassification options (e.g., 'p_old_col' or 'p_old')."
+                    )
+                    report["agent_remediation"].append(
+                        f"Specify 'p_old_col' (or 'p_old') and 'p_new_col' (or 'p_new') in options for model '{item.get('name', 'unnamed')}'."
+                    )
+                elif not has_old:
+                    report["valid"] = False
+                    report["errors"].append(
+                        f"Reclassification model '{item.get('name', 'unnamed')}' requires an initial predicted probability/score column via 'p_old_col' or 'p_old'."
+                    )
+                    report["agent_remediation"].append(
+                        f"Specify 'p_old_col' (or 'p_old') in options for model '{item.get('name', 'unnamed')}'."
+                    )
+                elif not has_new:
+                    report["valid"] = False
+                    report["errors"].append(
+                        f"Reclassification model '{item.get('name', 'unnamed')}' requires a new predicted probability column via 'p_new_col' or 'p_new'."
+                    )
+                    report["agent_remediation"].append(
+                        f"Specify 'p_new_col' or 'p_new' in options for model '{item.get('name', 'unnamed')}'."
+                    )
 
             # Resolve duration once using identical precedence to from_yaml()
             supports_time = False

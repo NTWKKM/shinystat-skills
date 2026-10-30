@@ -1644,6 +1644,34 @@ In the latest CodeRabbit review round on PR #22:
 - **Status**: Accepted & Fully Verified.
 - **Verification**: 724 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
 
+---
+
+## ADR 57: PR #22 CodeRabbit Follow-Up: Reclassification Preflight Bilateral Column Enforcement & Standalone Cloud Packaging in Parity Tests
+
+### Context
+In the latest CodeRabbit review round on PR #22:
+1. `src/medstat/cli/spec.py`: Preflight validation required `p_new_col` or `p_new` when `is_reclass` was active, but did not symmetrically verify that `p_old_col` or `p_old` was provided when only a new-score column was supplied (or when `reclassification: true` was set). Additionally, `is_reclass` did not require both columns before accepting a model as reclassification, allowing partially configured diagnostic models to bypass bilateral score requirements.
+2. `tests/unit/test_shinystat_skill.py`: `test_shinystat_cloud_canonical_skill_exists_and_valid()` asserted parity between `skills/shinystat-cloud` and `packaging/cloud/shinystat-cloud`. In a fresh clone or clean test runner where `scripts/package-cloud-skill.sh` had not yet been executed manually, the parity assertion failed.
+
+### Decision
+1. **Reclassification Bilateral Column Enforcement**:
+   - Defined `has_old = bool(opts_dict.get("p_old_col") or opts_dict.get("p_old"))` and `has_new = bool(opts_dict.get("p_new_col") or opts_dict.get("p_new"))`.
+   - Updated `is_reclass` to require `not is_iptw and m_type in ("reclassification", "diagnostic", "diag") and has_old and has_new`.
+   - Detected reclassification intent via `has_reclass_intent` across `m_type == "reclassification"`, `opts_dict.get("reclassification")`, `has_old`, or `has_new`.
+   - When `has_reclass_intent and not is_reclass`:
+     - If neither `has_old` nor `has_new`: rejected with `lacks reclassification options (e.g., 'p_old_col' or 'p_old')`.
+     - If `not has_old`: rejected with actionable remediation specifying `p_old_col` (or `p_old`).
+     - If `not has_new`: rejected with actionable remediation specifying `p_new_col` (or `p_new`).
+   - Preserved IPTW exception and prevented generic diagnostic missing operation errors from shadowing reclassification remediation.
+   - Added regression test `test_preflight_validate_reclassification_missing_p_old_rejected` in `tests/unit/test_cli_ergonomics.py`.
+2. **Automated Standalone Cloud Package Generation in Tests**:
+   - Updated `test_shinystat_cloud_canonical_skill_exists_and_valid()` in `tests/unit/test_shinystat_skill.py` to invoke `scripts/package-cloud-skill.sh` via `subprocess.run()` prior to comparing `canonical_files` and `packaging_files`.
+   - Ensured the standalone cloud package is dynamically generated as part of standard pytest execution, eliminating manual preparation prerequisites.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 725 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
+
 
 
 
