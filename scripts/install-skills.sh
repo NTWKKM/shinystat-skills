@@ -74,6 +74,9 @@ else
     rm -rf "$REPO_ROOT/packaging/cloud/_shared"
 fi
 
+# Clean up any legacy in-workspace mirror directories to maintain SSOT (ADR 49)
+rm -rf "$REPO_ROOT/.agent/skills" "$REPO_ROOT/.agents/skills" "$REPO_ROOT/.claude/skills" "$REPO_ROOT/.cursor/skills" "$REPO_ROOT/.agent/agents" "$REPO_ROOT/.agents/agents" 2>/dev/null || true
+
 CANONICAL_AGENT="$REPO_ROOT/agents/figure-tester.md"
 
 if [[ "$SCOPE" == "global" ]]; then
