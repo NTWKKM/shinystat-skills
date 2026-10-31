@@ -3400,3 +3400,54 @@ def test_cloud_recipes_and_figures_pr23_review_remediation(recipes, tmp_path):
         out_path=str(tmp_path / "rcs_gauss.png"),
     )
     assert Path(rcs_gauss_out).exists()
+
+
+def test_cloud_recipe_24_meta_analysis_exponentiation_and_inference(recipes):
+    """Verifies that run_meta_analysis in Recipe 24 correctly infers ratio scale from log_effect column or exponentiate flag."""
+    run_meta = recipes["run_meta_analysis"]
+
+    # 1. Default effect_col="log_effect" without is_ratio column -> infers is_ratio=True and exponentiates
+    df_log = pd.DataFrame(
+        {
+            "study": ["Trial 1", "Trial 2", "Trial 3"],
+            "log_effect": [0.2, 0.4, 0.3],
+            "se": [0.1, 0.15, 0.12],
+        }
+    )
+    res_inferred = run_meta(df_log)
+    assert res_inferred["is_ratio"] is True
+    assert np.isclose(
+        res_inferred["fixed_effect"]["effect_disp"],
+        np.exp(res_inferred["fixed_effect"]["log_effect"]),
+        atol=1e-10,
+    )
+    assert np.isclose(
+        res_inferred["random_effects"]["effect_disp"],
+        np.exp(res_inferred["random_effects"]["log_effect"]),
+        atol=1e-10,
+    )
+
+    # 2. Continuous effect (e.g. effect_col="md") -> is_ratio=False, effect_disp == log_effect
+    df_md = pd.DataFrame(
+        {
+            "study": ["Trial 1", "Trial 2", "Trial 3"],
+            "md": [2.5, 3.1, 2.8],
+            "se": [0.5, 0.6, 0.4],
+        }
+    )
+    res_md = run_meta(df_md, effect_col="md")
+    assert res_md["is_ratio"] is False
+    assert np.isclose(
+        res_md["fixed_effect"]["effect_disp"],
+        res_md["fixed_effect"]["log_effect"],
+        atol=1e-10,
+    )
+
+    # 3. Explicit exponentiate=False override
+    res_override = run_meta(df_log, exponentiate=False)
+    assert res_override["is_ratio"] is False
+    assert np.isclose(
+        res_override["fixed_effect"]["effect_disp"],
+        res_override["fixed_effect"]["log_effect"],
+        atol=1e-10,
+    )

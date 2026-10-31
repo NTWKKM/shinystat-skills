@@ -2562,8 +2562,21 @@ def run_meta_analysis(
     effect_col: str = "log_effect",
     se_col: str = "se",
     study_col: str = "study",
+    exponentiate: bool | None = None,
 ) -> dict[str, Any]:
-    """Perform Fixed-Effect and DerSimonian-Laird Random-Effects Meta-Analysis."""
+    """Perform Fixed-Effect and DerSimonian-Laird Random-Effects Meta-Analysis.
+
+    Parameters:
+        df: DataFrame containing study estimates and standard errors.
+        use_hksj: If True, uses Hartung-Knapp-Sidik-Jonkman adjustment for random effects.
+        alpha: Significance level (default 0.05).
+        effect_col: Column name containing effect sizes (default 'log_effect').
+        se_col: Column name containing standard errors (default 'se').
+        study_col: Column name containing study identifiers (default 'study').
+        exponentiate: Whether to exponentiate log effects for display (effect_disp, CIs).
+            When None, infers True if 'is_ratio' column is True or effect_col starts with 'log_',
+            otherwise False.
+    """
     if not (isinstance(alpha, (int, float)) and math.isfinite(alpha) and 0.0 < alpha < 1.0):
         raise ValueError("alpha must be a finite number strictly between 0 and 1.")
 
@@ -2572,9 +2585,14 @@ def run_meta_analysis(
     if k < 2:
         raise ValueError(f"Meta-analysis requires at least 2 studies (got {k}).")
 
-    is_ratio = (
-        bool(df_work["is_ratio"].iloc[0]) if "is_ratio" in df_work.columns else False
-    )
+    if exponentiate is not None:
+        is_ratio = bool(exponentiate)
+    elif "is_ratio" in df_work.columns:
+        is_ratio = bool(df_work["is_ratio"].iloc[0])
+    elif isinstance(effect_col, str) and effect_col.startswith("log_"):
+        is_ratio = True
+    else:
+        is_ratio = False
     if effect_col in df_work.columns:
         theta = df_work[effect_col].to_numpy(dtype=float)
     elif "effect_size" in df_work.columns:
