@@ -1554,50 +1554,70 @@ def verify_standalone_integrity(
                 )
             )
         )
-        is_p_floor = bool(
-            0.0 < val <= 1.0
-            and not is_alpha_cutoff
-            and re.search(r"\bp\s*(?:-\s*value\s*)?<\s*$", window_before, re.IGNORECASE)
+        p_ineq_match = re.search(
+            r"\bp\s*(?:-\s*value\s*)?([<>]=?)\s*$", window_before, re.IGNORECASE
         )
-        if is_p_floor:
-            if not any(0.0 <= pv < val for pv in known_p_vals):
+        p_inequality = (
+            p_ineq_match.group(1)
+            if (0.0 < val <= 1.0 and not is_alpha_cutoff and p_ineq_match)
+            else None
+        )
+        if p_inequality is not None:
+            if p_inequality == "<":
+                matched = any(0.0 <= pv < val for pv in known_p_vals)
+            elif p_inequality == "<=":
+                matched = any(0.0 <= pv <= val for pv in known_p_vals)
+            elif p_inequality == ">":
+                matched = any(val < pv <= 1.0 for pv in known_p_vals)
+            elif p_inequality == ">=":
+                matched = any(val <= pv <= 1.0 for pv in known_p_vals)
+            else:
+                matched = False
+            if not matched:
                 untraced_nums.append(val)
             continue
 
-        if abs(val) <= 1.0:
-            if re.search(r"[eE]", raw_str):
-                parts = re.split(r"[eE]", raw_str)
-                mantissa = parts[0]
-                try:
-                    exp = int(parts[1])
-                except (IndexError, ValueError):
-                    exp = 0
-                mantissa_dec = len(mantissa.split(".")[1]) if "." in mantissa else 0
-                dec_digits = max(0, mantissa_dec - exp)
-            else:
-                dec_digits = len(raw_str.split(".")[1]) if "." in raw_str else 2
-            abs_tol = min(0.02, 10.0 ** (-dec_digits))
+        # Determine decimal precision d from raw token string:
+        # For scientific notation (e.g. 1.2e-3), derive d from mantissa decimals minus exponent.
+        # For standard decimals (e.g. 1.45), d is the count of fractional digits.
+        # For integers (e.g. 412), d = 0.
+        if re.search(r"[eE]", raw_str):
+            parts = re.split(r"[eE]", raw_str)
+            mantissa = parts[0]
+            try:
+                exp_str = re.split(r"[%]", parts[1])[0]
+                exp = int(exp_str)
+            except (IndexError, ValueError):
+                exp = 0
+            mantissa_dec = len(mantissa.split(".")[1]) if "." in mantissa else 0
+            d = max(0, mantissa_dec - exp)
+        elif "." in raw_str:
+            dec_part = raw_str.split(".")[1]
+            d = len(re.split(r"[%]", dec_part)[0])
         else:
-            abs_tol = 0.02
+            d = 0
+
+        # Half-unit tolerance based on claimed precision: abs(val - kn) <= 0.5 * 10^(-d) + 1e-9.
+        # Intended behavior: P=0.01 passes when true P=0.012 (correct 2-decimal rounding),
+        # whereas 0.02 and 0.013 are rejected.
+        tol = 0.5 * (10.0 ** (-d)) + 1e-9
 
         matched = False
         for kn in known_nums:
-            if abs(val - kn) <= abs_tol:
+            # 1. Direct match:
+            if abs(val - kn) <= tol:
                 matched = True
                 break
-            if abs(val) > 1.0 and abs(kn) > 1e-9 and abs(val - kn) / abs(kn) <= 0.01:
-                matched = True
-                break
-            if has_pct or (abs(val) > 1.0 and abs(kn) <= 1.0):
-                pct_tol = min(0.05, abs_tol * 100.0) if has_pct else 0.05
-                if abs(val - kn * 100.0) <= pct_tol:
+
+            # 2. Percentage scale match: only permitted when token explicitly has '%' attached
+            if has_pct:
+                if abs(val - kn * 100.0) <= tol:
                     matched = True
                     break
 
+        # 3. Allowed untraced whitelist: uses the exact same half-unit precision tolerance
         if not matched and allowed_list:
-            if any(
-                math.isclose(val, aw, rel_tol=1e-2, abs_tol=1e-4) for aw in allowed_list
-            ):
+            if any(abs(val - aw) <= tol for aw in allowed_list):
                 matched = True
 
         if not matched:
@@ -1635,7 +1655,7 @@ def verify_standalone_integrity(
                     bool(re.search(date_prefix_pattern, window_before, re.IGNORECASE))
                     or bool(
                         re.search(
-                            r"\b(?:et\s+al\.?|JAMA|NEJM|Lancet|BMJ|Med|Crit\s+Care|J\b|Ann\b|Clin\b|Sci\b|Press|Univ|doi|vol|pp?\.?)\b",
+                            r"(?:\b(?:et\s+al\.?|JAMA|NEJM|Lancet|BMJ|Med|Crit\s+Care|J\b|Ann\b|Clin\b|Sci\b|Press|Univ|doi|vol\.?)\b|\bpp?\.)",
                             window_before,
                             re.IGNORECASE,
                         )

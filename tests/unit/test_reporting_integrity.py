@@ -2,10 +2,30 @@
 tests/unit/test_reporting_integrity.py: Unit tests for Pillar 5 Reporting Integrity Verification.
 """
 
+# ruff: noqa: E402
+
 from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(REPO_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "src"))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from medstat.reporting.integrity import verify_report_integrity
 from medstat.reporting.ir import ReportDocument
+from tests.fixtures.integrity_cases import (
+    BASE_NARRATIVE,
+    BASE_RESULTS_DICT,
+    INTEGRITY_PARITY_CASES,
+    STAT_MUTATIONS,
+)
 
 
 def test_integrity_clean_report():
@@ -612,3 +632,43 @@ def test_integrity_p_floor_and_allowed_untraced_guards():
     audit_allow_pass = verify_report_integrity(doc_allow, allowed_untraced=[50.0])
     assert 50.0 not in audit_allow_pass.untraced_numbers
     assert audit_allow_pass.passed is True
+
+
+@pytest.mark.parametrize("case", INTEGRITY_PARITY_CASES, ids=lambda c: c.id)
+def test_integrity_gate_tolerance_parity_cases(case):
+    """Verifies all Task 2a parity cases through ReportDocument and verify_report_integrity."""
+    doc = ReportDocument(title="Parity Test", results_dict=case.results_dict)
+    doc.add_paragraph(case.narrative)
+    audit = verify_report_integrity(doc, allowed_untraced=case.allowed_untraced)
+
+    assert audit.passed == case.expected_passed, (
+        f"Case {case.id} failed: expected passed={case.expected_passed}, got {audit.passed}. "
+        f"Untraced: {audit.untraced_numbers}"
+    )
+    assert sorted(audit.untraced_numbers) == sorted(case.expected_untraced), (
+        f"Case {case.id} untraced mismatch: expected {case.expected_untraced}, got {audit.untraced_numbers}"
+    )
+
+
+def test_integrity_gate_tolerance_mutations():
+    """Verifies Task 2b mutation tests for all 5 statistical tokens (must all fail audit.passed)."""
+    for token_str, mutations in STAT_MUTATIONS:
+        for mutated_val in mutations:
+            # Safely replace token preserving other numeric strings
+            pat = r"(?<![\d.])" + re.escape(token_str) + r"(?![\d.])"
+            mutated_narrative = re.sub(pat, mutated_val, BASE_NARRATIVE, count=1)
+            assert mutated_narrative != BASE_NARRATIVE, (
+                f"Failed to substitute token '{token_str}' with '{mutated_val}'"
+            )
+
+            doc = ReportDocument(
+                title="Mutation Test",
+                results_dict=BASE_RESULTS_DICT,
+            )
+            doc.add_paragraph(mutated_narrative)
+            audit = verify_report_integrity(doc)
+
+            assert audit.passed is False, (
+                f"Mutation {token_str} -> {mutated_val} unexpectedly passed audit! "
+                f"Narrative: '{mutated_narrative}', Untraced: {audit.untraced_numbers}"
+            )

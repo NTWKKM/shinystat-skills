@@ -10,7 +10,6 @@ Invariants enforced:
 
 from __future__ import annotations
 
-import math
 import re
 from dataclasses import dataclass, field
 from typing import Any, NamedTuple
@@ -215,7 +214,7 @@ def _is_structural_context(
         if _DATE_PREFIX_PATTERN.search(window_before):
             return True
         if re.search(
-            r"\b(?:et\s+al\.?|JAMA|NEJM|Lancet|BMJ|Crit\s+Care|doi|vol|pp?\.?)\b",
+            r"(?:\b(?:et\s+al\.?|JAMA|NEJM|Lancet|BMJ|Crit\s+Care|doi|vol\.?)\b|\bpp?\.)",
             window_before,
             re.IGNORECASE,
         ):
@@ -385,6 +384,14 @@ def verify_report_integrity(
     any required confounding caveat, and zero untraced numbers
     (``len(untraced) == 0``). Missing methods or retention keywords only add warnings.
 
+    Numerical matching uses a half-unit tolerance based on claimed precision:
+    ``abs(val - kn) <= 0.5 * 10**(-d) + 1e-9`` where ``d`` is the number of
+    decimal digits displayed in the narrative text (d=0 for integers).
+    For example, P=0.01 passes when true P=0.012 (correct rounding to 2 decimals),
+    whereas 0.02 and 0.013 are rejected. Percentage-scale matching against kn*100
+    is only permitted when the token explicitly carries a '%' sign.
+    The ``allowed_untraced`` whitelist enforces the identical half-unit tolerance.
+
     ``citations_count`` counts matched citation groups, not unique references;
     bracketed bibliography labels can also count. Citation sources and their
     agreement with the narrative are not verified.
@@ -458,56 +465,47 @@ def verify_report_integrity(
                 untraced.append(tn)
             continue
 
-        # Check against known numbers: for values <= 1, use token's displayed precision
-        if abs(tn) <= 1.0:
-            if re.search(r"[eE]", token_str):
-                parts = re.split(r"[eE]", token_str)
-                mantissa = parts[0]
-                try:
-                    exp_str = re.split(r"[%]", parts[1])[0]
-                    exp = int(exp_str)
-                except (IndexError, ValueError):
-                    exp = 0
-                mantissa_dec = len(mantissa.split(".")[1]) if "." in mantissa else 0
-                dec_digits = max(0, mantissa_dec - exp)
-            elif "." in token_str:
-                dec_part = token_str.split(".")[1]
-                dec_digits = len(re.split(r"[%]", dec_part)[0])
-            else:
-                dec_digits = 2
-            abs_tol = min(0.02, 10.0 ** (-dec_digits))
+        # Determine decimal precision d from raw token string:
+        # For scientific notation (e.g. 1.2e-3), derive d from mantissa decimals minus exponent.
+        # For standard decimals (e.g. 1.45), d is the count of fractional digits.
+        # For integers (e.g. 412), d = 0.
+        if re.search(r"[eE]", token_str):
+            parts = re.split(r"[eE]", token_str)
+            mantissa = parts[0]
+            try:
+                exp_str = re.split(r"[%]", parts[1])[0]
+                exp = int(exp_str)
+            except (IndexError, ValueError):
+                exp = 0
+            mantissa_dec = len(mantissa.split(".")[1]) if "." in mantissa else 0
+            d = max(0, mantissa_dec - exp)
+        elif "." in token_str:
+            dec_part = token_str.split(".")[1]
+            d = len(re.split(r"[%]", dec_part)[0])
         else:
-            abs_tol = 0.02
+            d = 0
+
+        # Half-unit tolerance based on claimed precision: abs(val - kn) <= 0.5 * 10^(-d) + 1e-9.
+        # Intended behavior: P=0.01 passes when true P=0.012 (correct 2-decimal rounding),
+        # whereas 0.02 and 0.013 are rejected.
+        tol = 0.5 * (10.0 ** (-d)) + 1e-9
 
         matched = False
         for kn in known_numbers:
-            abs_diff = abs(tn - kn)
-            # Direct match branch:
-            # For values with abs(tn) <= 1, strictly enforce displayed precision abs_tol;
-            # Only allow 1% relative tolerance for larger values (|tn| > 1.0)
-            if abs_diff <= abs_tol:
+            # 1. Direct match:
+            if abs(tn - kn) <= tol:
                 matched = True
                 break
-            if abs(tn) > 1.0 and abs(kn) > 1e-9:
-                rel_diff = abs_diff / abs(kn)
-                if rel_diff <= 0.01:
+
+            # 2. Percentage scale match: only permitted when token explicitly has '%' attached
+            if has_pct:
+                if abs(tn - kn * 100.0) <= tol:
                     matched = True
                     break
 
-            # Percentage scale match branch (e.g. 85.2% in text vs 0.852 in results):
-            # Only trigger percentage-scale comparison if token explicitly has '%'
-            # OR if tn is on percentage scale (|tn| > 1.0 and |kn| <= 1.0)
-            if has_pct or (abs(tn) > 1.0 and abs(kn) <= 1.0):
-                pct_diff = abs(tn - kn * 100.0)
-                pct_tol = min(0.05, abs_tol * 100.0) if has_pct else 0.05
-                if pct_diff <= pct_tol:
-                    matched = True
-                    break
-
+        # 3. Allowed untraced whitelist: uses the exact same half-unit precision tolerance
         if not matched and allowed_list:
-            if any(
-                math.isclose(tn, aw, rel_tol=1e-2, abs_tol=1e-4) for aw in allowed_list
-            ):
+            if any(abs(tn - aw) <= tol for aw in allowed_list):
                 matched = True
 
         if not matched:

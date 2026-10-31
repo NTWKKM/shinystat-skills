@@ -3,7 +3,10 @@ tests/unit/test_shinystat_cloud.py: Comprehensive unit tests and statistical inv
 verification for the shinystat-cloud standalone package and recipes.
 """
 
+# ruff: noqa: E402
+
 import re
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -11,8 +14,21 @@ import pandas as pd
 import pytest
 import yaml
 
-# Import functions from python-recipes directly by extracting or importing
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(REPO_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "src"))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from medstat.reporting.integrity import verify_report_integrity
+from medstat.reporting.ir import ReportDocument
+from tests.fixtures.integrity_cases import (
+    BASE_NARRATIVE,
+    BASE_RESULTS_DICT,
+    INTEGRITY_PARITY_CASES,
+    STAT_MUTATIONS,
+)
+
 CLOUD_DIR = REPO_ROOT / "packaging" / "cloud" / "shinystat-cloud"
 RECIPES_DIR = REPO_ROOT / "skills" / "shinystat-cloud" / "references" / "recipes"
 
@@ -2149,6 +2165,79 @@ def _extract_report_builder_namespace():
     for block in blocks:
         exec(block, ns)
     return ns
+
+
+def test_cloud_verify_standalone_integrity_parity_and_mutations():
+    """
+    Task 2a & 2b: Asserts that verify_standalone_integrity (extracted from report-builder.md)
+    and verify_report_integrity (via ReportDocument) have exact 100% parity across all 24 cases
+    in INTEGRITY_PARITY_CASES and all mutation tests.
+    """
+    ns = _extract_report_builder_namespace()
+    verify_standalone = ns["verify_standalone_integrity"]
+
+    # 1. Parity across all 24 cases
+    for case in INTEGRITY_PARITY_CASES:
+        doc = ReportDocument(title="Parity Test", results_dict=case.results_dict)
+        doc.add_paragraph(case.narrative)
+        ir_res = verify_report_integrity(doc, allowed_untraced=case.allowed_untraced)
+
+        standalone_res = verify_standalone(
+            case.narrative,
+            results_dict=case.results_dict,
+            allowed_untraced=case.allowed_untraced,
+        )
+
+        assert standalone_res["passed"] == case.expected_passed, (
+            f"Case {case.id} standalone passed mismatch: expected {case.expected_passed}, got {standalone_res['passed']}"
+        )
+        assert sorted(standalone_res["untraced_numbers"]) == sorted(
+            case.expected_untraced
+        ), (
+            f"Case {case.id} standalone untraced mismatch: expected {case.expected_untraced}, got {standalone_res['untraced_numbers']}"
+        )
+
+        # Exact parity assertion between implementations
+        assert standalone_res["passed"] == ir_res.passed, (
+            f"Case {case.id} parity divergence in passed: standalone={standalone_res['passed']}, ir={ir_res.passed}"
+        )
+        assert sorted(standalone_res["untraced_numbers"]) == sorted(
+            ir_res.untraced_numbers
+        ), (
+            f"Case {case.id} parity divergence in untraced: standalone={standalone_res['untraced_numbers']}, ir={ir_res.untraced_numbers}"
+        )
+
+    # 2. Mutation tests for all 5 statistical tokens
+    for token_str, mutations in STAT_MUTATIONS:
+        for mutated_val in mutations:
+            pat = r"(?<![\d.])" + re.escape(token_str) + r"(?![\d.])"
+            mutated_narrative = re.sub(pat, mutated_val, BASE_NARRATIVE, count=1)
+            assert mutated_narrative != BASE_NARRATIVE
+
+            doc = ReportDocument(
+                title="Mutation Test",
+                results_dict=BASE_RESULTS_DICT,
+            )
+            doc.add_paragraph(mutated_narrative)
+            ir_res = verify_report_integrity(doc)
+
+            standalone_res = verify_standalone(
+                mutated_narrative,
+                results_dict=BASE_RESULTS_DICT,
+            )
+
+            assert standalone_res["passed"] is False, (
+                f"Mutation {token_str} -> {mutated_val} unexpectedly passed standalone integrity! "
+                f"Untraced: {standalone_res['untraced_numbers']}"
+            )
+            assert ir_res.passed is False, (
+                f"Mutation {token_str} -> {mutated_val} unexpectedly passed IR integrity! "
+                f"Untraced: {ir_res.untraced_numbers}"
+            )
+            assert standalone_res["passed"] == ir_res.passed
+            assert sorted(standalone_res["untraced_numbers"]) == sorted(
+                ir_res.untraced_numbers
+            )
 
 
 def test_cloud_standalone_plotly_spec_generators(tmp_path):
