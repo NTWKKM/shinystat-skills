@@ -1895,6 +1895,34 @@ An external audit of `shinystat-cloud` and `src/medstat/reporting/integrity.py` 
 - **Status**: Accepted & Fully Verified.
 - **Verification**: All 5 audit fabricated-number cases return `passed=False`; all standalone cloud recipes (1–24) and report generators (`.md`, `.html`, `.docx`, `.pptx`, `.pdf`) execute cleanly in isolated zero-`medstat` tests.
 
+---
+
+## ADR 67: Half-Unit Decimal Precision Tolerance for Pillar 5 Numerical Integrity Gate
+
+### Context
+Following ADR 66's zero-tolerance enforcement (`len(untraced) == 0`), an audit using realistic clinical regression narratives (`results_dict = {"or_age": 1.45, "ci_low": 1.10, "ci_high": 1.91, "p": 0.012, "n": 412}`) revealed five vulnerability loopholes where fabricated numbers escaped detection:
+1. **Unchecked Percentage Matching**: When $|val| > 1.0$ and $|kn| \le 1.0$, values were matched against $kn \times 100$ without requiring an explicit `%` sign. Consequently, mutating CI low from `1.10` to `1.20` passed because it matched $p = 0.012 \times 100 = 1.20$.
+2. **Whole-Unit Precision Window**: Sub-one decimal tolerance used $10^{-d}$ (e.g. $0.01$ for $d=2$). Mutating $P = 0.012$ to $0.02$ passed because $|0.02 - 0.012| = 0.008 \le 0.01$.
+3. **1% Relative Tolerance Branch**: Large values ($|val| > 1.0$) permitted a 1% relative difference, allowing sample size $n = 412$ to be fabricated as $415$ or $408$.
+4. **Float Edge Jitter**: OR $1.45 \to 1.47$ was caught only by floating-point epsilon exceeding $0.02$ rather than a principled statistical boundary.
+5. **Overbroad Year Context Regex**: The citation pattern `pp?\.?` matched bare `P` in `P=0.012` due to case-insensitivity and optional dot, falsely classifying bare years like `(1950)` as bibliographic citations.
+6. **Loose Whitelist Tolerance**: `allowed_untraced` used `math.isclose(rel_tol=1e-2)`, permitting `73.9` when `73.4` was whitelisted.
+
+### Decision
+Enforce a uniform, mathematically sound matching rule across both `src/medstat/reporting/integrity.py` (`verify_report_integrity`) and `skills/_shared/references/report-builder.md` (`verify_standalone_integrity`):
+1. **Half-Unit Decimal Precision Tolerance**: `abs(val - kn) <= 0.5 * 10**(-d) + 1e-9`, where $d$ is the number of decimal digits in the raw string ($d = 0$ for integers; scientific notation derives $d$ from mantissa decimals minus exponent).
+2. **Removal of Loose Branches**: Completely delete the 1% relative tolerance branch and $0.02$ absolute tolerance branch.
+3. **Strict Percentage Qualification**: Restrict percentage-scale comparison ($kn \times 100.0$) strictly to tokens with `has_pct == True` (carrying a `%` symbol).
+4. **Whitelist Precision Synchronization**: Audit `allowed_untraced` using the exact same half-unit precision tolerance instead of relative tolerance.
+5. **Bibliographic Regex Hardening**: Require a mandatory dot on page markers (`pp?\.`), eliminating collisions between p-value notation (`P=...`) and publication year exemptions.
+6. **Inequality Parity**: Mirror inequality evaluation (`<, <=, >, >=`) between `verify_report_integrity` and `verify_standalone_integrity`.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Precision Grounding**: $P = 0.01$ passes as authentic 2-decimal rounding of $0.012$ ($|0.01 - 0.012| = 0.002 \le 0.005$), while $0.02$ and $0.013$ fail.
+- **Fail-Closed Security**: Fabricated ORs (1.46, 1.47), sample sizes (415, 408), CI limits (1.15, 1.20), bare years `(1950)`, and out-of-spec whitelist entries (73.9) are all deterministically rejected.
+- **Parity Guarantee**: Validated by automated tests running all 24 canonical cases and mutation suites side-by-side across both implementations.
+
 
 
 
