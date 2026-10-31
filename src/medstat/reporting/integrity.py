@@ -164,6 +164,7 @@ class TextToken(NamedTuple):
     has_pct: bool
     is_structural: bool
     is_p_floor: bool = False
+    p_inequality: str | None = None
 
 
 def _is_structural_context(
@@ -342,11 +343,14 @@ def _extract_text_tokens(text: str) -> list[TextToken]:
             window_after,
             doc_has_references=doc_has_references,
         )
-        is_p_floor = bool(
-            0.0 < val <= 1.0
-            and not is_structural
-            and re.search(r"\bp\s*(?:-\s*value\s*)?<\s*$", window_before, re.IGNORECASE)
+        p_ineq_match = re.search(
+            r"\bp\s*(?:-\s*value\s*)?([<>]=?)\s*$", window_before, re.IGNORECASE
         )
+        p_inequality: str | None = None
+        if 0.0 < val <= 1.0 and not is_structural and p_ineq_match:
+            p_inequality = p_ineq_match.group(1)
+
+        is_p_floor = bool(p_inequality in ("<", "<="))
         tokens.append(
             TextToken(
                 val=val,
@@ -354,6 +358,7 @@ def _extract_text_tokens(text: str) -> list[TextToken]:
                 has_pct=has_pct,
                 is_structural=is_structural,
                 is_p_floor=is_p_floor,
+                p_inequality=p_inequality,
             )
         )
     return tokens
@@ -430,6 +435,22 @@ def verify_report_integrity(
         has_pct = token.has_pct
         is_structural = token.is_structural
         is_p_floor = token.is_p_floor
+
+        p_inequality = getattr(token, "p_inequality", None)
+        if p_inequality is not None:
+            if p_inequality == "<":
+                matched = any(0.0 <= pv < tn for pv in known_p_values)
+            elif p_inequality == "<=":
+                matched = any(0.0 <= pv <= tn for pv in known_p_values)
+            elif p_inequality == ">":
+                matched = any(tn < pv <= 1.0 for pv in known_p_values)
+            elif p_inequality == ">=":
+                matched = any(tn <= pv <= 1.0 for pv in known_p_values)
+            else:
+                matched = False
+            if not matched and not is_structural:
+                untraced.append(tn)
+            continue
 
         if is_p_floor:
             matched = any(0.0 <= pv < tn for pv in known_p_values)

@@ -1093,6 +1093,15 @@ def impute_mice_mixed_datasets(
         )
     if m < 1 or not isinstance(m, int) or isinstance(m, bool):
         raise ValueError("m must be an integer >= 1.")
+    if (
+        not isinstance(max_iter, int)
+        or isinstance(max_iter, bool)
+        or max_iter < 1
+    ):
+        raise ValueError(
+            f"max_iter must be an integer >= 1; got {max_iter!r} "
+            f"of type {type(max_iter).__name__}."
+        )
 
     cols = list(
         dict.fromkeys(
@@ -1127,6 +1136,16 @@ def impute_mice_mixed_datasets(
     for _ in range(m):
         work = df.copy()
         cat_mappings: dict[str, list] = {}
+        for col_name in cols:
+            ctype = target_types.get(col_name)
+            is_cat_col = ctype in ("categorical", "ordinal", "binary") or not pd.api.types.is_numeric_dtype(df[col_name])
+            if is_cat_col:
+                if isinstance(df[col_name].dtype, pd.CategoricalDtype):
+                    cats = list(df[col_name].dtype.categories)
+                else:
+                    cats = list(pd.Series(df[col_name].dropna()).unique())
+                cat_mappings[col_name] = cats
+
         # Initialize missing values via bootstrap draw from observed values
         for feat in features_to_impute:
             ftype = target_types.get(feat, "continuous")
@@ -1135,8 +1154,7 @@ def impute_mice_mixed_datasets(
                 raise ValueError(f"Column '{feat}' has 0 observed values.")
             mis_mask = work[feat].isna()
             if ftype in ("categorical", "ordinal", "binary"):
-                cats = list(pd.Series(obs_vals).unique())
-                cat_mappings[feat] = cats
+                cats = cat_mappings[feat]
                 code_map = {c: idx for idx, c in enumerate(cats)}
                 work[feat] = work[feat].map(code_map).astype(float)
                 if mis_mask.any():
@@ -1160,10 +1178,39 @@ def impute_mice_mixed_datasets(
                 pred_blocks = [np.ones((len(work), 1), dtype=float)]
                 for pc in pred_cols:
                     pc_type = target_types.get(pc)
-                    if pc_type == "categorical" and len(cat_mappings.get(pc, [])) > 2:
-                        codes = work[pc].round().astype(int)
-                        for k_idx in range(1, len(cat_mappings[pc])):
-                            pred_blocks.append((codes == k_idx).to_numpy(dtype=float)[:, None])
+                    pc_cats = cat_mappings.get(pc)
+                    if pc_type == "categorical":
+                        if pc_cats is not None and len(pc_cats) > 2:
+                            if pd.api.types.is_numeric_dtype(work[pc]):
+                                codes = work[pc].round().astype(int)
+                            else:
+                                code_map = {c: idx for idx, c in enumerate(pc_cats)}
+                                codes = work[pc].map(code_map).round().astype(int)
+                            for k_idx in range(1, len(pc_cats)):
+                                pred_blocks.append((codes == k_idx).to_numpy(dtype=float)[:, None])
+                        elif pc_cats is not None and len(pc_cats) == 2:
+                            if pd.api.types.is_numeric_dtype(work[pc]):
+                                codes = work[pc].round().astype(int)
+                            else:
+                                code_map = {c: idx for idx, c in enumerate(pc_cats)}
+                                codes = work[pc].map(code_map).round().astype(int)
+                            pred_blocks.append((codes == 1).to_numpy(dtype=float)[:, None])
+                        elif not pd.api.types.is_numeric_dtype(work[pc]):
+                            dummies = pd.get_dummies(work[pc], drop_first=True, dtype=float)
+                            if dummies.shape[1] > 0:
+                                pred_blocks.append(dummies.to_numpy(dtype=float))
+                        else:
+                            pred_blocks.append(work[pc].to_numpy(dtype=float)[:, None])
+                    elif pc_type == "ordinal":
+                        if pc_cats is not None:
+                            if not pd.api.types.is_numeric_dtype(work[pc]):
+                                code_map = {c: idx for idx, c in enumerate(pc_cats)}
+                                scores = work[pc].map(code_map).astype(float)
+                            else:
+                                scores = work[pc].astype(float)
+                            pred_blocks.append(scores.to_numpy(dtype=float)[:, None])
+                        else:
+                            pred_blocks.append(work[pc].to_numpy(dtype=float)[:, None])
                     elif not pd.api.types.is_numeric_dtype(work[pc]):
                         dummies = pd.get_dummies(work[pc], drop_first=True, dtype=float)
                         if dummies.shape[1] > 0:
@@ -1178,14 +1225,27 @@ def impute_mice_mixed_datasets(
 
                 if ftype == "continuous":
                     n_obs, p = X_obs.shape
-                    XtX_inv = np.linalg.pinv(X_obs.T @ X_obs)
+                    dof = n_obs - p
+                    if n_obs <= p or dof <= 0 or np.linalg.matrix_rank(X_obs) < p:
+                        raise ValueError(
+                            f"Non-identifiable continuous model for '{feat}': requires n_obs ({n_obs}) > p ({p}), "
+                            "positive residual degrees of freedom, and full column rank."
+                        )
+                    try:
+                        XtX_inv = np.linalg.inv(X_obs.T @ X_obs)
+                    except np.linalg.LinAlgError:
+                        raise ValueError(f"Singular design covariance matrix for '{feat}'.")
                     beta_hat = XtX_inv @ (X_obs.T @ y_obs)
                     resid = y_obs - X_obs @ beta_hat
-                    dof = max(1, n_obs - p)
-                    rss = max(float(np.sum(resid**2)), 1e-8)
-                    sigma2_star = rss / max(float(rng.chisquare(dof)), 1e-6)
+                    rss = float(np.sum(resid**2))
+                    if not math.isfinite(rss) or rss <= 0.0:
+                        raise ValueError(f"Invalid residual sum of squares for '{feat}'.")
+                    sigma2_star = rss / float(rng.chisquare(dof))
+                    cov_beta = sigma2_star * XtX_inv
+                    if not (np.all(np.isfinite(cov_beta)) and np.all(np.diag(cov_beta) > 0)):
+                        raise ValueError(f"Invalid parameter covariance for '{feat}'.")
                     beta_star = rng.multivariate_normal(
-                        beta_hat, sigma2_star * XtX_inv
+                        beta_hat, cov_beta
                     )
                     work.loc[mis_mask, feat] = (
                         X_mis @ beta_star
@@ -1213,6 +1273,11 @@ def impute_mice_mixed_datasets(
                         fit = sm.MNLogit(y_obs.astype(int), X_obs).fit(
                             disp=False, maxiter=100
                         )
+                        converged = bool(
+                            getattr(fit, "mle_retvals", {}).get("converged", False)
+                        )
+                        if not converged:
+                            raise ValueError("MNLogit model failed to converge.")
                         params_mat = np.asarray(fit.params, dtype=float)
                         cov_b = np.asarray(fit.cov_params(), dtype=float)
                         if not (np.all(np.isfinite(params_mat)) and np.all(np.isfinite(cov_b))):
@@ -1237,12 +1302,14 @@ def impute_mice_mixed_datasets(
                     work.loc[mis_mask, feat] = np.asarray(draws, dtype=float)
 
         # Restore original category labels for categorical/binary columns
-        for feat, cats in cat_mappings.items():
-            inv_map = {idx: c for idx, c in enumerate(cats)}
-            work[feat] = work[feat].round().astype(int).map(inv_map)
-            if isinstance(df[feat].dtype, pd.CategoricalDtype):
-                work[feat] = pd.Categorical(
-                    work[feat],
+        for feat in features_to_impute:
+            if feat in cat_mappings:
+                cats = cat_mappings[feat]
+                inv_map = {idx: c for idx, c in enumerate(cats)}
+                work[feat] = work[feat].round().astype(int).map(inv_map)
+                if isinstance(df[feat].dtype, pd.CategoricalDtype):
+                    work[feat] = pd.Categorical(
+                        work[feat],
                     categories=df[feat].cat.categories,
                     ordered=df[feat].cat.ordered,
                 )

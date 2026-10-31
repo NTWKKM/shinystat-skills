@@ -37,6 +37,7 @@ def plot_standalone_km_with_risk_table(
     out_path: str = "km_plot.png",
 ) -> str:
     plt.rcParams["pdf.fonttype"] = 42
+    plt.rcParams["ps.fonttype"] = 42
     fig, (ax, ax_tbl) = plt.subplots(
         2, 1, figsize=(6.8, 5.2), dpi=300, gridspec_kw={"height_ratios": [3.5, 1]}, sharex=True
     )
@@ -63,6 +64,8 @@ def plot_standalone_km_with_risk_table(
     ax_tbl.spines["left"].set_visible(False)
     ax_tbl.yaxis.set_ticks([])
     if risk_counts and time_ticks:
+        if any(len(counts) != len(time_ticks) for counts in risk_counts.values()):
+            raise ValueError("All risk_counts lists must have equal length to time_ticks.")
         ax_tbl.set_xticks(time_ticks)
         for idx, (label, counts) in enumerate(risk_counts.items()):
             y_row = 1.0 - (idx + 0.5) / max(1, len(risk_counts))
@@ -88,13 +91,23 @@ import pandas as pd
 def plot_standalone_cif(
     cif_primary: dict | pd.DataFrame,
     cif_competing: dict | pd.DataFrame | None = None,
+    risk_counts: dict[str, list[int]] | None = None,
+    time_ticks: list[float] | None = None,
     title: str = "Cumulative Incidence Function (Aalen-Johansen)",
     x_label: str = "Follow-up Time",
     y_label: str = "Cumulative Incidence",
     out_path: str = "cif_plot.png",
 ) -> str:
     plt.rcParams["pdf.fonttype"] = 42
-    fig, ax = plt.subplots(figsize=(6.5, 4.5), dpi=300)
+    plt.rcParams["ps.fonttype"] = 42
+    has_risk = bool(risk_counts and time_ticks)
+    if has_risk:
+        fig, (ax, ax_tbl) = plt.subplots(
+            2, 1, figsize=(6.8, 5.2), dpi=300, gridspec_kw={"height_ratios": [3.5, 1]}, sharex=True
+        )
+    else:
+        fig, ax = plt.subplots(figsize=(6.5, 4.5), dpi=300)
+        ax_tbl = None
 
     src = cif_primary["cif_table"] if isinstance(cif_primary, dict) and "cif_table" in cif_primary else cif_primary
     t_key = "time" if "time" in src else "timeline"
@@ -105,9 +118,11 @@ def plot_standalone_cif(
     ax.step(t1, y1, where="post", color="#BC3C29", lw=2.0, label=label1)
 
     max_vals = [float(np.nanmax(y1)) if len(y1) else 0.0]
-    if "ci_lower" in src and "ci_upper" in src:
-        ci_low = np.asarray(src["ci_lower"], dtype=float)
-        ci_high = np.asarray(src["ci_upper"], dtype=float)
+    ci_low_col = "cif_primary_ci_lower" if "cif_primary_ci_lower" in src else ("ci_lower" if "ci_lower" in src else None)
+    ci_high_col = "cif_primary_ci_upper" if "cif_primary_ci_upper" in src else ("ci_upper" if "ci_upper" in src else None)
+    if ci_low_col and ci_high_col:
+        ci_low = np.asarray(src[ci_low_col], dtype=float)
+        ci_high = np.asarray(src[ci_high_col], dtype=float)
         ax.fill_between(t1, ci_low, ci_high, step="post", color="#BC3C29", alpha=0.18)
         if len(ci_high):
             max_vals.append(float(np.nanmax(ci_high)))
@@ -122,8 +137,9 @@ def plot_standalone_cif(
         ax.step(t2, y2, where="post", color="#0072B5", lw=1.8, ls="--", label=label2)
         if len(y2):
             max_vals.append(float(np.nanmax(y2)))
-        if "ci_upper" in src2:
-            ci2_high = np.asarray(src2["ci_upper"], dtype=float)
+        ci2_high_col = "cif_competing_ci_upper" if "cif_competing_ci_upper" in src2 else ("ci_upper" if "ci_upper" in src2 else None)
+        if ci2_high_col:
+            ci2_high = np.asarray(src2[ci2_high_col], dtype=float)
             if len(ci2_high):
                 max_vals.append(float(np.nanmax(ci2_high)))
     elif "cif_competing" in src:
@@ -134,11 +150,28 @@ def plot_standalone_cif(
 
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
-    ax.set_xlabel(x_label, fontweight="bold")
     ax.set_ylabel(y_label, fontweight="bold")
     ax.set_title(title, loc="left", fontweight="bold", pad=10)
     ax.set_ylim(0.0, min(1.0, max(0.25, max(max_vals) * 1.25)))
     ax.legend(frameon=False, loc="upper left")
+
+    if ax_tbl is not None and risk_counts and time_ticks:
+        if any(len(counts) != len(time_ticks) for counts in risk_counts.values()):
+            raise ValueError("All risk_counts lists must have equal length to time_ticks.")
+        ax_tbl.spines["top"].set_visible(False)
+        ax_tbl.spines["right"].set_visible(False)
+        ax_tbl.spines["left"].set_visible(False)
+        ax_tbl.yaxis.set_ticks([])
+        ax_tbl.set_xticks(time_ticks)
+        for idx, (label, counts) in enumerate(risk_counts.items()):
+            y_row = 1.0 - (idx + 0.5) / max(1, len(risk_counts))
+            ax_tbl.text(time_ticks[0], y_row, f"{label}: ", ha="right", va="center", fontweight="bold", fontsize=8.5)
+            for tx, cnt in zip(time_ticks, counts):
+                ax_tbl.text(tx, y_row, str(cnt), ha="center", va="center", fontsize=8.5)
+        ax_tbl.set_xlabel(x_label, fontweight="bold")
+    else:
+        ax.set_xlabel(x_label, fontweight="bold")
+
     fig.tight_layout()
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
@@ -146,7 +179,8 @@ def plot_standalone_cif(
 ```
 
 ### 3. Multivariable / Subgroup / Meta-Analysis Forest Plot
-- **Primary Recipe**: Use `fit_firth_logistic` (Recipe 1) or `fit_logistic_regression_table` (Recipe 10) in [02-regression-firth-ordinal.md](recipes/02-regression-firth-ordinal.md), or `run_meta_analysis` in [05-diagnostic-meta-power.md](recipes/05-diagnostic-meta-power.md) (Recipe 24).
+- **Primary Recipe**: Use `fit_firth_logistic` in [02-regression-firth-ordinal.md](recipes/02-regression-firth-ordinal.md) (Recipe 1), or `run_meta_analysis` in [05-diagnostic-meta-power.md](recipes/05-diagnostic-meta-power.md) (Recipe 24).
+- **Scale & Axis Guidance**: For ratio effect measures (OR / RR / HR), use `log_scale=True`, `null_value=1.0`, and ratio axis labels (e.g. `xlabel="Adjusted Odds Ratio (95% CI)"`). For continuous difference effect measures (MD / SMD), use `log_scale=False`, `null_value=0.0`, and difference axis labels (e.g. `xlabel="Mean Difference (95% CI)"` or `xlabel="Standardized Mean Difference (95% CI)"`).
 - **Standalone Plot Template**:
 ```python
 import matplotlib.pyplot as plt
@@ -167,6 +201,7 @@ def plot_standalone_forest(
     out_path: str = "forest_plot.png",
 ) -> str:
     plt.rcParams["pdf.fonttype"] = 42
+    plt.rcParams["ps.fonttype"] = 42
     work = df.iloc[::-1].reset_index(drop=True)
     if label_col not in work.columns:
         for cand in ("Variable", "study", "covariate", "term"):
@@ -226,16 +261,24 @@ def plot_standalone_roc(
     auc_val: float,
     ci_lower: float | None = None,
     ci_upper: float | None = None,
+    optimal_point: dict | None = None,
     title: str = "Receiver Operating Characteristic (ROC)",
     out_path: str = "roc_plot.png",
 ) -> str:
     plt.rcParams["pdf.fonttype"] = 42
+    plt.rcParams["ps.fonttype"] = 42
     fig, ax = plt.subplots(figsize=(5.5, 5.2), dpi=300)
     lbl = f"AUROC = {auc_val:.3f}" + (
         f" (95% CI, {ci_lower:.3f}–{ci_upper:.3f})" if ci_lower is not None and ci_upper is not None else ""
     )
     ax.plot(fpr, tpr, color="#0072B5", lw=2.2, label=lbl)
     ax.plot([0, 1], [0, 1], color="#94A3B8", ls="--", lw=1.2, label="Chance (0.50)")
+    if optimal_point is not None:
+        opt_fpr = float(optimal_point["fpr"])
+        opt_tpr = float(optimal_point["tpr"])
+        opt_cutoff = optimal_point.get("cutoff")
+        opt_lbl = f"Optimal (cutoff = {opt_cutoff:.3f})" if opt_cutoff is not None else "Optimal Cutpoint"
+        ax.scatter([opt_fpr], [opt_tpr], color="#BC3C29", s=45, zorder=5, label=opt_lbl)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.set_xlim(-0.02, 1.02)
@@ -264,9 +307,25 @@ def plot_standalone_calibration_dca(
     out_path: str = "calibration_dca.png",
 ) -> str:
     plt.rcParams["pdf.fonttype"] = 42
+    plt.rcParams["ps.fonttype"] = 42
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.0, 4.6), dpi=300)
     ax1.plot([0, 1], [0, 1], color="#94A3B8", ls="--", lw=1.2, label="Ideal")
     ax1.plot(calib_df["pred_mean"], calib_df["obs_rate"], "o-", color="#0072B5", lw=2.0, label="Observed")
+    if "ci_lower" in calib_df.columns and "ci_upper" in calib_df.columns:
+        yerr = [
+            calib_df["obs_rate"] - calib_df["ci_lower"],
+            calib_df["ci_upper"] - calib_df["obs_rate"],
+        ]
+        ax1.errorbar(
+            calib_df["pred_mean"],
+            calib_df["obs_rate"],
+            yerr=yerr,
+            fmt="none",
+            ecolor="#0072B5",
+            elinewidth=1.2,
+            capsize=3,
+            label="95% CI",
+        )
     ax1.spines["top"].set_visible(False)
     ax1.spines["right"].set_visible(False)
     ax1.set_xlabel("Predicted Probability", fontweight="bold")
@@ -274,9 +333,25 @@ def plot_standalone_calibration_dca(
     ax1.set_title("A. Calibration Plot", loc="left", fontweight="bold")
     ax1.legend(frameon=False)
 
-    ax2.plot(dca_df["threshold"], dca_df["nb_model"], color="#BC3C29", lw=2.0, label="Prediction Model")
-    ax2.plot(dca_df["threshold"], dca_df["nb_all"], color="#64748B", ls="--", lw=1.4, label="Treat All")
-    ax2.axhline(0.0, color="#1E293B", ls=":", lw=1.2, label="Treat None")
+    if "strategy" in dca_df.columns:
+        m_df = dca_df[dca_df["strategy"] == "Model"]
+        all_df = dca_df[dca_df["strategy"] == "Treat All"]
+        none_df = dca_df[dca_df["strategy"] == "Treat None"]
+        if not m_df.empty:
+            ax2.plot(m_df["threshold"], m_df["net_benefit"], color="#BC3C29", lw=2.0, label="Prediction Model")
+        if not all_df.empty:
+            ax2.plot(all_df["threshold"], all_df["net_benefit"], color="#64748B", ls="--", lw=1.4, label="Treat All")
+        if not none_df.empty:
+            ax2.plot(none_df["threshold"], none_df["net_benefit"], color="#1E293B", ls=":", lw=1.2, label="Treat None")
+        else:
+            ax2.axhline(0.0, color="#1E293B", ls=":", lw=1.2, label="Treat None")
+    else:
+        if "nb_model" in dca_df.columns:
+            ax2.plot(dca_df["threshold"], dca_df["nb_model"], color="#BC3C29", lw=2.0, label="Prediction Model")
+        if "nb_all" in dca_df.columns:
+            ax2.plot(dca_df["threshold"], dca_df["nb_all"], color="#64748B", ls="--", lw=1.4, label="Treat All")
+        ax2.axhline(0.0, color="#1E293B", ls=":", lw=1.2, label="Treat None")
+
     ax2.spines["top"].set_visible(False)
     ax2.spines["right"].set_visible(False)
     ax2.set_xlabel("Threshold Probability", fontweight="bold")
@@ -300,13 +375,29 @@ import pandas as pd
 
 def plot_standalone_love(
     balance_df: pd.DataFrame,
-    var_col: str = "covariate",
-    unadj_col: str = "smd_unadjusted",
-    adj_col: str = "smd_adjusted",
+    var_col: str = "Variable",
+    unadj_col: str = "Pre-Match SMD",
+    adj_col: str = "Post-Match SMD",
     out_path: str = "love_plot.png",
 ) -> str:
     plt.rcParams["pdf.fonttype"] = 42
+    plt.rcParams["ps.fonttype"] = 42
     work = balance_df.iloc[::-1].reset_index(drop=True)
+    if var_col not in work.columns:
+        for cand in ("Variable", "covariate", "term", "variable"):
+            if cand in work.columns:
+                var_col = cand
+                break
+    if unadj_col not in work.columns:
+        for cand in ("Pre-Match SMD", "smd_unadjusted", "Unadjusted", "smd_pre"):
+            if cand in work.columns:
+                unadj_col = cand
+                break
+    if adj_col not in work.columns:
+        for cand in ("Post-Match SMD", "smd_adjusted", "Adjusted", "smd_post", "smd_matched"):
+            if cand in work.columns:
+                adj_col = cand
+                break
     y = np.arange(len(work))
     fig, ax = plt.subplots(figsize=(6.5, max(3.2, 0.4 * len(work) + 1.2)), dpi=300)
     ax.axvline(0.10, color="#BC3C29", ls="--", lw=1.2, label="Threshold (|SMD| = 0.10)")
@@ -336,20 +427,52 @@ import numpy as np
 def plot_standalone_bland_altman(
     m1: np.ndarray,
     m2: np.ndarray,
+    ba_result: dict | None = None,
     title: str = "Bland-Altman Agreement Plot",
     out_path: str = "bland_altman.png",
 ) -> str:
     plt.rcParams["pdf.fonttype"] = 42
-    a = np.asarray(m1, dtype=float)
-    b = np.asarray(m2, dtype=float)
+    plt.rcParams["ps.fonttype"] = 42
+    v1 = np.asarray(m1, dtype=float)
+    v2 = np.asarray(m2, dtype=float)
+    if len(v1) != len(v2):
+        raise ValueError(f"Length mismatch: m1 ({len(v1)}) and m2 ({len(v2)}) must have identical lengths.")
+    valid = np.isfinite(v1) & np.isfinite(v2)
+    a = v1[valid]
+    b = v2[valid]
+    n = len(a)
+    if n < 2:
+        raise ValueError("Bland-Altman difference analysis requires at least 2 valid paired measurements.")
     means = 0.5 * (a + b)
     diffs = a - b
-    bias = float(np.mean(diffs))
-    sd = float(np.std(diffs, ddof=1))
-    loa_low, loa_high = bias - 1.96 * sd, bias + 1.96 * sd
+
+    if ba_result is not None:
+        bias = float(ba_result["mean_diff"])
+        loa_high = float(ba_result["upper_loa"])
+        loa_low = float(ba_result["lower_loa"])
+        ci_bias = ba_result.get("ci_mean_diff")
+        ci_loa_high = ba_result.get("ci_upper_loa")
+        ci_loa_low = ba_result.get("ci_lower_loa")
+    else:
+        bias = float(np.mean(diffs))
+        sd = float(np.std(diffs, ddof=1))
+        loa_low, loa_high = bias - 1.96 * sd, bias + 1.96 * sd
+        se_mean = sd / np.sqrt(n)
+        se_loa = float(np.sqrt((1.0 / n + (1.96**2) / (2.0 * (n - 1))) * (sd**2)))
+        t_crit = 1.96
+        ci_bias = (bias - t_crit * se_mean, bias + t_crit * se_mean)
+        ci_loa_high = (loa_high - t_crit * se_loa, loa_high + t_crit * se_loa)
+        ci_loa_low = (loa_low - t_crit * se_loa, loa_low + t_crit * se_loa)
 
     fig, ax = plt.subplots(figsize=(6.2, 4.5), dpi=300)
     ax.scatter(means, diffs, color="#0072B5", alpha=0.65, s=24)
+    if ci_bias is not None:
+        ax.axhspan(ci_bias[0], ci_bias[1], color="#1E293B", alpha=0.12, label="95% CI (Bias)")
+    if ci_loa_high is not None:
+        ax.axhspan(ci_loa_high[0], ci_loa_high[1], color="#BC3C29", alpha=0.10, label="95% CI (LoA)")
+    if ci_loa_low is not None:
+        ax.axhspan(ci_loa_low[0], ci_loa_low[1], color="#BC3C29", alpha=0.10)
+
     ax.axhline(bias, color="#1E293B", lw=1.8, label=f"Mean Bias = {bias:.2f}")
     ax.axhline(loa_high, color="#BC3C29", ls="--", lw=1.4, label=f"+1.96 SD = {loa_high:.2f}")
     ax.axhline(loa_low, color="#BC3C29", ls="--", lw=1.4, label=f"-1.96 SD = {loa_low:.2f}")
@@ -375,21 +498,44 @@ import pandas as pd
 
 def plot_standalone_rcs(
     contrast_df: pd.DataFrame,
+    rcs_var: str | None = None,
+    x_col: str | None = None,
+    family: str = "binomial",
     p_overall: float | None = None,
     p_nonlinear: float | None = None,
     x_label: str = "Continuous Exposure",
-    y_label: str = "Adjusted Odds / Hazard Ratio (95% CI)",
+    y_label: str | None = None,
     title: str = "Restricted Cubic Spline Dose-Response",
     out_path: str = "rcs_curve.png",
 ) -> str:
     plt.rcParams["pdf.fonttype"] = 42
+    plt.rcParams["ps.fonttype"] = 42
     fig, ax = plt.subplots(figsize=(6.4, 4.5), dpi=300)
-    x = contrast_df["x"].to_numpy(dtype=float)
+
+    col = x_col or rcs_var
+    if col is None or col not in contrast_df.columns:
+        cand_cols = [
+            c
+            for c in contrast_df.columns
+            if c not in ("estimate", "ci_lower", "ci_upper", "log_contrast", "se")
+        ]
+        col = cand_cols[0] if cand_cols else "x"
+    x = contrast_df[col].to_numpy(dtype=float)
     y = contrast_df["estimate"].to_numpy(dtype=float)
     lo = contrast_df["ci_lower"].to_numpy(dtype=float)
     hi = contrast_df["ci_upper"].to_numpy(dtype=float)
 
-    ax.axhline(1.0, color="#94A3B8", ls="--", lw=1.1)
+    is_gaussian = str(family).lower() == "gaussian"
+    null_val = 0.0 if is_gaussian else 1.0
+    if y_label is None:
+        if is_gaussian:
+            y_label = "Mean Difference (95% CI)"
+        elif str(family).lower() == "cox":
+            y_label = "Adjusted Hazard Ratio (95% CI)"
+        else:
+            y_label = "Adjusted Odds Ratio (95% CI)"
+
+    ax.axhline(null_val, color="#94A3B8", ls="--", lw=1.1)
     ax.plot(x, y, color="#0072B5", lw=2.2, label="Spline Point Estimate")
     ax.fill_between(x, lo, hi, color="#0072B5", alpha=0.18, label="95% CI")
     if p_overall is not None and p_nonlinear is not None:
@@ -430,6 +576,7 @@ def plot_schoenfeld_residuals(
 ) -> str:
     """Plot scaled Schoenfeld residuals against time with a smoothed trend line."""
     plt.rcParams["pdf.fonttype"] = 42
+    plt.rcParams["ps.fonttype"] = 42
     t = np.asarray(event_times, dtype=float).ravel()
     r = np.asarray(scaled_residuals, dtype=float).ravel()
     order = np.argsort(t)

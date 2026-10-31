@@ -2976,7 +2976,9 @@ def test_ported_cloud_recipes_mixed_mice_ordinal_rcs_gee_meta(recipes):
     )
     assert rcs_cox["family"] == "cox"
     assert rcs_cox["effect_label"] == "Hazard Ratio"
-    assert np.all(rcs_cox["contrast_df"]["estimate"] > 0)
+    cox_est = rcs_cox["contrast_df"]["estimate"]
+    assert cox_est.iloc[0] > 1.0 and cox_est.iloc[-1] > 1.0
+    assert np.all(cox_est > 0)
 
     # 4. Recipe 23: Clustered GEE & Design Effect (DEFF)
     fit_gee = recipes["fit_gee"]
@@ -3062,3 +3064,250 @@ def test_ported_cloud_recipes_mixed_mice_ordinal_rcs_gee_meta(recipes):
     meta_md = run_meta(es_md, use_hksj=False)
     assert np.isclose(es_md.loc[0, "effect_size"], -3.1, atol=1e-10)
     assert meta_md["random_effects"]["effect_disp"] < 0.0
+
+
+def test_cloud_recipes_and_figures_pr23_review_remediation(recipes, tmp_path):
+    """
+    Verifies all CodeRabbit PR #23 findings across cloud recipes and figure templates:
+    1. Continuous meta-analysis sample size & effect_measure validation.
+    2. Egger regression with constant precision.
+    3. MICE max_iter, continuous non-identifiability, and declared categorical/ordinal predictors.
+    4. Standalone figure templates (KM cardinality, CIF risk table & CIs, ROC optimal point,
+       Calibration CIs, DCA long-form, Love plot defaults, Bland-Altman validation & CIs, RCS families).
+    """
+    import re
+    from pathlib import Path
+
+    # 1. Recipe 24: Continuous effect sizes input validation
+    comp_cont = recipes["compute_continuous_effect_sizes"]
+    df_valid = pd.DataFrame(
+        {
+            "study": ["S1"],
+            "m1": [10.0],
+            "sd1": [2.0],
+            "n1": [20],
+            "m0": [8.0],
+            "sd0": [2.0],
+            "n0": [20],
+        }
+    )
+    # Reject fractional sample size
+    df_fractional = df_valid.copy()
+    df_fractional["n1"] = [2.5]
+    with pytest.raises(ValueError, match="Invalid continuous summary inputs"):
+        comp_cont(df_fractional, "m1", "sd1", "n1", "m0", "sd0", "n0", "study", "SMD")
+
+    # Reject unsupported effect measure
+    with pytest.raises(ValueError, match="Unsupported effect_measure"):
+        comp_cont(df_valid, "m1", "sd1", "n1", "m0", "sd0", "n0", "study", "RR")
+
+    # 2. Recipe 24: Egger regression with constant precision
+    run_meta = recipes["run_meta_analysis"]
+    df_constant_prec = pd.DataFrame(
+        {
+            "study": [f"Study_{i}" for i in range(12)],
+            "effect_size": np.linspace(0.1, 1.2, 12),
+            "se": [0.25] * 12,  # all identical standard errors -> constant precision
+            "is_ratio": [False] * 12,
+        }
+    )
+    meta_const_prec = run_meta(
+        df_constant_prec,
+        effect_col="effect_size",
+        se_col="se",
+        study_col="study",
+    )
+    assert meta_const_prec["heterogeneity"]["egger_p_value"] is None
+
+    # 3. Recipe 4: MICE max_iter validation and non-identifiable continuous models
+    impute_mixed = recipes["impute_mice_mixed_datasets"]
+    df_mice = pd.DataFrame(
+        {
+            "y": [1, 0, 1, 0, 1, 0],
+            "cont": [1.0, np.nan, 3.0, 4.0, np.nan, 6.0],
+            "bin": [1, 0, 1, np.nan, 0, 1],
+        }
+    )
+    for bad_iter in (0, -1, 2.5, True):
+        with pytest.raises(ValueError, match="max_iter must be an integer >= 1"):
+            impute_mixed(
+                df_mice,
+                features_to_impute=["cont"],
+                target_types={"cont": "continuous"},
+                outcome_col="y",
+                max_iter=bad_iter,
+            )
+
+    # Continuous model non-identifiability: n_obs <= p
+    df_rank_def = pd.DataFrame(
+        {
+            "y": [1, 0],
+            "x1": [1.0, 2.0],
+            "x2": [2.0, 4.0],
+            "x3": [3.0, 6.0],
+            "target": [1.0, np.nan],
+        }
+    )
+    with pytest.raises(ValueError, match="Non-identifiable continuous model"):
+        impute_mixed(
+            df_rank_def,
+            features_to_impute=["target"],
+            predictors=["x1", "x2", "x3"],
+            target_types={"target": "continuous"},
+            outcome_col="y",
+            m=1,
+            max_iter=1,
+        )
+
+    # 4. Standalone figure recipes in figures.md
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    fig_file = repo_root / "skills" / "shinystat-cloud" / "references" / "figures.md"
+    fig_content = fig_file.read_text(encoding="utf-8")
+    fig_blocks = re.findall(r"```python\n(.*?)\n```", fig_content, re.DOTALL)
+    fig_ns = {}
+    exec("\n".join(fig_blocks), fig_ns)
+
+    # A. KM risk table cardinality validation
+    km_df = pd.DataFrame(
+        {
+            "time": [0, 5, 10],
+            "survival": [1.0, 0.8, 0.5],
+            "ci_lower": [0.9, 0.7, 0.4],
+            "ci_upper": [1.0, 0.9, 0.6],
+        }
+    )
+    with pytest.raises(
+        ValueError, match="All risk_counts lists must have equal length to time_ticks"
+    ):
+        fig_ns["plot_standalone_km_with_risk_table"](
+            {"Arm A": km_df},
+            risk_counts={"Arm A": [10, 8]},
+            time_ticks=[0, 5, 10],
+            out_path=str(tmp_path / "km_fail.png"),
+        )
+    km_out = fig_ns["plot_standalone_km_with_risk_table"](
+        {"Arm A": km_df},
+        risk_counts={"Arm A": [10, 8, 5]},
+        time_ticks=[0, 5, 10],
+        out_path=str(tmp_path / "km_pass.png"),
+    )
+    assert Path(km_out).exists()
+
+    # B. CIF with risk table and primary CI columns
+    cif_df = pd.DataFrame(
+        {
+            "time": [0, 5, 10],
+            "cif_primary": [0.0, 0.1, 0.3],
+            "cif_primary_ci_lower": [0.0, 0.05, 0.2],
+            "cif_primary_ci_upper": [0.0, 0.15, 0.4],
+        }
+    )
+    cif_out = fig_ns["plot_standalone_cif"](
+        {"cif_table": cif_df},
+        risk_counts={"At Risk": [100, 80, 50]},
+        time_ticks=[0, 5, 10],
+        out_path=str(tmp_path / "cif.png"),
+    )
+    assert Path(cif_out).exists()
+
+    # C. ROC with optimal_point
+    roc_out = fig_ns["plot_standalone_roc"](
+        np.array([0, 0.2, 1]),
+        np.array([0, 0.8, 1]),
+        0.85,
+        0.75,
+        0.95,
+        optimal_point={"fpr": 0.2, "tpr": 0.8, "cutoff": 2.5},
+        out_path=str(tmp_path / "roc.png"),
+    )
+    assert Path(roc_out).exists()
+
+    # D. Calibration CIs and long-form DCA
+    calib_df = pd.DataFrame(
+        {
+            "pred_mean": [0.1, 0.5, 0.9],
+            "obs_rate": [0.12, 0.48, 0.88],
+            "ci_lower": [0.05, 0.38, 0.78],
+            "ci_upper": [0.19, 0.58, 0.98],
+        }
+    )
+    dca_df = pd.DataFrame(
+        {
+            "threshold": [0.1, 0.2, 0.1, 0.2, 0.1, 0.2],
+            "net_benefit": [0.15, 0.10, 0.12, 0.05, 0.0, 0.0],
+            "strategy": [
+                "Model",
+                "Model",
+                "Treat All",
+                "Treat All",
+                "Treat None",
+                "Treat None",
+            ],
+        }
+    )
+    calib_dca_out = fig_ns["plot_standalone_calibration_dca"](
+        calib_df, dca_df, out_path=str(tmp_path / "calib_dca.png")
+    )
+    assert Path(calib_dca_out).exists()
+
+    # E. Love plot default column schema
+    bal_df = pd.DataFrame(
+        {
+            "Variable": ["age", "bmi"],
+            "Pre-Match SMD": [0.35, 0.20],
+            "Post-Match SMD": [0.04, 0.02],
+        }
+    )
+    love_out = fig_ns["plot_standalone_love"](
+        bal_df, out_path=str(tmp_path / "love.png")
+    )
+    assert Path(love_out).exists()
+
+    # F. Bland-Altman validation and shaded CIs
+    with pytest.raises(ValueError, match="Length mismatch"):
+        fig_ns["plot_standalone_bland_altman"](
+            [1, 2], [1, 2, 3], out_path=str(tmp_path / "ba_fail.png")
+        )
+    with pytest.raises(ValueError, match="at least 2 valid paired measurements"):
+        fig_ns["plot_standalone_bland_altman"](
+            [1, np.nan], [np.nan, 2], out_path=str(tmp_path / "ba_fail2.png")
+        )
+
+    ba_out = fig_ns["plot_standalone_bland_altman"](
+        np.array([10.0, 20.0, 30.0, 40.0]),
+        np.array([10.5, 19.8, 30.2, 39.5]),
+        ba_result={
+            "mean_diff": -0.05,
+            "upper_loa": 0.95,
+            "lower_loa": -1.05,
+            "ci_mean_diff": (-0.3, 0.2),
+            "ci_upper_loa": (0.7, 1.2),
+            "ci_lower_loa": (-1.3, -0.8),
+        },
+        out_path=str(tmp_path / "ba.png"),
+    )
+    assert Path(ba_out).exists()
+
+    # G. RCS predictor column extraction and Gaussian vs Cox scales
+    rcs_df = pd.DataFrame(
+        {
+            "biomarker": np.linspace(0, 10, 50),
+            "estimate": np.exp(0.1 * np.linspace(0, 10, 50)),
+            "ci_lower": np.exp(0.05 * np.linspace(0, 10, 50)),
+            "ci_upper": np.exp(0.15 * np.linspace(0, 10, 50)),
+        }
+    )
+    rcs_cox_out = fig_ns["plot_standalone_rcs"](
+        rcs_df,
+        rcs_var="biomarker",
+        family="cox",
+        out_path=str(tmp_path / "rcs_cox.png"),
+    )
+    assert Path(rcs_cox_out).exists()
+    rcs_gauss_out = fig_ns["plot_standalone_rcs"](
+        rcs_df,
+        rcs_var="biomarker",
+        family="gaussian",
+        out_path=str(tmp_path / "rcs_gauss.png"),
+    )
+    assert Path(rcs_gauss_out).exists()

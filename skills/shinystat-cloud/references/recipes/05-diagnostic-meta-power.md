@@ -2510,6 +2510,10 @@ def compute_continuous_effect_sizes(
     effect_measure: Literal["MD", "SMD"] = "MD",
 ) -> pd.DataFrame:
     """Compute Mean Difference (MD) or Hedges' g (SMD) and standard errors for continuous endpoints."""
+    if effect_measure not in ("MD", "SMD"):
+        raise ValueError(
+            f"Unsupported effect_measure '{effect_measure}'. Expected 'MD' or 'SMD'."
+        )
     cols = [study_col, mean_t_col, sd_t_col, n_t_col, mean_c_col, sd_c_col, n_c_col]
     clean = df[cols].dropna().copy()
     records = []
@@ -2519,6 +2523,8 @@ def compute_continuous_effect_sizes(
         m0, sd0, n0 = float(row[mean_c_col]), float(row[sd_c_col]), float(row[n_c_col])
         if not (
             all(math.isfinite(x) for x in (m1, sd1, n1, m0, sd0, n0))
+            and n1.is_integer()
+            and n0.is_integer()
             and n1 >= 2
             and n0 >= 2
             and sd1 > 0
@@ -2644,10 +2650,11 @@ def run_meta_analysis(
     ):
         if not df_work[study_col].is_unique:
             raise ValueError("Duplicate study IDs detected; Egger's test requires unique studies.")
-        snd = theta / se
         prec = 1.0 / se
-        res_egger = stats.linregress(prec, snd)
-        egger_p = float(res_egger.pvalue)
+        if len(np.unique(prec)) >= 2:
+            snd = theta / se
+            res_egger = stats.linregress(prec, snd)
+            egger_p = float(res_egger.pvalue)
 
     leave_one_out = []
     if k >= 3 and study_col in df_work.columns:

@@ -552,6 +552,54 @@ def test_integrity_p_floor_and_allowed_untraced_guards():
     assert 0.05 not in audit_p_floor_ok.untraced_numbers
     assert audit_p_floor_ok.passed is True
 
+    # P > 0.05 valid when true P is 0.23
+    doc_p_gt_ok = ReportDocument(
+        title="Valid Greater-Than P Inequality",
+        results_dict={"p_value": 0.23},
+    )
+    doc_p_gt_ok.add_paragraph("Methods: Included cohort.")
+    doc_p_gt_ok.add_paragraph(
+        "Secondary endpoint demonstrated no significance (P > 0.05)."
+    )
+    audit_p_gt_ok = verify_report_integrity(doc_p_gt_ok)
+    assert 0.05 not in audit_p_gt_ok.untraced_numbers
+    assert audit_p_gt_ok.passed is True
+
+    # P > 0.05 invalid when true P is 0.03
+    doc_p_gt_bad = ReportDocument(
+        title="Invalid Greater-Than P Inequality",
+        results_dict={"p_value": 0.03},
+    )
+    doc_p_gt_bad.add_paragraph("Methods: Included cohort.")
+    doc_p_gt_bad.add_paragraph(
+        "Secondary endpoint claimed non-significance (P > 0.05)."
+    )
+    audit_p_gt_bad = verify_report_integrity(doc_p_gt_bad)
+    assert 0.05 in audit_p_gt_bad.untraced_numbers
+    assert audit_p_gt_bad.passed is False
+
+    # Boundary: equality at threshold for strict inequality (P > 0.05 when true P is 0.05 is invalid)
+    doc_p_gt_boundary_strict = ReportDocument(
+        title="Boundary Greater-Than P Inequality Strict",
+        results_dict={"p_value": 0.05},
+    )
+    doc_p_gt_boundary_strict.add_paragraph("Methods: Included cohort.")
+    doc_p_gt_boundary_strict.add_paragraph("Boundary case (P > 0.05).")
+    audit_p_gt_boundary_strict = verify_report_integrity(doc_p_gt_boundary_strict)
+    assert 0.05 in audit_p_gt_boundary_strict.untraced_numbers
+    assert audit_p_gt_boundary_strict.passed is False
+
+    # Boundary: equality at threshold for non-strict inequality (P >= 0.05 when true P is 0.05 is valid)
+    doc_p_gte_boundary = ReportDocument(
+        title="Boundary Greater-Than-Equal P Inequality",
+        results_dict={"p_value": 0.05},
+    )
+    doc_p_gte_boundary.add_paragraph("Methods: Included cohort.")
+    doc_p_gte_boundary.add_paragraph("Boundary case (P >= 0.05).")
+    audit_p_gte_boundary = verify_report_integrity(doc_p_gte_boundary)
+    assert 0.05 not in audit_p_gte_boundary.untraced_numbers
+    assert audit_p_gte_boundary.passed is True
+
     doc_allow = ReportDocument(
         title="Allowed Untraced Strict Match",
         results_dict={"n": 100},
