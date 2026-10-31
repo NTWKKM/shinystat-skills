@@ -394,7 +394,7 @@ def _extract_text_tokens(text: str) -> list[TextToken]:
         p_val = val / 100.0 if has_pct else val
         p_inequality: str | None = None
         p_qualifier: str | None = None
-        if 0.0 < p_val <= 1.0 and not is_structural and p_ineq_match:
+        if 0.0 <= p_val <= 1.0 and not is_structural and p_ineq_match:
             raw_op = p_ineq_match.group(1)
             p_inequality = (
                 "<=" if raw_op == "≤" else (">=" if raw_op == "≥" else raw_op)

@@ -1585,7 +1585,7 @@ def verify_standalone_integrity(
         p_val = val / 100.0 if has_pct else val
         p_inequality = None
         p_qualifier = None
-        if 0.0 < p_val <= 1.0 and not is_alpha_cutoff and p_ineq_match:
+        if 0.0 <= p_val <= 1.0 and not is_alpha_cutoff and p_ineq_match:
             raw_op = p_ineq_match.group(1)
             p_inequality = "<=" if raw_op == "≤" else (">=" if raw_op == "≥" else raw_op)
             window_context = f"{window_before} {raw_str} {window_after}"

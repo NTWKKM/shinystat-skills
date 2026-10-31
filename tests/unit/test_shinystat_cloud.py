@@ -3696,6 +3696,18 @@ def test_cloud_figures_templates_validation_and_safety(tmp_path):
     ):
         plot_love(balance_nan)
 
+    balance_inf = pd.DataFrame(
+        {
+            "Variable": ["Age", "Sex"],
+            "Pre-Match SMD": [0.25, 0.15],
+            "Post-Match SMD": [0.05, np.inf],
+        }
+    )
+    with pytest.raises(
+        ValueError, match="SMD columns must contain only finite numeric values"
+    ):
+        plot_love(balance_inf)
+
 
 def test_cloud_standalone_qualified_p_values_and_dict_records_parity():
     """Verifies that verify_standalone_integrity mirrors verify_report_integrity for qualified p-values and dict records."""
@@ -3725,6 +3737,21 @@ def test_cloud_standalone_qualified_p_values_and_dict_records_parity():
     assert sa_i["passed"] is True
     assert ir_i.untraced_numbers == sa_i["untraced_numbers"] == []
 
+    # 2b. Reverse-value case: primary p=0.01 is significant, but p_interaction=0.2 is not.
+    # An interaction claim "interaction P < 0.05" must fail and report [0.05] as untraced,
+    # ensuring the primary P-value cannot satisfy an interaction claim.
+    res_reverse = {"p": 0.01, "p_interaction": 0.2}
+    narrative_reverse_fail = (
+        "Treatment by subgroup interaction was significant (interaction P < 0.05)."
+    )
+    doc_reverse = ReportDocument(title="Reverse Claim", results_dict=res_reverse)
+    doc_reverse.add_paragraph(narrative_reverse_fail)
+    ir_rev = verify_report_integrity(doc_reverse)
+    sa_rev = verify_standalone(narrative_reverse_fail, results_dict=res_reverse)
+    assert ir_rev.passed is False
+    assert sa_rev["passed"] is False
+    assert ir_rev.untraced_numbers == sa_rev["untraced_numbers"] == [0.05]
+
     # 3. Dict-valued record: {"p_interaction": {"estimate": 0.01, "p_value": 0.2}}
     # The estimate (0.01) must NOT be extracted as a p-value to satisfy P < 0.05
     res_dict_rec = {"p_interaction": {"estimate": 0.01, "p_value": 0.2}}
@@ -3746,3 +3773,24 @@ def test_cloud_standalone_qualified_p_values_and_dict_records_parity():
     assert ir_dpass.passed is True
     assert sa_dpass["passed"] is True
     assert ir_dpass.untraced_numbers == sa_dpass["untraced_numbers"] == []
+
+    # 4. Zero-bound inequality validation: P < 0 is strictly false when p=0.0
+    res_zero = {"p": 0.0}
+    doc_zero_strict = ReportDocument(title="Zero Bound Strict", results_dict=res_zero)
+    narrative_zero_strict = "Difference was significant (P < 0)."
+    doc_zero_strict.add_paragraph(narrative_zero_strict)
+    ir_zs = verify_report_integrity(doc_zero_strict)
+    sa_zs = verify_standalone(narrative_zero_strict, results_dict=res_zero)
+    assert ir_zs.passed is False
+    assert sa_zs["passed"] is False
+    assert ir_zs.untraced_numbers == sa_zs["untraced_numbers"] == [0.0]
+
+    # Inclusive P <= 0 passes when p=0.0
+    doc_zero_incl = ReportDocument(title="Zero Bound Inclusive", results_dict=res_zero)
+    narrative_zero_incl = "Difference was at boundary (P <= 0)."
+    doc_zero_incl.add_paragraph(narrative_zero_incl)
+    ir_zi = verify_report_integrity(doc_zero_incl)
+    sa_zi = verify_standalone(narrative_zero_incl, results_dict=res_zero)
+    assert ir_zi.passed is True
+    assert sa_zi["passed"] is True
+    assert ir_zi.untraced_numbers == sa_zi["untraced_numbers"] == []

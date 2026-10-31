@@ -702,6 +702,17 @@ def test_integrity_qualified_p_value_association_and_record_recursion():
     assert audit_interaction.passed is True
     assert len(audit_interaction.untraced_numbers) == 0
 
+    # 2b. Reverse-value case: primary p=0.01 is significant, but p_interaction=0.2 is not
+    # An interaction claim "interaction P < 0.05" must fail and report [0.05] as untraced
+    res_reverse = {"p": 0.01, "p_interaction": 0.2}
+    doc_reverse_fail = ReportDocument(title="Reverse Claim", results_dict=res_reverse)
+    doc_reverse_fail.add_paragraph(
+        "Treatment by subgroup interaction was significant (interaction P < 0.05)."
+    )
+    audit_reverse = verify_report_integrity(doc_reverse_fail)
+    assert audit_reverse.passed is False
+    assert 0.05 in audit_reverse.untraced_numbers
+
     # 3. Dict-valued record: {"p_interaction": {"estimate": 0.01, "p_value": 0.2}}
     # The estimate (0.01) must NOT be extracted as a p-value to satisfy P < 0.05
     res_dict_rec = {"p_interaction": {"estimate": 0.01, "p_value": 0.2}}
@@ -716,3 +727,18 @@ def test_integrity_qualified_p_value_association_and_record_recursion():
     doc_dict_pass.add_paragraph("Interaction was evaluated (interaction P < 0.30).")
     audit_dict_pass = verify_report_integrity(doc_dict_pass)
     assert audit_dict_pass.passed is True
+
+    # 4. Zero-bound inequality validation: P < 0 is strictly false when p=0.0
+    res_zero = {"p": 0.0}
+    doc_zero_strict = ReportDocument(title="Zero Bound Strict", results_dict=res_zero)
+    doc_zero_strict.add_paragraph("Difference was significant (P < 0).")
+    audit_zero_strict = verify_report_integrity(doc_zero_strict)
+    assert audit_zero_strict.passed is False
+    assert 0.0 in audit_zero_strict.untraced_numbers
+
+    # Inclusive P <= 0 passes when p=0.0
+    doc_zero_incl = ReportDocument(title="Zero Bound Inclusive", results_dict=res_zero)
+    doc_zero_incl.add_paragraph("Difference was at boundary (P <= 0).")
+    audit_zero_incl = verify_report_integrity(doc_zero_incl)
+    assert audit_zero_incl.passed is True
+    assert len(audit_zero_incl.untraced_numbers) == 0
