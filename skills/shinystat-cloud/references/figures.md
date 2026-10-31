@@ -386,7 +386,7 @@ def plot_standalone_calibration_dca(
 
 ### 6. Propensity Score Balance (Love Plot)
 
-- **Primary Recipe**: Use `match_propensity_scores` in [04-causal-iptw-psm.md](recipes/04-causal-iptw-psm.md) (Recipe 6) which returns `balance_df` directly, or compute weighted SMDs via `calculate_weighted_smd` (Recipe 14) formatted into a balance table with columns `Variable`, `Pre-Match SMD`, and `Post-Match SMD` (or `smd_unadjusted`, `smd_adjusted`), plotting $|\text{SMD}|$ pre- and post-adjustment with a vertical threshold line at $|\text{SMD}| = 0.10$.
+- **Primary Recipe**: Pass `result["balance_df"]` from `match_propensity_scores` in [04-causal-iptw-psm.md](recipes/04-causal-iptw-psm.md) (Recipe 6), or compute weighted SMDs via `calculate_weighted_smd` (Recipe 14) formatted into a balance table with columns `Variable`, `Pre-Match SMD`, and `Post-Match SMD` (or `smd_unadjusted`, `smd_adjusted`), plotting $|\text{SMD}|$ pre- and post-adjustment with a vertical threshold line at $|\text{SMD}| = 0.10$.
 - **Standalone Plot Template**:
 ```python
 import matplotlib.pyplot as plt
@@ -395,7 +395,7 @@ import pandas as pd
 
 
 def plot_standalone_love(
-    balance_df: pd.DataFrame,
+    balance_df: pd.DataFrame | dict,
     var_col: str = "Variable",
     unadj_col: str = "Pre-Match SMD",
     adj_col: str = "Post-Match SMD",
@@ -403,6 +403,10 @@ def plot_standalone_love(
 ) -> str:
     plt.rcParams["pdf.fonttype"] = 42
     plt.rcParams["ps.fonttype"] = 42
+    if isinstance(balance_df, dict) and "balance_df" in balance_df:
+        balance_df = balance_df["balance_df"]
+    elif isinstance(balance_df, dict):
+        balance_df = pd.DataFrame(balance_df)
     work = balance_df.iloc[::-1].reset_index(drop=True)
     if var_col not in work.columns:
         for cand in ("Variable", "covariate", "term", "variable"):

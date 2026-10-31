@@ -1480,7 +1480,7 @@ def verify_standalone_integrity(
         return nums
 
     p_key_re = re.compile(
-        r"^(?:p|pval|p_val|p_value|p_adj|p_overall|p_nonlinear|p_omnibus|p_q|p_lrt|p_wald)s?$",
+        r"^(?:p|p[-_]?(?:val|value|adj|overall|non[-_]?linear|omnibus|q|lrt|wald|trend|interaction))s?$",
         re.IGNORECASE,
     )
 
@@ -1555,14 +1555,14 @@ def verify_standalone_integrity(
             )
         )
         p_ineq_match = re.search(
-            r"\bp\s*(?:-\s*value\s*)?([<>]=?)\s*$", window_before, re.IGNORECASE
+            r"\bp\s*(?:[-_\s]*value\s*)?([<>]=?|[≤≥])\s*$", window_before, re.IGNORECASE
         )
         p_val = val / 100.0 if has_pct else val
-        p_inequality = (
-            p_ineq_match.group(1)
-            if (0.0 < p_val <= 1.0 and not is_alpha_cutoff and p_ineq_match)
-            else None
-        )
+        if 0.0 < p_val <= 1.0 and not is_alpha_cutoff and p_ineq_match:
+            raw_op = p_ineq_match.group(1)
+            p_inequality = "<=" if raw_op == "≤" else (">=" if raw_op == "≥" else raw_op)
+        else:
+            p_inequality = None
         if p_inequality is not None:
             if p_inequality == "<":
                 matched = any(0.0 <= pv < p_val for pv in known_p_vals)

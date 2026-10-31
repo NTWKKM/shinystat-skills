@@ -2167,47 +2167,76 @@ def _extract_report_builder_namespace():
     return ns
 
 
-def test_cloud_verify_standalone_integrity_parity_and_mutations():
+def test_integrity_parity_fixture_cardinality():
+    """Asserts that the shared integrity parity fixture contains >= 24 cases."""
+    assert len(INTEGRITY_PARITY_CASES) >= 24, (
+        f"Expected fixture to contain at least 24 cases, got {len(INTEGRITY_PARITY_CASES)}"
+    )
+
+
+@pytest.mark.parametrize("case", INTEGRITY_PARITY_CASES, ids=lambda c: c.id)
+def test_cloud_verify_standalone_integrity_parity(case):
     """
-    Task 2a & 2b: Asserts that verify_standalone_integrity (extracted from report-builder.md)
-    and verify_report_integrity (via ReportDocument) have exact 100% parity across all 24 cases
-    in INTEGRITY_PARITY_CASES and all mutation tests.
+    Task 2a: Asserts that verify_standalone_integrity (extracted from report-builder.md)
+    and verify_report_integrity (via ReportDocument) have exact 100% parity across each test case.
     """
     ns = _extract_report_builder_namespace()
     verify_standalone = ns["verify_standalone_integrity"]
 
-    # 1. Parity across all 24 cases
-    for case in INTEGRITY_PARITY_CASES:
-        doc = ReportDocument(title="Parity Test", results_dict=case.results_dict)
-        doc.add_paragraph(case.narrative)
-        ir_res = verify_report_integrity(doc, allowed_untraced=case.allowed_untraced)
+    doc = ReportDocument(title="Parity Test", results_dict=case.results_dict)
+    doc.add_paragraph(case.narrative)
+    ir_res = verify_report_integrity(doc, allowed_untraced=case.allowed_untraced)
 
-        standalone_res = verify_standalone(
-            case.narrative,
-            results_dict=case.results_dict,
-            allowed_untraced=case.allowed_untraced,
-        )
+    standalone_res = verify_standalone(
+        case.narrative,
+        results_dict=case.results_dict,
+        allowed_untraced=case.allowed_untraced,
+    )
 
-        assert standalone_res["passed"] == case.expected_passed, (
-            f"Case {case.id} standalone passed mismatch: expected {case.expected_passed}, got {standalone_res['passed']}"
-        )
-        assert sorted(standalone_res["untraced_numbers"]) == sorted(
-            case.expected_untraced
-        ), (
-            f"Case {case.id} standalone untraced mismatch: expected {case.expected_untraced}, got {standalone_res['untraced_numbers']}"
-        )
+    assert standalone_res["passed"] == case.expected_passed, (
+        f"Case {case.id} standalone passed mismatch: expected {case.expected_passed}, got {standalone_res['passed']}"
+    )
+    assert sorted(standalone_res["untraced_numbers"]) == sorted(
+        case.expected_untraced
+    ), (
+        f"Case {case.id} standalone untraced mismatch: expected {case.expected_untraced}, got {standalone_res['untraced_numbers']}"
+    )
 
-        # Exact parity assertion between implementations
-        assert standalone_res["passed"] == ir_res.passed, (
-            f"Case {case.id} parity divergence in passed: standalone={standalone_res['passed']}, ir={ir_res.passed}"
-        )
-        assert sorted(standalone_res["untraced_numbers"]) == sorted(
-            ir_res.untraced_numbers
-        ), (
-            f"Case {case.id} parity divergence in untraced: standalone={standalone_res['untraced_numbers']}, ir={ir_res.untraced_numbers}"
-        )
+    # Exact parity assertion between implementations
+    assert standalone_res["passed"] == ir_res.passed, (
+        f"Case {case.id} parity divergence in passed: standalone={standalone_res['passed']}, ir={ir_res.passed}"
+    )
+    assert sorted(standalone_res["untraced_numbers"]) == sorted(
+        ir_res.untraced_numbers
+    ), (
+        f"Case {case.id} parity divergence in untraced: standalone={standalone_res['untraced_numbers']}, ir={ir_res.untraced_numbers}"
+    )
 
-    # 2. Mutation tests for all 5 statistical tokens
+
+def test_cloud_verify_standalone_integrity_mutations():
+    """
+    Task 2b: Asserts that unmodified BASE_NARRATIVE passes both implementations,
+    and all single-token mutations to the 5 statistical values fail both implementations.
+    """
+    ns = _extract_report_builder_namespace()
+    verify_standalone = ns["verify_standalone_integrity"]
+
+    # Pre-check: Verify unmodified BASE_NARRATIVE passes both implementations
+    base_doc = ReportDocument(
+        title="Base Integrity Check",
+        results_dict=BASE_RESULTS_DICT,
+    )
+    base_doc.add_paragraph(BASE_NARRATIVE)
+    base_ir = verify_report_integrity(base_doc)
+    base_sa = verify_standalone(BASE_NARRATIVE, results_dict=BASE_RESULTS_DICT)
+    assert base_ir.passed is True, (
+        f"Base narrative unexpectedly failed IR integrity: {base_ir.untraced_numbers}"
+    )
+    assert base_sa["passed"] is True, (
+        f"Base narrative unexpectedly failed standalone integrity: {base_sa['untraced_numbers']}"
+    )
+
+    # Mutation tests for all 5 statistical tokens
     for token_str, mutations in STAT_MUTATIONS:
         for mutated_val in mutations:
             pat = r"(?<![\d.])" + re.escape(token_str) + r"(?![\d.])"
@@ -3015,7 +3044,14 @@ def test_ported_cloud_recipes_mixed_mice_ordinal_rcs_gee_meta(recipes):
         random_state=42,
     )
     assert len(mixed_dsets) == 3
+    obs_age = df_mixed["age"].dropna()
+    obs_sex = df_mixed["sex_bin"].dropna()
+    obs_stage = df_mixed["stage_cat"].dropna()
     for d in mixed_dsets:
+        assert (d.loc[obs_age.index, "age"] == obs_age).all()
+        assert (d.loc[obs_sex.index, "sex_bin"] == obs_sex).all()
+        assert (d.loc[obs_stage.index, "stage_cat"] == obs_stage).all()
+        pd.testing.assert_series_equal(d["outcome"], df_mixed["outcome"])
         assert (
             not d[["age", "sex_bin", "stage_cat", "site_id", "severity_ord"]]
             .isna()
@@ -3451,11 +3487,13 @@ def test_cloud_recipe_24_meta_analysis_exponentiation_and_inference(recipes):
     assert np.isclose(
         res_inferred["fixed_effect"]["effect_disp"],
         np.exp(res_inferred["fixed_effect"]["log_effect"]),
+        rtol=0.0,
         atol=1e-10,
     )
     assert np.isclose(
         res_inferred["random_effects"]["effect_disp"],
         np.exp(res_inferred["random_effects"]["log_effect"]),
+        rtol=0.0,
         atol=1e-10,
     )
 
@@ -3472,6 +3510,7 @@ def test_cloud_recipe_24_meta_analysis_exponentiation_and_inference(recipes):
     assert np.isclose(
         res_md["fixed_effect"]["effect_disp"],
         res_md["fixed_effect"]["log_effect"],
+        rtol=0.0,
         atol=1e-10,
     )
 
@@ -3481,8 +3520,45 @@ def test_cloud_recipe_24_meta_analysis_exponentiation_and_inference(recipes):
     assert np.isclose(
         res_override["fixed_effect"]["effect_disp"],
         res_override["fixed_effect"]["log_effect"],
+        rtol=0.0,
         atol=1e-10,
     )
+
+    # 4. Strict is_ratio metadata validation
+    df_ratio_valid = pd.DataFrame(
+        {
+            "study": ["Trial 1", "Trial 2"],
+            "log_effect": [0.2, 0.4],
+            "se": [0.1, 0.15],
+            "is_ratio": [True, True],
+        }
+    )
+    res_rv = run_meta(df_ratio_valid)
+    assert res_rv["is_ratio"] is True
+
+    # Conflicting booleans
+    df_conflicting = pd.DataFrame(
+        {
+            "study": ["Trial 1", "Trial 2"],
+            "log_effect": [0.2, 0.4],
+            "se": [0.1, 0.15],
+            "is_ratio": [True, False],
+        }
+    )
+    with pytest.raises(ValueError, match="conflicting values"):
+        run_meta(df_conflicting)
+
+    # Non-boolean or missing values
+    df_missing_bool = pd.DataFrame(
+        {
+            "study": ["Trial 1", "Trial 2"],
+            "log_effect": [0.2, 0.4],
+            "se": [0.1, 0.15],
+            "is_ratio": [True, None],
+        }
+    )
+    with pytest.raises(ValueError, match="missing or non-boolean"):
+        run_meta(df_missing_bool)
 
 
 def test_cloud_figures_templates_validation_and_safety(tmp_path):

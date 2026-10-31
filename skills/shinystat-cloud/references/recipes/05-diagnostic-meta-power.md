@@ -2588,7 +2588,17 @@ def run_meta_analysis(
     if exponentiate is not None:
         is_ratio = bool(exponentiate)
     elif "is_ratio" in df_work.columns:
-        is_ratio = bool(df_work["is_ratio"].iloc[0])
+        col = df_work["is_ratio"]
+        if col.isna().any() or not all(isinstance(v, (bool, np.bool_)) for v in col):
+            raise ValueError(
+                "Column 'is_ratio' contains missing or non-boolean values; pass 'exponentiate' explicitly."
+            )
+        first_val = bool(col.iloc[0])
+        if not all(bool(v) == first_val for v in col):
+            raise ValueError(
+                "Column 'is_ratio' contains conflicting values across studies; pass 'exponentiate' explicitly."
+            )
+        is_ratio = first_val
     elif isinstance(effect_col, str) and effect_col.startswith("log_"):
         is_ratio = True
     else:

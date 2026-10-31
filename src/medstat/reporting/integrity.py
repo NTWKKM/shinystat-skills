@@ -85,7 +85,7 @@ def _flatten_numbers(val: Any) -> list[float]:
 
 
 _P_KEY_RE = re.compile(
-    r"^(?:p|pval|p_val|p_value|p_adj|p_overall|p_nonlinear|p_omnibus|p_q|p_lrt|p_wald)s?$",
+    r"^(?:p|p[-_]?(?:val|value|adj|overall|non[-_]?linear|omnibus|q|lrt|wald|trend|interaction))s?$",
     re.IGNORECASE,
 )
 
@@ -343,12 +343,15 @@ def _extract_text_tokens(text: str) -> list[TextToken]:
             doc_has_references=doc_has_references,
         )
         p_ineq_match = re.search(
-            r"\bp\s*(?:-\s*value\s*)?([<>]=?)\s*$", window_before, re.IGNORECASE
+            r"\bp\s*(?:[-_\s]*value\s*)?([<>]=?|[≤≥])\s*$", window_before, re.IGNORECASE
         )
         p_val = val / 100.0 if has_pct else val
         p_inequality: str | None = None
         if 0.0 < p_val <= 1.0 and not is_structural and p_ineq_match:
-            p_inequality = p_ineq_match.group(1)
+            raw_op = p_ineq_match.group(1)
+            p_inequality = (
+                "<=" if raw_op == "≤" else (">=" if raw_op == "≥" else raw_op)
+            )
 
         is_p_floor = bool(p_inequality in ("<", "<="))
         tokens.append(
@@ -598,9 +601,10 @@ def verify_report_integrity(
         )
     if untraced:
         remediation_hints.append(
-            "Untraced numbers detected. Remediation: Ensure narrative numbers match values in results_dict within audit tolerance rules "
-            "(displayed precision min(0.02, 10^(-dec_digits)) for |val| <= 1.0, 1% relative tolerance or 0.02 for |val| > 1.0, "
-            "and percentage-scale matching within 0.05 or min(0.05, 100*abs_tol))."
+            "Untraced numbers detected. Remediation: Ensure narrative numbers match values in results_dict within half-unit precision tolerance "
+            "(|val - known| <= 0.5 * 10^(-d) + 1e-9, where d is the count of displayed fractional decimal digits, d=0 for integers). "
+            "Percentage-scale matching (kn * 100) applies only when the narrative token includes an explicit '%' sign. "
+            "P-value inequality expressions (e.g. P < 0.05, P ≤ 0.05, P > 0.05, P ≥ 0.05) must satisfy recorded p-values."
         )
     if not has_causal_caveat:
         remediation_hints.append(

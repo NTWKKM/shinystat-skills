@@ -1159,9 +1159,12 @@ def impute_mice_mixed_datasets(
                 code_map = {c: idx for idx, c in enumerate(cats)}
                 work[feat] = work[feat].map(code_map).astype(float)
                 if mis_mask.any():
-                    work.loc[mis_mask, feat] = rng.choice(
-                        len(cats), size=int(mis_mask.sum())
-                    ).astype(float)
+                    if len(cats) <= 1:
+                        work.loc[mis_mask, feat] = 0.0
+                    else:
+                        work.loc[mis_mask, feat] = rng.choice(
+                            len(cats), size=int(mis_mask.sum())
+                        ).astype(float)
             else:
                 work[feat] = work[feat].astype(float)
                 if mis_mask.any():
@@ -1173,6 +1176,10 @@ def impute_mice_mixed_datasets(
             for feat in features_to_impute:
                 mis_mask = df[feat].isna()
                 if not mis_mask.any():
+                    continue
+                ftype = target_types.get(feat, "continuous")
+                if ftype in ("categorical", "ordinal", "binary") and len(cat_mappings.get(feat, [])) <= 1:
+                    work.loc[mis_mask, feat] = 0.0
                     continue
                 obs_mask = ~mis_mask
                 pred_cols = [c for c in cols if c != feat]
@@ -1196,12 +1203,24 @@ def impute_mice_mixed_datasets(
                                 code_map = {c: idx for idx, c in enumerate(pc_cats)}
                                 codes = work[pc].map(code_map).round().astype(int)
                             pred_blocks.append((codes == 1).to_numpy(dtype=float)[:, None])
+                        elif pc_cats is not None and len(pc_cats) <= 1:
+                            pass
                         elif not pd.api.types.is_numeric_dtype(work[pc]):
-                            dummies = pd.get_dummies(work[pc], drop_first=True, dtype=float)
+                            s = (
+                                work[pc].cat.remove_unused_categories()
+                                if isinstance(work[pc].dtype, pd.CategoricalDtype)
+                                else work[pc]
+                            )
+                            dummies = pd.get_dummies(s, drop_first=True, dtype=float)
                             if dummies.shape[1] > 0:
                                 pred_blocks.append(dummies.to_numpy(dtype=float))
                         else:
-                            dummies = pd.get_dummies(work[pc], drop_first=True, dtype=float)
+                            s = (
+                                work[pc].cat.remove_unused_categories()
+                                if isinstance(work[pc].dtype, pd.CategoricalDtype)
+                                else work[pc]
+                            )
+                            dummies = pd.get_dummies(s, drop_first=True, dtype=float)
                             if dummies.shape[1] > 0:
                                 pred_blocks.append(dummies.to_numpy(dtype=float))
                             else:
@@ -1217,7 +1236,12 @@ def impute_mice_mixed_datasets(
                         else:
                             pred_blocks.append(work[pc].to_numpy(dtype=float)[:, None])
                     elif not pd.api.types.is_numeric_dtype(work[pc]):
-                        dummies = pd.get_dummies(work[pc], drop_first=True, dtype=float)
+                        s = (
+                            work[pc].cat.remove_unused_categories()
+                            if isinstance(work[pc].dtype, pd.CategoricalDtype)
+                            else work[pc]
+                        )
+                        dummies = pd.get_dummies(s, drop_first=True, dtype=float)
                         if dummies.shape[1] > 0:
                             pred_blocks.append(dummies.to_numpy(dtype=float))
                     else:
@@ -1226,7 +1250,6 @@ def impute_mice_mixed_datasets(
                 X_obs = X_all[obs_mask.to_numpy()]
                 X_mis = X_all[mis_mask.to_numpy()]
                 y_obs = work.loc[obs_mask, feat].to_numpy(dtype=float)
-                ftype = target_types.get(feat, "continuous")
 
                 if ftype == "continuous":
                     n_obs, p = X_obs.shape
@@ -1243,7 +1266,7 @@ def impute_mice_mixed_datasets(
                     beta_hat = XtX_inv @ (X_obs.T @ y_obs)
                     resid = y_obs - X_obs @ beta_hat
                     rss = float(np.sum(resid**2))
-                    if not math.isfinite(rss) or rss <= 0.0:
+                    if not np.isfinite(rss) or rss <= 0.0:
                         raise ValueError(f"Invalid residual sum of squares for '{feat}'.")
                     sigma2_star = rss / float(rng.chisquare(dof))
                     cov_beta = sigma2_star * XtX_inv
