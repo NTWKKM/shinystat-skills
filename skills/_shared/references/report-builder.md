@@ -1127,6 +1127,7 @@ try:
         results: dict,
         tables: dict[str, pd.DataFrame],
         figure_paths: list[str] = None,
+        kpi_cards: list[dict] = None,
         out_path: str = "report.pptx",
     ) -> str:
         prs = Presentation()
@@ -1142,8 +1143,38 @@ try:
             clean_narr = re.sub(r"<[^>]+>", "", str(results["narrative"]))
             slide.placeholders[1].text = clean_narr
 
-        # 2. Table Slides
         blank_layout = prs.slide_layouts[6] if len(prs.slide_layouts) > 6 else prs.slide_layouts[0]
+
+        # 2. Key Findings & KPI Cards Slide
+        cards = kpi_cards if kpi_cards is not None else results.get("kpi_cards", [])
+        if cards:
+            kslide = prs.slides.add_slide(blank_layout)
+            hdr = kslide.shapes.add_textbox(Inches(0.6), Inches(0.4), Inches(12.0), Inches(0.6))
+            hdr.text_frame.text = "Key Clinical Findings & KPI Summary"
+            n_cards = min(len(cards), 4)
+            card_w = 11.6 / max(1, n_cards)
+            for idx, card in enumerate(cards[:4]):
+                left = Inches(0.6 + idx * (card_w + 0.15))
+                box = kslide.shapes.add_textbox(left, Inches(1.5), Inches(card_w), Inches(2.5))
+                tf = box.text_frame
+                tf.word_wrap = True
+                p_lbl = tf.paragraphs[0]
+                p_lbl.text = str(card.get("label", f"Metric {idx + 1}"))
+                for r in p_lbl.runs:
+                    r.font.size = Pt(12)
+                    r.font.bold = True
+                p_val = tf.add_paragraph()
+                p_val.text = str(card.get("value", ""))
+                for r in p_val.runs:
+                    r.font.size = Pt(22)
+                    r.font.bold = True
+                if card.get("subtitle"):
+                    p_sub = tf.add_paragraph()
+                    p_sub.text = str(card["subtitle"])
+                    for r in p_sub.runs:
+                        r.font.size = Pt(10)
+
+        # 3. Table Slides
         for caption, df in (tables or {}).items():
             tslide = prs.slides.add_slide(blank_layout)
             tx = tslide.shapes.add_textbox(Inches(0.6), Inches(0.4), Inches(12.0), Inches(0.6))
@@ -1185,6 +1216,7 @@ except ImportError:
         results: dict,
         tables: dict[str, pd.DataFrame],
         figure_paths: list[str] = None,
+        kpi_cards: list[dict] = None,
         out_path: str = "report.pptx",
     ) -> str:
         if Path(out_path).suffix.lower() == ".pptx":
@@ -1212,7 +1244,64 @@ def generate_pdf_report(
     figure_paths: list[str] = None,
     out_path: str = "report.pdf",
 ) -> str:
-    """Renders a publication-grade multi-page PDF with TrueType font embedding (Type 42) via Matplotlib PdfPages."""
+    """Renders a publication-grade multi-page PDF via reportlab Platypus (primary) or Matplotlib PdfPages (Type 42 fallback)."""
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.units import inch
+        from reportlab.platypus import (
+            Image as RLImage,
+            Paragraph,
+            SimpleDocTemplate,
+            Spacer,
+            Table as RLTable,
+            TableStyle,
+        )
+
+        doc = SimpleDocTemplate(str(out_path), pagesize=A4)
+        styles = getSampleStyleSheet()
+        story = [Paragraph(str(title), styles["Title"]), Spacer(1, 0.2 * inch)]
+        if "narrative" in results:
+            clean_narr = re.sub(r"<[^>]+>", "", str(results["narrative"]))
+            for para in clean_narr.split("\n\n"):
+                if para.strip():
+                    story.append(Paragraph(para.strip(), styles["BodyText"]))
+                    story.append(Spacer(1, 0.1 * inch))
+
+        for caption, df in (tables or {}).items():
+            if df is None or df.empty:
+                continue
+            story.append(Paragraph(f"<b>{caption}</b>", styles["Heading3"]))
+            data = [[str(c) for c in df.columns]] + [
+                ["" if pd.isna(v) else str(v) for v in row]
+                for _, row in df.iterrows()
+            ]
+            t = RLTable(data, repeatRows=1)
+            t.setStyle(
+                TableStyle(
+                    [
+                        ("LINEABOVE", (0, 0), (-1, 0), 1.2, colors.black),
+                        ("LINEBELOW", (0, 0), (-1, 0), 0.8, colors.black),
+                        ("LINEBELOW", (0, -1), (-1, -1), 1.2, colors.black),
+                        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+                    ]
+                )
+            )
+            story.append(t)
+            story.append(Spacer(1, 0.2 * inch))
+
+        for fp in figure_paths or []:
+            p = Path(fp)
+            if p.exists() and p.suffix.lower() in {".png", ".jpg", ".jpeg"}:
+                story.append(RLImage(str(p), width=5.8 * inch, height=3.8 * inch))
+                story.append(Spacer(1, 0.2 * inch))
+
+        doc.build(story)
+        return out_path
+    except Exception:
+        pass
+
     plt.rcParams["pdf.fonttype"] = 42
     plt.rcParams["ps.fonttype"] = 42
 
@@ -1275,6 +1364,7 @@ def generate_pdf_report(
 Before releasing any report, run the standalone verification routine:
 
 ```python
+import math
 import re
 from pathlib import Path
 import pandas as pd
@@ -1344,7 +1434,17 @@ def verify_standalone_integrity(
     keys_str = " ".join(results_dict.keys()).lower()
     is_causal = any(
         k in keys_str
-        for k in ["psm", "propensity", "cox", "hazard_ratio", "odds_ratio", "logistic"]
+        for k in [
+            "psm",
+            "propensity",
+            "love_plot",
+            "cox",
+            "hazard_ratio",
+            "or_table",
+            "odds_ratio",
+            "logistic",
+            "regression",
+        ]
     )
     has_caveat = True
     if is_causal:
@@ -1370,13 +1470,52 @@ def verify_standalone_integrity(
             for v in d:
                 nums.extend(_flatten_nums(v))
         elif isinstance(d, (int, float)) and not isinstance(d, bool):
-            nums.append(float(d))
+            if pd.notna(d):
+                nums.append(float(d))
+        elif isinstance(d, pd.DataFrame):
+            for col in d.columns:
+                for v in d[col]:
+                    if pd.notna(v) and isinstance(v, (int, float)) and not isinstance(v, bool):
+                        nums.append(float(v))
         return nums
 
+    p_key_re = re.compile(
+        r"^(?:p|pval|p_val|p_value|p_adj|p_overall|p_nonlinear|p_omnibus|p_q|p_lrt|p_wald)s?$",
+        re.IGNORECASE,
+    )
+
+    def _flatten_p_vals(d):
+        pvals = []
+        if isinstance(d, dict):
+            for k, v in d.items():
+                if p_key_re.match(str(k)):
+                    pvals.extend(n for n in _flatten_nums(v) if 0.0 <= n <= 1.0)
+                else:
+                    pvals.extend(_flatten_p_vals(v))
+        elif isinstance(d, (list, tuple, set)):
+            for item in d:
+                pvals.extend(_flatten_p_vals(item))
+        elif isinstance(d, pd.DataFrame):
+            for col in d.columns:
+                if p_key_re.match(str(col)):
+                    pvals.extend(n for n in _flatten_nums(d[col]) if 0.0 <= n <= 1.0)
+        return pvals
+
     known_nums = _flatten_nums(results_dict)
-    if allowed_untraced is not None:
-        known_nums.extend(float(x) for x in allowed_untraced)
+    known_p_vals = _flatten_p_vals(results_dict)
+    if not known_p_vals:
+        known_p_vals = [kn for kn in known_nums if 0.0 <= kn <= 1.0]
+    allowed_list = (
+        [float(x) for x in allowed_untraced] if allowed_untraced is not None else []
+    )
     clean_text = re.sub(r"(?<=\d),(?=\d{3}\b)", "", narrative_text)
+    doc_has_references = bool(
+        re.search(
+            r"(?:^|\n)\s*(?:#{1,4}\s*)?(?:References|Bibliography)\b",
+            narrative_text,
+            re.IGNORECASE,
+        )
+    )
     raw_matches = list(
         re.finditer(
             r"(?<!\w)(?<![a-zA-Z]-)(?P<num>(?:[-+]?\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?)(?P<pct>\s*%)?",
@@ -1393,6 +1532,36 @@ def verify_standalone_integrity(
         except ValueError:
             continue
         if not (-1e7 < val < 1e7):
+            continue
+
+        start = m.start()
+        window_before = clean_text[max(0, start - 80) : start].split("\n")[-1]
+        window_after = clean_text[m.end() : min(len(clean_text), m.end() + 80)].split("\n")[0]
+        window = f"{window_before}{raw_str}{window_after}"
+
+        is_alpha_cutoff = val in (0.05, 0.01, 0.001, 0.005, 0.0001) and bool(
+            re.search(
+                r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff)\b",
+                window,
+                re.IGNORECASE,
+            )
+            and not (
+                re.search(r"\bp\s*(?:-\s*value\s*)?=\s*$", window_before, re.IGNORECASE)
+                and not re.search(
+                    r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff)\b",
+                    window_before,
+                    re.IGNORECASE,
+                )
+            )
+        )
+        is_p_floor = bool(
+            0.0 < val <= 1.0
+            and not is_alpha_cutoff
+            and re.search(r"\bp\s*(?:-\s*value\s*)?<\s*$", window_before, re.IGNORECASE)
+        )
+        if is_p_floor:
+            if not any(0.0 <= pv < val for pv in known_p_vals):
+                untraced_nums.append(val)
             continue
 
         if abs(val) <= 1.0:
@@ -1425,29 +1594,15 @@ def verify_standalone_integrity(
                     matched = True
                     break
 
-        start = m.start()
-        window_before = clean_text[max(0, start - 80) : start].split("\n")[-1]
-        window_after = clean_text[m.end() : min(len(clean_text), m.end() + 80)].split("\n")[0]
-        window = f"{window_before}{raw_str}{window_after}"
-
-        is_p_floor = bool(
-            val in (0.001, 0.0001)
-            and re.search(r"\bp\s*(?:-\s*value\s*)?<\s*$", window_before, re.IGNORECASE)
-        )
-        if not matched and is_p_floor:
-            if any(0.0 <= kn < val for kn in known_nums):
+        if not matched and allowed_list:
+            if any(
+                math.isclose(val, aw, rel_tol=1e-2, abs_tol=1e-4) for aw in allowed_list
+            ):
                 matched = True
 
         if not matched:
             is_ci_level = val in (90.0, 95.0, 99.0) and bool(
                 re.search(r"\b(?:CI|confidence|credible)\b", window, re.IGNORECASE)
-            )
-            is_alpha_cutoff = val in (0.05, 0.01, 0.001, 0.005, 0.0001) and bool(
-                re.search(
-                    r"\b(?:alpha|significance|threshold|cutoff|two-sided|one-sided)\b",
-                    window,
-                    re.IGNORECASE,
-                )
             )
             is_scale_const = val in (0.0, 100.0) and bool(
                 re.search(r"\b(?:scale|normalized|range|total)\b", window, re.IGNORECASE)
@@ -1500,7 +1655,8 @@ def verify_standalone_integrity(
                     )
                     or bool(re.search(r"\b(?:Ref\.?|Refs\.?|Reference|References|Citation|Citations)\s*#?$", window_before, re.IGNORECASE))
                     or bool(
-                        1.0 <= val <= 100.0
+                        doc_has_references
+                        and 1.0 <= val <= 100.0
                         and re.match(r"^\s*(?:\[\s*)?$", window_before)
                         and re.match(r"^\s*(?:\]\s*)?[\.\)]?\s+[A-Z][a-zA-Z'’\-]+(?:\s+[A-Z]{1,3}\b|\s*,\s*[A-Z]{1,3}\b|\s+et\s+al)", window_after)
                     )

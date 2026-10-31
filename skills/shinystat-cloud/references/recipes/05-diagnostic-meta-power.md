@@ -2441,8 +2441,26 @@ def compute_binary_effect_sizes(
     records = []
     for _, row in clean.iterrows():
         study = str(row[study_col])
-        a, n1 = float(row[events_t_col]), float(row[n_t_col])
-        c, n0 = float(row[events_c_col]), float(row[n_c_col])
+        a_raw, n1_raw = float(row[events_t_col]), float(row[n_t_col])
+        c_raw, n0_raw = float(row[events_c_col]), float(row[n_c_col])
+        if not (
+            math.isfinite(a_raw)
+            and math.isfinite(n1_raw)
+            and math.isfinite(c_raw)
+            and math.isfinite(n0_raw)
+            and a_raw.is_integer()
+            and n1_raw.is_integer()
+            and c_raw.is_integer()
+            and n0_raw.is_integer()
+            and n1_raw >= 1
+            and n0_raw >= 1
+            and 0 <= a_raw <= n1_raw
+            and 0 <= c_raw <= n0_raw
+        ):
+            raise ValueError(
+                f"Invalid 2x2 counts in study '{study}': require integer 0 <= events <= n and n >= 1."
+            )
+        a, n1, c, n0 = a_raw, n1_raw, c_raw, n0_raw
         b, d = n1 - a, n0 - c
         if a == 0 or b == 0 or c == 0 or d == 0:
             a, b, c, d = a + 0.5, b + 0.5, c + 0.5, d + 0.5
@@ -2474,6 +2492,58 @@ def compute_binary_effect_sizes(
                 "ci_lower": math.exp(ci_l) if is_ratio else ci_l,
                 "ci_upper": math.exp(ci_u) if is_ratio else ci_u,
                 "is_ratio": is_ratio,
+                "effect_measure": effect_measure,
+            }
+        )
+    return pd.DataFrame(records)
+
+
+def compute_continuous_effect_sizes(
+    df: pd.DataFrame,
+    mean_t_col: str,
+    sd_t_col: str,
+    n_t_col: str,
+    mean_c_col: str,
+    sd_c_col: str,
+    n_c_col: str,
+    study_col: str,
+    effect_measure: Literal["MD", "SMD"] = "MD",
+) -> pd.DataFrame:
+    """Compute Mean Difference (MD) or Hedges' g (SMD) and standard errors for continuous endpoints."""
+    cols = [study_col, mean_t_col, sd_t_col, n_t_col, mean_c_col, sd_c_col, n_c_col]
+    clean = df[cols].dropna().copy()
+    records = []
+    for _, row in clean.iterrows():
+        study = str(row[study_col])
+        m1, sd1, n1 = float(row[mean_t_col]), float(row[sd_t_col]), float(row[n_t_col])
+        m0, sd0, n0 = float(row[mean_c_col]), float(row[sd_c_col]), float(row[n_c_col])
+        if not (
+            all(math.isfinite(x) for x in (m1, sd1, n1, m0, sd0, n0))
+            and n1 >= 2
+            and n0 >= 2
+            and sd1 > 0
+            and sd0 > 0
+        ):
+            raise ValueError(f"Invalid continuous summary inputs in study '{study}'.")
+        if effect_measure == "SMD":
+            dof = n1 + n0 - 2.0
+            s_pool = math.sqrt(((n1 - 1.0) * (sd1**2) + (n0 - 1.0) * (sd0**2)) / dof)
+            j_corr = 1.0 - (3.0 / (4.0 * dof - 1.0)) if dof > 1 else 1.0
+            eff = j_corr * ((m1 - m0) / s_pool)
+            se = math.sqrt((n1 + n0) / (n1 * n0) + (eff**2) / (2.0 * (n1 + n0)))
+        else:
+            eff = m1 - m0
+            se = math.sqrt((sd1**2) / n1 + (sd0**2) / n0)
+        records.append(
+            {
+                "study": study,
+                "effect_size": eff,
+                "log_effect": eff,
+                "se": se,
+                "ci_lower": eff - 1.96 * se,
+                "ci_upper": eff + 1.96 * se,
+                "is_ratio": False,
+                "effect_measure": effect_measure,
             }
         )
     return pd.DataFrame(records)
@@ -2488,20 +2558,37 @@ def run_meta_analysis(
     study_col: str = "study",
 ) -> dict[str, Any]:
     """Perform Fixed-Effect and DerSimonian-Laird Random-Effects Meta-Analysis."""
+    if not (isinstance(alpha, (int, float)) and math.isfinite(alpha) and 0.0 < alpha < 1.0):
+        raise ValueError("alpha must be a finite number strictly between 0 and 1.")
+
     df_work = df.copy()
-    if effect_col not in df_work.columns and "effect_size" in df_work.columns:
-        effect_col = "effect_size"
     k = len(df_work)
     if k < 2:
         raise ValueError(f"Meta-analysis requires at least 2 studies (got {k}).")
 
-    theta = df_work[effect_col].to_numpy(dtype=float)
-    se = df_work[se_col].to_numpy(dtype=float)
-    if np.any(se <= 0) or np.any(np.isnan(se)):
-        raise ValueError("Standard errors must be strictly positive and finite.")
     is_ratio = (
         bool(df_work["is_ratio"].iloc[0]) if "is_ratio" in df_work.columns else False
     )
+    if effect_col in df_work.columns:
+        theta = df_work[effect_col].to_numpy(dtype=float)
+    elif "effect_size" in df_work.columns:
+        raw_eff = df_work["effect_size"].to_numpy(dtype=float)
+        if not np.all(np.isfinite(raw_eff)):
+            raise ValueError("Non-finite values detected in effect_size.")
+        if is_ratio:
+            if np.any(raw_eff <= 0):
+                raise ValueError("Ratio effect_size values must be > 0 to log-transform.")
+            theta = np.log(raw_eff)
+        else:
+            theta = raw_eff
+    else:
+        raise ValueError(f"Column '{effect_col}' not found in DataFrame.")
+
+    se = df_work[se_col].to_numpy(dtype=float)
+    if not np.all(np.isfinite(theta)):
+        raise ValueError("Effects array contains non-finite values (NaN or inf).")
+    if not np.all(np.isfinite(se)) or np.any(se <= 0):
+        raise ValueError("Standard errors must be strictly positive and finite.")
 
     w_fe = 1.0 / (se**2)
     sum_w_fe = float(np.sum(w_fe))
@@ -2518,6 +2605,7 @@ def run_meta_analysis(
     tau2 = max(0.0, (q_stat - df_q) / c_const) if c_const > 0 else 0.0
     tau = math.sqrt(tau2)
     i2 = max(0.0, ((q_stat - df_q) / q_stat) * 100.0) if q_stat > 0 else 0.0
+    h2 = max(1.0, q_stat / df_q) if df_q > 0 else 1.0
 
     w_re = 1.0 / (se**2 + tau2)
     sum_w_re = float(np.sum(w_re))
@@ -2544,11 +2632,46 @@ def run_meta_analysis(
         return float(math.exp(val)) if is_ratio else float(val)
 
     egger_p = None
-    if k >= 10:
+    is_smd = (
+        "effect_measure" in df_work.columns
+        and str(df_work["effect_measure"].iloc[0]).upper() == "SMD"
+    )
+    if (
+        study_col in df_work.columns
+        and not is_ratio
+        and not is_smd
+        and df_work[study_col].dropna().nunique() >= 10
+    ):
+        if not df_work[study_col].is_unique:
+            raise ValueError("Duplicate study IDs detected; Egger's test requires unique studies.")
         snd = theta / se
         prec = 1.0 / se
         res_egger = stats.linregress(prec, snd)
         egger_p = float(res_egger.pvalue)
+
+    leave_one_out = []
+    if k >= 3 and study_col in df_work.columns:
+        for idx in range(k):
+            th_sub = np.delete(theta, idx)
+            se_sub = np.delete(se, idx)
+            w_sub = 1.0 / (se_sub**2)
+            sw_sub = float(np.sum(w_sub))
+            th_fe_sub = float(np.sum(w_sub * th_sub) / sw_sub)
+            q_sub = float(np.sum(w_sub * ((th_sub - th_fe_sub) ** 2)))
+            c_sub = sw_sub - float(np.sum(w_sub**2) / sw_sub)
+            t2_sub = max(0.0, (q_sub - (k - 2)) / c_sub) if c_sub > 0 else 0.0
+            wre_sub = 1.0 / (se_sub**2 + t2_sub)
+            swre_sub = float(np.sum(wre_sub))
+            th_re_sub = float(np.sum(wre_sub * th_sub) / swre_sub)
+            sere_sub = math.sqrt(1.0 / swre_sub)
+            leave_one_out.append(
+                {
+                    "omitted_study": str(df_work[study_col].iloc[idx]),
+                    "effect_disp": _disp(th_re_sub),
+                    "ci_lower": _disp(th_re_sub - z_crit * sere_sub),
+                    "ci_upper": _disp(th_re_sub + z_crit * sere_sub),
+                }
+            )
 
     studies_out = df_work.copy()
     studies_out["weight_fe_pct"] = (w_fe / sum_w_fe) * 100.0
@@ -2583,9 +2706,11 @@ def run_meta_analysis(
             "df": df_q,
             "p_value": p_q,
             "I2": i2,
+            "H2": h2,
             "tau2": tau2,
             "tau": tau,
             "egger_p_value": egger_p,
         },
+        "leave_one_out": leave_one_out,
     }
 ```

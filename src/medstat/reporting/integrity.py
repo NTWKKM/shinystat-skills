@@ -10,6 +10,7 @@ Invariants enforced:
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any, NamedTuple
@@ -82,6 +83,35 @@ def _flatten_numbers(val: Any) -> list[float]:
             if pd.notna(v) and isinstance(v, (int, float)):
                 numbers.append(float(v))
     return numbers
+
+
+_P_KEY_RE = re.compile(
+    r"^(?:p|pval|p_val|p_value|p_adj|p_overall|p_nonlinear|p_omnibus|p_q|p_lrt|p_wald)s?$",
+    re.IGNORECASE,
+)
+
+
+def _flatten_p_values(val: Any) -> list[float]:
+    """Recursively extracts numeric p-values from dictionary keys or DataFrame columns."""
+    pvals: list[float] = []
+    if isinstance(val, dict):
+        for k, v in val.items():
+            if _P_KEY_RE.match(str(k)):
+                for n in _flatten_numbers(v):
+                    if 0.0 <= n <= 1.0:
+                        pvals.append(float(n))
+            else:
+                pvals.extend(_flatten_p_values(v))
+    elif isinstance(val, (list, tuple, set)):
+        for item in val:
+            pvals.extend(_flatten_p_values(item))
+    elif isinstance(val, pd.DataFrame):
+        for col in val.columns:
+            if _P_KEY_RE.match(str(col)):
+                for n in _flatten_numbers(val[col]):
+                    if 0.0 <= n <= 1.0:
+                        pvals.append(float(n))
+    return pvals
 
 
 _MONTHS_PATTERN = r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
@@ -161,11 +191,22 @@ def _is_structural_context(
 
     # 2. Alpha thresholds and p-value cutoffs (e.g., alpha = 0.05, significance threshold p < 0.05)
     if val in (0.05, 0.01, 0.001, 0.005, 0.0001):
-        if re.search(
-            r"\b(?:alpha|significance|threshold|cutoff|two-sided|one-sided)\b",
-            window,
-            re.IGNORECASE,
-        ):
+        has_threshold_kw = bool(
+            re.search(
+                r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff)\b",
+                window,
+                re.IGNORECASE,
+            )
+        )
+        is_direct_p_eq = bool(
+            re.search(r"\bp\s*(?:-\s*value\s*)?=\s*$", window_before, re.IGNORECASE)
+            and not re.search(
+                r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff)\b",
+                window_before,
+                re.IGNORECASE,
+            )
+        )
+        if has_threshold_kw and not is_direct_p_eq:
             return True
 
     # 3. Calendar & Publication years (1900-2035) when preceded by date or journal/citation context
@@ -302,7 +343,8 @@ def _extract_text_tokens(text: str) -> list[TextToken]:
             doc_has_references=doc_has_references,
         )
         is_p_floor = bool(
-            val in (0.001, 0.0001)
+            0.0 < val <= 1.0
+            and not is_structural
             and re.search(r"\bp\s*(?:-\s*value\s*)?<\s*$", window_before, re.IGNORECASE)
         )
         tokens.append(
@@ -373,8 +415,12 @@ def verify_report_integrity(
 
     # 2. Numerical Traceability
     known_numbers = _flatten_numbers(doc.results_dict)
-    if allowed_untraced is not None:
-        known_numbers.extend(float(x) for x in allowed_untraced)
+    known_p_values = _flatten_p_values(doc.results_dict)
+    if not known_p_values:
+        known_p_values = [kn for kn in known_numbers if 0.0 <= kn <= 1.0]
+    allowed_list = (
+        [float(x) for x in allowed_untraced] if allowed_untraced is not None else []
+    )
     text_tokens = _extract_text_tokens(all_text)
 
     untraced: list[float] = []
@@ -384,6 +430,12 @@ def verify_report_integrity(
         has_pct = token.has_pct
         is_structural = token.is_structural
         is_p_floor = token.is_p_floor
+
+        if is_p_floor:
+            matched = any(0.0 <= pv < tn for pv in known_p_values)
+            if not matched and not is_structural:
+                untraced.append(tn)
+            continue
 
         # Check against known numbers: for values <= 1, use token's displayed precision
         if abs(tn) <= 1.0:
@@ -431,8 +483,10 @@ def verify_report_integrity(
                     matched = True
                     break
 
-        if not matched and is_p_floor:
-            if any(0.0 <= kn < tn for kn in known_numbers):
+        if not matched and allowed_list:
+            if any(
+                math.isclose(tn, aw, rel_tol=1e-2, abs_tol=1e-4) for aw in allowed_list
+            ):
                 matched = True
 
         if not matched:

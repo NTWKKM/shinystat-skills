@@ -512,3 +512,55 @@ def test_integrity_citation_ranges_and_bare_references():
     assert 9.0 not in audit.untraced_numbers
     assert 10.0 not in audit.untraced_numbers
     assert len(audit.untraced_numbers) == 0
+
+
+def test_integrity_p_floor_and_allowed_untraced_guards():
+    """
+    Verifies that:
+    1. 'two-sided P = 0.001' is NOT exempted as an alpha threshold when true P is 0.012.
+    2. 'P < 0.001' is blocked when true P is 0.0014 (even though 0.0014 is within 0.0005 of 0.001).
+    3. Valid inequality 'P < 0.05' passes when true P is 0.012.
+    4. allowed_untraced does not apply percentage-scaling or loose 0.02 p-value tolerances.
+    """
+    doc_two_sided = ReportDocument(
+        title="Two-Sided P Audit",
+        results_dict={"p_value": 0.012, "n": 100},
+    )
+    doc_two_sided.add_paragraph("Methods: Cohort retention was 100 patients.")
+    doc_two_sided.add_paragraph("The difference was significant (two-sided P = 0.001).")
+    audit_two_sided = verify_report_integrity(doc_two_sided)
+    assert 0.001 in audit_two_sided.untraced_numbers
+    assert audit_two_sided.passed is False
+
+    doc_p_floor_bad = ReportDocument(
+        title="P Floor Rounding Boundary",
+        results_dict={"p_value": 0.0014},
+    )
+    doc_p_floor_bad.add_paragraph("Methods: Included cohort.")
+    doc_p_floor_bad.add_paragraph("Primary endpoint reached P < 0.001.")
+    audit_p_floor_bad = verify_report_integrity(doc_p_floor_bad)
+    assert 0.001 in audit_p_floor_bad.untraced_numbers
+    assert audit_p_floor_bad.passed is False
+
+    doc_p_floor_ok = ReportDocument(
+        title="Valid P Inequality",
+        results_dict={"p_value": 0.012},
+    )
+    doc_p_floor_ok.add_paragraph("Methods: Included cohort.")
+    doc_p_floor_ok.add_paragraph("Primary endpoint reached P < 0.05.")
+    audit_p_floor_ok = verify_report_integrity(doc_p_floor_ok)
+    assert 0.05 not in audit_p_floor_ok.untraced_numbers
+    assert audit_p_floor_ok.passed is True
+
+    doc_allow = ReportDocument(
+        title="Allowed Untraced Strict Match",
+        results_dict={"n": 100},
+    )
+    doc_allow.add_paragraph("Methods: Cohort of 100 patients with 50 events.")
+    audit_allow_fail = verify_report_integrity(doc_allow, allowed_untraced=[0.5])
+    assert 50.0 in audit_allow_fail.untraced_numbers
+    assert audit_allow_fail.passed is False
+
+    audit_allow_pass = verify_report_integrity(doc_allow, allowed_untraced=[50.0])
+    assert 50.0 not in audit_allow_pass.untraced_numbers
+    assert audit_allow_pass.passed is True

@@ -1104,6 +1104,23 @@ def impute_mice_mixed_datasets(
     if len(cols) < 2:
         raise ValueError("MICE requires >= 1 additional predictor or outcome column.")
 
+    non_imputed_cols = [c for c in cols if c not in features_to_impute]
+    for c in non_imputed_cols:
+        if df[c].isna().any():
+            raise ValueError(
+                f"Conditioning column '{c}' contains missing values but is not in features_to_impute."
+            )
+        if pd.api.types.is_numeric_dtype(df[c]):
+            if not np.all(np.isfinite(df[c].to_numpy(dtype=float))):
+                raise ValueError(f"Conditioning column '{c}' contains non-finite values.")
+
+    for feat in features_to_impute:
+        ftype = target_types.get(feat, "continuous")
+        if ftype == "continuous":
+            obs_arr = df[feat].dropna().to_numpy(dtype=float)
+            if not np.all(np.isfinite(obs_arr)):
+                raise ValueError(f"Continuous column '{feat}' contains non-finite observed values.")
+
     rng = np.random.default_rng(random_state)
     imputed_datasets: list[pd.DataFrame] = []
 
@@ -1140,18 +1157,22 @@ def impute_mice_mixed_datasets(
                     continue
                 obs_mask = ~mis_mask
                 pred_cols = [c for c in cols if c != feat]
-                X_obs = np.column_stack(
-                    [
-                        np.ones(int(obs_mask.sum())),
-                        work.loc[obs_mask, pred_cols].to_numpy(dtype=float),
-                    ]
-                )
-                X_mis = np.column_stack(
-                    [
-                        np.ones(int(mis_mask.sum())),
-                        work.loc[mis_mask, pred_cols].to_numpy(dtype=float),
-                    ]
-                )
+                pred_blocks = [np.ones((len(work), 1), dtype=float)]
+                for pc in pred_cols:
+                    pc_type = target_types.get(pc)
+                    if pc_type == "categorical" and len(cat_mappings.get(pc, [])) > 2:
+                        codes = work[pc].round().astype(int)
+                        for k_idx in range(1, len(cat_mappings[pc])):
+                            pred_blocks.append((codes == k_idx).to_numpy(dtype=float)[:, None])
+                    elif not pd.api.types.is_numeric_dtype(work[pc]):
+                        dummies = pd.get_dummies(work[pc], drop_first=True, dtype=float)
+                        if dummies.shape[1] > 0:
+                            pred_blocks.append(dummies.to_numpy(dtype=float))
+                    else:
+                        pred_blocks.append(work[pc].to_numpy(dtype=float)[:, None])
+                X_all = np.hstack(pred_blocks)
+                X_obs = X_all[obs_mask.to_numpy()]
+                X_mis = X_all[mis_mask.to_numpy()]
                 y_obs = work.loc[obs_mask, feat].to_numpy(dtype=float)
                 ftype = target_types.get(feat, "continuous")
 
@@ -1192,7 +1213,19 @@ def impute_mice_mixed_datasets(
                         fit = sm.MNLogit(y_obs.astype(int), X_obs).fit(
                             disp=False, maxiter=100
                         )
-                        probs_mat = np.asarray(fit.predict(X_mis), dtype=float)
+                        params_mat = np.asarray(fit.params, dtype=float)
+                        cov_b = np.asarray(fit.cov_params(), dtype=float)
+                        if not (np.all(np.isfinite(params_mat)) and np.all(np.isfinite(cov_b))):
+                            raise ValueError("Non-finite MNLogit parameter covariance.")
+                        flat_params = params_mat.ravel(order="F")
+                        drawn_flat = rng.multivariate_normal(
+                            flat_params,
+                            cov_b + np.eye(len(flat_params)) * 1e-6,
+                        )
+                        beta_star = drawn_flat.reshape(params_mat.shape, order="F")
+                        eta = np.clip(X_mis @ beta_star, -30.0, 30.0)
+                        exp_eta = np.column_stack([np.ones(len(X_mis)), np.exp(eta)])
+                        probs_mat = exp_eta / np.sum(exp_eta, axis=1, keepdims=True)
                     except Exception:
                         counts = np.bincount(y_obs.astype(int), minlength=n_cats)
                         p_emp = counts / max(counts.sum(), 1)

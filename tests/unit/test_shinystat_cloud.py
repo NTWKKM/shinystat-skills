@@ -2920,29 +2920,63 @@ def test_ported_cloud_recipes_mixed_mice_ordinal_rcs_gee_meta(recipes):
             {"Stage I", "Stage II", "Stage III"}
         )
 
-    # 2. Recipe 21: Ordinal Logistic & Brant Test
+    # 2. Recipe 21: Ordinal Logistic & Brant Test (parallel vs non-parallel slopes)
     fit_ord = recipes["fit_proportional_odds"]
     brant_fn = recipes["assess_proportional_odds"]
-    x1 = rng.normal(0, 1, size=120)
-    latent = 0.8 * x1 + rng.logistic(0, 1, size=120)
+    fit_mnlogit = recipes["fit_multinomial_logistic"]
+    x1 = rng.normal(0, 1, size=240)
+    latent = 1.0 * x1 + rng.logistic(0, 1, size=240)
     y_ord = np.digitize(latent, bins=[-0.8, 0.8])
-    X_ord = pd.DataFrame({"x1": x1})
-    ord_res = fit_ord(y_ord, X_ord)
+    X_ord = pd.DataFrame({"x1": x1}, index=np.arange(1000, 1240))
+    ord_res = fit_ord(pd.Series(y_ord, index=X_ord.index), X_ord)
     assert ord_res["k_categories"] == 3
     assert ord_res["predictor_df"].loc["x1", "odds_ratio"] > 1.0
-    brant_res = brant_fn(y_ord, X_ord)
-    assert "omnibus" in brant_res
-    assert 0.0 <= brant_res["omnibus"]["p_value"] <= 1.0
+    brant_res = brant_fn(pd.Series(y_ord, index=X_ord.index), X_ord)
+    assert brant_res["omnibus"]["passed"] is True
+    assert brant_res["variables"]["x1"]["passed"] is True
 
-    # 3. Recipe 22: Harrell Restricted Cubic Splines
+    # Non-parallel slopes fixture (strong threshold-specific slope disparity) -> passed == False -> MNLogit fallback
+    n_np = 600
+    x_np = rng.normal(0, 1, n_np)
+    p1 = 1.0 / (1.0 + np.exp(-(0.0 + 2.0 * x_np)))
+    p2 = 1.0 / (1.0 + np.exp(-(1.5 - 1.5 * x_np)))
+    u_np = rng.uniform(0, 1, n_np)
+    y_np = np.where(u_np < p2, 2, np.where(u_np < p1, 1, 0))
+    X_np = pd.DataFrame({"x1": x_np})
+    brant_viol = brant_fn(y_np, X_np)
+    assert brant_viol["omnibus"]["passed"] is False
+    assert brant_viol["variables"]["x1"]["passed"] is False
+    mn_res = fit_mnlogit(y_np, X_np)
+    assert mn_res["converged"] is True
+    assert "params" in mn_res
+
+    # 3. Recipe 22: Harrell Restricted Cubic Splines (Binomial & Cox PH)
     fit_rcs = recipes["fit_rcs_spline_model"]
     x_rcs = rng.uniform(-3, 3, size=150)
     logits = -0.5 + 0.8 * (x_rcs**2)
     y_rcs = rng.binomial(1, 1.0 / (1.0 + np.exp(-logits)))
-    df_rcs = pd.DataFrame({"y": y_rcs, "biomarker": x_rcs})
+    df_rcs = pd.DataFrame(
+        {
+            "y": y_rcs,
+            "biomarker": x_rcs,
+            "time": rng.exponential(scale=np.exp(-0.3 * (x_rcs**2)), size=150) + 0.1,
+            "event": rng.binomial(1, 0.75, size=150),
+        }
+    )
     rcs_res = fit_rcs(df_rcs, outcome_col="y", rcs_var="biomarker", knots=4)
     assert rcs_res["p_nonlinearity"] < 0.05
     assert len(rcs_res["contrast_df"]) == 100
+    rcs_cox = fit_rcs(
+        df_rcs,
+        outcome_col="time",
+        rcs_var="biomarker",
+        knots=4,
+        family="cox",
+        event_col="event",
+    )
+    assert rcs_cox["family"] == "cox"
+    assert rcs_cox["effect_label"] == "Hazard Ratio"
+    assert np.all(rcs_cox["contrast_df"]["estimate"] > 0)
 
     # 4. Recipe 23: Clustered GEE & Design Effect (DEFF)
     fit_gee = recipes["fit_gee"]
@@ -2955,20 +2989,76 @@ def test_ported_cloud_recipes_mixed_mice_ordinal_rcs_gee_meta(recipes):
     assert gee_res["design_effect"] >= 1.0
     assert "odds_ratio" in gee_res["summary_df"].columns
 
-    # 5. Recipe 24: DerSimonian-Laird Meta-Analysis
+    # 5. Recipe 24: DerSimonian-Laird Meta-Analysis (Binary & Continuous vs analytical reference)
+    from medstat.meta.models import run_meta_analysis as medstat_run_meta
+
     comp_bin = recipes["compute_binary_effect_sizes"]
+    comp_cont = recipes["compute_continuous_effect_sizes"]
     run_meta = recipes["run_meta_analysis"]
     df_studies = pd.DataFrame(
         {
             "study": ["Trial 1", "Trial 2", "Trial 3", "Trial 4"],
-            "ev_t": [12, 18, 9, 22],
+            "ev_t": [6, 28, 8, 35],
             "n_t": [100, 120, 80, 150],
-            "ev_c": [24, 30, 18, 38],
+            "ev_c": [26, 22, 24, 30],
             "n_c": [100, 120, 80, 150],
         }
     )
     es_df = comp_bin(df_studies, "ev_t", "n_t", "ev_c", "n_c", "study", "OR")
+    # Verify exact analytical log(OR) and SE for Trial 1: a=6, b=94, c=26, d=74
+    exp_log_or_0 = np.log((6 * 74) / (94 * 26))
+    exp_se_0 = np.sqrt(1 / 6 + 1 / 94 + 1 / 26 + 1 / 74)
+    assert np.isclose(es_df.loc[0, "log_effect"], exp_log_or_0, atol=1e-10)
+    assert np.isclose(es_df.loc[0, "se"], exp_se_0, atol=1e-10)
+
     meta_res = run_meta(es_df, use_hksj=True)
+    ref_res = medstat_run_meta(es_df, use_hksj=True)
     assert meta_res["k"] == 4
-    assert meta_res["random_effects"]["effect_disp"] < 1.0
-    assert meta_res["heterogeneity"]["I2"] >= 0.0
+    assert meta_res["heterogeneity"]["tau2"] > 0.0
+    assert np.isclose(
+        meta_res["fixed_effect"]["log_effect"],
+        ref_res["fixed_effect"]["log_effect"],
+        atol=1e-10,
+    )
+    assert np.isclose(
+        meta_res["random_effects"]["log_effect"],
+        ref_res["random_effects"]["log_effect"],
+        atol=1e-10,
+    )
+    assert np.isclose(
+        meta_res["random_effects"]["ci_lower"],
+        ref_res["random_effects"]["ci_lower"],
+        atol=1e-10,
+    )
+    assert np.isclose(
+        meta_res["random_effects"]["ci_upper"],
+        ref_res["random_effects"]["ci_upper"],
+        atol=1e-10,
+    )
+    assert np.isclose(
+        meta_res["heterogeneity"]["tau2"], ref_res["heterogeneity"]["tau2"], atol=1e-10
+    )
+    assert np.isclose(
+        meta_res["heterogeneity"]["Q"], ref_res["heterogeneity"]["Q"], atol=1e-10
+    )
+    assert np.isclose(
+        meta_res["heterogeneity"]["I2"], ref_res["heterogeneity"]["I2"], atol=1e-10
+    )
+    assert "H2" in meta_res["heterogeneity"]
+    assert len(meta_res["leave_one_out"]) == 4
+
+    df_cont = pd.DataFrame(
+        {
+            "study": ["S1", "S2", "S3"],
+            "m1": [-5.2, -4.8, -6.1],
+            "sd1": [2.1, 2.0, 2.3],
+            "n1": [60, 75, 50],
+            "m0": [-2.1, -1.9, -2.5],
+            "sd0": [2.0, 2.2, 2.1],
+            "n0": [60, 75, 50],
+        }
+    )
+    es_md = comp_cont(df_cont, "m1", "sd1", "n1", "m0", "sd0", "n0", "study", "MD")
+    meta_md = run_meta(es_md, use_hksj=False)
+    assert np.isclose(es_md.loc[0, "effect_size"], -3.1, atol=1e-10)
+    assert meta_md["random_effects"]["effect_disp"] < 0.0

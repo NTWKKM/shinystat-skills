@@ -453,7 +453,9 @@ def fit_proportional_odds(
         )
 
     if isinstance(X, pd.DataFrame):
-        X_df = X.loc[y_series.index].copy()
+        if len(X) != len(y_raw):
+            raise ValueError("Length mismatch between y and X.")
+        X_df = X.iloc[valid_mask].copy()
         var_names = list(X_df.columns)
     else:
         X_mat = np.asarray(X)
@@ -463,6 +465,9 @@ def fit_proportional_odds(
             X_mat = X_mat[valid_mask]
         var_names = [f"x{i}" for i in range(X_mat.shape[1])]
         X_df = pd.DataFrame(X_mat, index=y_series.index, columns=var_names)
+
+    if not np.all(np.isfinite(X_df.to_numpy(dtype=float))):
+        raise ValueError("Missing or non-finite values detected in covariates X.")
 
     model = OrderedModel(y_series, X_df, distr=distr)
     result = model.fit(method=method, maxiter=maxiter, disp=False)
@@ -507,6 +512,7 @@ def fit_proportional_odds(
 
     return {
         "model": result,
+        "converged": bool(result.mle_retvals.get("converged", True)),
         "summary_df": summary_df,
         "predictor_df": predictor_df,
         "cutpoints": cutpoints,
@@ -537,9 +543,13 @@ def assess_proportional_odds(
         raise ValueError("Brant test requires an ordinal outcome with >= 3 categories.")
 
     if isinstance(X, pd.DataFrame):
-        X_df = X.loc[y_series.index].copy()
+        if len(X) != len(y_raw):
+            raise ValueError("Length mismatch between y and X.")
+        X_df = X.iloc[valid_mask].copy()
     else:
         X_mat = np.asarray(X)
+        if len(X_mat) != len(y_raw):
+            raise ValueError("Length mismatch between y and X.")
         if len(y_series) < len(y_raw):
             X_mat = X_mat[valid_mask]
         X_df = pd.DataFrame(
@@ -547,6 +557,9 @@ def assess_proportional_odds(
             index=y_series.index,
             columns=[f"x{i}" for i in range(X_mat.shape[1])],
         )
+
+    if not np.all(np.isfinite(X_df.to_numpy(dtype=float))):
+        raise ValueError("Missing or non-finite values detected in covariates X.")
 
     p_covars = X_df.shape[1]
     var_names = list(X_df.columns)
@@ -639,17 +652,22 @@ def fit_multinomial_logistic(
 ) -> dict[str, Any]:
     """Fit unconstrained multinomial logit fallback when proportional odds is rejected."""
     y_raw = pd.Series(y)
+    if len(X) != len(y_raw):
+        raise ValueError("Length mismatch between y and X.")
     valid_mask = y_raw.notna().to_numpy()
     y_series = y_raw[valid_mask]
     X_df = (
-        X.loc[y_series.index].copy()
+        X.iloc[valid_mask].copy()
         if isinstance(X, pd.DataFrame)
         else pd.DataFrame(np.asarray(X)[valid_mask], index=y_series.index)
     )
+    if not np.all(np.isfinite(X_df.to_numpy(dtype=float))):
+        raise ValueError("Missing or non-finite values detected in covariates X.")
     X_mat = sm.add_constant(X_df).to_numpy(dtype=float) if add_constant else X_df.to_numpy(dtype=float)
     res = sm.MNLogit(y_series.to_numpy(), X_mat).fit(maxiter=maxiter, disp=False)
     return {
         "model": res,
+        "converged": bool(res.mle_retvals.get("converged", True)),
         "log_likelihood": float(res.llf),
         "aic": float(res.aic),
         "bic": float(res.bic),
@@ -728,18 +746,33 @@ def fit_rcs_spline_model(
     rcs_var: str,
     adjust_cols: list[str] | None = None,
     knots: int = 4,
-    family: Literal["binomial", "gaussian"] = "binomial",
+    family: Literal["binomial", "gaussian", "cox"] = "binomial",
+    event_col: str | None = None,
     ref_value: float | None = None,
     n_grid: int = 100,
 ) -> dict[str, Any]:
-    """Fit Harrell RCS model, test non-linearity via LRT, and compute dose-response contrast curve."""
-    adjust = [c for c in (adjust_cols or []) if c not in {outcome_col, rcs_var}]
-    clean = df[[outcome_col, rcs_var] + adjust].dropna().copy()
+    """Fit Harrell RCS model (binomial, gaussian, or cox), test non-linearity via LRT, and compute dose-response contrast curve."""
+    fam_str = str(family).lower()
+    if fam_str not in {"binomial", "gaussian", "cox"}:
+        raise ValueError(
+            f"Unsupported family '{family}'. Choose 'binomial', 'gaussian', or 'cox'."
+        )
+    if fam_str == "cox" and not event_col:
+        raise ValueError("event_col is required when family='cox' (outcome_col is duration).")
+
+    req_cols = [outcome_col, rcs_var] + ([event_col] if event_col else [])
+    adjust = [c for c in (adjust_cols or []) if c not in set(req_cols)]
+    clean = df[req_cols + adjust].dropna().copy()
     if len(clean) < 15:
         raise ValueError("Insufficient complete observations for RCS model (need >= 15).")
 
     x_vals = clean[rcs_var].to_numpy(dtype=float)
     y_vals = clean[outcome_col].to_numpy(dtype=float)
+    if not (np.all(np.isfinite(x_vals)) and np.all(np.isfinite(y_vals))):
+        raise ValueError("Non-finite values detected in outcome_col or rcs_var.")
+    if fam_str == "binomial" and not set(np.unique(y_vals)).issubset({0.0, 1.0}):
+        raise ValueError("Binary outcome for binomial RCS must be strictly encoded as {0, 1}.")
+
     basis_mat, knot_vals = build_harrell_rcs_basis(x_vals, knots=knots)
     n_spline_cols = basis_mat.shape[1]
     spline_names = [f"{rcs_var}_rcs{i}" for i in range(n_spline_cols)]
@@ -748,24 +781,49 @@ def fit_rcs_spline_model(
     X_lin_df = pd.DataFrame({f"{rcs_var}_rcs0": x_vals}, index=clean.index)
     if adjust:
         for c in adjust:
-            X_spline_df[c] = clean[c].astype(float)
-            X_lin_df[c] = clean[c].astype(float)
+            col_arr = clean[c].to_numpy(dtype=float)
+            if not np.all(np.isfinite(col_arr)):
+                raise ValueError(f"Non-finite values detected in covariate '{c}'.")
+            X_spline_df[c] = col_arr
+            X_lin_df[c] = col_arr
 
-    X_full = sm.add_constant(X_spline_df)
-    X_lin = sm.add_constant(X_lin_df)
-    fam = sm.families.Binomial() if family == "binomial" else sm.families.Gaussian()
+    if fam_str == "cox":
+        from lifelines import CoxPHFitter
 
-    res_full = sm.GLM(y_vals, X_full, family=fam).fit()
-    res_lin = sm.GLM(y_vals, X_lin, family=fam).fit()
+        ev_vals = clean[event_col].to_numpy(dtype=float)
+        if not set(np.unique(ev_vals)).issubset({0.0, 1.0}):
+            raise ValueError("Cox event_col must be strictly encoded as {0, 1}.")
+        if np.any(y_vals <= 0):
+            raise ValueError("Cox survival durations in outcome_col must be > 0.")
 
-    # Likelihood Ratio Test for non-linearity (comparing full k-1 spline terms vs linear term)
-    lr_nonlin = max(0.0, float(2.0 * (res_full.llf - res_lin.llf)))
+        df_full_cox = X_spline_df.copy()
+        df_full_cox["_dur"] = y_vals
+        df_full_cox["_ev"] = ev_vals
+        df_lin_cox = X_lin_df.copy()
+        df_lin_cox["_dur"] = y_vals
+        df_lin_cox["_ev"] = ev_vals
+
+        cph_full = CoxPHFitter().fit(df_full_cox, duration_col="_dur", event_col="_ev")
+        cph_lin = CoxPHFitter().fit(df_lin_cox, duration_col="_dur", event_col="_ev")
+        lr_nonlin = max(0.0, float(2.0 * (cph_full.log_likelihood_ - cph_lin.log_likelihood_)))
+        b_spline = cph_full.params_.loc[spline_names].to_numpy(dtype=float)
+        cov_spline = cph_full.variance_matrix_.loc[spline_names, spline_names].to_numpy(dtype=float)
+        res_full = cph_full
+        aic_val = float(cph_full.AIC_partial_)
+    else:
+        X_full = sm.add_constant(X_spline_df)
+        X_lin = sm.add_constant(X_lin_df)
+        fam = sm.families.Binomial() if fam_str == "binomial" else sm.families.Gaussian()
+
+        res_full = sm.GLM(y_vals, X_full, family=fam).fit()
+        res_lin = sm.GLM(y_vals, X_lin, family=fam).fit()
+        lr_nonlin = max(0.0, float(2.0 * (res_full.llf - res_lin.llf)))
+        b_spline = res_full.params[spline_names].to_numpy(dtype=float)
+        cov_spline = res_full.cov_params().loc[spline_names, spline_names].to_numpy(dtype=float)
+        aic_val = float(res_full.aic)
+
     df_nonlin = max(1, n_spline_cols - 1)
     p_nonlinearity = float(stats.chi2.sf(lr_nonlin, df=df_nonlin))
-
-    # Wald test for overall association of all spline terms
-    b_spline = res_full.params[spline_names].to_numpy(dtype=float)
-    cov_spline = res_full.cov_params().loc[spline_names, spline_names].to_numpy(dtype=float)
     wald_overall = float(b_spline.T @ np.linalg.pinv(cov_spline) @ b_spline)
     p_overall = float(stats.chi2.sf(wald_overall, df=n_spline_cols))
 
@@ -781,7 +839,7 @@ def fit_rcs_spline_model(
     var_contrast = np.sum((diff_basis @ cov_spline) * diff_basis, axis=1)
     se_contrast = np.sqrt(np.maximum(0.0, var_contrast))
 
-    is_ratio = family == "binomial"
+    is_ratio = fam_str in {"binomial", "cox"}
     est = np.exp(log_contrast) if is_ratio else log_contrast
     ci_low = (
         np.exp(log_contrast - 1.96 * se_contrast)
@@ -807,6 +865,13 @@ def fit_rcs_spline_model(
 
     return {
         "model": res_full,
+        "converged": bool(getattr(res_full, "converged", True)),
+        "family": fam_str,
+        "effect_label": (
+            "Hazard Ratio"
+            if fam_str == "cox"
+            else ("Odds Ratio" if fam_str == "binomial" else "Mean Difference")
+        ),
         "knots": knot_vals.tolist(),
         "ref_value": float(ref_value),
         "p_overall": p_overall,
@@ -814,7 +879,7 @@ def fit_rcs_spline_model(
         "lr_nonlinearity": lr_nonlin,
         "df_nonlinearity": df_nonlin,
         "contrast_df": contrast_df,
-        "aic": float(res_full.aic),
+        "aic": aic_val,
     }
 ```
 
@@ -903,25 +968,54 @@ def fit_gee(
     """Fit population-averaged GEE with sandwich SEs (bias-reduced when n_clusters < 40)."""
     y_s = pd.Series(y)
     c_s = pd.Series(cluster_ids)
-    valid = ~(y_s.isna() | c_s.isna())
-    y_clean = y_s[valid].to_numpy(dtype=float)
-    c_clean = c_s[valid].to_numpy()
+    if len(c_s) != len(y_s):
+        raise ValueError("Length mismatch between y and cluster_ids.")
 
     if isinstance(X, pd.DataFrame):
-        X_df = X.loc[y_s[valid].index].copy()
-        var_names = list(X_df.columns)
-        X_mat = X_df.to_numpy(dtype=float)
+        if len(X) != len(y_s):
+            raise ValueError("Length mismatch between y and X.")
+        var_names = list(X.columns)
+        X_raw_mat = X.to_numpy(dtype=float)
     else:
-        X_mat = np.asarray(X, dtype=float)[valid.to_numpy()]
-        var_names = [f"x{i}" for i in range(X_mat.shape[1])]
+        X_raw_mat = np.asarray(X, dtype=float)
+        if X_raw_mat.ndim == 1:
+            X_raw_mat = X_raw_mat[:, None]
+        if len(X_raw_mat) != len(y_s):
+            raise ValueError("Length mismatch between y and X.")
+        var_names = [f"x{i}" for i in range(X_raw_mat.shape[1])]
+
+    valid_mask = (
+        y_s.notna().to_numpy()
+        & c_s.notna().to_numpy()
+        & np.all(np.isfinite(X_raw_mat), axis=1)
+    )
+    t_raw = None
+    if time is not None:
+        t_raw = np.asarray(time, dtype=float).ravel()
+        if len(t_raw) != len(y_s):
+            raise ValueError("Length mismatch between y and time.")
+        valid_mask = valid_mask & np.isfinite(t_raw)
+
+    y_clean = y_s.to_numpy(dtype=float)[valid_mask]
+    if not np.all(np.isfinite(y_clean)):
+        raise ValueError("Outcome y contains non-finite values.")
+    c_clean = c_s.to_numpy()[valid_mask]
+    X_mat = X_raw_mat[valid_mask]
+
+    fam_str = str(family).lower()
+    if fam_str not in {"binomial", "gaussian"}:
+        raise ValueError(f"Unsupported GEE family '{family}'. Choose 'binomial' or 'gaussian'.")
+    is_binary = fam_str == "binomial"
+    if is_binary and not set(np.unique(y_clean)).issubset({0.0, 1.0}):
+        raise ValueError("GEE binomial outcome must be strictly encoded as {0, 1}.")
 
     if add_constant:
         X_mat = sm.add_constant(X_mat)
         var_names = ["const"] + var_names
 
     t_clean = None
-    if time is not None:
-        t_clean = np.asarray(time, dtype=float)[valid.to_numpy()]
+    if t_raw is not None:
+        t_clean = t_raw[valid_mask]
         order = np.lexsort((t_clean, c_clean))
         t_clean = t_clean[order]
     else:
@@ -937,8 +1031,7 @@ def fit_gee(
         "autoregressive": lambda: Autoregressive(grid=True),
     }
     struct = struct_map[str(cov_struct).lower()]()
-    fam = Binomial() if str(family).lower() == "binomial" else Gaussian()
-    is_binary = str(family).lower() == "binomial"
+    fam = Binomial() if is_binary else Gaussian()
 
     n_clusters = len(np.unique(c_clean))
     cov_type = "bias_reduced" if n_clusters < 40 else "robust"
