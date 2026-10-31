@@ -1484,27 +1484,52 @@ def verify_standalone_integrity(
         re.IGNORECASE,
     )
 
-    def _flatten_p_vals(d):
+    def _detect_p_qual(key_str):
+        k_lower = key_str.lower()
+        if "interaction" in k_lower:
+            return "interaction"
+        if "trend" in k_lower:
+            return "trend"
+        if "non" in k_lower and "linear" in k_lower:
+            return "nonlinear"
+        if "omnibus" in k_lower:
+            return "omnibus"
+        if "lrt" in k_lower:
+            return "lrt"
+        if "wald" in k_lower:
+            return "wald"
+        return None
+
+    def _extract_qualified_p_vals(d, parent_qual=None):
         pvals = []
         if isinstance(d, dict):
             for k, v in d.items():
-                if p_key_re.match(str(k)):
-                    pvals.extend(n for n in _flatten_nums(v) if 0.0 <= n <= 1.0)
+                k_str = str(k)
+                k_qual = _detect_p_qual(k_str) or parent_qual
+                if p_key_re.match(k_str):
+                    if isinstance(v, dict):
+                        pvals.extend(_extract_qualified_p_vals(v, parent_qual=k_qual))
+                    elif isinstance(v, pd.DataFrame):
+                        pvals.extend(_extract_qualified_p_vals(v, parent_qual=k_qual))
+                    else:
+                        pvals.extend((k_qual, n) for n in _flatten_nums(v) if 0.0 <= n <= 1.0)
                 else:
-                    pvals.extend(_flatten_p_vals(v))
+                    pvals.extend(_extract_qualified_p_vals(v, parent_qual=k_qual))
         elif isinstance(d, (list, tuple, set)):
             for item in d:
-                pvals.extend(_flatten_p_vals(item))
+                pvals.extend(_extract_qualified_p_vals(item, parent_qual=parent_qual))
         elif isinstance(d, pd.DataFrame):
             for col in d.columns:
-                if p_key_re.match(str(col)):
-                    pvals.extend(n for n in _flatten_nums(d[col]) if 0.0 <= n <= 1.0)
+                col_str = str(col)
+                col_qual = _detect_p_qual(col_str) or parent_qual
+                if p_key_re.match(col_str):
+                    pvals.extend((col_qual, n) for n in _flatten_nums(d[col]) if 0.0 <= n <= 1.0)
         return pvals
 
     known_nums = _flatten_nums(results_dict)
-    known_p_vals = _flatten_p_vals(results_dict)
-    if not known_p_vals:
-        known_p_vals = [kn for kn in known_nums if 0.0 <= kn <= 1.0]
+    qualified_p_vals = _extract_qualified_p_vals(results_dict)
+    if not qualified_p_vals:
+        qualified_p_vals = [(None, kn) for kn in known_nums if 0.0 <= kn <= 1.0]
     allowed_list = (
         [float(x) for x in allowed_untraced] if allowed_untraced is not None else []
     )
@@ -1558,20 +1583,33 @@ def verify_standalone_integrity(
             r"\bp\s*(?:[-_\s]*value\s*)?([<>]=?|[≤≥])\s*$", window_before, re.IGNORECASE
         )
         p_val = val / 100.0 if has_pct else val
+        p_inequality = None
+        p_qualifier = None
         if 0.0 < p_val <= 1.0 and not is_alpha_cutoff and p_ineq_match:
             raw_op = p_ineq_match.group(1)
             p_inequality = "<=" if raw_op == "≤" else (">=" if raw_op == "≥" else raw_op)
-        else:
-            p_inequality = None
+            window_context = f"{window_before} {raw_str} {window_after}"
+            p_qualifier = _detect_p_qual(window_context)
         if p_inequality is not None:
-            if p_inequality == "<":
-                matched = any(0.0 <= pv < p_val for pv in known_p_vals)
+            if p_qualifier is not None:
+                candidate_pvals = [
+                    pv for qual, pv in qualified_p_vals if qual == p_qualifier
+                ]
+            else:
+                candidate_pvals = [
+                    pv for qual, pv in qualified_p_vals if qual is None
+                ]
+
+            if not candidate_pvals:
+                matched = False
+            elif p_inequality == "<":
+                matched = any(0.0 <= pv < p_val for pv in candidate_pvals)
             elif p_inequality == "<=":
-                matched = any(0.0 <= pv <= p_val for pv in known_p_vals)
+                matched = any(0.0 <= pv <= p_val for pv in candidate_pvals)
             elif p_inequality == ">":
-                matched = any(p_val < pv <= 1.0 for pv in known_p_vals)
+                matched = any(p_val < pv <= 1.0 for pv in candidate_pvals)
             elif p_inequality == ">=":
-                matched = any(p_val <= pv <= 1.0 for pv in known_p_vals)
+                matched = any(p_val <= pv <= 1.0 for pv in candidate_pvals)
             else:
                 matched = False
             if not matched:

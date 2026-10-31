@@ -90,27 +90,72 @@ _P_KEY_RE = re.compile(
 )
 
 
-def _flatten_p_values(val: Any) -> list[float]:
-    """Recursively extracts numeric p-values from dictionary keys or DataFrame columns."""
-    pvals: list[float] = []
+def _detect_p_qualifier(key_str: str) -> str | None:
+    """Infers specialized p-value qualifier from key or context string."""
+    k_lower = key_str.lower()
+    if "interaction" in k_lower:
+        return "interaction"
+    if "trend" in k_lower:
+        return "trend"
+    if "non" in k_lower and "linear" in k_lower:
+        return "nonlinear"
+    if "omnibus" in k_lower:
+        return "omnibus"
+    if "lrt" in k_lower:
+        return "lrt"
+    if "wald" in k_lower:
+        return "wald"
+    return None
+
+
+def _extract_qualified_p_values(
+    val: Any, parent_qualifier: str | None = None
+) -> list[tuple[str | None, float]]:
+    """Recursively extracts (qualifier, p_value) pairs from dictionary keys or DataFrame columns.
+
+    For dictionary-valued records, recurses into their p-value fields instead of passing
+    the entire record to _flatten_numbers, ensuring non-p-value fields (e.g. estimates,
+    test statistics) are not treated as p-values.
+    """
+    pvals: list[tuple[str | None, float]] = []
     if isinstance(val, dict):
         for k, v in val.items():
-            if _P_KEY_RE.match(str(k)):
-                for n in _flatten_numbers(v):
-                    if 0.0 <= n <= 1.0:
-                        pvals.append(float(n))
+            k_str = str(k)
+            k_qual = _detect_p_qualifier(k_str) or parent_qualifier
+            if _P_KEY_RE.match(k_str):
+                if isinstance(v, dict):
+                    pvals.extend(
+                        _extract_qualified_p_values(v, parent_qualifier=k_qual)
+                    )
+                elif isinstance(v, pd.DataFrame):
+                    pvals.extend(
+                        _extract_qualified_p_values(v, parent_qualifier=k_qual)
+                    )
+                else:
+                    for n in _flatten_numbers(v):
+                        if 0.0 <= n <= 1.0:
+                            pvals.append((k_qual, float(n)))
             else:
-                pvals.extend(_flatten_p_values(v))
+                pvals.extend(_extract_qualified_p_values(v, parent_qualifier=k_qual))
     elif isinstance(val, (list, tuple, set)):
         for item in val:
-            pvals.extend(_flatten_p_values(item))
+            pvals.extend(
+                _extract_qualified_p_values(item, parent_qualifier=parent_qualifier)
+            )
     elif isinstance(val, pd.DataFrame):
         for col in val.columns:
-            if _P_KEY_RE.match(str(col)):
+            col_str = str(col)
+            col_qual = _detect_p_qualifier(col_str) or parent_qualifier
+            if _P_KEY_RE.match(col_str):
                 for n in _flatten_numbers(val[col]):
                     if 0.0 <= n <= 1.0:
-                        pvals.append(float(n))
+                        pvals.append((col_qual, float(n)))
     return pvals
+
+
+def _flatten_p_values(val: Any) -> list[float]:
+    """Recursively extracts numeric p-values from dictionary keys or DataFrame columns."""
+    return [pv for _, pv in _extract_qualified_p_values(val)]
 
 
 _MONTHS_PATTERN = r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
@@ -164,6 +209,7 @@ class TextToken(NamedTuple):
     is_structural: bool
     is_p_floor: bool = False
     p_inequality: str | None = None
+    p_qualifier: str | None = None
 
 
 def _is_structural_context(
@@ -347,11 +393,14 @@ def _extract_text_tokens(text: str) -> list[TextToken]:
         )
         p_val = val / 100.0 if has_pct else val
         p_inequality: str | None = None
+        p_qualifier: str | None = None
         if 0.0 < p_val <= 1.0 and not is_structural and p_ineq_match:
             raw_op = p_ineq_match.group(1)
             p_inequality = (
                 "<=" if raw_op == "≤" else (">=" if raw_op == "≥" else raw_op)
             )
+            window_context = f"{window_before} {raw_num} {window_after}"
+            p_qualifier = _detect_p_qualifier(window_context)
 
         is_p_floor = bool(p_inequality in ("<", "<="))
         tokens.append(
@@ -362,6 +411,7 @@ def _extract_text_tokens(text: str) -> list[TextToken]:
                 is_structural=is_structural,
                 is_p_floor=is_p_floor,
                 p_inequality=p_inequality,
+                p_qualifier=p_qualifier,
             )
         )
     return tokens
@@ -431,9 +481,9 @@ def verify_report_integrity(
 
     # 2. Numerical Traceability
     known_numbers = _flatten_numbers(doc.results_dict)
-    known_p_values = _flatten_p_values(doc.results_dict)
-    if not known_p_values:
-        known_p_values = [kn for kn in known_numbers if 0.0 <= kn <= 1.0]
+    qualified_p_values = _extract_qualified_p_values(doc.results_dict)
+    if not qualified_p_values:
+        qualified_p_values = [(None, kn) for kn in known_numbers if 0.0 <= kn <= 1.0]
     allowed_list = (
         [float(x) for x in allowed_untraced] if allowed_untraced is not None else []
     )
@@ -446,27 +496,36 @@ def verify_report_integrity(
         has_pct = token.has_pct
         is_structural = token.is_structural
         is_p_floor = token.is_p_floor
-
         p_inequality = getattr(token, "p_inequality", None)
-        if p_inequality is not None:
+        token_qual = getattr(token, "p_qualifier", None)
+
+        if p_inequality is not None or is_p_floor:
             p_bound = tn / 100.0 if has_pct else tn
-            if p_inequality == "<":
-                matched = any(0.0 <= pv < p_bound for pv in known_p_values)
-            elif p_inequality == "<=":
-                matched = any(0.0 <= pv <= p_bound for pv in known_p_values)
-            elif p_inequality == ">":
-                matched = any(p_bound < pv <= 1.0 for pv in known_p_values)
-            elif p_inequality == ">=":
-                matched = any(p_bound <= pv <= 1.0 for pv in known_p_values)
+            op = p_inequality if p_inequality is not None else "<"
+
+            # Filter candidate p-values to preserve association between claim and its relevant p-value
+            if token_qual is not None:
+                candidate_pvals = [
+                    pv for qual, pv in qualified_p_values if qual == token_qual
+                ]
+            else:
+                candidate_pvals = [
+                    pv for qual, pv in qualified_p_values if qual is None
+                ]
+
+            if not candidate_pvals:
+                matched = False
+            elif op == "<":
+                matched = any(0.0 <= pv < p_bound for pv in candidate_pvals)
+            elif op == "<=":
+                matched = any(0.0 <= pv <= p_bound for pv in candidate_pvals)
+            elif op == ">":
+                matched = any(p_bound < pv <= 1.0 for pv in candidate_pvals)
+            elif op == ">=":
+                matched = any(p_bound <= pv <= 1.0 for pv in candidate_pvals)
             else:
                 matched = False
-            if not matched and not is_structural:
-                untraced.append(tn)
-            continue
 
-        if is_p_floor:
-            p_bound = tn / 100.0 if has_pct else tn
-            matched = any(0.0 <= pv < p_bound for pv in known_p_values)
             if not matched and not is_structural:
                 untraced.append(tn)
             continue

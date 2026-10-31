@@ -423,11 +423,18 @@ def plot_standalone_love(
             if cand in work.columns:
                 adj_col = cand
                 break
+    if unadj_col not in work.columns or adj_col not in work.columns:
+        raise KeyError(
+            f"Balance DataFrame missing required SMD columns: '{unadj_col}' or '{adj_col}'"
+        )
+    smd_values = work[[unadj_col, adj_col]].apply(pd.to_numeric, errors="coerce")
+    if not np.isfinite(smd_values.to_numpy(dtype=float)).all():
+        raise ValueError("SMD columns must contain only finite numeric values.")
     y = np.arange(len(work))
     fig, ax = plt.subplots(figsize=(6.5, max(3.2, 0.4 * len(work) + 1.2)), dpi=300)
     ax.axvline(0.10, color="#BC3C29", ls="--", lw=1.2, label="Threshold (|SMD| = 0.10)")
-    ax.plot(np.abs(work[unadj_col]), y, "o", color="#64748B", label="Unadjusted")
-    ax.plot(np.abs(work[adj_col]), y, "s", color="#0072B5", label="Adjusted")
+    ax.plot(np.abs(smd_values[unadj_col]), y, "o", color="#64748B", label="Unadjusted")
+    ax.plot(np.abs(smd_values[adj_col]), y, "s", color="#0072B5", label="Adjusted")
     ax.set_yticks(y)
     ax.set_yticklabels(work[var_col].astype(str))
     ax.spines["top"].set_visible(False)

@@ -3664,3 +3664,85 @@ def test_cloud_figures_templates_validation_and_safety(tmp_path):
         out_path=str(tmp_path / "rcs_gauss.png"),
     )
     assert Path(rcs_gauss).exists()
+
+    # 6. Love plot finite SMD validation and dict unwrapping
+    plot_love = ns["plot_standalone_love"]
+    balance_valid = pd.DataFrame(
+        {
+            "Variable": ["Age", "Sex", "BMI"],
+            "Pre-Match SMD": [0.25, 0.15, 0.30],
+            "Post-Match SMD": [0.05, 0.02, 0.08],
+        }
+    )
+    love_out = plot_love(balance_valid, out_path=str(tmp_path / "love.png"))
+    assert Path(love_out).exists()
+
+    # Dict unwrapping from match_propensity_scores
+    love_dict_out = plot_love(
+        {"balance_df": balance_valid}, out_path=str(tmp_path / "love_dict.png")
+    )
+    assert Path(love_dict_out).exists()
+
+    # Reject non-finite SMD values
+    balance_nan = pd.DataFrame(
+        {
+            "Variable": ["Age", "Sex"],
+            "Pre-Match SMD": [0.25, np.nan],
+            "Post-Match SMD": [0.05, 0.02],
+        }
+    )
+    with pytest.raises(
+        ValueError, match="SMD columns must contain only finite numeric values"
+    ):
+        plot_love(balance_nan)
+
+
+def test_cloud_standalone_qualified_p_values_and_dict_records_parity():
+    """Verifies that verify_standalone_integrity mirrors verify_report_integrity for qualified p-values and dict records."""
+    ns = _extract_report_builder_namespace()
+    verify_standalone = ns["verify_standalone_integrity"]
+
+    # 1. Primary claim fails when primary p is non-significant, even if p_interaction is significant
+    res_split = {"p": 0.2, "p_interaction": 0.01}
+    doc_primary = ReportDocument(title="Primary Claim", results_dict=res_split)
+    narrative_primary = "Primary outcome was statistically significant (P < 0.05)."
+    doc_primary.add_paragraph(narrative_primary)
+    ir_p = verify_report_integrity(doc_primary)
+    sa_p = verify_standalone(narrative_primary, results_dict=res_split)
+    assert ir_p.passed is False
+    assert sa_p["passed"] is False
+    assert ir_p.untraced_numbers == sa_p["untraced_numbers"] == [0.05]
+
+    # 2. Interaction claim passes when p_interaction satisfies the bound
+    narrative_interaction = (
+        "Treatment by subgroup interaction was significant (interaction P < 0.05)."
+    )
+    doc_interaction = ReportDocument(title="Interaction Claim", results_dict=res_split)
+    doc_interaction.add_paragraph(narrative_interaction)
+    ir_i = verify_report_integrity(doc_interaction)
+    sa_i = verify_standalone(narrative_interaction, results_dict=res_split)
+    assert ir_i.passed is True
+    assert sa_i["passed"] is True
+    assert ir_i.untraced_numbers == sa_i["untraced_numbers"] == []
+
+    # 3. Dict-valued record: {"p_interaction": {"estimate": 0.01, "p_value": 0.2}}
+    # The estimate (0.01) must NOT be extracted as a p-value to satisfy P < 0.05
+    res_dict_rec = {"p_interaction": {"estimate": 0.01, "p_value": 0.2}}
+    narrative_dict_fail = "Interaction was significant (interaction P < 0.05)."
+    doc_dfail = ReportDocument(title="Dict Record Fail", results_dict=res_dict_rec)
+    doc_dfail.add_paragraph(narrative_dict_fail)
+    ir_dfail = verify_report_integrity(doc_dfail)
+    sa_dfail = verify_standalone(narrative_dict_fail, results_dict=res_dict_rec)
+    assert ir_dfail.passed is False
+    assert sa_dfail["passed"] is False
+    assert ir_dfail.untraced_numbers == sa_dfail["untraced_numbers"] == [0.05]
+
+    # But satisfies bound matching true p_value=0.2 (interaction P < 0.30)
+    narrative_dict_pass = "Interaction was evaluated (interaction P < 0.30)."
+    doc_dpass = ReportDocument(title="Dict Record Pass", results_dict=res_dict_rec)
+    doc_dpass.add_paragraph(narrative_dict_pass)
+    ir_dpass = verify_report_integrity(doc_dpass)
+    sa_dpass = verify_standalone(narrative_dict_pass, results_dict=res_dict_rec)
+    assert ir_dpass.passed is True
+    assert sa_dpass["passed"] is True
+    assert ir_dpass.untraced_numbers == sa_dpass["untraced_numbers"] == []

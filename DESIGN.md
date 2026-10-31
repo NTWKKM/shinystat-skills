@@ -1916,6 +1916,7 @@ Enforce a uniform, mathematically sound matching rule across both `src/medstat/r
 4. **Whitelist Precision Synchronization**: Audit `allowed_untraced` using the exact same half-unit precision tolerance instead of relative tolerance.
 5. **Bibliographic Regex Hardening**: Require a mandatory dot on page markers (`pp?\.`), eliminating collisions between p-value notation (`P=...`) and publication year exemptions.
 6. **Inequality Parity**: Mirror inequality evaluation (`<, <=, >, >=`) between `verify_report_integrity` and `verify_standalone_integrity`.
+7. **P-Value Context Qualification & Record Recursion**: Infer p-value qualifiers (`interaction`, `trend`, `nonlinear`, `omnibus`, `lrt`, `wald`) from context and bind claims strictly to relevant p-values, preventing subgroup or interaction p-values from falsely satisfying primary outcome claims. Recurse into dictionary-valued records to extract only actual p-value fields, preventing effect estimates or sample sizes from being treated as p-values.
 
 ### Consequences
 - **Status**: Accepted & Fully Verified.

@@ -672,3 +672,47 @@ def test_integrity_gate_tolerance_mutations():
                 f"Mutation {token_str} -> {mutated_val} unexpectedly passed audit! "
                 f"Narrative: '{mutated_narrative}', Untraced: {audit.untraced_numbers}"
             )
+
+
+def test_integrity_qualified_p_value_association_and_record_recursion():
+    """
+    Verifies that:
+    1. A specialized interaction p-value does not satisfy an unqualified/primary p-value claim.
+    2. An interaction claim correctly matches an interaction p-value.
+    3. Dictionary-valued p-value records do not treat non-p-value fields (e.g. estimate) as p-values.
+    """
+    # 1. Primary claim fails when primary p is non-significant, even if p_interaction is significant
+    res_split = {"p": 0.2, "p_interaction": 0.01}
+    doc_primary_fail = ReportDocument(title="Primary Claim", results_dict=res_split)
+    doc_primary_fail.add_paragraph(
+        "Primary outcome was statistically significant (P < 0.05)."
+    )
+    audit_primary = verify_report_integrity(doc_primary_fail)
+    assert audit_primary.passed is False
+    assert 0.05 in audit_primary.untraced_numbers
+
+    # 2. Interaction claim passes when p_interaction satisfies the bound
+    doc_interaction_pass = ReportDocument(
+        title="Interaction Claim", results_dict=res_split
+    )
+    doc_interaction_pass.add_paragraph(
+        "Treatment by subgroup interaction was significant (interaction P < 0.05)."
+    )
+    audit_interaction = verify_report_integrity(doc_interaction_pass)
+    assert audit_interaction.passed is True
+    assert len(audit_interaction.untraced_numbers) == 0
+
+    # 3. Dict-valued record: {"p_interaction": {"estimate": 0.01, "p_value": 0.2}}
+    # The estimate (0.01) must NOT be extracted as a p-value to satisfy P < 0.05
+    res_dict_rec = {"p_interaction": {"estimate": 0.01, "p_value": 0.2}}
+    doc_dict_fail = ReportDocument(title="Dict Record Fail", results_dict=res_dict_rec)
+    doc_dict_fail.add_paragraph("Interaction was significant (interaction P < 0.05).")
+    audit_dict_fail = verify_report_integrity(doc_dict_fail)
+    assert audit_dict_fail.passed is False
+    assert 0.05 in audit_dict_fail.untraced_numbers
+
+    # But satisfies a bound matching true p_value=0.2 (e.g. interaction P < 0.30)
+    doc_dict_pass = ReportDocument(title="Dict Record Pass", results_dict=res_dict_rec)
+    doc_dict_pass.add_paragraph("Interaction was evaluated (interaction P < 0.30).")
+    audit_dict_pass = verify_report_integrity(doc_dict_pass)
+    assert audit_dict_pass.passed is True
