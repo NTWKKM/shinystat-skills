@@ -133,6 +133,7 @@ class TextToken(NamedTuple):
     raw_str: str
     has_pct: bool
     is_structural: bool
+    is_p_floor: bool = False
 
 
 def _is_structural_context(
@@ -158,10 +159,10 @@ def _is_structural_context(
         if re.search(r"\b(?:CI|confidence|credible)\b", window, re.IGNORECASE):
             return True
 
-    # 2. Alpha thresholds and p-value cutoffs (e.g., alpha = 0.05, p < 0.05, p < 0.001)
-    if val in (0.05, 0.01, 0.001, 0.005):
+    # 2. Alpha thresholds and p-value cutoffs (e.g., alpha = 0.05, significance threshold p < 0.05)
+    if val in (0.05, 0.01, 0.001, 0.005, 0.0001):
         if re.search(
-            r"(?:alpha|significance|threshold|cutoff)\b|p\s*[<>=]",
+            r"\b(?:alpha|significance|threshold|cutoff|two-sided|one-sided)\b",
             window,
             re.IGNORECASE,
         ):
@@ -300,12 +301,17 @@ def _extract_text_tokens(text: str) -> list[TextToken]:
             window_after,
             doc_has_references=doc_has_references,
         )
+        is_p_floor = bool(
+            val in (0.001, 0.0001)
+            and re.search(r"\bp\s*(?:-\s*value\s*)?<\s*$", window_before, re.IGNORECASE)
+        )
         tokens.append(
             TextToken(
                 val=val,
                 raw_str=raw_num,
                 has_pct=has_pct,
                 is_structural=is_structural,
+                is_p_floor=is_p_floor,
             )
         )
     return tokens
@@ -316,7 +322,10 @@ def _extract_text_numbers(text: str) -> list[float]:
     return [token.val for token in _extract_text_tokens(text)]
 
 
-def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
+def verify_report_integrity(
+    doc: ReportDocument,
+    allowed_untraced: set[float] | list[float] | tuple[float, ...] | None = None,
+) -> IntegrityReport:
     """
     Audits a ReportDocument and returns an IntegrityReport:
     1. Traces numbers in narrative text against results_dict.
@@ -324,10 +333,10 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
     3. Checks confounding caveats when results_dict keys suggest causal analyses.
     4. Checks for methods and retention keywords.
 
-    Structural constants are exempt from numerical tracing. ``passed`` requires
-    no PHI matches, any required confounding caveat, and at most
-    ``max(1, int(number_of_extracted_tokens * 0.15))`` untraced numbers.
-    Missing methods or retention keywords only add warnings.
+    Structural constants and values explicitly listed in ``allowed_untraced``
+    are exempt from numerical tracing. ``passed`` requires no PHI matches,
+    any required confounding caveat, and zero untraced numbers
+    (``len(untraced) == 0``). Missing methods or retention keywords only add warnings.
 
     ``citations_count`` counts matched citation groups, not unique references;
     bracketed bibliography labels can also count. Citation sources and their
@@ -364,8 +373,9 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
 
     # 2. Numerical Traceability
     known_numbers = _flatten_numbers(doc.results_dict)
+    if allowed_untraced is not None:
+        known_numbers.extend(float(x) for x in allowed_untraced)
     text_tokens = _extract_text_tokens(all_text)
-    text_numbers = [token.val for token in text_tokens]
 
     untraced: list[float] = []
     for token in text_tokens:
@@ -373,6 +383,7 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
         token_str = token.raw_str
         has_pct = token.has_pct
         is_structural = token.is_structural
+        is_p_floor = token.is_p_floor
 
         # Check against known numbers: for values <= 1, use token's displayed precision
         if abs(tn) <= 1.0:
@@ -419,6 +430,10 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
                 if pct_diff <= pct_tol:
                     matched = True
                     break
+
+        if not matched and is_p_floor:
+            if any(0.0 <= kn < tn for kn in known_numbers):
+                matched = True
 
         if not matched:
             if not is_structural:
@@ -498,13 +513,7 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
     )
     citations_count = len(citation_matches)
 
-    passed = (
-        (len(phi_violations) == 0)
-        and has_causal_caveat
-        and (
-            len(untraced) == 0 or len(untraced) <= max(1, int(len(text_numbers) * 0.15))
-        )
-    )
+    passed = (len(phi_violations) == 0) and has_causal_caveat and (len(untraced) == 0)
 
     remediation_hints: list[str] = []
     if phi_violations:

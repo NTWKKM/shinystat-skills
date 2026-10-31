@@ -1065,6 +1065,160 @@ def impute_mice_single(
 
 # Backward-compatible alias for exploratory single imputation
 impute_mice = impute_mice_single
+
+
+def impute_mice_mixed_datasets(
+    df: pd.DataFrame,
+    features_to_impute: list[str],
+    target_types: dict[str, str],
+    outcome_col: str | None = None,
+    predictors: list[str] | None = None,
+    m: int = 5,
+    max_iter: int = 10,
+    random_state: int = 42,
+) -> list[pd.DataFrame]:
+    """Chained-equations MICE supporting mixed continuous, binary, and categorical targets.
+
+    - 'continuous': Proper Bayesian Gaussian draws (sigma*^2 ~ Inv-chi^2, beta* ~ N, y* ~ N).
+    - 'binary': Logistic regression with asymptotic normal parameter draw beta* ~ N(beta_hat, V_hat)
+      and Bernoulli draw y* ~ Bernoulli(expit(X_mis @ beta*)).
+    - 'categorical' / 'ordinal': Multinomial logit probability draw across observed category levels.
+    Never imputes outcome_col.
+    """
+    import statsmodels.api as sm
+
+    if outcome_col and outcome_col in features_to_impute:
+        raise ValueError(
+            "Clinical governance invariant: Never impute the primary outcome variable!"
+        )
+    if m < 1 or not isinstance(m, int) or isinstance(m, bool):
+        raise ValueError("m must be an integer >= 1.")
+
+    cols = list(
+        dict.fromkeys(
+            features_to_impute
+            + (predictors or [])
+            + ([outcome_col] if outcome_col else [])
+        )
+    )
+    if len(cols) < 2:
+        raise ValueError("MICE requires >= 1 additional predictor or outcome column.")
+
+    rng = np.random.default_rng(random_state)
+    imputed_datasets: list[pd.DataFrame] = []
+
+    for _ in range(m):
+        work = df.copy()
+        cat_mappings: dict[str, list] = {}
+        # Initialize missing values via bootstrap draw from observed values
+        for feat in features_to_impute:
+            ftype = target_types.get(feat, "continuous")
+            obs_vals = work[feat].dropna()
+            if len(obs_vals) == 0:
+                raise ValueError(f"Column '{feat}' has 0 observed values.")
+            mis_mask = work[feat].isna()
+            if ftype in ("categorical", "ordinal", "binary"):
+                cats = list(pd.Series(obs_vals).unique())
+                cat_mappings[feat] = cats
+                code_map = {c: idx for idx, c in enumerate(cats)}
+                work[feat] = work[feat].map(code_map).astype(float)
+                if mis_mask.any():
+                    work.loc[mis_mask, feat] = rng.choice(
+                        len(cats), size=int(mis_mask.sum())
+                    ).astype(float)
+            else:
+                work[feat] = work[feat].astype(float)
+                if mis_mask.any():
+                    work.loc[mis_mask, feat] = rng.choice(
+                        obs_vals.to_numpy(dtype=float), size=int(mis_mask.sum())
+                    )
+
+        for _ in range(max_iter):
+            for feat in features_to_impute:
+                mis_mask = df[feat].isna()
+                if not mis_mask.any():
+                    continue
+                obs_mask = ~mis_mask
+                pred_cols = [c for c in cols if c != feat]
+                X_obs = np.column_stack(
+                    [
+                        np.ones(int(obs_mask.sum())),
+                        work.loc[obs_mask, pred_cols].to_numpy(dtype=float),
+                    ]
+                )
+                X_mis = np.column_stack(
+                    [
+                        np.ones(int(mis_mask.sum())),
+                        work.loc[mis_mask, pred_cols].to_numpy(dtype=float),
+                    ]
+                )
+                y_obs = work.loc[obs_mask, feat].to_numpy(dtype=float)
+                ftype = target_types.get(feat, "continuous")
+
+                if ftype == "continuous":
+                    n_obs, p = X_obs.shape
+                    XtX_inv = np.linalg.pinv(X_obs.T @ X_obs)
+                    beta_hat = XtX_inv @ (X_obs.T @ y_obs)
+                    resid = y_obs - X_obs @ beta_hat
+                    dof = max(1, n_obs - p)
+                    rss = max(float(np.sum(resid**2)), 1e-8)
+                    sigma2_star = rss / max(float(rng.chisquare(dof)), 1e-6)
+                    beta_star = rng.multivariate_normal(
+                        beta_hat, sigma2_star * XtX_inv
+                    )
+                    work.loc[mis_mask, feat] = (
+                        X_mis @ beta_star
+                        + rng.normal(0.0, np.sqrt(sigma2_star), size=int(mis_mask.sum()))
+                    )
+                elif ftype == "binary" or (
+                    ftype in ("categorical", "ordinal")
+                    and len(cat_mappings.get(feat, [])) == 2
+                ):
+                    try:
+                        fit = sm.Logit(y_obs, X_obs).fit(disp=False, maxiter=100)
+                        cov_b = np.asarray(fit.cov_params(), dtype=float)
+                        beta_star = rng.multivariate_normal(
+                            np.asarray(fit.params, dtype=float),
+                            cov_b + np.eye(cov_b.shape[0]) * 1e-6,
+                        )
+                        logits = np.clip(X_mis @ beta_star, -30.0, 30.0)
+                        probs = 1.0 / (1.0 + np.exp(-logits))
+                    except Exception:
+                        probs = np.full(int(mis_mask.sum()), float(np.mean(y_obs)))
+                    work.loc[mis_mask, feat] = rng.binomial(1, np.clip(probs, 1e-4, 1.0 - 1e-4)).astype(float)
+                else:
+                    n_cats = len(cat_mappings[feat])
+                    try:
+                        fit = sm.MNLogit(y_obs.astype(int), X_obs).fit(
+                            disp=False, maxiter=100
+                        )
+                        probs_mat = np.asarray(fit.predict(X_mis), dtype=float)
+                    except Exception:
+                        counts = np.bincount(y_obs.astype(int), minlength=n_cats)
+                        p_emp = counts / max(counts.sum(), 1)
+                        probs_mat = np.tile(p_emp, (int(mis_mask.sum()), 1))
+                    draws = [
+                        rng.choice(n_cats, p=row_p / np.sum(row_p))
+                        for row_p in probs_mat
+                    ]
+                    work.loc[mis_mask, feat] = np.asarray(draws, dtype=float)
+
+        # Restore original category labels for categorical/binary columns
+        for feat, cats in cat_mappings.items():
+            inv_map = {idx: c for idx, c in enumerate(cats)}
+            work[feat] = work[feat].round().astype(int).map(inv_map)
+            if isinstance(df[feat].dtype, pd.CategoricalDtype):
+                work[feat] = pd.Categorical(
+                    work[feat],
+                    categories=df[feat].cat.categories,
+                    ordered=df[feat].cat.ordered,
+                )
+
+        if outcome_col:
+            work[outcome_col] = df[outcome_col]
+        imputed_datasets.append(work)
+
+    return imputed_datasets
 ```
 
 ---

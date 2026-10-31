@@ -1016,6 +1016,46 @@ def test_each_recipe_is_self_contained():
                         auroc_expected=0.85, auroc_null=0.50, prevalence=0.30
                     )
                     assert "total_n" in res20_diag
+                elif "fit_proportional_odds" in isolated_ns:
+                    np.random.seed(42)
+                    y_ord = np.random.choice([0, 1, 2], size=45)
+                    X_ord = pd.DataFrame({"x1": np.random.normal(0, 1, size=45)})
+                    res21 = isolated_ns["fit_proportional_odds"](y_ord, X_ord)
+                    assert "predictor_df" in res21
+                    brant21 = isolated_ns["assess_proportional_odds"](y_ord, X_ord)
+                    assert "omnibus" in brant21
+                elif "fit_rcs_spline_model" in isolated_ns:
+                    np.random.seed(42)
+                    x_s = np.random.normal(50, 10, size=60)
+                    y_s = (x_s + np.random.normal(0, 5, size=60) > 50).astype(int)
+                    df22 = pd.DataFrame({"y": y_s, "age": x_s})
+                    res22 = isolated_ns["fit_rcs_spline_model"](
+                        df22, outcome_col="y", rcs_var="age", knots=3
+                    )
+                    assert "p_nonlinearity" in res22
+                    assert "contrast_df" in res22
+                elif "fit_gee" in isolated_ns:
+                    np.random.seed(42)
+                    clusters = np.repeat(np.arange(10), 5)
+                    x_g = np.random.normal(0, 1, size=50)
+                    y_g = (x_g + np.random.normal(0, 1, size=50) > 0).astype(int)
+                    res23 = isolated_ns["fit_gee"](
+                        y_g, pd.DataFrame({"x1": x_g}), clusters, family="binomial"
+                    )
+                    assert "summary_df" in res23
+                    assert "design_effect" in res23
+                elif "run_meta_analysis" in isolated_ns:
+                    df24 = pd.DataFrame(
+                        {
+                            "study": ["S1", "S2", "S3", "S4"],
+                            "log_effect": [0.2, 0.35, 0.15, 0.4],
+                            "se": [0.1, 0.12, 0.09, 0.15],
+                            "is_ratio": [True, True, True, True],
+                        }
+                    )
+                    res24 = isolated_ns["run_meta_analysis"](df24)
+                    assert "random_effects" in res24
+                    assert "heterogeneity" in res24
                 else:
                     pytest.fail(
                         f"Recipe {idx} had no matching execution branch in isolated test harness"
@@ -2010,6 +2050,90 @@ def test_cloud_report_builder_docx_fallback_and_integrity(tmp_path):
     )
     assert 1.23e-4 not in audit_sci_ok["untraced_numbers"]
 
+    # Audit Critical #1 Verification: all 5 fabricated number cases must return passed=False
+    base_res = {"or": 1.45, "p": 0.012, "n": 412}
+    # Case 1: OR mutated 1.45 -> 3.45
+    c1 = verify_fn(
+        "In 412 patients, logistic regression yielded OR = 3.45 (P = 0.012) after confounder adjustment.",
+        results_dict=base_res,
+    )
+    assert c1["passed"] is False
+    assert 3.45 in c1["untraced_numbers"]
+
+    # Case 2: P mutated 0.012 -> 0.034
+    c2 = verify_fn(
+        "In 412 patients, logistic regression yielded OR = 1.45 (P = 0.034) after confounder adjustment.",
+        results_dict=base_res,
+    )
+    assert c2["passed"] is False
+    assert 0.034 in c2["untraced_numbers"]
+
+    # Case 3: n mutated 412 -> 512
+    c3 = verify_fn(
+        "In 512 patients, logistic regression yielded OR = 1.45 (P = 0.012) after confounder adjustment.",
+        results_dict=base_res,
+    )
+    assert c3["passed"] is False
+    assert 512.0 in c3["untraced_numbers"]
+
+    # Case 4: Single fabricated number in long prose
+    c4 = verify_fn(
+        "Across 412 patients (Table 1), OR was 1.45 (P = 0.012); sensitivity analysis in 412 patients "
+        "confirmed OR 1.45 (P = 0.012) with unmeasured confounding E-value caveat, except subgroup OR 2.75.",
+        results_dict=base_res,
+    )
+    assert c4["passed"] is False
+    assert 2.75 in c4["untraced_numbers"]
+
+    # Case 5: P mutated to P = 0.001 or P < 0.001 when true P = 0.012 -> must fail
+    c5_eq = verify_fn(
+        "In 412 patients, OR = 1.45 (P = 0.001) with unmeasured confounding noted.",
+        results_dict=base_res,
+    )
+    assert c5_eq["passed"] is False
+    assert 0.001 in c5_eq["untraced_numbers"]
+
+    c5_lt = verify_fn(
+        "In 412 patients, OR = 1.45 (P < 0.001) with unmeasured confounding noted.",
+        results_dict=base_res,
+    )
+    assert c5_lt["passed"] is False
+    assert 0.001 in c5_lt["untraced_numbers"]
+
+    # Valid P-floor (P < 0.001 when true P = 0.0002) and explicit allowed_untraced
+    c5_floor_ok = verify_fn(
+        "In 412 patients, OR = 1.45 (P < 0.001) with unmeasured confounding noted.",
+        results_dict={"or": 1.45, "p": 0.0002, "n": 412},
+    )
+    assert c5_floor_ok["passed"] is True
+
+    c_allow = verify_fn(
+        "In 412 patients, OR = 1.45 (P = 0.012) at 30-day follow-up.",
+        results_dict=base_res,
+        allowed_untraced={30.0},
+    )
+    assert c_allow["passed"] is True
+
+    # Verify standalone PPTX and PDF generators exist and execute
+    gen_pptx = ns.get("generate_pptx_report")
+    gen_pdf = ns.get("generate_pdf_report")
+    assert callable(gen_pptx)
+    assert callable(gen_pdf)
+    pptx_out = gen_pptx(
+        "Clinical Trial Deck",
+        results={"narrative": "Primary endpoint reached significance."},
+        tables={"Table 1": pd.DataFrame({"Arm": ["A", "B"], "N": [25, 25]})},
+        out_path=str(tmp_path / "deck.pptx"),
+    )
+    assert Path(pptx_out).exists()
+    pdf_out = gen_pdf(
+        "Clinical Trial Manuscript",
+        results={"narrative": "Primary endpoint reached significance."},
+        tables={"Table 1": pd.DataFrame({"Arm": ["A", "B"], "N": [25, 25]})},
+        out_path=str(tmp_path / "manuscript.pdf"),
+    )
+    assert Path(pdf_out).exists()
+
 
 # -----------------------------------------------------------------------------
 # 8. Standalone Pure-Python Plotly Spec Generators (Zero Dependencies)
@@ -2747,3 +2871,104 @@ def test_recipe_20_riley_and_diagnostic_sample_size_invariants(recipes):
         power=0.90,
     )
     assert res_high_power["total_n"] > res_auroc["total_n"]
+
+
+# -----------------------------------------------------------------------------
+# 33. Recipes 12 (Mixed MICE), 21 (Ordinal/Brant), 22 (RCS), 23 (GEE/DEFF), 24 (Meta)
+# -----------------------------------------------------------------------------
+
+
+def test_ported_cloud_recipes_mixed_mice_ordinal_rcs_gee_meta(recipes):
+    # 1. Mixed-Type MICE (continuous + binary + categorical)
+    impute_mixed = recipes["impute_mice_mixed_datasets"]
+    rng = np.random.default_rng(42)
+    n = 80
+    df_mixed = pd.DataFrame(
+        {
+            "outcome": rng.binomial(1, 0.35, size=n),
+            "age": np.where(rng.random(n) < 0.2, np.nan, rng.normal(60, 10, size=n)),
+            "sex_bin": np.where(
+                rng.random(n) < 0.15, np.nan, rng.binomial(1, 0.5, size=n)
+            ),
+            "stage_cat": pd.Series(
+                np.where(
+                    rng.random(n) < 0.15,
+                    None,
+                    rng.choice(["Stage I", "Stage II", "Stage III"], size=n),
+                )
+            ),
+        }
+    )
+    mixed_dsets = impute_mixed(
+        df_mixed,
+        features_to_impute=["age", "sex_bin", "stage_cat"],
+        target_types={
+            "age": "continuous",
+            "sex_bin": "binary",
+            "stage_cat": "categorical",
+        },
+        outcome_col="outcome",
+        m=3,
+        max_iter=3,
+        random_state=42,
+    )
+    assert len(mixed_dsets) == 3
+    for d in mixed_dsets:
+        assert not d[["age", "sex_bin", "stage_cat"]].isna().any().any()
+        assert set(d["sex_bin"].unique()).issubset({0, 1})
+        assert set(d["stage_cat"].unique()).issubset(
+            {"Stage I", "Stage II", "Stage III"}
+        )
+
+    # 2. Recipe 21: Ordinal Logistic & Brant Test
+    fit_ord = recipes["fit_proportional_odds"]
+    brant_fn = recipes["assess_proportional_odds"]
+    x1 = rng.normal(0, 1, size=120)
+    latent = 0.8 * x1 + rng.logistic(0, 1, size=120)
+    y_ord = np.digitize(latent, bins=[-0.8, 0.8])
+    X_ord = pd.DataFrame({"x1": x1})
+    ord_res = fit_ord(y_ord, X_ord)
+    assert ord_res["k_categories"] == 3
+    assert ord_res["predictor_df"].loc["x1", "odds_ratio"] > 1.0
+    brant_res = brant_fn(y_ord, X_ord)
+    assert "omnibus" in brant_res
+    assert 0.0 <= brant_res["omnibus"]["p_value"] <= 1.0
+
+    # 3. Recipe 22: Harrell Restricted Cubic Splines
+    fit_rcs = recipes["fit_rcs_spline_model"]
+    x_rcs = rng.uniform(-3, 3, size=150)
+    logits = -0.5 + 0.8 * (x_rcs**2)
+    y_rcs = rng.binomial(1, 1.0 / (1.0 + np.exp(-logits)))
+    df_rcs = pd.DataFrame({"y": y_rcs, "biomarker": x_rcs})
+    rcs_res = fit_rcs(df_rcs, outcome_col="y", rcs_var="biomarker", knots=4)
+    assert rcs_res["p_nonlinearity"] < 0.05
+    assert len(rcs_res["contrast_df"]) == 100
+
+    # 4. Recipe 23: Clustered GEE & Design Effect (DEFF)
+    fit_gee = recipes["fit_gee"]
+    clusters = np.repeat(np.arange(15), 8)
+    cluster_eff = np.repeat(rng.normal(0, 0.9, size=15), 8)
+    x_gee = rng.normal(0, 1, size=120)
+    y_gee = (0.6 * x_gee + cluster_eff + rng.normal(0, 0.8, size=120) > 0).astype(int)
+    gee_res = fit_gee(y_gee, pd.DataFrame({"x": x_gee}), clusters, family="binomial")
+    assert gee_res["n_clusters"] == 15
+    assert gee_res["design_effect"] >= 1.0
+    assert "odds_ratio" in gee_res["summary_df"].columns
+
+    # 5. Recipe 24: DerSimonian-Laird Meta-Analysis
+    comp_bin = recipes["compute_binary_effect_sizes"]
+    run_meta = recipes["run_meta_analysis"]
+    df_studies = pd.DataFrame(
+        {
+            "study": ["Trial 1", "Trial 2", "Trial 3", "Trial 4"],
+            "ev_t": [12, 18, 9, 22],
+            "n_t": [100, 120, 80, 150],
+            "ev_c": [24, 30, 18, 38],
+            "n_c": [100, 120, 80, 150],
+        }
+    )
+    es_df = comp_bin(df_studies, "ev_t", "n_t", "ev_c", "n_c", "study", "OR")
+    meta_res = run_meta(es_df, use_hksj=True)
+    assert meta_res["k"] == 4
+    assert meta_res["random_effects"]["effect_disp"] < 1.0
+    assert meta_res["heterogeneity"]["I2"] >= 0.0

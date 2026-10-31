@@ -146,35 +146,38 @@ All subcommands and renderers emit structured contracts allowing deterministic c
 
 ---
 
-## 4. Multi-Agent Skill Mirror Parity & SSOT Seam
+## 4. Canonical Skill Tree & SSOT Seam
 
 ```
 ┌────────────────────────────────────────────────────────┐
-│               src/medstat/ (Package SSOT)               │
+│               src/medstat/ (Package SSOT)              │
 └───────────────────────────┬────────────────────────────┘
-                            │ relative symlink (Phase 1)
+                            │ relative symlink (install-skills.sh)
                             ▼
 ┌────────────────────────────────────────────────────────┐
 │         skills/shinystat/scripts/medstat/ (Link)       │
-└───────────────────────────┬────────────────────────────┘
-                            │ automated symlink harnesses
-      ┌─────────────────────┼─────────────────────┐
-      ▼                     ▼                     ▼
-┌───────────┐         ┌───────────┐         ┌───────────┐
-│  .agent/  │         │  .agents/ │         │  .claude/ │ (.cursor/)
-└───────────┘         └───────────┘         └───────────┘
+└────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────┐
+│          skills/_shared/references/ (Shared SSOT)      │
+└─────────────┬───────────────────────────┬──────────────┘
+              │ all *.md                  │ all *.md except figures.md
+              ▼                           ▼
+┌───────────────────────────┐ ┌──────────────────────────┐
+│skills/shinystat/references│ │skills/shinystat-cloud/...│
+└───────────────────────────┘ └──────────────────────────┘
 ```
 
-- **SSOT Integrity**: `src/medstat/` is the single source of truth for the biostatistical calculation engine. Skill harnesses (`.agent/`, `.agents/`, `.claude/`, `.cursor/`, `skills/shinystat/scripts/medstat/`) are symlinked and git-ignored to prevent 6x repo duplication and context pollution.
-- **Progressive Disclosure Recipes**: `skills/shinystat-cloud/references/recipes/` divides recipes into 5 focused modules (`01-data-missing-table1`, `02-regression-firth-ordinal`, `03-survival-competing-risks`, `04-causal-iptw-psm`, `05-diagnostic-meta-power`), routed contextually by `SKILL.md`.
-- **Shared Reference Repository**: Common references (`decision-heuristics.md`, `figures.md`, etc.) are centralized in `skills/_shared/references/` and synced via `./scripts/install-skills.sh`.
+- **SSOT Integrity**: `src/medstat/` and `skills/` are the single canonical sources of truth tracked in Git. `skills/shinystat/scripts/medstat/` is linked from `src/medstat/` via `./scripts/install-skills.sh` and git-ignored to prevent duplication.
+- **Progressive Disclosure Recipes**: `skills/shinystat-cloud/references/recipes/` divides 24 standalone zero-`medstat` recipes into 5 focused modules (`01-data-missing-table1`, `02-regression-firth-ordinal`, `03-survival-competing-risks`, `04-causal-validation-agreement`, `05-diagnostic-meta-power`), routed contextually by `SKILL.md`.
+- **Shared Reference Repository & Cloud Figures Separation**: Common references (`decision-heuristics.md`, `flows.md`, `house-styles.md`, `illustration.md`, `report-builder.md`) are centralized in `skills/_shared/references/` and synced via `./scripts/install-skills.sh`, while `skills/shinystat-cloud/references/figures.md` is maintained as a dedicated zero-`medstat` cloud reference.
 - **Self-Healing CLI & Pre-Flight Validation**: `medstat_cli.py` exposes `--schema` and `--validate-only <plan.yaml>`, returning structured JSON with `agent_remediation` hints for automatic self-correction.
 
 ---
 
 ## 5. Multi-Agent Subagents & Autonomous Verification
 
-Specialized subagents are registered under `~/.gemini/config/agents/` and mirrored into workspace `.agent/agents/` and `.agents/agents/` to provide autonomous verification, peer review, and domain validation:
+Specialized subagents are defined in `agents/` (and optionally installed globally under `~/.gemini/config/agents/` via `./scripts/install-skills.sh --global`) to provide autonomous verification, peer review, and domain validation:
 
 - **`figure-tester`** (*Lead Figure QA & Verification Specialist*):
   - **Purpose**: Autonomous, exhaustive validation of clinical figures across all 7 figure families (Survival/CIF, Forest, Diagnostic/Prediction, Causal/Agreement, Study Flow, Vector Scientific Schematics, Diagnostics/Missingness), 5 journal house styles (`NEJM`, `JAMA`, `LANCET`, `BMJ`, `CLINICAL`), canvas column geometries (`single_col`, `one_half_col`, `double_col`, `docx`, `pptx`), and export bundle formats (PNG 300/600 DPI, TrueType PDF `fonttype=42`, SVG, audited `_source.csv`, Dual View Plotly HTML).

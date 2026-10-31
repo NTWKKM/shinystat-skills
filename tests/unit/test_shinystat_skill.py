@@ -147,9 +147,17 @@ def test_shinystat_cloud_canonical_skill_exists_and_valid():
     body = parts[2]
     assert "The 5 Decision Pillars" in body
     assert "_shared/references/decision-heuristics.md" in body
-    assert "_shared/references/figures.md" in body
+    assert "references/figures.md" in body
     assert "references/recipes/01-data-missing-table1.md" in body
     assert "_shared/references/report-builder.md" in body
+
+    cloud_figures = canonical_cloud / "references" / "figures.md"
+    assert cloud_figures.exists(), (
+        "skills/shinystat-cloud/references/figures.md missing"
+    )
+    assert "from medstat" not in cloud_figures.read_text(encoding="utf-8"), (
+        "Cloud figures.md must not contain any medstat imports"
+    )
 
     # References existence check: verify all shared references linked in body exist under shared_ref_dir
     shared_ref_dir = repo_root / "skills" / "_shared" / "references"
@@ -258,41 +266,37 @@ def test_shinystat_reference_manual_exists():
     assert "Events Per Variable (EPV)" in ref_content
 
 
-def test_shinystat_multi_agent_mirrors_byte_identical():
-    """Verify exact byte-identical parity between canonical skills/ root and all agent mirrors."""
+def test_shinystat_canonical_shared_references_synced():
+    """Verify canonical skills/shinystat and skills/shinystat-cloud contain synced shared references."""
     repo_root = Path(__file__).resolve().parent.parent.parent
-    canonical_dir = repo_root / "skills"
+    shared_ref_dir = repo_root / "skills" / "_shared" / "references"
+    local_ref_dir = repo_root / "skills" / "shinystat" / "references"
+    cloud_ref_dir = repo_root / "skills" / "shinystat-cloud" / "references"
 
-    mirrors = [
-        repo_root / ".agent" / "skills",
-        repo_root / ".agents" / "skills",
-        repo_root / ".claude" / "skills",
-        repo_root / ".cursor" / "skills",
-    ]
+    shared_files = {p.name for p in shared_ref_dir.glob("*.md") if p.is_file()}
+    assert shared_files, "No shared reference files found in skills/_shared/references"
 
-    canonical_files = {
-        p for p in _collect_valid_skill_files(canonical_dir) if "_shared" not in p.parts
-    }
-    assert canonical_files, "No files found in canonical skills directory"
-
-    for mirror in mirrors:
-        assert mirror.exists(), f"Mirror {mirror} missing"
-        mirror_files = _collect_valid_skill_files(mirror)
-        assert mirror_files == canonical_files, (
-            f"Path mismatch for mirror {mirror}: "
-            f"missing={sorted(canonical_files - mirror_files)}, "
-            f"extra={sorted(mirror_files - canonical_files)}"
+    for fname in sorted(shared_files):
+        shared_file = shared_ref_dir / fname
+        local_file = local_ref_dir / fname
+        assert local_file.exists(), (
+            f"Missing shared reference in local skill: {local_file}"
         )
-        for rel_path in canonical_files:
-            canon_file = canonical_dir / rel_path
-            mirror_file = mirror / rel_path
-            assert mirror_file.read_bytes() == canon_file.read_bytes(), (
-                f"Byte mismatch in {rel_path} for mirror {mirror}"
+        assert local_file.read_bytes() == shared_file.read_bytes(), (
+            f"Byte mismatch in {fname} between skills/_shared/references and skills/shinystat/references"
+        )
+        if fname != "figures.md":
+            cloud_file = cloud_ref_dir / fname
+            assert cloud_file.exists(), (
+                f"Missing shared reference in cloud skill: {cloud_file}"
+            )
+            assert cloud_file.read_bytes() == shared_file.read_bytes(), (
+                f"Byte mismatch in {fname} between skills/_shared/references and skills/shinystat-cloud/references"
             )
 
 
 def test_src_medstat_and_skills_bundled_medstat_byte_identical():
-    """Verify exact byte-identical parity between src/medstat (SSOT) and all bundled medstat targets."""
+    """Verify exact byte-identical parity between src/medstat (SSOT) and skills/shinystat/scripts/medstat."""
     repo_root = Path(__file__).resolve().parent.parent.parent
     src_dir = repo_root / "src" / "medstat"
     assert src_dir.exists(), "src/medstat directory not found"
@@ -301,22 +305,6 @@ def test_src_medstat_and_skills_bundled_medstat_byte_identical():
         (
             "canonical skills/",
             repo_root / "skills" / "shinystat" / "scripts" / "medstat",
-        ),
-        (
-            "antigravity .agent mirror",
-            repo_root / ".agent" / "skills" / "shinystat" / "scripts" / "medstat",
-        ),
-        (
-            "antigravity .agents mirror",
-            repo_root / ".agents" / "skills" / "shinystat" / "scripts" / "medstat",
-        ),
-        (
-            "claude code .claude mirror",
-            repo_root / ".claude" / "skills" / "shinystat" / "scripts" / "medstat",
-        ),
-        (
-            "cursor .cursor mirror",
-            repo_root / ".cursor" / "skills" / "shinystat" / "scripts" / "medstat",
         ),
     ]
 

@@ -73,7 +73,7 @@ def test_integrity_untraced_numbers():
 
 
 def test_integrity_untraced_numbers_threshold_allowance():
-    """Verifies that an untraced rate <= 15% (or single structural number) passes audit."""
+    """Verifies that even a single untraced number blocks audit.passed unless explicitly whitelisted in allowed_untraced."""
     doc = ReportDocument(
         title="Analysis Report",
         results_dict={
@@ -89,15 +89,80 @@ def test_integrity_untraced_numbers_threshold_allowance():
             "s10": 111.1,
         },
     )
-    # 10 known numbers + 1 untraced number (73.4) -> 1/11 = 9.1% <= 15%
+    # 10 known numbers + 1 untraced number (73.4) -> must fail under strict len(untraced) == 0 gate
     doc.add_paragraph(
         "Stats: 11.1, 22.2, 33.3, 44.4, 55.5, 66.6, 77.7, 88.8, 99.9, 111.1, with untraced marker 73.4."
     )
 
     audit = verify_report_integrity(doc)
-    assert audit.passed is True
+    assert audit.passed is False
     assert len(audit.untraced_numbers) == 1
     assert 73.4 in audit.untraced_numbers
+
+    # Explicit allow-list permits known non-statistical token
+    audit_allowed = verify_report_integrity(doc, allowed_untraced={73.4})
+    assert audit_allowed.passed is True
+    assert len(audit_allowed.untraced_numbers) == 0
+
+
+def test_integrity_audit_critical_cases_block_fabricated_numbers():
+    """Verifies all 5 audit cases against results_dict = {'or': 1.45, 'p': 0.012, 'n': 412}."""
+    base_results = {"or": 1.45, "p": 0.012, "n": 412}
+
+    # 1. Mutate OR from 1.45 to 3.45 -> passed=False
+    doc_or = ReportDocument(title="Audit OR", results_dict=base_results)
+    doc_or.add_paragraph("In 412 patients, the odds ratio was 3.45 (P = 0.012).")
+    res_or = verify_report_integrity(doc_or)
+    assert res_or.passed is False
+    assert 3.45 in res_or.untraced_numbers
+
+    # 2. Mutate P from 0.012 to 0.034 -> passed=False
+    doc_p = ReportDocument(title="Audit P", results_dict=base_results)
+    doc_p.add_paragraph("In 412 patients, the odds ratio was 1.45 (P = 0.034).")
+    res_p = verify_report_integrity(doc_p)
+    assert res_p.passed is False
+    assert 0.034 in res_p.untraced_numbers
+
+    # 3. Mutate n from 412 to 512 -> passed=False
+    doc_n = ReportDocument(title="Audit N", results_dict=base_results)
+    doc_n.add_paragraph("In 512 patients, the odds ratio was 1.45 (P = 0.012).")
+    res_n = verify_report_integrity(doc_n)
+    assert res_n.passed is False
+    assert 512.0 in res_n.untraced_numbers
+
+    # 4. Single fabricated number in long narrative -> passed=False
+    doc_long = ReportDocument(title="Audit Long", results_dict=base_results)
+    doc_long.add_paragraph(
+        "Across 412 enrolled patients (Table 1), primary analysis yielded OR 1.45 (P = 0.012); "
+        "Repeat evaluation confirmed OR 1.45 (P = 0.012) in 412 patients, except subgroup OR 2.89."
+    )
+    res_long = verify_report_integrity(doc_long)
+    assert res_long.passed is False
+    assert 2.89 in res_long.untraced_numbers
+
+    # 5. Mutate P from 0.012 to P=0.001 or P<0.001 -> both must fail when true P=0.012
+    doc_p_eq = ReportDocument(title="Audit P=0.001", results_dict=base_results)
+    doc_p_eq.add_paragraph("In 412 patients, the odds ratio was 1.45 (P = 0.001).")
+    res_p_eq = verify_report_integrity(doc_p_eq)
+    assert res_p_eq.passed is False
+    assert 0.001 in res_p_eq.untraced_numbers
+
+    doc_p_lt = ReportDocument(title="Audit P<0.001", results_dict=base_results)
+    doc_p_lt.add_paragraph("In 412 patients, the odds ratio was 1.45 (P < 0.001).")
+    res_p_lt = verify_report_integrity(doc_p_lt)
+    assert res_p_lt.passed is False
+    assert 0.001 in res_p_lt.untraced_numbers
+
+    # Conversely, when true P is 0.0003 (< 0.001), P < 0.001 is a valid P-value floor
+    doc_p_floor_ok = ReportDocument(
+        title="Valid P<0.001 Floor", results_dict={"or": 1.45, "p": 0.0003, "n": 412}
+    )
+    doc_p_floor_ok.add_paragraph(
+        "In 412 patients, the odds ratio was 1.45 (P < 0.001)."
+    )
+    res_p_floor_ok = verify_report_integrity(doc_p_floor_ok)
+    assert res_p_floor_ok.passed is True
+    assert len(res_p_floor_ok.untraced_numbers) == 0
 
 
 def test_integrity_causal_caveat_warning():

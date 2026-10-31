@@ -2411,3 +2411,181 @@ def calculate_diagnostic_auroc_sample_size(
         "two_sided": two_sided,
     }
 ```
+
+---
+
+## 24. Fixed-Effects & DerSimonian-Laird Random-Effects Meta-Analysis (PRISMA 2020)
+
+Computes study-level binary ($\text{OR}$, $\text{RR}$, $\text{RD}$ with $0.5$ Haldane-Anscombe continuity correction for zero cells) or continuous ($\text{MD}$, Hedges' $g$ $\text{SMD}$) effect sizes and runs **Inverse-Variance Fixed-Effect** and **DerSimonian-Laird Random-Effects Meta-Analysis** with optional **Hartung-Knapp-Sidik-Jonkman (HKSJ)** small-sample adjustment, **Cochran's $Q$**, **Higgins' $I^2$**, between-study variance **$\hat{\tau}^2$**, **95% Prediction Interval**, and **Egger's regression asymmetry test** (when $k \ge 10$).
+
+```python
+import math
+from typing import Any, Literal
+import numpy as np
+import pandas as pd
+import scipy.stats as stats
+
+
+def compute_binary_effect_sizes(
+    df: pd.DataFrame,
+    events_t_col: str,
+    n_t_col: str,
+    events_c_col: str,
+    n_c_col: str,
+    study_col: str,
+    effect_measure: Literal["OR", "RR", "RD"] = "OR",
+) -> pd.DataFrame:
+    """Compute log effect sizes and standard errors for 2x2 binary endpoints."""
+    cols = [study_col, events_t_col, n_t_col, events_c_col, n_c_col]
+    clean = df[cols].dropna().copy()
+    records = []
+    for _, row in clean.iterrows():
+        study = str(row[study_col])
+        a, n1 = float(row[events_t_col]), float(row[n_t_col])
+        c, n0 = float(row[events_c_col]), float(row[n_c_col])
+        b, d = n1 - a, n0 - c
+        if a == 0 or b == 0 or c == 0 or d == 0:
+            a, b, c, d = a + 0.5, b + 0.5, c + 0.5, d + 0.5
+            n1, n0 = n1 + 1.0, n0 + 1.0
+
+        if effect_measure == "OR":
+            val = (a * d) / (b * c)
+            log_eff = math.log(val)
+            se = math.sqrt(1.0 / a + 1.0 / b + 1.0 / c + 1.0 / d)
+            is_ratio = True
+        elif effect_measure == "RR":
+            val = (a / n1) / (c / n0)
+            log_eff = math.log(val)
+            se = math.sqrt(1.0 / a - 1.0 / n1 + 1.0 / c - 1.0 / n0)
+            is_ratio = True
+        else:
+            val = (a / n1) - (c / n0)
+            log_eff = val
+            se = math.sqrt((a * b) / (n1**3) + (c * d) / (n0**3))
+            is_ratio = False
+
+        ci_l, ci_u = log_eff - 1.96 * se, log_eff + 1.96 * se
+        records.append(
+            {
+                "study": study,
+                "effect_size": val,
+                "log_effect": log_eff,
+                "se": se,
+                "ci_lower": math.exp(ci_l) if is_ratio else ci_l,
+                "ci_upper": math.exp(ci_u) if is_ratio else ci_u,
+                "is_ratio": is_ratio,
+            }
+        )
+    return pd.DataFrame(records)
+
+
+def run_meta_analysis(
+    df: pd.DataFrame,
+    use_hksj: bool = False,
+    alpha: float = 0.05,
+    effect_col: str = "log_effect",
+    se_col: str = "se",
+    study_col: str = "study",
+) -> dict[str, Any]:
+    """Perform Fixed-Effect and DerSimonian-Laird Random-Effects Meta-Analysis."""
+    df_work = df.copy()
+    if effect_col not in df_work.columns and "effect_size" in df_work.columns:
+        effect_col = "effect_size"
+    k = len(df_work)
+    if k < 2:
+        raise ValueError(f"Meta-analysis requires at least 2 studies (got {k}).")
+
+    theta = df_work[effect_col].to_numpy(dtype=float)
+    se = df_work[se_col].to_numpy(dtype=float)
+    if np.any(se <= 0) or np.any(np.isnan(se)):
+        raise ValueError("Standard errors must be strictly positive and finite.")
+    is_ratio = (
+        bool(df_work["is_ratio"].iloc[0]) if "is_ratio" in df_work.columns else False
+    )
+
+    w_fe = 1.0 / (se**2)
+    sum_w_fe = float(np.sum(w_fe))
+    theta_fe = float(np.sum(w_fe * theta) / sum_w_fe)
+    se_fe = math.sqrt(1.0 / sum_w_fe)
+    z_crit = float(stats.norm.ppf(1.0 - alpha / 2.0))
+    ci_fe_low, ci_fe_high = theta_fe - z_crit * se_fe, theta_fe + z_crit * se_fe
+    p_fe = float(2.0 * stats.norm.sf(abs(theta_fe / se_fe)))
+
+    q_stat = float(np.sum(w_fe * ((theta - theta_fe) ** 2)))
+    df_q = k - 1
+    p_q = float(stats.chi2.sf(q_stat, df_q))
+    c_const = sum_w_fe - float(np.sum(w_fe**2) / sum_w_fe)
+    tau2 = max(0.0, (q_stat - df_q) / c_const) if c_const > 0 else 0.0
+    tau = math.sqrt(tau2)
+    i2 = max(0.0, ((q_stat - df_q) / q_stat) * 100.0) if q_stat > 0 else 0.0
+
+    w_re = 1.0 / (se**2 + tau2)
+    sum_w_re = float(np.sum(w_re))
+    theta_re = float(np.sum(w_re * theta) / sum_w_re)
+
+    if use_hksj and k >= 3:
+        q_hksj = float((1.0 / (k - 1)) * np.sum(w_re * ((theta - theta_re) ** 2)))
+        se_re = math.sqrt(max(1.0, q_hksj) / sum_w_re)
+        t_crit = float(stats.t.ppf(1.0 - alpha / 2.0, df=k - 1))
+        ci_re_low, ci_re_high = theta_re - t_crit * se_re, theta_re + t_crit * se_re
+        p_re = float(2.0 * stats.t.sf(abs(theta_re / se_re), df=k - 1))
+    else:
+        se_re = math.sqrt(1.0 / sum_w_re)
+        ci_re_low, ci_re_high = theta_re - z_crit * se_re, theta_re + z_crit * se_re
+        p_re = float(2.0 * stats.norm.sf(abs(theta_re / se_re)))
+
+    pi_low, pi_high = np.nan, np.nan
+    if k >= 3:
+        t_crit_pi = float(stats.t.ppf(1.0 - alpha / 2.0, df=max(1, k - 2)))
+        se_pi = math.sqrt(tau2 + se_re**2)
+        pi_low, pi_high = theta_re - t_crit_pi * se_pi, theta_re + t_crit_pi * se_pi
+
+    def _disp(val: float) -> float:
+        return float(math.exp(val)) if is_ratio else float(val)
+
+    egger_p = None
+    if k >= 10:
+        snd = theta / se
+        prec = 1.0 / se
+        res_egger = stats.linregress(prec, snd)
+        egger_p = float(res_egger.pvalue)
+
+    studies_out = df_work.copy()
+    studies_out["weight_fe_pct"] = (w_fe / sum_w_fe) * 100.0
+    studies_out["weight_re_pct"] = (w_re / sum_w_re) * 100.0
+
+    return {
+        "k": k,
+        "is_ratio": is_ratio,
+        "studies": studies_out,
+        "fixed_effect": {
+            "log_effect": theta_fe,
+            "effect_disp": _disp(theta_fe),
+            "se": se_fe,
+            "ci_lower": _disp(ci_fe_low),
+            "ci_upper": _disp(ci_fe_high),
+            "p_value": p_fe,
+        },
+        "random_effects": {
+            "log_effect": theta_re,
+            "effect_disp": _disp(theta_re),
+            "se": se_re,
+            "ci_lower": _disp(ci_re_low),
+            "ci_upper": _disp(ci_re_high),
+            "p_value": p_re,
+            "prediction_interval": [_disp(pi_low), _disp(pi_high)]
+            if not np.isnan(pi_low)
+            else None,
+        },
+        "heterogeneity": {
+            "estimator": "DerSimonian-Laird",
+            "Q": q_stat,
+            "df": df_q,
+            "p_value": p_q,
+            "I2": i2,
+            "tau2": tau2,
+            "tau": tau,
+            "egger_p_value": egger_p,
+        },
+    }
+```
