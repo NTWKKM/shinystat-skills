@@ -345,8 +345,9 @@ def _extract_text_tokens(text: str) -> list[TextToken]:
         p_ineq_match = re.search(
             r"\bp\s*(?:-\s*value\s*)?([<>]=?)\s*$", window_before, re.IGNORECASE
         )
+        p_val = val / 100.0 if has_pct else val
         p_inequality: str | None = None
-        if 0.0 < val <= 1.0 and not is_structural and p_ineq_match:
+        if 0.0 < p_val <= 1.0 and not is_structural and p_ineq_match:
             p_inequality = p_ineq_match.group(1)
 
         is_p_floor = bool(p_inequality in ("<", "<="))
@@ -445,14 +446,15 @@ def verify_report_integrity(
 
         p_inequality = getattr(token, "p_inequality", None)
         if p_inequality is not None:
+            p_bound = tn / 100.0 if has_pct else tn
             if p_inequality == "<":
-                matched = any(0.0 <= pv < tn for pv in known_p_values)
+                matched = any(0.0 <= pv < p_bound for pv in known_p_values)
             elif p_inequality == "<=":
-                matched = any(0.0 <= pv <= tn for pv in known_p_values)
+                matched = any(0.0 <= pv <= p_bound for pv in known_p_values)
             elif p_inequality == ">":
-                matched = any(tn < pv <= 1.0 for pv in known_p_values)
+                matched = any(p_bound < pv <= 1.0 for pv in known_p_values)
             elif p_inequality == ">=":
-                matched = any(tn <= pv <= 1.0 for pv in known_p_values)
+                matched = any(p_bound <= pv <= 1.0 for pv in known_p_values)
             else:
                 matched = False
             if not matched and not is_structural:
@@ -460,7 +462,8 @@ def verify_report_integrity(
             continue
 
         if is_p_floor:
-            matched = any(0.0 <= pv < tn for pv in known_p_values)
+            p_bound = tn / 100.0 if has_pct else tn
+            matched = any(0.0 <= pv < p_bound for pv in known_p_values)
             if not matched and not is_structural:
                 untraced.append(tn)
             continue

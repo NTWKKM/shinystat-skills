@@ -1557,20 +1557,21 @@ def verify_standalone_integrity(
         p_ineq_match = re.search(
             r"\bp\s*(?:-\s*value\s*)?([<>]=?)\s*$", window_before, re.IGNORECASE
         )
+        p_val = val / 100.0 if has_pct else val
         p_inequality = (
             p_ineq_match.group(1)
-            if (0.0 < val <= 1.0 and not is_alpha_cutoff and p_ineq_match)
+            if (0.0 < p_val <= 1.0 and not is_alpha_cutoff and p_ineq_match)
             else None
         )
         if p_inequality is not None:
             if p_inequality == "<":
-                matched = any(0.0 <= pv < val for pv in known_p_vals)
+                matched = any(0.0 <= pv < p_val for pv in known_p_vals)
             elif p_inequality == "<=":
-                matched = any(0.0 <= pv <= val for pv in known_p_vals)
+                matched = any(0.0 <= pv <= p_val for pv in known_p_vals)
             elif p_inequality == ">":
-                matched = any(val < pv <= 1.0 for pv in known_p_vals)
+                matched = any(p_val < pv <= 1.0 for pv in known_p_vals)
             elif p_inequality == ">=":
-                matched = any(val <= pv <= 1.0 for pv in known_p_vals)
+                matched = any(p_val <= pv <= 1.0 for pv in known_p_vals)
             else:
                 matched = False
             if not matched:

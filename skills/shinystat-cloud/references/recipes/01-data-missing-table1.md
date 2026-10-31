@@ -1141,7 +1141,8 @@ def impute_mice_mixed_datasets(
             is_cat_col = ctype in ("categorical", "ordinal", "binary") or not pd.api.types.is_numeric_dtype(df[col_name])
             if is_cat_col:
                 if isinstance(df[col_name].dtype, pd.CategoricalDtype):
-                    cats = list(df[col_name].dtype.categories)
+                    observed_set = set(df[col_name].dropna().unique())
+                    cats = [c for c in df[col_name].dtype.categories if c in observed_set]
                 else:
                     cats = list(pd.Series(df[col_name].dropna()).unique())
                 cat_mappings[col_name] = cats
@@ -1181,7 +1182,7 @@ def impute_mice_mixed_datasets(
                     pc_cats = cat_mappings.get(pc)
                     if pc_type == "categorical":
                         if pc_cats is not None and len(pc_cats) > 2:
-                            if pd.api.types.is_numeric_dtype(work[pc]):
+                            if pc in features_to_impute:
                                 codes = work[pc].round().astype(int)
                             else:
                                 code_map = {c: idx for idx, c in enumerate(pc_cats)}
@@ -1189,7 +1190,7 @@ def impute_mice_mixed_datasets(
                             for k_idx in range(1, len(pc_cats)):
                                 pred_blocks.append((codes == k_idx).to_numpy(dtype=float)[:, None])
                         elif pc_cats is not None and len(pc_cats) == 2:
-                            if pd.api.types.is_numeric_dtype(work[pc]):
+                            if pc in features_to_impute:
                                 codes = work[pc].round().astype(int)
                             else:
                                 code_map = {c: idx for idx, c in enumerate(pc_cats)}
@@ -1200,14 +1201,18 @@ def impute_mice_mixed_datasets(
                             if dummies.shape[1] > 0:
                                 pred_blocks.append(dummies.to_numpy(dtype=float))
                         else:
-                            pred_blocks.append(work[pc].to_numpy(dtype=float)[:, None])
+                            dummies = pd.get_dummies(work[pc], drop_first=True, dtype=float)
+                            if dummies.shape[1] > 0:
+                                pred_blocks.append(dummies.to_numpy(dtype=float))
+                            else:
+                                pred_blocks.append(work[pc].to_numpy(dtype=float)[:, None])
                     elif pc_type == "ordinal":
                         if pc_cats is not None:
-                            if not pd.api.types.is_numeric_dtype(work[pc]):
+                            if pc in features_to_impute:
+                                scores = work[pc].astype(float)
+                            else:
                                 code_map = {c: idx for idx, c in enumerate(pc_cats)}
                                 scores = work[pc].map(code_map).astype(float)
-                            else:
-                                scores = work[pc].astype(float)
                             pred_blocks.append(scores.to_numpy(dtype=float)[:, None])
                         else:
                             pred_blocks.append(work[pc].to_numpy(dtype=float)[:, None])

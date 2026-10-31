@@ -67,6 +67,20 @@ INTEGRITY_PARITY_CASES: list[IntegrityParityCase] = [
         expected_untraced=[],
         allowed_untraced=[73.4],
     ),
+    IntegrityParityCase(
+        id="pass_p_lt_5_pct",
+        narrative="Age was associated with the outcome (OR 1.45, 95% CI 1.10 to 1.91, P<5%; n=412).",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=True,
+        expected_untraced=[],
+    ),
+    IntegrityParityCase(
+        id="pass_p_lt_0_05",
+        narrative="Age was associated with the outcome (OR 1.45, 95% CI 1.10 to 1.91, P<0.05; n=412).",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=True,
+        expected_untraced=[],
+    ),
     # --- MUST FAIL CASES ---
     IntegrityParityCase(
         id="fail_or_3_45",
@@ -137,6 +151,13 @@ INTEGRITY_PARITY_CASES: list[IntegrityParityCase] = [
         results_dict=BASE_RESULTS_DICT,
         expected_passed=False,
         expected_untraced=[0.001],
+    ),
+    IntegrityParityCase(
+        id="fail_p_lt_0_05_pct",
+        narrative="Age was associated with the outcome (OR 1.45, 95% CI 1.10 to 1.91, P<0.05%; n=412).",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=False,
+        expected_untraced=[0.05],
     ),
     IntegrityParityCase(
         id="fail_p_0_05",

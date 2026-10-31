@@ -2968,23 +2968,34 @@ def test_recipe_20_riley_and_diagnostic_sample_size_invariants(recipes):
 
 
 def test_ported_cloud_recipes_mixed_mice_ordinal_rcs_gee_meta(recipes):
-    # 1. Mixed-Type MICE (continuous + binary + categorical)
+    # 1. Mixed-Type MICE (continuous + binary + categorical with nominal & ordinal conditioning)
     impute_mixed = recipes["impute_mice_mixed_datasets"]
-    rng = np.random.default_rng(42)
+    rng_mice = np.random.default_rng(42)
     n = 80
+    stage_raw = np.where(
+        rng_mice.random(n) < 0.15,
+        None,
+        rng_mice.choice(["Stage I", "Stage II", "Stage III"], size=n),
+    )
     df_mixed = pd.DataFrame(
         {
-            "outcome": rng.binomial(1, 0.35, size=n),
-            "age": np.where(rng.random(n) < 0.2, np.nan, rng.normal(60, 10, size=n)),
-            "sex_bin": np.where(
-                rng.random(n) < 0.15, np.nan, rng.binomial(1, 0.5, size=n)
+            "outcome": rng_mice.binomial(1, 0.35, size=n),
+            "age": np.where(
+                rng_mice.random(n) < 0.2, np.nan, rng_mice.normal(60, 10, size=n)
             ),
-            "stage_cat": pd.Series(
-                np.where(
-                    rng.random(n) < 0.15,
-                    None,
-                    rng.choice(["Stage I", "Stage II", "Stage III"], size=n),
-                )
+            "sex_bin": np.where(
+                rng_mice.random(n) < 0.15, np.nan, rng_mice.binomial(1, 0.5, size=n)
+            ),
+            "stage_cat": pd.Categorical(
+                stage_raw,
+                categories=["Stage I", "Stage II", "Stage III", "Stage IV"],
+                ordered=True,
+            ),
+            "site_id": rng_mice.choice([10, 20, 30], size=n),
+            "severity_ord": pd.Categorical(
+                rng_mice.choice(["Mild", "Moderate", "Severe"], size=n),
+                categories=["Mild", "Moderate", "Severe"],
+                ordered=True,
             ),
         }
     )
@@ -2995,6 +3006,8 @@ def test_ported_cloud_recipes_mixed_mice_ordinal_rcs_gee_meta(recipes):
             "age": "continuous",
             "sex_bin": "binary",
             "stage_cat": "categorical",
+            "site_id": "categorical",
+            "severity_ord": "ordinal",
         },
         outcome_col="outcome",
         m=3,
@@ -3003,11 +3016,30 @@ def test_ported_cloud_recipes_mixed_mice_ordinal_rcs_gee_meta(recipes):
     )
     assert len(mixed_dsets) == 3
     for d in mixed_dsets:
-        assert not d[["age", "sex_bin", "stage_cat"]].isna().any().any()
+        assert (
+            not d[["age", "sex_bin", "stage_cat", "site_id", "severity_ord"]]
+            .isna()
+            .any()
+            .any()
+        )
         assert set(d["sex_bin"].unique()).issubset({0, 1})
         assert set(d["stage_cat"].unique()).issubset(
             {"Stage I", "Stage II", "Stage III"}
         )
+        assert isinstance(d["stage_cat"].dtype, pd.CategoricalDtype)
+        assert d["stage_cat"].cat.ordered is True
+        assert list(d["stage_cat"].cat.categories) == [
+            "Stage I",
+            "Stage II",
+            "Stage III",
+            "Stage IV",
+        ]
+        assert isinstance(d["severity_ord"].dtype, pd.CategoricalDtype)
+        assert d["severity_ord"].cat.ordered is True
+        assert list(d["severity_ord"].cat.categories) == ["Mild", "Moderate", "Severe"]
+        assert set(d["site_id"].unique()).issubset({10, 20, 30})
+
+    rng = np.random.default_rng(42)
 
     # 2. Recipe 21: Ordinal Logistic & Brant Test (parallel vs non-parallel slopes)
     fit_ord = recipes["fit_proportional_odds"]
