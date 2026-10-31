@@ -3483,3 +3483,108 @@ def test_cloud_recipe_24_meta_analysis_exponentiation_and_inference(recipes):
         res_override["fixed_effect"]["log_effect"],
         atol=1e-10,
     )
+
+
+def test_cloud_figures_templates_validation_and_safety(tmp_path):
+    """Verify standalone figures.md recipes enforce strict parameter validation and error resilience."""
+    fig_path = REPO_ROOT / "skills" / "shinystat-cloud" / "references" / "figures.md"
+    content = fig_path.read_text(encoding="utf-8")
+    blocks = re.findall(r"```python\n(.*?)\n```", content, re.DOTALL)
+    ns = {}
+    combined_code = "\n".join(blocks)
+    exec(combined_code, ns)
+
+    plot_km = ns["plot_standalone_km_with_risk_table"]
+    plot_cif = ns["plot_standalone_cif"]
+    plot_calib_dca = ns["plot_standalone_calibration_dca"]
+    plot_ba = ns["plot_standalone_bland_altman"]
+    plot_rcs = ns["plot_standalone_rcs"]
+
+    # 1. KM risk_counts length validation
+    km_data = {
+        "Group A": pd.DataFrame({"time": [0, 5, 10], "survival": [1.0, 0.8, 0.6]})
+    }
+    with pytest.raises(
+        ValueError, match="All risk_counts lists must have equal length to time_ticks"
+    ):
+        plot_km(km_data, time_ticks=[0, 5, 10], risk_counts={"Group A": [100, 80]})
+
+    km_out = plot_km(
+        km_data,
+        time_ticks=[0, 5, 10],
+        risk_counts={"Group A": [100, 80, 60]},
+        out_path=str(tmp_path / "km.png"),
+    )
+    assert Path(km_out).exists()
+
+    # 2. CIF risk_counts length validation
+    cif_data = pd.DataFrame({"time": [0, 5, 10], "cif_primary": [0.0, 0.1, 0.2]})
+    with pytest.raises(
+        ValueError, match="All risk_counts lists must have equal length to time_ticks"
+    ):
+        plot_cif(cif_data, time_ticks=[0, 5, 10], risk_counts={"At Risk": [100, 90]})
+
+    cif_out = plot_cif(
+        cif_data,
+        time_ticks=[0, 5, 10],
+        risk_counts={"At Risk": [100, 90, 80]},
+        out_path=str(tmp_path / "cif.png"),
+    )
+    assert Path(cif_out).exists()
+
+    # 3. Calibration / DCA dict normalization
+    calib_dict = {
+        "calibration_bins": {
+            "pred_mean": [0.1, 0.3, 0.5],
+            "obs_rate": [0.12, 0.28, 0.52],
+            "ci_lower": [0.08, 0.22, 0.44],
+            "ci_upper": [0.16, 0.34, 0.60],
+        }
+    }
+    dca_df = pd.DataFrame(
+        {
+            "threshold": [0.1, 0.2, 0.3],
+            "strategy": ["Model", "Model", "Model"],
+            "net_benefit": [0.08, 0.05, 0.02],
+        }
+    )
+    calib_out = plot_calib_dca(calib_dict, dca_df, out_path=str(tmp_path / "calib.png"))
+    assert Path(calib_out).exists()
+
+    # 4. Bland-Altman agreement with Student-t confidence intervals
+    m1 = np.array([10.0, 12.0, 14.0, 15.0, 18.0])
+    m2 = np.array([9.5, 12.2, 13.8, 15.4, 17.6])
+    ba_out = plot_ba(m1, m2, out_path=str(tmp_path / "ba.png"))
+    assert Path(ba_out).exists()
+
+    # 5. RCS predictor column and family validation
+    contrast_df = pd.DataFrame(
+        {
+            "biomarker": np.linspace(10, 50, 20),
+            "estimate": np.linspace(0.8, 2.5, 20),
+            "ci_lower": np.linspace(0.6, 1.8, 20),
+            "ci_upper": np.linspace(1.1, 3.5, 20),
+        }
+    )
+    with pytest.raises(ValueError, match="Unsupported family 'invalid'"):
+        plot_rcs(contrast_df, family="invalid")
+
+    with pytest.raises(
+        KeyError, match="Requested predictor column 'missing_col' not found"
+    ):
+        plot_rcs(contrast_df, x_col="missing_col")
+
+    rcs_binom = plot_rcs(
+        contrast_df,
+        rcs_var="biomarker",
+        family="binomial",
+        out_path=str(tmp_path / "rcs_binom.png"),
+    )
+    assert Path(rcs_binom).exists()
+
+    rcs_gauss = plot_rcs(
+        contrast_df,
+        family="gaussian",
+        out_path=str(tmp_path / "rcs_gauss.png"),
+    )
+    assert Path(rcs_gauss).exists()

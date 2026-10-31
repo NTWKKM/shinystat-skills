@@ -19,6 +19,7 @@ Every clinical figure produced in a cloud Python sandbox must satisfy these visu
 ## 2. Available Plot Recipes
 
 ### 1. Kaplan-Meier Survival Curve with Number-at-Risk Table
+
 - **Primary Recipe**: Use `fit_survival_analysis_suite` in [03-survival-competing-risks.md](recipes/03-survival-competing-risks.md) (Recipe 11).
 - **Standalone Plot Template**:
 ```python
@@ -38,6 +39,11 @@ def plot_standalone_km_with_risk_table(
 ) -> str:
     plt.rcParams["pdf.fonttype"] = 42
     plt.rcParams["ps.fonttype"] = 42
+
+    if risk_counts and time_ticks:
+        if any(len(counts) != len(time_ticks) for counts in risk_counts.values()):
+            raise ValueError("All risk_counts lists must have equal length to time_ticks.")
+
     fig, (ax, ax_tbl) = plt.subplots(
         2, 1, figsize=(6.8, 5.2), dpi=300, gridspec_kw={"height_ratios": [3.5, 1]}, sharex=True
     )
@@ -64,8 +70,6 @@ def plot_standalone_km_with_risk_table(
     ax_tbl.spines["left"].set_visible(False)
     ax_tbl.yaxis.set_ticks([])
     if risk_counts and time_ticks:
-        if any(len(counts) != len(time_ticks) for counts in risk_counts.values()):
-            raise ValueError("All risk_counts lists must have equal length to time_ticks.")
         ax_tbl.set_xticks(time_ticks)
         for idx, (label, counts) in enumerate(risk_counts.items()):
             y_row = 1.0 - (idx + 0.5) / max(1, len(risk_counts))
@@ -80,6 +84,7 @@ def plot_standalone_km_with_risk_table(
 ```
 
 ### 2. Competing Risks Cumulative Incidence Function (CIF)
+
 - **Primary Recipe**: Use `fit_competing_risks_cif` and `fit_competing_risks_regression` in [03-survival-competing-risks.md](recipes/03-survival-competing-risks.md) (Recipe 15).
 - **Standalone Plot Template**:
 ```python
@@ -100,6 +105,11 @@ def plot_standalone_cif(
 ) -> str:
     plt.rcParams["pdf.fonttype"] = 42
     plt.rcParams["ps.fonttype"] = 42
+
+    if risk_counts and time_ticks:
+        if any(len(counts) != len(time_ticks) for counts in risk_counts.values()):
+            raise ValueError("All risk_counts lists must have equal length to time_ticks.")
+
     has_risk = bool(risk_counts and time_ticks)
     if has_risk:
         fig, (ax, ax_tbl) = plt.subplots(
@@ -156,8 +166,6 @@ def plot_standalone_cif(
     ax.legend(frameon=False, loc="upper left")
 
     if ax_tbl is not None and risk_counts and time_ticks:
-        if any(len(counts) != len(time_ticks) for counts in risk_counts.values()):
-            raise ValueError("All risk_counts lists must have equal length to time_ticks.")
         ax_tbl.spines["top"].set_visible(False)
         ax_tbl.spines["right"].set_visible(False)
         ax_tbl.spines["left"].set_visible(False)
@@ -179,6 +187,7 @@ def plot_standalone_cif(
 ```
 
 ### 3. Multivariable / Subgroup / Meta-Analysis Forest Plot
+
 - **Primary Recipe**: Use `fit_firth_logistic` in [02-regression-firth-ordinal.md](recipes/02-regression-firth-ordinal.md) (Recipe 1), or `run_meta_analysis` in [05-diagnostic-meta-power.md](recipes/05-diagnostic-meta-power.md) (Recipe 24).
 - **Scale & Axis Guidance**: For ratio effect measures (OR / RR / HR), use `log_scale=True`, `null_value=1.0`, and ratio axis labels (e.g. `xlabel="Adjusted Odds Ratio (95% CI)"`). For continuous difference effect measures (MD / SMD), use `log_scale=False`, `null_value=0.0`, and difference axis labels (e.g. `xlabel="Mean Difference (95% CI)"` or `xlabel="Standardized Mean Difference (95% CI)"`).
 - **Standalone Plot Template**:
@@ -248,6 +257,7 @@ def plot_standalone_forest(
 ```
 
 ### 4. Diagnostic ROC Curve with DeLong 95% CI & Optimal Threshold
+
 - **Primary Recipe**: Use `auc_ci_delong` and `delong_paired_test` in [05-diagnostic-meta-power.md](recipes/05-diagnostic-meta-power.md) (Recipe 3).
 - **Standalone Plot Template**:
 ```python
@@ -294,6 +304,7 @@ def plot_standalone_roc(
 ```
 
 ### 5. Calibration Belt & Decision Curve Analysis (DCA)
+
 - **Primary Recipe**: Use `evaluate_calibration` and `calculate_dca` in [05-diagnostic-meta-power.md](recipes/05-diagnostic-meta-power.md) (Recipe 4).
 - **Standalone Plot Template**:
 ```python
@@ -302,12 +313,21 @@ import pandas as pd
 
 
 def plot_standalone_calibration_dca(
-    calib_df: pd.DataFrame,
-    dca_df: pd.DataFrame,
+    calib_df: pd.DataFrame | dict,
+    dca_df: pd.DataFrame | dict,
     out_path: str = "calibration_dca.png",
 ) -> str:
     plt.rcParams["pdf.fonttype"] = 42
     plt.rcParams["ps.fonttype"] = 42
+
+    if isinstance(calib_df, dict):
+        if "calibration_bins" in calib_df:
+            calib_df = pd.DataFrame(calib_df["calibration_bins"])
+        else:
+            calib_df = pd.DataFrame(calib_df)
+    if isinstance(dca_df, dict):
+        dca_df = pd.DataFrame(dca_df)
+
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.0, 4.6), dpi=300)
     ax1.plot([0, 1], [0, 1], color="#94A3B8", ls="--", lw=1.2, label="Ideal")
     ax1.plot(calib_df["pred_mean"], calib_df["obs_rate"], "o-", color="#0072B5", lw=2.0, label="Observed")
@@ -365,7 +385,8 @@ def plot_standalone_calibration_dca(
 ```
 
 ### 6. Propensity Score Balance (Love Plot)
-- **Primary Recipe**: Use `match_propensity_scores` (Recipe 6) or `compute_iptw` (Recipe 14) in [04-causal-iptw-psm.md](recipes/04-causal-iptw-psm.md), plotting $|\text{SMD}|$ pre- and post-adjustment with a vertical threshold line at $|\text{SMD}| = 0.10$.
+
+- **Primary Recipe**: Use `match_propensity_scores` in [04-causal-iptw-psm.md](recipes/04-causal-iptw-psm.md) (Recipe 6) which returns `balance_df` directly, or compute weighted SMDs via `calculate_weighted_smd` (Recipe 14) formatted into a balance table with columns `Variable`, `Pre-Match SMD`, and `Post-Match SMD` (or `smd_unadjusted`, `smd_adjusted`), plotting $|\text{SMD}|$ pre- and post-adjustment with a vertical threshold line at $|\text{SMD}| = 0.10$.
 - **Standalone Plot Template**:
 ```python
 import matplotlib.pyplot as plt
@@ -417,6 +438,7 @@ def plot_standalone_love(
 ```
 
 ### 7. Bland-Altman Method Agreement Plot
+
 - **Primary Recipe**: Use `calculate_bland_altman` in [05-diagnostic-meta-power.md](recipes/05-diagnostic-meta-power.md) (Recipe 5), marking mean bias and $\pm 1.96\text{ SD}$ Limits of Agreement (LoA) with 95% CI shading.
 - **Standalone Plot Template**:
 ```python
@@ -454,15 +476,17 @@ def plot_standalone_bland_altman(
         ci_loa_high = ba_result.get("ci_upper_loa")
         ci_loa_low = ba_result.get("ci_lower_loa")
     else:
+        from scipy.stats import t as t_dist
+
         bias = float(np.mean(diffs))
         sd = float(np.std(diffs, ddof=1))
         loa_low, loa_high = bias - 1.96 * sd, bias + 1.96 * sd
         se_mean = sd / np.sqrt(n)
         se_loa = float(np.sqrt((1.0 / n + (1.96**2) / (2.0 * (n - 1))) * (sd**2)))
-        t_crit = 1.96
+        t_crit = float(t_dist.ppf(0.975, df=n - 1)) if n > 1 else 1.96
         ci_bias = (bias - t_crit * se_mean, bias + t_crit * se_mean)
-        ci_loa_high = (loa_high - t_crit * se_loa, loa_high + t_crit * se_loa)
-        ci_loa_low = (loa_low - t_crit * se_loa, loa_low + t_crit * se_loa)
+        ci_loa_high = (loa_high - 1.96 * se_loa, loa_high + 1.96 * se_loa)
+        ci_loa_low = (loa_low - 1.96 * se_loa, loa_low + 1.96 * se_loa)
 
     fig, ax = plt.subplots(figsize=(6.2, 4.5), dpi=300)
     ax.scatter(means, diffs, color="#0072B5", alpha=0.65, s=24)
@@ -489,6 +513,7 @@ def plot_standalone_bland_altman(
 ```
 
 ### 8. Restricted Cubic Splines (RCS) Dose-Response Curve
+
 - **Primary Recipe**: Use `fit_rcs_spline_model` in [02-regression-firth-ordinal.md](recipes/02-regression-firth-ordinal.md) (Recipe 22), plotting `contrast_df["estimate"]` and `ci_lower`/`ci_upper` across the continuous predictor range with annotated overall and non-linearity $P$-values.
 - **Standalone Plot Template**:
 ```python
@@ -510,30 +535,48 @@ def plot_standalone_rcs(
 ) -> str:
     plt.rcParams["pdf.fonttype"] = 42
     plt.rcParams["ps.fonttype"] = 42
-    fig, ax = plt.subplots(figsize=(6.4, 4.5), dpi=300)
 
-    col = x_col or rcs_var
-    if col is None or col not in contrast_df.columns:
+    fam_clean = str(family).lower()
+    if fam_clean not in ("binomial", "gaussian", "cox"):
+        raise ValueError(
+            f"Unsupported family '{family}'; must be one of 'binomial', 'gaussian', or 'cox'."
+        )
+
+    target_col = x_col or rcs_var
+    if target_col is not None:
+        if target_col not in contrast_df.columns:
+            raise KeyError(
+                f"Requested predictor column '{target_col}' not found in contrast_df columns: {list(contrast_df.columns)}"
+            )
+        col = target_col
+    else:
         cand_cols = [
             c
             for c in contrast_df.columns
             if c not in ("estimate", "ci_lower", "ci_upper", "log_contrast", "se")
         ]
-        col = cand_cols[0] if cand_cols else "x"
+        if not cand_cols:
+            raise KeyError(
+                f"Could not infer predictor column from contrast_df columns: {list(contrast_df.columns)}"
+            )
+        col = cand_cols[0]
+
     x = contrast_df[col].to_numpy(dtype=float)
     y = contrast_df["estimate"].to_numpy(dtype=float)
     lo = contrast_df["ci_lower"].to_numpy(dtype=float)
     hi = contrast_df["ci_upper"].to_numpy(dtype=float)
 
-    is_gaussian = str(family).lower() == "gaussian"
+    is_gaussian = fam_clean == "gaussian"
     null_val = 0.0 if is_gaussian else 1.0
     if y_label is None:
         if is_gaussian:
             y_label = "Mean Difference (95% CI)"
-        elif str(family).lower() == "cox":
+        elif fam_clean == "cox":
             y_label = "Adjusted Hazard Ratio (95% CI)"
         else:
             y_label = "Adjusted Odds Ratio (95% CI)"
+
+    fig, ax = plt.subplots(figsize=(6.4, 4.5), dpi=300)
 
     ax.axhline(null_val, color="#94A3B8", ls="--", lw=1.1)
     ax.plot(x, y, color="#0072B5", lw=2.2, label="Spline Point Estimate")
@@ -560,6 +603,7 @@ def plot_standalone_rcs(
 ```
 
 ### 9. Cox Proportional Hazards Schoenfeld Residuals Diagnostic Plot
+
 - **Primary Recipe**: Use `schoenfeld_diagnostics` and `fit_survival_analysis_suite` in [03-survival-competing-risks.md](recipes/03-survival-competing-risks.md) (Recipe 11).
 - **Standalone Plot Template**:
 ```python
