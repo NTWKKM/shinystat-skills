@@ -4,7 +4,37 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MODE="${1:---symlink}" # รองรับ --symlink (ค่าเริ่มต้น) หรือ --copy
+MODE="--symlink"
+SCOPE="workspace"
+TARGET="all"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --copy)
+            MODE="--copy"
+            shift
+            ;;
+        --symlink)
+            MODE="--symlink"
+            shift
+            ;;
+        --global)
+            SCOPE="global"
+            shift
+            ;;
+        -s|--scope)
+            SCOPE="$2"
+            shift 2
+            ;;
+        -t|--target)
+            TARGET="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
 
 link_or_copy() {
     local src="$1"
@@ -19,40 +49,23 @@ link_or_copy() {
     fi
 }
 
-echo "[1/4] Syncing shared references into shinystat and shinystat-cloud..."
+echo "[1/3] Syncing shared references into shinystat and shinystat-cloud..."
 SHARED_REF_DIR="$REPO_ROOT/skills/_shared/references"
 if [[ -d "$SHARED_REF_DIR" ]]; then
     for ref_file in "$SHARED_REF_DIR"/*.md; do
         [[ -e "$ref_file" ]] || continue
         fname="$(basename "$ref_file")"
         link_or_copy "$ref_file" "$REPO_ROOT/skills/shinystat/references/$fname"
-        link_or_copy "$ref_file" "$REPO_ROOT/skills/shinystat-cloud/references/$fname"
+        if [[ "$fname" != "figures.md" ]]; then
+            link_or_copy "$ref_file" "$REPO_ROOT/skills/shinystat-cloud/references/$fname"
+        fi
     done
 fi
 
-echo "[2/4] Linking canonical src/medstat into skills/shinystat/scripts/medstat..."
+echo "[2/3] Linking canonical src/medstat into skills/shinystat/scripts/medstat..."
 link_or_copy "$REPO_ROOT/src/medstat" "$REPO_ROOT/skills/shinystat/scripts/medstat"
 
-echo "[3/4] Installing skills into IDE harness directories (.agent, .agents, .claude, .cursor)..."
-HARNESS_DIRS=(
-    "$REPO_ROOT/.agent/skills"
-    "$REPO_ROOT/.agents/skills"
-    "$REPO_ROOT/.claude/skills"
-    "$REPO_ROOT/.cursor/skills"
-)
-
-for hdir in "${HARNESS_DIRS[@]}"; do
-    mkdir -p "$hdir"
-    link_or_copy "$REPO_ROOT/skills/shinystat" "$hdir/shinystat"
-    link_or_copy "$REPO_ROOT/skills/shinystat-cloud" "$hdir/shinystat-cloud"
-    if [[ "$MODE" == "--copy" ]]; then
-        link_or_copy "$REPO_ROOT/skills/_shared" "$hdir/_shared"
-    else
-        rm -rf "$hdir/_shared"
-    fi
-done
-
-echo "[3.5/4] Installing cloud skill into packaging/cloud..."
+echo "[3/3] Installing cloud skill into packaging/cloud..."
 mkdir -p "$REPO_ROOT/packaging/cloud"
 link_or_copy "$REPO_ROOT/skills/shinystat-cloud" "$REPO_ROOT/packaging/cloud/shinystat-cloud"
 if [[ "$MODE" == "--copy" ]]; then
@@ -61,11 +74,47 @@ else
     rm -rf "$REPO_ROOT/packaging/cloud/_shared"
 fi
 
-echo "[4/4] Linking sub-agents (figure-tester.md)..."
+# Clean up any legacy in-workspace mirror directories to maintain SSOT (ADR 49)
+rm -rf "$REPO_ROOT/.agent/skills" "$REPO_ROOT/.agents/skills" "$REPO_ROOT/.claude/skills" "$REPO_ROOT/.cursor/skills" "$REPO_ROOT/.agent/agents" "$REPO_ROOT/.agents/agents" 2>/dev/null || true
+
 CANONICAL_AGENT="$REPO_ROOT/agents/figure-tester.md"
-if [[ -f "$CANONICAL_AGENT" ]]; then
-    link_or_copy "$CANONICAL_AGENT" "$REPO_ROOT/.agent/agents/figure-tester.md"
-    link_or_copy "$CANONICAL_AGENT" "$REPO_ROOT/.agents/agents/figure-tester.md"
+
+if [[ "$SCOPE" == "global" ]]; then
+    echo "[Global] Installing standalone dereferenced skills into Antigravity global config..."
+    GLOBAL_DIRS=()
+    if [[ "$TARGET" == "all" || "$TARGET" == "antigravity" ]]; then
+        GLOBAL_DIRS+=(
+            "${HOME}/.gemini/config/skills"
+            "${HOME}/.gemini/antigravity/skills"
+        )
+    fi
+    if [[ "$TARGET" == "all" || "$TARGET" == "claude" ]]; then
+        GLOBAL_DIRS+=("${HOME}/.claude/skills")
+    fi
+    if [[ "$TARGET" == "all" || "$TARGET" == "cursor" ]]; then
+        GLOBAL_DIRS+=("${HOME}/.cursor/skills")
+    fi
+
+    # Ensure packaging/cloud is built if needed
+    if [[ ! -d "$REPO_ROOT/packaging/cloud/shinystat-cloud" || -L "$REPO_ROOT/packaging/cloud/shinystat-cloud" ]]; then
+        "$REPO_ROOT/scripts/package-cloud-skill.sh" >/dev/null
+    fi
+
+    for gdir in "${GLOBAL_DIRS[@]}"; do
+        mkdir -p "$gdir"
+        rm -rf "$gdir/shinystat" "$gdir/shinystat-cloud"
+        cp -RL "$REPO_ROOT/skills/shinystat" "$gdir/shinystat"
+        cp -RL "$REPO_ROOT/packaging/cloud/shinystat-cloud" "$gdir/shinystat-cloud"
+        find "$gdir/shinystat" "$gdir/shinystat-cloud" -name ".DS_Store" -delete 2>/dev/null || true
+        find "$gdir/shinystat" "$gdir/shinystat-cloud" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+        echo "  ✓ Installed into $gdir"
+    done
+
+    # Global agent
+    if [[ -f "$CANONICAL_AGENT" && -d "${HOME}/.gemini/config/agents" ]]; then
+        cp "$CANONICAL_AGENT" "${HOME}/.gemini/config/agents/figure-tester.md"
+        echo "  ✓ Installed figure-tester agent into ${HOME}/.gemini/config/agents/figure-tester.md"
+    fi
 fi
 
-echo "Done! Installed shinystat-skills in '$MODE' mode."
+echo "Done! Installed shinystat-skills in '$MODE' mode (scope: $SCOPE)."

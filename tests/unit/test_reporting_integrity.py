@@ -2,10 +2,30 @@
 tests/unit/test_reporting_integrity.py: Unit tests for Pillar 5 Reporting Integrity Verification.
 """
 
+# ruff: noqa: E402
+
 from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(REPO_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "src"))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from medstat.reporting.integrity import verify_report_integrity
 from medstat.reporting.ir import ReportDocument
+from tests.fixtures.integrity_cases import (
+    BASE_NARRATIVE,
+    BASE_RESULTS_DICT,
+    INTEGRITY_PARITY_CASES,
+    STAT_MUTATIONS,
+)
 
 
 def test_integrity_clean_report():
@@ -73,7 +93,7 @@ def test_integrity_untraced_numbers():
 
 
 def test_integrity_untraced_numbers_threshold_allowance():
-    """Verifies that an untraced rate <= 15% (or single structural number) passes audit."""
+    """Verifies that even a single untraced number blocks audit.passed unless explicitly whitelisted in allowed_untraced."""
     doc = ReportDocument(
         title="Analysis Report",
         results_dict={
@@ -89,15 +109,80 @@ def test_integrity_untraced_numbers_threshold_allowance():
             "s10": 111.1,
         },
     )
-    # 10 known numbers + 1 untraced number (73.4) -> 1/11 = 9.1% <= 15%
+    # 10 known numbers + 1 untraced number (73.4) -> must fail under strict len(untraced) == 0 gate
     doc.add_paragraph(
         "Stats: 11.1, 22.2, 33.3, 44.4, 55.5, 66.6, 77.7, 88.8, 99.9, 111.1, with untraced marker 73.4."
     )
 
     audit = verify_report_integrity(doc)
-    assert audit.passed is True
+    assert audit.passed is False
     assert len(audit.untraced_numbers) == 1
     assert 73.4 in audit.untraced_numbers
+
+    # Explicit allow-list permits known non-statistical token
+    audit_allowed = verify_report_integrity(doc, allowed_untraced={73.4})
+    assert audit_allowed.passed is True
+    assert len(audit_allowed.untraced_numbers) == 0
+
+
+def test_integrity_audit_critical_cases_block_fabricated_numbers():
+    """Verifies all 5 audit cases against results_dict = {'or': 1.45, 'p': 0.012, 'n': 412}."""
+    base_results = {"or": 1.45, "p": 0.012, "n": 412}
+
+    # 1. Mutate OR from 1.45 to 3.45 -> passed=False
+    doc_or = ReportDocument(title="Audit OR", results_dict=base_results)
+    doc_or.add_paragraph("In 412 patients, the odds ratio was 3.45 (P = 0.012).")
+    res_or = verify_report_integrity(doc_or)
+    assert res_or.passed is False
+    assert 3.45 in res_or.untraced_numbers
+
+    # 2. Mutate P from 0.012 to 0.034 -> passed=False
+    doc_p = ReportDocument(title="Audit P", results_dict=base_results)
+    doc_p.add_paragraph("In 412 patients, the odds ratio was 1.45 (P = 0.034).")
+    res_p = verify_report_integrity(doc_p)
+    assert res_p.passed is False
+    assert 0.034 in res_p.untraced_numbers
+
+    # 3. Mutate n from 412 to 512 -> passed=False
+    doc_n = ReportDocument(title="Audit N", results_dict=base_results)
+    doc_n.add_paragraph("In 512 patients, the odds ratio was 1.45 (P = 0.012).")
+    res_n = verify_report_integrity(doc_n)
+    assert res_n.passed is False
+    assert 512.0 in res_n.untraced_numbers
+
+    # 4. Single fabricated number in long narrative -> passed=False
+    doc_long = ReportDocument(title="Audit Long", results_dict=base_results)
+    doc_long.add_paragraph(
+        "Across 412 enrolled patients (Table 1), primary analysis yielded OR 1.45 (P = 0.012); "
+        "Repeat evaluation confirmed OR 1.45 (P = 0.012) in 412 patients, except subgroup OR 2.89."
+    )
+    res_long = verify_report_integrity(doc_long)
+    assert res_long.passed is False
+    assert 2.89 in res_long.untraced_numbers
+
+    # 5. Mutate P from 0.012 to P=0.001 or P<0.001 -> both must fail when true P=0.012
+    doc_p_eq = ReportDocument(title="Audit P=0.001", results_dict=base_results)
+    doc_p_eq.add_paragraph("In 412 patients, the odds ratio was 1.45 (P = 0.001).")
+    res_p_eq = verify_report_integrity(doc_p_eq)
+    assert res_p_eq.passed is False
+    assert 0.001 in res_p_eq.untraced_numbers
+
+    doc_p_lt = ReportDocument(title="Audit P<0.001", results_dict=base_results)
+    doc_p_lt.add_paragraph("In 412 patients, the odds ratio was 1.45 (P < 0.001).")
+    res_p_lt = verify_report_integrity(doc_p_lt)
+    assert res_p_lt.passed is False
+    assert 0.001 in res_p_lt.untraced_numbers
+
+    # Conversely, when true P is 0.0003 (< 0.001), P < 0.001 is a valid P-value floor
+    doc_p_floor_ok = ReportDocument(
+        title="Valid P<0.001 Floor", results_dict={"or": 1.45, "p": 0.0003, "n": 412}
+    )
+    doc_p_floor_ok.add_paragraph(
+        "In 412 patients, the odds ratio was 1.45 (P < 0.001)."
+    )
+    res_p_floor_ok = verify_report_integrity(doc_p_floor_ok)
+    assert res_p_floor_ok.passed is True
+    assert len(res_p_floor_ok.untraced_numbers) == 0
 
 
 def test_integrity_causal_caveat_warning():
@@ -447,3 +532,143 @@ def test_integrity_citation_ranges_and_bare_references():
     assert 9.0 not in audit.untraced_numbers
     assert 10.0 not in audit.untraced_numbers
     assert len(audit.untraced_numbers) == 0
+
+
+def test_integrity_p_floor_and_allowed_untraced_guards():
+    """
+    Verifies that:
+    1. 'two-sided P = 0.001' is NOT exempted as an alpha threshold when true P is 0.012.
+    2. 'P < 0.001' is blocked when true P is 0.0014 (even though 0.0014 is within 0.0005 of 0.001).
+    3. Valid inequality 'P < 0.05' passes when true P is 0.012.
+    4. allowed_untraced does not apply percentage-scaling or loose 0.02 p-value tolerances.
+    """
+    doc_two_sided = ReportDocument(
+        title="Two-Sided P Audit",
+        results_dict={"p_value": 0.012, "n": 100},
+    )
+    doc_two_sided.add_paragraph("Methods: Cohort retention was 100 patients.")
+    doc_two_sided.add_paragraph("The difference was significant (two-sided P = 0.001).")
+    audit_two_sided = verify_report_integrity(doc_two_sided)
+    assert 0.001 in audit_two_sided.untraced_numbers
+    assert audit_two_sided.passed is False
+
+    doc_p_floor_bad = ReportDocument(
+        title="P Floor Rounding Boundary",
+        results_dict={"p_value": 0.0014},
+    )
+    doc_p_floor_bad.add_paragraph("Methods: Included cohort.")
+    doc_p_floor_bad.add_paragraph("Primary endpoint reached P < 0.001.")
+    audit_p_floor_bad = verify_report_integrity(doc_p_floor_bad)
+    assert 0.001 in audit_p_floor_bad.untraced_numbers
+    assert audit_p_floor_bad.passed is False
+
+    doc_p_floor_ok = ReportDocument(
+        title="Valid P Inequality",
+        results_dict={"p_value": 0.012},
+    )
+    doc_p_floor_ok.add_paragraph("Methods: Included cohort.")
+    doc_p_floor_ok.add_paragraph("Primary endpoint reached P < 0.05.")
+    audit_p_floor_ok = verify_report_integrity(doc_p_floor_ok)
+    assert 0.05 not in audit_p_floor_ok.untraced_numbers
+    assert audit_p_floor_ok.passed is True
+
+    # P > 0.05 valid when true P is 0.23
+    doc_p_gt_ok = ReportDocument(
+        title="Valid Greater-Than P Inequality",
+        results_dict={"p_value": 0.23},
+    )
+    doc_p_gt_ok.add_paragraph("Methods: Included cohort.")
+    doc_p_gt_ok.add_paragraph(
+        "Secondary endpoint demonstrated no significance (P > 0.05)."
+    )
+    audit_p_gt_ok = verify_report_integrity(doc_p_gt_ok)
+    assert 0.05 not in audit_p_gt_ok.untraced_numbers
+    assert audit_p_gt_ok.passed is True
+
+    # P > 0.05 invalid when true P is 0.03
+    doc_p_gt_bad = ReportDocument(
+        title="Invalid Greater-Than P Inequality",
+        results_dict={"p_value": 0.03},
+    )
+    doc_p_gt_bad.add_paragraph("Methods: Included cohort.")
+    doc_p_gt_bad.add_paragraph(
+        "Secondary endpoint claimed non-significance (P > 0.05)."
+    )
+    audit_p_gt_bad = verify_report_integrity(doc_p_gt_bad)
+    assert 0.05 in audit_p_gt_bad.untraced_numbers
+    assert audit_p_gt_bad.passed is False
+
+    # Boundary: equality at threshold for strict inequality (P > 0.05 when true P is 0.05 is invalid)
+    doc_p_gt_boundary_strict = ReportDocument(
+        title="Boundary Greater-Than P Inequality Strict",
+        results_dict={"p_value": 0.05},
+    )
+    doc_p_gt_boundary_strict.add_paragraph("Methods: Included cohort.")
+    doc_p_gt_boundary_strict.add_paragraph("Boundary case (P > 0.05).")
+    audit_p_gt_boundary_strict = verify_report_integrity(doc_p_gt_boundary_strict)
+    assert 0.05 in audit_p_gt_boundary_strict.untraced_numbers
+    assert audit_p_gt_boundary_strict.passed is False
+
+    # Boundary: equality at threshold for non-strict inequality (P >= 0.05 when true P is 0.05 is valid)
+    doc_p_gte_boundary = ReportDocument(
+        title="Boundary Greater-Than-Equal P Inequality",
+        results_dict={"p_value": 0.05},
+    )
+    doc_p_gte_boundary.add_paragraph("Methods: Included cohort.")
+    doc_p_gte_boundary.add_paragraph("Boundary case (P >= 0.05).")
+    audit_p_gte_boundary = verify_report_integrity(doc_p_gte_boundary)
+    assert 0.05 not in audit_p_gte_boundary.untraced_numbers
+    assert audit_p_gte_boundary.passed is True
+
+    doc_allow = ReportDocument(
+        title="Allowed Untraced Strict Match",
+        results_dict={"n": 100},
+    )
+    doc_allow.add_paragraph("Methods: Cohort of 100 patients with 50 events.")
+    audit_allow_fail = verify_report_integrity(doc_allow, allowed_untraced=[0.5])
+    assert 50.0 in audit_allow_fail.untraced_numbers
+    assert audit_allow_fail.passed is False
+
+    audit_allow_pass = verify_report_integrity(doc_allow, allowed_untraced=[50.0])
+    assert 50.0 not in audit_allow_pass.untraced_numbers
+    assert audit_allow_pass.passed is True
+
+
+@pytest.mark.parametrize("case", INTEGRITY_PARITY_CASES, ids=lambda c: c.id)
+def test_integrity_gate_tolerance_parity_cases(case):
+    """Verifies all Task 2a parity cases through ReportDocument and verify_report_integrity."""
+    doc = ReportDocument(title="Parity Test", results_dict=case.results_dict)
+    doc.add_paragraph(case.narrative)
+    audit = verify_report_integrity(doc, allowed_untraced=case.allowed_untraced)
+
+    assert audit.passed == case.expected_passed, (
+        f"Case {case.id} failed: expected passed={case.expected_passed}, got {audit.passed}. "
+        f"Untraced: {audit.untraced_numbers}"
+    )
+    assert sorted(audit.untraced_numbers) == sorted(case.expected_untraced), (
+        f"Case {case.id} untraced mismatch: expected {case.expected_untraced}, got {audit.untraced_numbers}"
+    )
+
+
+def test_integrity_gate_tolerance_mutations():
+    """Verifies Task 2b mutation tests for all 5 statistical tokens (must all fail audit.passed)."""
+    for token_str, mutations in STAT_MUTATIONS:
+        for mutated_val in mutations:
+            # Safely replace token preserving other numeric strings
+            pat = r"(?<![\d.])" + re.escape(token_str) + r"(?![\d.])"
+            mutated_narrative = re.sub(pat, mutated_val, BASE_NARRATIVE, count=1)
+            assert mutated_narrative != BASE_NARRATIVE, (
+                f"Failed to substitute token '{token_str}' with '{mutated_val}'"
+            )
+
+            doc = ReportDocument(
+                title="Mutation Test",
+                results_dict=BASE_RESULTS_DICT,
+            )
+            doc.add_paragraph(mutated_narrative)
+            audit = verify_report_integrity(doc)
+
+            assert audit.passed is False, (
+                f"Mutation {token_str} -> {mutated_val} unexpectedly passed audit! "
+                f"Narrative: '{mutated_narrative}', Untraced: {audit.untraced_numbers}"
+            )

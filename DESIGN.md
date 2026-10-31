@@ -1844,6 +1844,86 @@ In the latest CodeRabbit review round on PR #22:
 - **Status**: Accepted & Fully Verified.
 - **Verification**: 739 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
 
+---
+
+## ADR 65: Global Skill Installation Scope & Standalone Package Artifact Sanitization
+
+### Context
+1. In Antigravity and external agent environments, skills installed at machine-global scope (`~/.gemini/config/skills/`, `~/.gemini/antigravity/skills/`) were previously not updated automatically when local workspace repositories were refactored. The refactored `install-skills.sh` only targeted local IDE harnesses (`.agent`, `.agents`, `.claude`, `.cursor`), requiring manual copying to update global Antigravity configurations.
+2. In `scripts/package-cloud-skill.sh`, `zip -rq` appended to existing `shinystat-cloud.zip` archives without purging stale entries or excluding OS/Python cache files (`.DS_Store`, `__pycache__`), which could result in ghost nested directories or bloated distributable archives.
+
+### Decision
+1. **Global Scope Support in `install-skills.sh`**:
+   - Added CLI argument parsing for `--global`, `-s/--scope [workspace|global]`, and `-t/--target [antigravity|claude|cursor|all]`.
+   - When `scope=global` is selected, copies dereferenced, standalone skill trees (`shinystat` and `shinystat-cloud`) to `${HOME}/.gemini/config/skills` and `${HOME}/.gemini/antigravity/skills` (as well as Claude and Cursor global paths).
+   - Automatically sanitizes installed directories by removing `.DS_Store` files and `__pycache__` directories.
+   - Synchronizes canonical subagent definitions (`agents/figure-tester.md` to `${HOME}/.gemini/config/agents/figure-tester.md`).
+2. **Sanitized Archive Packaging in `package-cloud-skill.sh`**:
+   - Explicitly removes existing `shinystat-cloud.zip` prior to zipping.
+   - Passes `-x "*.DS_Store" -x "*__pycache__*"` to ensure clean, minimal distributables.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 739 tests passing across full test suite; verified byte parity and clean zip archives on Desktop and in global Antigravity discovery paths.
+
+---
+
+## ADR 66: Pillar 5 Zero-Tolerance Integrity Gate & Standalone Cloud Recipe Parity
+
+### Context
+An external audit of `shinystat-cloud` and `src/medstat/reporting/integrity.py` identified two critical and three medium issues:
+1. **Critical #1 (Integrity Gate Permitting Fabricated Numbers)**: Both `src/medstat/reporting/integrity.py` (`verify_report_integrity`) and `skills/_shared/references/report-builder.md` (`verify_standalone_integrity`) tolerated up to $\max(1, \lfloor 0.15 \cdot n \rfloor)$ untraced numbers, allowing single fabricated Odds Ratios, P-values, or sample sizes $n$ to pass with `passed=True` in violation of `SKILL.md §3` (`len(untraced_numbers) == 0`). Additionally, `0.001` / `0.05` were unconditionally exempted when `p` or `p-value` appeared in the window (allowing fabricated `P = 0.001` or `P < 0.001` when true $P = 0.012$), and `report-builder.md` used overly broad `is_year` (`1900 <= val <= 2100`) and `is_citation` (`[` in `window_before`) checks.
+2. **Critical #2 (Cloud Capability vs. Recipe Parity)**: `shinystat-cloud` advertised mixed-type MICE, ordinal proportional odds + Brant Wald test, Harrell Restricted Cubic Splines (RCS), clustered GEE with sandwich SEs & Design Effect, DerSimonian-Laird random-effects meta-analysis, and standalone `.pptx`/`.pdf` report generation, which existed in `src/medstat/` but lacked standalone zero-`medstat` recipes in `skills/shinystat-cloud/references/recipes/` and `report-builder.md`.
+3. **Medium #1–#3 (Cloud `figures.md` Imports, Duplicate `python-recipes.md`, and Agent Prompt Hygiene)**: `_shared/references/figures.md` contained 9 `from medstat.figures...` imports before line 228's cloud warning; `scripts/package-cloud-skill.sh` generated an unreferenced 215 KB `python-recipes.md` duplicate; tool names (`search_web`, `medical-terminology` MCP) and repeated 5x Polish Gates needed environment-agnostic generalization and single-source-of-truth consolidation per `/writing-for-agents`.
+
+### Decision
+1. **Strict Zero-Tolerance Numerical Traceability (`len(untraced) == 0`)**:
+   - Enforced `len(untraced) == 0` in both `verify_report_integrity` and `verify_standalone_integrity`, adding an optional `allowed_untraced: Sequence[float] | None = None` whitelist parameter for explicit non-statistical constants.
+   - Restricted P-value floor exemptions (`P < 0.001`, `P < 0.0001`) strictly to cases where `known_nums` contains a true value $0 \le v < \text{floor}$. Exact `P = 0.001` / `P = 0.01` / `P = 0.05` require matching `known_nums` unless accompanied by explicit $\alpha$-threshold keywords (`alpha`, `significance`, `threshold`, `cutoff`, `two-sided`, `one-sided`).
+   - Synchronized `verify_standalone_integrity`'s `is_year` (bounded `1900..2035` with explicit date/bibliographic context) and `is_citation` (bounded `1..100` bracketed/superscript/reference markers) with `src/medstat/reporting/integrity.py`.
+2. **Standalone Cloud Recipes (Recipes 12 Mixed, 21–24, and PPTX/PDF Generators)**:
+   - Added `impute_mice_mixed_datasets` (mixed continuous BayesianRidge, binary LogisticRegression with stochastic posterior draws, and multiclass Softmax) to Recipe 12 (`01-data-missing-table1.md`).
+   - Added Recipe 21 (`fit_proportional_odds`, `assess_proportional_odds` Brant Wald test, `fit_multinomial_logistic`), Recipe 22 (`build_harrell_rcs_basis`, `fit_rcs_spline_model`), and Recipe 23 (`calculate_design_effect`, `fit_gee` with sandwich SEs) to `02-regression-firth-ordinal.md`.
+   - Added Recipe 24 (`compute_binary_effect_sizes`, `run_meta_analysis` Fixed-Effects IV & DerSimonian-Laird Random-Effects with $Q$, $I^2$, $\tau^2$, Egger's regression, and leave-one-out sensitivity) to `05-diagnostic-meta-power.md`.
+   - Added standalone `generate_pptx_report` (`python-pptx`) and `generate_pdf_report` (`reportlab` with `matplotlib.backends.backend_pdf.PdfPages` fallback) to `skills/_shared/references/report-builder.md`.
+3. **Cloud-Dedicated `figures.md`, Single-Source Recipes, and `/writing-for-agents` Refactoring**:
+   - Created a dedicated zero-`medstat` `skills/shinystat-cloud/references/figures.md` and updated `scripts/install-skills.sh` so `_shared/references/figures.md` is synced only to local `skills/shinystat/references/figures.md`.
+   - Removed `python-recipes.md` generation from `scripts/package-cloud-skill.sh` and deleted `skills/shinystat-cloud/references/python-recipes.md`.
+   - Consolidated the 3-Tier Polish & Integrity Gate into `report-builder.md §4` as the single source of truth, generalized web search / optional MCP tool names, unified Gates `#1`–`#6`, and front-loaded `SKILL.md` descriptions.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: All 5 audit fabricated-number cases return `passed=False`; all standalone cloud recipes (1–24) and report generators (`.md`, `.html`, `.docx`, `.pptx`, `.pdf`) execute cleanly in isolated zero-`medstat` tests.
+
+---
+
+## ADR 67: Half-Unit Decimal Precision Tolerance for Pillar 5 Numerical Integrity Gate
+
+### Context
+Following ADR 66's zero-tolerance enforcement (`len(untraced) == 0`), an audit using realistic clinical regression narratives (`results_dict = {"or_age": 1.45, "ci_low": 1.10, "ci_high": 1.91, "p": 0.012, "n": 412}`) revealed five vulnerability loopholes where fabricated numbers escaped detection:
+1. **Unchecked Percentage Matching**: When $|val| > 1.0$ and $|kn| \le 1.0$, values were matched against $kn \times 100$ without requiring an explicit `%` sign. Consequently, mutating CI low from `1.10` to `1.20` passed because it matched $p = 0.012 \times 100 = 1.20$.
+2. **Whole-Unit Precision Window**: Sub-one decimal tolerance used $10^{-d}$ (e.g. $0.01$ for $d=2$). Mutating $P = 0.012$ to $0.02$ passed because $|0.02 - 0.012| = 0.008 \le 0.01$.
+3. **1% Relative Tolerance Branch**: Large values ($|val| > 1.0$) permitted a 1% relative difference, allowing sample size $n = 412$ to be fabricated as $415$ or $408$.
+4. **Float Edge Jitter**: OR $1.45 \to 1.47$ was caught only by floating-point epsilon exceeding $0.02$ rather than a principled statistical boundary.
+5. **Overbroad Year Context Regex**: The citation pattern `pp?\.?` matched bare `P` in `P=0.012` due to case-insensitivity and optional dot, falsely classifying bare years like `(1950)` as bibliographic citations.
+6. **Loose Whitelist Tolerance**: `allowed_untraced` used `math.isclose(rel_tol=1e-2)`, permitting `73.9` when `73.4` was whitelisted.
+
+### Decision
+Enforce a uniform, mathematically sound matching rule across both `src/medstat/reporting/integrity.py` (`verify_report_integrity`) and `skills/_shared/references/report-builder.md` (`verify_standalone_integrity`):
+1. **Half-Unit Decimal Precision Tolerance**: `abs(val - kn) <= 0.5 * 10**(-d) + 1e-9`, where $d$ is the number of decimal digits in the raw string ($d = 0$ for integers; scientific notation derives $d$ from mantissa decimals minus exponent).
+2. **Removal of Loose Branches**: Completely delete the 1% relative tolerance branch and $0.02$ absolute tolerance branch.
+3. **Strict Percentage Qualification**: Restrict percentage-scale comparison ($kn \times 100.0$) strictly to tokens with `has_pct == True` (carrying a `%` symbol).
+4. **Whitelist Precision Synchronization**: Audit `allowed_untraced` using the exact same half-unit precision tolerance instead of relative tolerance.
+5. **Bibliographic Regex Hardening**: Require a mandatory dot on page markers (`pp?\.`), eliminating collisions between p-value notation (`P=...`) and publication year exemptions.
+6. **Inequality Parity**: Mirror inequality evaluation (`<, <=, >, >=`) between `verify_report_integrity` and `verify_standalone_integrity`.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Precision Grounding**: $P = 0.01$ passes as authentic 2-decimal rounding of $0.012$ ($|0.01 - 0.012| = 0.002 \le 0.005$), while $0.02$ and $0.013$ fail.
+- **Fail-Closed Security**: Fabricated ORs (1.46, 1.47), sample sizes (415, 408), CI limits (1.15, 1.20), bare years `(1950)`, and out-of-spec whitelist entries (73.9) are all deterministically rejected.
+- **Parity Guarantee**: Validated by automated tests running all 24 canonical cases and mutation suites side-by-side across both implementations.
+
+
 
 
 

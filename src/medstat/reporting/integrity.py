@@ -84,6 +84,35 @@ def _flatten_numbers(val: Any) -> list[float]:
     return numbers
 
 
+_P_KEY_RE = re.compile(
+    r"^(?:p|p[-_]?(?:val|value|adj|overall|non[-_]?linear|omnibus|q|lrt|wald|trend|interaction))s?$",
+    re.IGNORECASE,
+)
+
+
+def _flatten_p_values(val: Any) -> list[float]:
+    """Recursively extracts numeric p-values from dictionary keys or DataFrame columns."""
+    pvals: list[float] = []
+    if isinstance(val, dict):
+        for k, v in val.items():
+            if _P_KEY_RE.match(str(k)):
+                for n in _flatten_numbers(v):
+                    if 0.0 <= n <= 1.0:
+                        pvals.append(float(n))
+            else:
+                pvals.extend(_flatten_p_values(v))
+    elif isinstance(val, (list, tuple, set)):
+        for item in val:
+            pvals.extend(_flatten_p_values(item))
+    elif isinstance(val, pd.DataFrame):
+        for col in val.columns:
+            if _P_KEY_RE.match(str(col)):
+                for n in _flatten_numbers(val[col]):
+                    if 0.0 <= n <= 1.0:
+                        pvals.append(float(n))
+    return pvals
+
+
 _MONTHS_PATTERN = r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
 _DATE_PREFIX_PATTERN = re.compile(
     r"(?:"
@@ -133,6 +162,8 @@ class TextToken(NamedTuple):
     raw_str: str
     has_pct: bool
     is_structural: bool
+    is_p_floor: bool = False
+    p_inequality: str | None = None
 
 
 def _is_structural_context(
@@ -158,13 +189,24 @@ def _is_structural_context(
         if re.search(r"\b(?:CI|confidence|credible)\b", window, re.IGNORECASE):
             return True
 
-    # 2. Alpha thresholds and p-value cutoffs (e.g., alpha = 0.05, p < 0.05, p < 0.001)
-    if val in (0.05, 0.01, 0.001, 0.005):
-        if re.search(
-            r"(?:alpha|significance|threshold|cutoff)\b|p\s*[<>=]",
-            window,
-            re.IGNORECASE,
-        ):
+    # 2. Alpha thresholds and p-value cutoffs (e.g., alpha = 0.05, significance threshold p < 0.05)
+    if val in (0.05, 0.01, 0.001, 0.005, 0.0001):
+        has_threshold_kw = bool(
+            re.search(
+                r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff)\b",
+                window,
+                re.IGNORECASE,
+            )
+        )
+        is_direct_p_eq = bool(
+            re.search(r"\bp\s*(?:-\s*value\s*)?=\s*$", window_before, re.IGNORECASE)
+            and not re.search(
+                r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff)\b",
+                window_before,
+                re.IGNORECASE,
+            )
+        )
+        if has_threshold_kw and not is_direct_p_eq:
             return True
 
     # 3. Calendar & Publication years (1900-2035) when preceded by date or journal/citation context
@@ -172,7 +214,7 @@ def _is_structural_context(
         if _DATE_PREFIX_PATTERN.search(window_before):
             return True
         if re.search(
-            r"\b(?:et\s+al\.?|JAMA|NEJM|Lancet|BMJ|Crit\s+Care|doi|vol|pp?\.?)\b",
+            r"(?:\b(?:et\s+al\.?|JAMA|NEJM|Lancet|BMJ|Crit\s+Care|doi|vol\.?)\b|\bpp?\.)",
             window_before,
             re.IGNORECASE,
         ):
@@ -300,12 +342,26 @@ def _extract_text_tokens(text: str) -> list[TextToken]:
             window_after,
             doc_has_references=doc_has_references,
         )
+        p_ineq_match = re.search(
+            r"\bp\s*(?:[-_\s]*value\s*)?([<>]=?|[≤≥])\s*$", window_before, re.IGNORECASE
+        )
+        p_val = val / 100.0 if has_pct else val
+        p_inequality: str | None = None
+        if 0.0 < p_val <= 1.0 and not is_structural and p_ineq_match:
+            raw_op = p_ineq_match.group(1)
+            p_inequality = (
+                "<=" if raw_op == "≤" else (">=" if raw_op == "≥" else raw_op)
+            )
+
+        is_p_floor = bool(p_inequality in ("<", "<="))
         tokens.append(
             TextToken(
                 val=val,
                 raw_str=raw_num,
                 has_pct=has_pct,
                 is_structural=is_structural,
+                is_p_floor=is_p_floor,
+                p_inequality=p_inequality,
             )
         )
     return tokens
@@ -316,7 +372,10 @@ def _extract_text_numbers(text: str) -> list[float]:
     return [token.val for token in _extract_text_tokens(text)]
 
 
-def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
+def verify_report_integrity(
+    doc: ReportDocument,
+    allowed_untraced: set[float] | list[float] | tuple[float, ...] | None = None,
+) -> IntegrityReport:
     """
     Audits a ReportDocument and returns an IntegrityReport:
     1. Traces numbers in narrative text against results_dict.
@@ -324,10 +383,18 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
     3. Checks confounding caveats when results_dict keys suggest causal analyses.
     4. Checks for methods and retention keywords.
 
-    Structural constants are exempt from numerical tracing. ``passed`` requires
-    no PHI matches, any required confounding caveat, and at most
-    ``max(1, int(number_of_extracted_tokens * 0.15))`` untraced numbers.
-    Missing methods or retention keywords only add warnings.
+    Structural constants and values explicitly listed in ``allowed_untraced``
+    are exempt from numerical tracing. ``passed`` requires no PHI matches,
+    any required confounding caveat, and zero untraced numbers
+    (``len(untraced) == 0``). Missing methods or retention keywords only add warnings.
+
+    Numerical matching uses a half-unit tolerance based on claimed precision:
+    ``abs(val - kn) <= 0.5 * 10**(-d) + 1e-9`` where ``d`` is the number of
+    decimal digits displayed in the narrative text (d=0 for integers).
+    For example, P=0.01 passes when true P=0.012 (correct rounding to 2 decimals),
+    whereas 0.02 and 0.013 are rejected. Percentage-scale matching against kn*100
+    is only permitted when the token explicitly carries a '%' sign.
+    The ``allowed_untraced`` whitelist enforces the identical half-unit tolerance.
 
     ``citations_count`` counts matched citation groups, not unique references;
     bracketed bibliography labels can also count. Citation sources and their
@@ -364,8 +431,13 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
 
     # 2. Numerical Traceability
     known_numbers = _flatten_numbers(doc.results_dict)
+    known_p_values = _flatten_p_values(doc.results_dict)
+    if not known_p_values:
+        known_p_values = [kn for kn in known_numbers if 0.0 <= kn <= 1.0]
+    allowed_list = (
+        [float(x) for x in allowed_untraced] if allowed_untraced is not None else []
+    )
     text_tokens = _extract_text_tokens(all_text)
-    text_numbers = [token.val for token in text_tokens]
 
     untraced: list[float] = []
     for token in text_tokens:
@@ -373,52 +445,74 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
         token_str = token.raw_str
         has_pct = token.has_pct
         is_structural = token.is_structural
+        is_p_floor = token.is_p_floor
 
-        # Check against known numbers: for values <= 1, use token's displayed precision
-        if abs(tn) <= 1.0:
-            if re.search(r"[eE]", token_str):
-                parts = re.split(r"[eE]", token_str)
-                mantissa = parts[0]
-                try:
-                    exp_str = re.split(r"[%]", parts[1])[0]
-                    exp = int(exp_str)
-                except (IndexError, ValueError):
-                    exp = 0
-                mantissa_dec = len(mantissa.split(".")[1]) if "." in mantissa else 0
-                dec_digits = max(0, mantissa_dec - exp)
-            elif "." in token_str:
-                dec_part = token_str.split(".")[1]
-                dec_digits = len(re.split(r"[%]", dec_part)[0])
+        p_inequality = getattr(token, "p_inequality", None)
+        if p_inequality is not None:
+            p_bound = tn / 100.0 if has_pct else tn
+            if p_inequality == "<":
+                matched = any(0.0 <= pv < p_bound for pv in known_p_values)
+            elif p_inequality == "<=":
+                matched = any(0.0 <= pv <= p_bound for pv in known_p_values)
+            elif p_inequality == ">":
+                matched = any(p_bound < pv <= 1.0 for pv in known_p_values)
+            elif p_inequality == ">=":
+                matched = any(p_bound <= pv <= 1.0 for pv in known_p_values)
             else:
-                dec_digits = 2
-            abs_tol = min(0.02, 10.0 ** (-dec_digits))
+                matched = False
+            if not matched and not is_structural:
+                untraced.append(tn)
+            continue
+
+        if is_p_floor:
+            p_bound = tn / 100.0 if has_pct else tn
+            matched = any(0.0 <= pv < p_bound for pv in known_p_values)
+            if not matched and not is_structural:
+                untraced.append(tn)
+            continue
+
+        # Determine decimal precision d from raw token string:
+        # For scientific notation (e.g. 1.2e-3), derive d from mantissa decimals minus exponent.
+        # For standard decimals (e.g. 1.45), d is the count of fractional digits.
+        # For integers (e.g. 412), d = 0.
+        if re.search(r"[eE]", token_str):
+            parts = re.split(r"[eE]", token_str)
+            mantissa = parts[0]
+            try:
+                exp_str = re.split(r"[%]", parts[1])[0]
+                exp = int(exp_str)
+            except (IndexError, ValueError):
+                exp = 0
+            mantissa_dec = len(mantissa.split(".")[1]) if "." in mantissa else 0
+            d = max(0, mantissa_dec - exp)
+        elif "." in token_str:
+            dec_part = token_str.split(".")[1]
+            d = len(re.split(r"[%]", dec_part)[0])
         else:
-            abs_tol = 0.02
+            d = 0
+
+        # Half-unit tolerance based on claimed precision: abs(val - kn) <= 0.5 * 10^(-d) + 1e-9.
+        # Intended behavior: P=0.01 passes when true P=0.012 (correct 2-decimal rounding),
+        # whereas 0.02 and 0.013 are rejected.
+        tol = 0.5 * (10.0 ** (-d)) + 1e-9
 
         matched = False
         for kn in known_numbers:
-            abs_diff = abs(tn - kn)
-            # Direct match branch:
-            # For values with abs(tn) <= 1, strictly enforce displayed precision abs_tol;
-            # Only allow 1% relative tolerance for larger values (|tn| > 1.0)
-            if abs_diff <= abs_tol:
+            # 1. Direct match:
+            if abs(tn - kn) <= tol:
                 matched = True
                 break
-            if abs(tn) > 1.0 and abs(kn) > 1e-9:
-                rel_diff = abs_diff / abs(kn)
-                if rel_diff <= 0.01:
+
+            # 2. Percentage scale match: only permitted when token explicitly has '%' attached
+            if has_pct:
+                if abs(tn - kn * 100.0) <= tol:
                     matched = True
                     break
 
-            # Percentage scale match branch (e.g. 85.2% in text vs 0.852 in results):
-            # Only trigger percentage-scale comparison if token explicitly has '%'
-            # OR if tn is on percentage scale (|tn| > 1.0 and |kn| <= 1.0)
-            if has_pct or (abs(tn) > 1.0 and abs(kn) <= 1.0):
-                pct_diff = abs(tn - kn * 100.0)
-                pct_tol = min(0.05, abs_tol * 100.0) if has_pct else 0.05
-                if pct_diff <= pct_tol:
-                    matched = True
-                    break
+        # 3. Allowed untraced whitelist: uses the exact same half-unit precision tolerance
+        if not matched and allowed_list:
+            if any(abs(tn - aw) <= tol for aw in allowed_list):
+                matched = True
 
         if not matched:
             if not is_structural:
@@ -498,13 +592,7 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
     )
     citations_count = len(citation_matches)
 
-    passed = (
-        (len(phi_violations) == 0)
-        and has_causal_caveat
-        and (
-            len(untraced) == 0 or len(untraced) <= max(1, int(len(text_numbers) * 0.15))
-        )
-    )
+    passed = (len(phi_violations) == 0) and has_causal_caveat and (len(untraced) == 0)
 
     remediation_hints: list[str] = []
     if phi_violations:
@@ -513,9 +601,10 @@ def verify_report_integrity(doc: ReportDocument) -> IntegrityReport:
         )
     if untraced:
         remediation_hints.append(
-            "Untraced numbers detected. Remediation: Ensure narrative numbers match values in results_dict within audit tolerance rules "
-            "(displayed precision min(0.02, 10^(-dec_digits)) for |val| <= 1.0, 1% relative tolerance or 0.02 for |val| > 1.0, "
-            "and percentage-scale matching within 0.05 or min(0.05, 100*abs_tol))."
+            "Untraced numbers detected. Remediation: Ensure narrative numbers match values in results_dict within half-unit precision tolerance "
+            "(|val - known| <= 0.5 * 10^(-d) + 1e-9, where d is the count of displayed fractional decimal digits, d=0 for integers). "
+            "Percentage-scale matching (kn * 100) applies only when the narrative token includes an explicit '%' sign. "
+            "P-value inequality expressions (e.g. P < 0.05, P ≤ 0.05, P > 0.05, P ≥ 0.05) must satisfy recorded p-values."
         )
     if not has_causal_caveat:
         remediation_hints.append(

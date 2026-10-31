@@ -1111,6 +1111,252 @@ except ImportError:
         )
 ```
 
+### 2D. Standalone PowerPoint Deck Generator (`.pptx`)
+
+```python
+import re
+from pathlib import Path
+import pandas as pd
+
+try:
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+
+    def generate_pptx_report(
+        title: str,
+        results: dict,
+        tables: dict[str, pd.DataFrame],
+        figure_paths: list[str] = None,
+        kpi_cards: list[dict] = None,
+        out_path: str = "report.pptx",
+    ) -> str:
+        prs = Presentation()
+        prs.slide_width = Inches(13.333)
+        prs.slide_height = Inches(7.5)
+
+        # 1. Title & Executive Narrative Slide
+        slide_layout = prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0]
+        slide = prs.slides.add_slide(slide_layout)
+        if slide.shapes.title:
+            slide.shapes.title.text = str(title)
+        if len(slide.placeholders) > 1 and "narrative" in results:
+            clean_narr = re.sub(r"<[^>]+>", "", str(results["narrative"]))
+            slide.placeholders[1].text = clean_narr
+
+        blank_layout = prs.slide_layouts[6] if len(prs.slide_layouts) > 6 else prs.slide_layouts[0]
+
+        # 2. Key Findings & KPI Cards Slide
+        cards = kpi_cards if kpi_cards is not None else results.get("kpi_cards", [])
+        if cards:
+            kslide = prs.slides.add_slide(blank_layout)
+            hdr = kslide.shapes.add_textbox(Inches(0.6), Inches(0.4), Inches(12.0), Inches(0.6))
+            hdr.text_frame.text = "Key Clinical Findings & KPI Summary"
+            n_cards = min(len(cards), 4)
+            card_w = 11.6 / max(1, n_cards)
+            for idx, card in enumerate(cards[:4]):
+                left = Inches(0.6 + idx * (card_w + 0.15))
+                box = kslide.shapes.add_textbox(left, Inches(1.5), Inches(card_w), Inches(2.5))
+                tf = box.text_frame
+                tf.word_wrap = True
+                p_lbl = tf.paragraphs[0]
+                p_lbl.text = str(card.get("label", f"Metric {idx + 1}"))
+                for r in p_lbl.runs:
+                    r.font.size = Pt(12)
+                    r.font.bold = True
+                p_val = tf.add_paragraph()
+                p_val.text = str(card.get("value", ""))
+                for r in p_val.runs:
+                    r.font.size = Pt(22)
+                    r.font.bold = True
+                if card.get("subtitle"):
+                    p_sub = tf.add_paragraph()
+                    p_sub.text = str(card["subtitle"])
+                    for r in p_sub.runs:
+                        r.font.size = Pt(10)
+
+        # 3. Table Slides
+        for caption, df in (tables or {}).items():
+            tslide = prs.slides.add_slide(blank_layout)
+            tx = tslide.shapes.add_textbox(Inches(0.6), Inches(0.4), Inches(12.0), Inches(0.6))
+            tx.text_frame.text = str(caption)
+            rows, cols = len(df) + 1, len(df.columns)
+            tbl_shape = tslide.shapes.add_table(
+                rows, cols, Inches(0.6), Inches(1.2), Inches(12.0), Inches(min(5.5, 0.45 * rows))
+            )
+            tbl = tbl_shape.table
+            for j, col in enumerate(df.columns):
+                cell = tbl.cell(0, j)
+                cell.text = str(col)
+                for p in cell.text_frame.paragraphs:
+                    for r in p.runs:
+                        r.font.bold = True
+                        r.font.size = Pt(11)
+            for i, (_, row) in enumerate(df.iterrows()):
+                for j, col in enumerate(df.columns):
+                    val = "" if pd.isna(row[col]) else str(row[col])
+                    cell = tbl.cell(i + 1, j)
+                    cell.text = val
+                    for p in cell.text_frame.paragraphs:
+                        for r in p.runs:
+                            r.font.size = Pt(10)
+
+        # 3. Figure Slides
+        for fp in figure_paths or []:
+            p = Path(fp)
+            if p.exists():
+                fslide = prs.slides.add_slide(blank_layout)
+                fslide.shapes.add_picture(str(p), Inches(1.5), Inches(0.8), width=Inches(10.0))
+
+        prs.save(out_path)
+        return out_path
+
+except ImportError:
+    def generate_pptx_report(
+        title: str,
+        results: dict,
+        tables: dict[str, pd.DataFrame],
+        figure_paths: list[str] = None,
+        kpi_cards: list[dict] = None,
+        out_path: str = "report.pptx",
+    ) -> str:
+        if Path(out_path).suffix.lower() == ".pptx":
+            out_path = str(Path(out_path).with_suffix(".html"))
+        return generate_html_report(
+            title, results, tables, figure_paths, out_path=out_path
+        )
+```
+
+### 2E. Standalone PDF Report Generator (`.pdf`)
+
+```python
+import re
+import textwrap
+from pathlib import Path
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
+import pandas as pd
+
+
+def generate_pdf_report(
+    title: str,
+    results: dict,
+    tables: dict[str, pd.DataFrame],
+    figure_paths: list[str] = None,
+    out_path: str = "report.pdf",
+) -> str:
+    """Renders a publication-grade multi-page PDF via reportlab Platypus (primary) or Matplotlib PdfPages (Type 42 fallback)."""
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.units import inch
+        from reportlab.platypus import (
+            Image as RLImage,
+            Paragraph,
+            SimpleDocTemplate,
+            Spacer,
+            Table as RLTable,
+            TableStyle,
+        )
+
+        doc = SimpleDocTemplate(str(out_path), pagesize=A4)
+        styles = getSampleStyleSheet()
+        story = [Paragraph(str(title), styles["Title"]), Spacer(1, 0.2 * inch)]
+        if "narrative" in results:
+            clean_narr = re.sub(r"<[^>]+>", "", str(results["narrative"]))
+            for para in clean_narr.split("\n\n"):
+                if para.strip():
+                    story.append(Paragraph(para.strip(), styles["BodyText"]))
+                    story.append(Spacer(1, 0.1 * inch))
+
+        for caption, df in (tables or {}).items():
+            if df is None or df.empty:
+                continue
+            story.append(Paragraph(f"<b>{caption}</b>", styles["Heading3"]))
+            data = [[str(c) for c in df.columns]] + [
+                ["" if pd.isna(v) else str(v) for v in row]
+                for _, row in df.iterrows()
+            ]
+            t = RLTable(data, repeatRows=1)
+            t.setStyle(
+                TableStyle(
+                    [
+                        ("LINEABOVE", (0, 0), (-1, 0), 1.2, colors.black),
+                        ("LINEBELOW", (0, 0), (-1, 0), 0.8, colors.black),
+                        ("LINEBELOW", (0, -1), (-1, -1), 1.2, colors.black),
+                        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+                    ]
+                )
+            )
+            story.append(t)
+            story.append(Spacer(1, 0.2 * inch))
+
+        for fp in figure_paths or []:
+            p = Path(fp)
+            if p.exists() and p.suffix.lower() in {".png", ".jpg", ".jpeg"}:
+                story.append(RLImage(str(p), width=5.8 * inch, height=3.8 * inch))
+                story.append(Spacer(1, 0.2 * inch))
+
+        doc.build(story)
+        return out_path
+    except Exception:
+        pass
+
+    plt.rcParams["pdf.fonttype"] = 42
+    plt.rcParams["ps.fonttype"] = 42
+
+    with PdfPages(out_path) as pdf:
+        # Page 1: Title & Narrative Summary
+        fig = plt.figure(figsize=(8.27, 11.69))
+        fig.text(0.08, 0.92, str(title), fontsize=16, fontweight="bold", ha="left", va="top")
+        if "narrative" in results:
+            clean_narr = re.sub(r"<[^>]+>", "", str(results["narrative"]))
+            wrapped = "\n".join(
+                textwrap.fill(line, width=88) if line.strip() else ""
+                for line in clean_narr.splitlines()
+            )
+            fig.text(0.08, 0.85, wrapped, fontsize=10, ha="left", va="top", linespacing=1.4)
+        plt.axis("off")
+        pdf.savefig(fig, bbox_inches="tight")
+        plt.close(fig)
+
+        # Table Pages
+        for caption, df in (tables or {}).items():
+            if df is None or df.empty:
+                continue
+            tfig, ax = plt.subplots(figsize=(8.27, max(4.0, 1.2 + 0.35 * len(df))))
+            ax.axis("off")
+            ax.set_title(str(caption), fontsize=12, fontweight="bold", loc="left", pad=12)
+            cell_text = [
+                ["" if pd.isna(v) else str(v) for v in row]
+                for _, row in df.iterrows()
+            ]
+            mpl_tbl = ax.table(
+                cellText=cell_text,
+                colLabels=[str(c) for c in df.columns],
+                loc="upper center",
+                cellLoc="left",
+            )
+            mpl_tbl.auto_set_font_size(False)
+            mpl_tbl.set_fontsize(8.5)
+            mpl_tbl.scale(1.0, 1.3)
+            pdf.savefig(tfig, bbox_inches="tight")
+            plt.close(tfig)
+
+        # Figure Pages
+        for fp in figure_paths or []:
+            p = Path(fp)
+            if p.exists() and p.suffix.lower() in {".png", ".jpg", ".jpeg"}:
+                img = plt.imread(str(p))
+                ffig, fax = plt.subplots(figsize=(8.27, 6.0))
+                fax.imshow(img)
+                fax.axis("off")
+                pdf.savefig(ffig, bbox_inches="tight", dpi=300)
+                plt.close(ffig)
+
+    return out_path
+```
+
 ---
 
 ## 3. Standalone Reporting Integrity Verification
@@ -1118,15 +1364,19 @@ except ImportError:
 Before releasing any report, run the standalone verification routine:
 
 ```python
+import math
 import re
 from pathlib import Path
 import pandas as pd
 
 
 def verify_standalone_integrity(
-    narrative_text: str, results_dict: dict, table_dfs: list[pd.DataFrame] = None
+    narrative_text: str,
+    results_dict: dict,
+    table_dfs: list[pd.DataFrame] = None,
+    allowed_untraced: list[float] | set[float] | tuple[float, ...] = None,
 ) -> dict:
-    """Verifies numerical traceability and screens for PHI without importing medstat."""
+    """Verifies numerical traceability (len(untraced_numbers) == 0) and screens for PHI without importing medstat."""
     violations = []
 
     # 1. PHI Scan
@@ -1184,7 +1434,17 @@ def verify_standalone_integrity(
     keys_str = " ".join(results_dict.keys()).lower()
     is_causal = any(
         k in keys_str
-        for k in ["psm", "propensity", "cox", "hazard_ratio", "odds_ratio", "logistic"]
+        for k in [
+            "psm",
+            "propensity",
+            "love_plot",
+            "cox",
+            "hazard_ratio",
+            "or_table",
+            "odds_ratio",
+            "logistic",
+            "regression",
+        ]
     )
     has_caveat = True
     if is_causal:
@@ -1210,34 +1470,63 @@ def verify_standalone_integrity(
             for v in d:
                 nums.extend(_flatten_nums(v))
         elif isinstance(d, (int, float)) and not isinstance(d, bool):
-            nums.append(float(d))
+            if pd.notna(d):
+                nums.append(float(d))
+        elif isinstance(d, pd.DataFrame):
+            for col in d.columns:
+                for v in d[col]:
+                    if pd.notna(v) and isinstance(v, (int, float)) and not isinstance(v, bool):
+                        nums.append(float(v))
         return nums
 
+    p_key_re = re.compile(
+        r"^(?:p|p[-_]?(?:val|value|adj|overall|non[-_]?linear|omnibus|q|lrt|wald|trend|interaction))s?$",
+        re.IGNORECASE,
+    )
+
+    def _flatten_p_vals(d):
+        pvals = []
+        if isinstance(d, dict):
+            for k, v in d.items():
+                if p_key_re.match(str(k)):
+                    pvals.extend(n for n in _flatten_nums(v) if 0.0 <= n <= 1.0)
+                else:
+                    pvals.extend(_flatten_p_vals(v))
+        elif isinstance(d, (list, tuple, set)):
+            for item in d:
+                pvals.extend(_flatten_p_vals(item))
+        elif isinstance(d, pd.DataFrame):
+            for col in d.columns:
+                if p_key_re.match(str(col)):
+                    pvals.extend(n for n in _flatten_nums(d[col]) if 0.0 <= n <= 1.0)
+        return pvals
+
     known_nums = _flatten_nums(results_dict)
-    clean_text = narrative_text.replace(",", "")
+    known_p_vals = _flatten_p_vals(results_dict)
+    if not known_p_vals:
+        known_p_vals = [kn for kn in known_nums if 0.0 <= kn <= 1.0]
+    allowed_list = (
+        [float(x) for x in allowed_untraced] if allowed_untraced is not None else []
+    )
+    clean_text = re.sub(r"(?<=\d),(?=\d{3}\b)", "", narrative_text)
+    doc_has_references = bool(
+        re.search(
+            r"(?:^|\n)\s*(?:#{1,4}\s*)?(?:References|Bibliography)\b",
+            narrative_text,
+            re.IGNORECASE,
+        )
+    )
     raw_matches = list(
         re.finditer(
-            r"(?<!\w)(?<![a-zA-Z]-)(?:[-+]?\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?",
+            r"(?<!\w)(?<![a-zA-Z]-)(?P<num>(?:[-+]?\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?)(?P<pct>\s*%)?",
             clean_text,
         )
     )
-    ignored_structural = {
-        0.0,
-        1.0,
-        2.0,
-        3.0,
-        4.0,
-        5.0,
-        95.0,
-        99.0,
-        100.0,
-        0.05,
-        0.01,
-        0.001,
-    }
     untraced_nums = []
     for m in raw_matches:
-        raw_str = m.group(0)
+        raw_str = m.group("num")
+        pct_group = m.group("pct")
+        has_pct = bool(pct_group and pct_group.strip() == "%")
         try:
             val = float(raw_str)
         except ValueError:
@@ -1245,43 +1534,112 @@ def verify_standalone_integrity(
         if not (-1e7 < val < 1e7):
             continue
 
-        if abs(val) <= 1.0:
-            if re.search(r"[eE]", raw_str):
-                parts = re.split(r"[eE]", raw_str)
-                mantissa = parts[0]
-                try:
-                    exp = int(parts[1])
-                except (IndexError, ValueError):
-                    exp = 0
-                mantissa_dec = len(mantissa.split(".")[1]) if "." in mantissa else 0
-                dec_digits = max(0, mantissa_dec - exp)
-            else:
-                dec_digits = len(raw_str.split(".")[1]) if "." in raw_str else 2
-            abs_tol = min(0.02, 10.0 ** (-dec_digits))
+        start = m.start()
+        window_before = clean_text[max(0, start - 80) : start].split("\n")[-1]
+        window_after = clean_text[m.end() : min(len(clean_text), m.end() + 80)].split("\n")[0]
+        window = f"{window_before}{raw_str}{window_after}"
+
+        is_alpha_cutoff = val in (0.05, 0.01, 0.001, 0.005, 0.0001) and bool(
+            re.search(
+                r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff)\b",
+                window,
+                re.IGNORECASE,
+            )
+            and not (
+                re.search(r"\bp\s*(?:-\s*value\s*)?=\s*$", window_before, re.IGNORECASE)
+                and not re.search(
+                    r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff)\b",
+                    window_before,
+                    re.IGNORECASE,
+                )
+            )
+        )
+        p_ineq_match = re.search(
+            r"\bp\s*(?:[-_\s]*value\s*)?([<>]=?|[≤≥])\s*$", window_before, re.IGNORECASE
+        )
+        p_val = val / 100.0 if has_pct else val
+        if 0.0 < p_val <= 1.0 and not is_alpha_cutoff and p_ineq_match:
+            raw_op = p_ineq_match.group(1)
+            p_inequality = "<=" if raw_op == "≤" else (">=" if raw_op == "≥" else raw_op)
         else:
-            abs_tol = 0.02
+            p_inequality = None
+        if p_inequality is not None:
+            if p_inequality == "<":
+                matched = any(0.0 <= pv < p_val for pv in known_p_vals)
+            elif p_inequality == "<=":
+                matched = any(0.0 <= pv <= p_val for pv in known_p_vals)
+            elif p_inequality == ">":
+                matched = any(p_val < pv <= 1.0 for pv in known_p_vals)
+            elif p_inequality == ">=":
+                matched = any(p_val <= pv <= 1.0 for pv in known_p_vals)
+            else:
+                matched = False
+            if not matched:
+                untraced_nums.append(val)
+            continue
+
+        # Determine decimal precision d from raw token string:
+        # For scientific notation (e.g. 1.2e-3), derive d from mantissa decimals minus exponent.
+        # For standard decimals (e.g. 1.45), d is the count of fractional digits.
+        # For integers (e.g. 412), d = 0.
+        if re.search(r"[eE]", raw_str):
+            parts = re.split(r"[eE]", raw_str)
+            mantissa = parts[0]
+            try:
+                exp_str = re.split(r"[%]", parts[1])[0]
+                exp = int(exp_str)
+            except (IndexError, ValueError):
+                exp = 0
+            mantissa_dec = len(mantissa.split(".")[1]) if "." in mantissa else 0
+            d = max(0, mantissa_dec - exp)
+        elif "." in raw_str:
+            dec_part = raw_str.split(".")[1]
+            d = len(re.split(r"[%]", dec_part)[0])
+        else:
+            d = 0
+
+        # Half-unit tolerance based on claimed precision: abs(val - kn) <= 0.5 * 10^(-d) + 1e-9.
+        # Intended behavior: P=0.01 passes when true P=0.012 (correct 2-decimal rounding),
+        # whereas 0.02 and 0.013 are rejected.
+        tol = 0.5 * (10.0 ** (-d)) + 1e-9
 
         matched = False
         for kn in known_nums:
-            if abs(val - kn) <= abs_tol:
-                matched = True
-                break
-            if abs(val) > 1.0 and abs(kn) > 1e-9 and abs(val - kn) / abs(kn) <= 0.01:
-                matched = True
-                break
-            if abs(val) > 1.0 and abs(kn) <= 1.0 and abs(val - kn * 100.0) <= 0.05:
+            # 1. Direct match:
+            if abs(val - kn) <= tol:
                 matched = True
                 break
 
+            # 2. Percentage scale match: only permitted when token explicitly has '%' attached
+            if has_pct:
+                if abs(val - kn * 100.0) <= tol:
+                    matched = True
+                    break
+
+        # 3. Allowed untraced whitelist: uses the exact same half-unit precision tolerance
+        if not matched and allowed_list:
+            if any(abs(val - aw) <= tol for aw in allowed_list):
+                matched = True
+
         if not matched:
-            start = m.start()
-            window_before = clean_text[max(0, start - 30) : start].split("\n")[-1]
-            is_counter = bool(
+            is_ci_level = val in (90.0, 95.0, 99.0) and bool(
+                re.search(r"\b(?:CI|confidence|credible)\b", window, re.IGNORECASE)
+            )
+            is_scale_const = val in (0.0, 100.0) and bool(
+                re.search(r"\b(?:scale|normalized|range|total)\b", window, re.IGNORECASE)
+            )
+            is_version = bool(
+                re.search(r"\b(?:Version|v\.)\s*$", window_before, re.IGNORECASE)
+            )
+            is_counter = "." not in raw_str and bool(
                 re.search(
                     r"\b(?:Table|Figure|Fig\.?|Tier|Phase|Stage|Grade|Step|Level|Item|Section)\s*$",
                     window_before,
                     re.IGNORECASE,
                 )
+            )
+            is_exponent = "." not in raw_str and bool(
+                re.search(r"[a-zA-Z\)]\^$", window_before)
             )
             date_prefix_pattern = (
                 r"(?:"
@@ -1291,7 +1649,6 @@ def verify_standalone_integrity(
                 r"|\b(?:19\d{2}|20\d{2})\s*(?:-|–|/|\b(?:to|through|until|and)\b)"
                 r")\s*$"
             )
-            window_after = clean_text[m.end() : min(len(clean_text), m.end() + 30)].split("\n")[0]
             is_year = (
                 1900.0 <= val <= 2035.0
                 and "." not in raw_str
@@ -1299,7 +1656,7 @@ def verify_standalone_integrity(
                     bool(re.search(date_prefix_pattern, window_before, re.IGNORECASE))
                     or bool(
                         re.search(
-                            r"\b(?:et\s+al\.?|JAMA|NEJM|Lancet|BMJ|Med|Crit\s+Care|J\b|Ann\b|Clin\b|Sci\b|Press|Univ|doi|vol|pp?\.?)\b|[\(\[]\s*$",
+                            r"(?:\b(?:et\s+al\.?|JAMA|NEJM|Lancet|BMJ|Med|Crit\s+Care|J\b|Ann\b|Clin\b|Sci\b|Press|Univ|doi|vol\.?)\b|\bpp?\.)",
                             window_before,
                             re.IGNORECASE,
                         )
@@ -1311,18 +1668,34 @@ def verify_standalone_integrity(
                 and (
                     ("<sup" in window_before and "</sup>" in window_after and window_before.rfind("<sup") > window_before.rfind("</sup>"))
                     or bool(re.search(r"\[\^\s*$", window_before) and window_after.startswith("]"))
-                    or bool(re.search(r"\^\s*$", window_before) and (not window_after or window_after[0] in " \t\n,.;:)]"))
-                    or bool(re.search(r"\[\s*$", window_before) and re.match(r"\s*[,\-\]]", window_after))
+                    or bool(re.search(r"\^\[(?:[\d\s,]+|[\d\s,]*[-–]\s*)*$", window_before) and re.match(r"^(?:[\s,\-–]+\d+)*\s*\](?![a-zA-Z])", window_after))
+                    or bool(
+                        1.0 <= val <= 100.0
+                        and re.search(r"\[(?:[\d\s,]+|[\d\s,]*[-–]\s*)*$", window_before)
+                        and re.match(r"^(?:[\s,\-–]+\d+)*\s*\](?![a-zA-Z])", window_after)
+                    )
                     or bool(re.search(r"\b(?:Ref\.?|Refs\.?|Reference|References|Citation|Citations)\s*#?$", window_before, re.IGNORECASE))
-                    or bool(re.match(r"^\s*(?:\[\s*)?$", window_before) and re.match(r"^\s*(?:\]\s*)?[\.\)]\s+[A-Z]", window_after))
+                    or bool(
+                        doc_has_references
+                        and 1.0 <= val <= 100.0
+                        and re.match(r"^\s*(?:\[\s*)?$", window_before)
+                        and re.match(r"^\s*(?:\]\s*)?[\.\)]?\s+[A-Z][a-zA-Z'’\-]+(?:\s+[A-Z]{1,3}\b|\s*,\s*[A-Z]{1,3}\b|\s+et\s+al)", window_after)
+                    )
                 )
             )
-            is_structural_10 = val == 10.0 and is_counter
-            if not (val in ignored_structural or is_structural_10 or is_year or is_citation):
+            if not (
+                is_ci_level
+                or is_alpha_cutoff
+                or is_scale_const
+                or is_version
+                or is_counter
+                or is_exponent
+                or is_year
+                or is_citation
+            ):
                 untraced_nums.append(val)
 
-    untraced_rate = len(untraced_nums) / max(len(raw_matches), 1)
-    traceability_passed = len(untraced_nums) <= 1 or untraced_rate <= 0.15
+    traceability_passed = len(untraced_nums) == 0
 
     return {
         "passed": len(violations) == 0 and has_caveat and traceability_passed,
@@ -1337,35 +1710,35 @@ def verify_standalone_integrity(
 
 ## 4. Evidence-Base Verification & Superscript Citations Pipeline
 
-When the **Polish Grilling Gate (#6)** is engaged (via explicit prompt request e.g. "หาหลักฐานมาประกอบ" / "find evidence", Gate #5 Full Polish selection, or triggered on-demand), execute this 4-step evidence verification and citation workflow (if Standard Skip Polish is active, standard deliverables proceed directly using strictly user-provided sources, resolving incomplete citations and comparing real empirical findings by routing citation lookups through available literature MCPs first, with search_web as fallback, without exploratory literature reviews; if user provided no references, omit the References section entirely):
+When the **Polish Grilling Gate (#6)** is engaged (via explicit prompt request e.g. "หาหลักฐานมาประกอบ" / "find evidence", Gate #5 Full Polish selection, or triggered on-demand), execute this 4-step evidence verification and citation workflow (if Standard Skip Polish is active, standard deliverables proceed directly using strictly user-provided sources, resolving incomplete citations and comparing real empirical findings by routing citation lookups through available literature MCPs first, with any available web search tool (e.g., `web_search`, `search_web`) as fallback, without exploratory literature reviews; if user provided no references, omit the References section entirely):
 
 ### Step 1: Clinical Claims vs Analyzed Data Audit
 - Cross-audit every narrative statement in Discussion and Results against `results_dict` and study design.
 - Base permitted causal language on the prespecified estimand, study design, confounder control, and identification assumptions (do not treat weighting alone as sufficient or unweighted observational data as automatically prohibiting causal claims; report associative framing where identification is unverified, and require E-values only where defined and appropriate for the supported effect measure and sensitivity question).
 - Derive the significance threshold ($\alpha$) and confidence-interval level ($1-\alpha$) from analysis metadata rather than assuming fixed $0.05$ and $95\%$; verify that non-significant results in superiority or null-hypothesis tests ($P > \alpha$) are strictly stated as "insufficient evidence to reject the null hypothesis" rather than claiming equivalence or "no effect", while preserving separate margin- and CI-based interpretation for prespecified non-inferiority or equivalence analyses.
-- Compare normalized point estimates, confidence intervals, and $P$-values against tabular outputs using the magnitude- and percentage-specific tolerance rule (`abs_tol = min(0.02, 10**(-dec_digits))` for $|val| \le 1.0$, $0.02$ absolute or $0.01$ relative for $|val| > 1.0$, or $\min(0.05, abs\_tol \times 100.0)$ for percentages).
+- Compare normalized point estimates, confidence intervals, and $P$-values against tabular outputs using the half-unit decimal precision tolerance rule (`abs(val - kn) <= 0.5 * 10**(-d) + 1e-9`, where `d` is the number of decimal digits displayed in the narrative text; $d=0$ for integers), strictly permitting percentage-scale matching (`kn * 100.0`) only when the token explicitly carries a `%` sign, and enforcing the same half-unit precision tolerance on `allowed_untraced` constants.
 
 ### Step 2: Empirical Research Grounding & Primary Source Verification via MCPs & Bibliographic Engines
 
 - **Dynamic Bibliographic Source & MCP Adaptation**:
-  - Dynamically discover and adapt to any literature or medical database MCP servers connected in the environment (e.g. PubMed MCP, PRISMA MCP, NEJM, Cochrane, Semantic Scholar, ScienceDirect, `medical-terminology`).
-  - Prioritize specialized MCP tools when available for fast, authoritative metadata and abstract retrieval; seamlessly fallback to `search_web` / PubMed web queries when dedicated MCP database servers are absent.
+  - Dynamically discover and adapt to any literature or medical database MCP servers connected in the environment (e.g. PubMed MCP, PRISMA MCP, NEJM, Cochrane, Semantic Scholar, ScienceDirect, or optional `medical-terminology` MCP when available).
+  - Prioritize specialized MCP tools when available for fast, authoritative metadata and abstract retrieval; seamlessly fallback to any available web search tool (e.g., `web_search`, `search_web`) or PubMed web queries when dedicated MCP database servers are absent.
 - **Step 2A: User-Scoped Source Resolution & Online Empirical Comparison (Standard & Full Polish)**:
   - When user-provided materials, clinical notes, or prompts cite or mention external studies (e.g., "Singer 2016", "Sepsis-3", "KDIGO 2012") with or without full text or complete bibliographic metadata:
-    - Do NOT leave it as an informal or truncated citation.
-    - **Zero-PHI Literature Query Boundary**: Do NOT send raw user materials, clinical-note text, or patient excerpts to external MCPs or `search_web`. Build external requests strictly from bibliographic metadata and, when needed, de-identified, non-patient-specific topic or claim descriptors (e.g., disease entity, estimand, intervention); reject or redact any Protected Health Information (HN, patient name, DOB, Thai National ID, phone) before dispatching queries.
-    - Query available MCPs or search engines to retrieve and verify the authentic primary publication and claim support using bibliographic fields appropriate to the source type: for journal articles, Title, full Author list, Journal, Year, Volume, Pages (or article number / e-locator when pages are not assigned), and DOI (when assigned); for clinical practice guidelines, consensus statements, government reports, or standards, Title, issuing body/organization, Year, version or report identifier, and official URL when no DOI exists; and for books or older publications, authors/editors, Title, publisher, and Year.
-    - **Discussion Empirical Grounding (Conditional on Source Content)**: Even when the user supplies a local document or full text, query online sources (MCPs/search) if searchable. Extract and present real empirical research figures (sample sizes, benchmark effect sizes, control group event rates, 95% CIs) as comparable ONLY when the source actually reports them, matches the target estimand, population, outcome, and time horizon, and directly supports the specific **Discussion narrative** claim. Sources that do not report relevant empirical figures (e.g., clinical guidelines, consensus criteria, classification frameworks) or differ in clinical context/estimand must be cited for the conceptual claims, recommendations, or criteria they support without inventing, importing, or presenting non-comparable figures.
-    - **Offline / Unavailable Literature Services**: When online literature services (MCPs, `search_web`) are unavailable or unreachable, authenticated local full text with source-appropriate bibliographic metadata satisfies verification ONLY when carrying an accepted provenance or validation signal (user-provided file in workspace/prompt, publisher/journal masthead or frontmatter, DOI/PMID header, or official organization publication cover; accepting issuing body and official URL/identifier when no DOI exists); otherwise halt explicitly (anti-phantom citation invariant).
+    - Always resolve it into a complete, verified citation.
+    - **Zero-PHI Literature Query Boundary**: Keep raw user materials, clinical-note text, and patient excerpts out of external MCP or web search queries. Build external requests strictly from bibliographic metadata and, when needed, de-identified, non-patient-specific topic or claim descriptors (e.g., disease entity, estimand, intervention); redact any Protected Health Information (HN, patient name, DOB, Thai National ID, phone) before dispatching queries.
+    - Query available MCPs or any available web search tool to retrieve and verify the authentic primary publication and claim support using bibliographic fields appropriate to the source type: for journal articles, Title, full Author list, Journal, Year, Volume, Pages (or article number / e-locator when pages are not assigned), and DOI (when assigned); for clinical practice guidelines, consensus statements, government reports, or standards, Title, issuing body/organization, Year, version or report identifier, and official URL when no DOI exists; and for books or older publications, authors/editors, Title, publisher, and Year.
+    - **Discussion Empirical Grounding (Conditional on Source Content)**: Even when the user supplies a local document or full text, query online sources (MCPs or any available web search tool) if searchable. Extract and present real empirical research figures (sample sizes, benchmark effect sizes, control group event rates, 95% CIs) as comparable ONLY when the source actually reports them, matches the target estimand, population, outcome, and time horizon, and directly supports the specific **Discussion narrative** claim. Sources that do not report relevant empirical figures (e.g., clinical guidelines, consensus criteria, classification frameworks) or differ in clinical context/estimand must be cited for the conceptual claims, recommendations, or criteria they support without inventing, importing, or presenting non-comparable figures.
+    - **Offline / Unavailable Literature Services**: When online literature services (MCPs and web search tools) are unavailable or unreachable, authenticated local full text with source-appropriate bibliographic metadata satisfies verification ONLY when carrying an accepted provenance or validation signal (user-provided file in workspace/prompt, publisher/journal masthead or frontmatter, DOI/PMID header, or official organization publication cover; accepting issuing body and official URL/identifier when no DOI exists); otherwise halt explicitly (anti-phantom citation invariant).
     - Insert the complete, verified study into the References list and assign sequential superscript citations (`<sup>1</sup>`, `<sup>2,3</sup>`) formatted in the chosen Journal House Style.
   - **Zero Unsolicited References in Standard Mode**: If the user does not provide references or mention external literature, the Standard Mode deliverable contains NO external literature References section.
 - **Step 2B: Relevant Literature Enrichment (Full Polish Only)**:
-  - Actively search available literature MCPs / `search_web` for additional authentic, relevant published studies, clinical trials, or guidelines that directly relate to the study's clinical topic, target population, and analyzed outcomes (strictly constructing queries from de-identified medical topic descriptors without raw patient materials).
+  - Actively search available literature MCPs or any available web search tool (e.g., `web_search`, `search_web`) for additional authentic, relevant published studies, clinical trials, or guidelines that directly relate to the study's clinical topic, target population, and analyzed outcomes (strictly constructing queries from de-identified medical topic descriptors without raw patient materials).
   - Extract and present real empirical findings and comparison benchmarks as comparable ONLY when reported by the source, matching the target estimand, population, outcome, and time horizon, and directly supporting a specific Discussion claim (otherwise cite the source for its conceptual claims without figures or omit it), assigning sequential superscript citations and expanding the Reference list.
 - **Verification & Safety Rules (All Modes)**:
-  - **Zero-PHI Query Boundary**: Enforce complete redaction or rejection of raw user materials, clinical-note text, or patient identifiers before sending requests to external MCPs or `search_web`. Construct all external search queries strictly from verified bibliographic metadata and de-identified medical concept terms.
-  - **Bibliographic Verification**: Verify bibliographic metadata via query: `"<First Author> <Journal> <Year> <Title keywords>"` or DOI/PMID (or `"<Issuing Body> <Title> <Year>"` for guidelines/reports) across available MCPs or `search_web`. Require bibliographic fields appropriate to the source type (accepting issuing body and official URL/identifier when no DOI exists). When literature services are unavailable, authenticated local full text satisfies verification only when carrying an accepted provenance signal with source-appropriate bibliographic metadata; explicitly halt if verification is unavailable.
-  - **`medical-terminology` MCP**: Validate medical terminology, standardized ontology codes (SNOMED CT, LOINC, RxNorm, ICD-10), and laboratory reference ranges.
+  - **Zero-PHI Query Boundary**: Enforce complete redaction or rejection of raw user materials, clinical-note text, or patient identifiers before sending requests to external MCPs or web search tools. Construct all external search queries strictly from verified bibliographic metadata and de-identified medical concept terms.
+  - **Bibliographic Verification**: Verify bibliographic metadata via query: `"<First Author> <Journal> <Year> <Title keywords>"` or DOI/PMID (or `"<Issuing Body> <Title> <Year>"` for guidelines/reports) across available MCPs or any available web search tool. Require bibliographic fields appropriate to the source type (accepting issuing body and official URL/identifier when no DOI exists). When literature services are unavailable, authenticated local full text satisfies verification only when carrying an accepted provenance signal with source-appropriate bibliographic metadata; explicitly halt if verification is unavailable.
+  - **Optional `medical-terminology` MCP**: When the `medical-terminology` MCP server is available in the environment, use it to validate medical terminology, standardized ontology codes (SNOMED CT, LOINC, RxNorm, ICD-10), and laboratory reference ranges.
   - Confirm that the cited paper's primary findings directly support the specific sentence in the manuscript.
   - **Anti-Phantom Citation Invariant**: Zero fabricated papers, hallucinated author lists, or synthetic DOIs. If a citation cannot be verified or its actual conclusions contradict the narrative statement, halt at Grilling Gate #6 to reconcile or replace the citation.
 

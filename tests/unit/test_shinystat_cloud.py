@@ -3,7 +3,10 @@ tests/unit/test_shinystat_cloud.py: Comprehensive unit tests and statistical inv
 verification for the shinystat-cloud standalone package and recipes.
 """
 
+# ruff: noqa: E402
+
 import re
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -11,8 +14,21 @@ import pandas as pd
 import pytest
 import yaml
 
-# Import functions from python-recipes directly by extracting or importing
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(REPO_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "src"))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from medstat.reporting.integrity import verify_report_integrity
+from medstat.reporting.ir import ReportDocument
+from tests.fixtures.integrity_cases import (
+    BASE_NARRATIVE,
+    BASE_RESULTS_DICT,
+    INTEGRITY_PARITY_CASES,
+    STAT_MUTATIONS,
+)
+
 CLOUD_DIR = REPO_ROOT / "packaging" / "cloud" / "shinystat-cloud"
 RECIPES_DIR = REPO_ROOT / "skills" / "shinystat-cloud" / "references" / "recipes"
 
@@ -1016,6 +1032,46 @@ def test_each_recipe_is_self_contained():
                         auroc_expected=0.85, auroc_null=0.50, prevalence=0.30
                     )
                     assert "total_n" in res20_diag
+                elif "fit_proportional_odds" in isolated_ns:
+                    np.random.seed(42)
+                    y_ord = np.random.choice([0, 1, 2], size=45)
+                    X_ord = pd.DataFrame({"x1": np.random.normal(0, 1, size=45)})
+                    res21 = isolated_ns["fit_proportional_odds"](y_ord, X_ord)
+                    assert "predictor_df" in res21
+                    brant21 = isolated_ns["assess_proportional_odds"](y_ord, X_ord)
+                    assert "omnibus" in brant21
+                elif "fit_rcs_spline_model" in isolated_ns:
+                    np.random.seed(42)
+                    x_s = np.random.normal(50, 10, size=60)
+                    y_s = (x_s + np.random.normal(0, 5, size=60) > 50).astype(int)
+                    df22 = pd.DataFrame({"y": y_s, "age": x_s})
+                    res22 = isolated_ns["fit_rcs_spline_model"](
+                        df22, outcome_col="y", rcs_var="age", knots=3
+                    )
+                    assert "p_nonlinearity" in res22
+                    assert "contrast_df" in res22
+                elif "fit_gee" in isolated_ns:
+                    np.random.seed(42)
+                    clusters = np.repeat(np.arange(10), 5)
+                    x_g = np.random.normal(0, 1, size=50)
+                    y_g = (x_g + np.random.normal(0, 1, size=50) > 0).astype(int)
+                    res23 = isolated_ns["fit_gee"](
+                        y_g, pd.DataFrame({"x1": x_g}), clusters, family="binomial"
+                    )
+                    assert "summary_df" in res23
+                    assert "design_effect" in res23
+                elif "run_meta_analysis" in isolated_ns:
+                    df24 = pd.DataFrame(
+                        {
+                            "study": ["S1", "S2", "S3", "S4"],
+                            "log_effect": [0.2, 0.35, 0.15, 0.4],
+                            "se": [0.1, 0.12, 0.09, 0.15],
+                            "is_ratio": [True, True, True, True],
+                        }
+                    )
+                    res24 = isolated_ns["run_meta_analysis"](df24)
+                    assert "random_effects" in res24
+                    assert "heterogeneity" in res24
                 else:
                     pytest.fail(
                         f"Recipe {idx} had no matching execution branch in isolated test harness"
@@ -2010,6 +2066,90 @@ def test_cloud_report_builder_docx_fallback_and_integrity(tmp_path):
     )
     assert 1.23e-4 not in audit_sci_ok["untraced_numbers"]
 
+    # Audit Critical #1 Verification: all 5 fabricated number cases must return passed=False
+    base_res = {"or": 1.45, "p": 0.012, "n": 412}
+    # Case 1: OR mutated 1.45 -> 3.45
+    c1 = verify_fn(
+        "In 412 patients, logistic regression yielded OR = 3.45 (P = 0.012) after confounder adjustment.",
+        results_dict=base_res,
+    )
+    assert c1["passed"] is False
+    assert 3.45 in c1["untraced_numbers"]
+
+    # Case 2: P mutated 0.012 -> 0.034
+    c2 = verify_fn(
+        "In 412 patients, logistic regression yielded OR = 1.45 (P = 0.034) after confounder adjustment.",
+        results_dict=base_res,
+    )
+    assert c2["passed"] is False
+    assert 0.034 in c2["untraced_numbers"]
+
+    # Case 3: n mutated 412 -> 512
+    c3 = verify_fn(
+        "In 512 patients, logistic regression yielded OR = 1.45 (P = 0.012) after confounder adjustment.",
+        results_dict=base_res,
+    )
+    assert c3["passed"] is False
+    assert 512.0 in c3["untraced_numbers"]
+
+    # Case 4: Single fabricated number in long prose
+    c4 = verify_fn(
+        "Across 412 patients (Table 1), OR was 1.45 (P = 0.012); sensitivity analysis in 412 patients "
+        "confirmed OR 1.45 (P = 0.012) with unmeasured confounding E-value caveat, except subgroup OR 2.75.",
+        results_dict=base_res,
+    )
+    assert c4["passed"] is False
+    assert 2.75 in c4["untraced_numbers"]
+
+    # Case 5: P mutated to P = 0.001 or P < 0.001 when true P = 0.012 -> must fail
+    c5_eq = verify_fn(
+        "In 412 patients, OR = 1.45 (P = 0.001) with unmeasured confounding noted.",
+        results_dict=base_res,
+    )
+    assert c5_eq["passed"] is False
+    assert 0.001 in c5_eq["untraced_numbers"]
+
+    c5_lt = verify_fn(
+        "In 412 patients, OR = 1.45 (P < 0.001) with unmeasured confounding noted.",
+        results_dict=base_res,
+    )
+    assert c5_lt["passed"] is False
+    assert 0.001 in c5_lt["untraced_numbers"]
+
+    # Valid P-floor (P < 0.001 when true P = 0.0002) and explicit allowed_untraced
+    c5_floor_ok = verify_fn(
+        "In 412 patients, OR = 1.45 (P < 0.001) with unmeasured confounding noted.",
+        results_dict={"or": 1.45, "p": 0.0002, "n": 412},
+    )
+    assert c5_floor_ok["passed"] is True
+
+    c_allow = verify_fn(
+        "In 412 patients, OR = 1.45 (P = 0.012) at 30-day follow-up.",
+        results_dict=base_res,
+        allowed_untraced={30.0},
+    )
+    assert c_allow["passed"] is True
+
+    # Verify standalone PPTX and PDF generators exist and execute
+    gen_pptx = ns.get("generate_pptx_report")
+    gen_pdf = ns.get("generate_pdf_report")
+    assert callable(gen_pptx)
+    assert callable(gen_pdf)
+    pptx_out = gen_pptx(
+        "Clinical Trial Deck",
+        results={"narrative": "Primary endpoint reached significance."},
+        tables={"Table 1": pd.DataFrame({"Arm": ["A", "B"], "N": [25, 25]})},
+        out_path=str(tmp_path / "deck.pptx"),
+    )
+    assert Path(pptx_out).exists()
+    pdf_out = gen_pdf(
+        "Clinical Trial Manuscript",
+        results={"narrative": "Primary endpoint reached significance."},
+        tables={"Table 1": pd.DataFrame({"Arm": ["A", "B"], "N": [25, 25]})},
+        out_path=str(tmp_path / "manuscript.pdf"),
+    )
+    assert Path(pdf_out).exists()
+
 
 # -----------------------------------------------------------------------------
 # 8. Standalone Pure-Python Plotly Spec Generators (Zero Dependencies)
@@ -2025,6 +2165,108 @@ def _extract_report_builder_namespace():
     for block in blocks:
         exec(block, ns)
     return ns
+
+
+def test_integrity_parity_fixture_cardinality():
+    """Asserts that the shared integrity parity fixture contains >= 24 cases."""
+    assert len(INTEGRITY_PARITY_CASES) >= 24, (
+        f"Expected fixture to contain at least 24 cases, got {len(INTEGRITY_PARITY_CASES)}"
+    )
+
+
+@pytest.mark.parametrize("case", INTEGRITY_PARITY_CASES, ids=lambda c: c.id)
+def test_cloud_verify_standalone_integrity_parity(case):
+    """
+    Task 2a: Asserts that verify_standalone_integrity (extracted from report-builder.md)
+    and verify_report_integrity (via ReportDocument) have exact 100% parity across each test case.
+    """
+    ns = _extract_report_builder_namespace()
+    verify_standalone = ns["verify_standalone_integrity"]
+
+    doc = ReportDocument(title="Parity Test", results_dict=case.results_dict)
+    doc.add_paragraph(case.narrative)
+    ir_res = verify_report_integrity(doc, allowed_untraced=case.allowed_untraced)
+
+    standalone_res = verify_standalone(
+        case.narrative,
+        results_dict=case.results_dict,
+        allowed_untraced=case.allowed_untraced,
+    )
+
+    assert standalone_res["passed"] == case.expected_passed, (
+        f"Case {case.id} standalone passed mismatch: expected {case.expected_passed}, got {standalone_res['passed']}"
+    )
+    assert sorted(standalone_res["untraced_numbers"]) == sorted(
+        case.expected_untraced
+    ), (
+        f"Case {case.id} standalone untraced mismatch: expected {case.expected_untraced}, got {standalone_res['untraced_numbers']}"
+    )
+
+    # Exact parity assertion between implementations
+    assert standalone_res["passed"] == ir_res.passed, (
+        f"Case {case.id} parity divergence in passed: standalone={standalone_res['passed']}, ir={ir_res.passed}"
+    )
+    assert sorted(standalone_res["untraced_numbers"]) == sorted(
+        ir_res.untraced_numbers
+    ), (
+        f"Case {case.id} parity divergence in untraced: standalone={standalone_res['untraced_numbers']}, ir={ir_res.untraced_numbers}"
+    )
+
+
+def test_cloud_verify_standalone_integrity_mutations():
+    """
+    Task 2b: Asserts that unmodified BASE_NARRATIVE passes both implementations,
+    and all single-token mutations to the 5 statistical values fail both implementations.
+    """
+    ns = _extract_report_builder_namespace()
+    verify_standalone = ns["verify_standalone_integrity"]
+
+    # Pre-check: Verify unmodified BASE_NARRATIVE passes both implementations
+    base_doc = ReportDocument(
+        title="Base Integrity Check",
+        results_dict=BASE_RESULTS_DICT,
+    )
+    base_doc.add_paragraph(BASE_NARRATIVE)
+    base_ir = verify_report_integrity(base_doc)
+    base_sa = verify_standalone(BASE_NARRATIVE, results_dict=BASE_RESULTS_DICT)
+    assert base_ir.passed is True, (
+        f"Base narrative unexpectedly failed IR integrity: {base_ir.untraced_numbers}"
+    )
+    assert base_sa["passed"] is True, (
+        f"Base narrative unexpectedly failed standalone integrity: {base_sa['untraced_numbers']}"
+    )
+
+    # Mutation tests for all 5 statistical tokens
+    for token_str, mutations in STAT_MUTATIONS:
+        for mutated_val in mutations:
+            pat = r"(?<![\d.])" + re.escape(token_str) + r"(?![\d.])"
+            mutated_narrative = re.sub(pat, mutated_val, BASE_NARRATIVE, count=1)
+            assert mutated_narrative != BASE_NARRATIVE
+
+            doc = ReportDocument(
+                title="Mutation Test",
+                results_dict=BASE_RESULTS_DICT,
+            )
+            doc.add_paragraph(mutated_narrative)
+            ir_res = verify_report_integrity(doc)
+
+            standalone_res = verify_standalone(
+                mutated_narrative,
+                results_dict=BASE_RESULTS_DICT,
+            )
+
+            assert standalone_res["passed"] is False, (
+                f"Mutation {token_str} -> {mutated_val} unexpectedly passed standalone integrity! "
+                f"Untraced: {standalone_res['untraced_numbers']}"
+            )
+            assert ir_res.passed is False, (
+                f"Mutation {token_str} -> {mutated_val} unexpectedly passed IR integrity! "
+                f"Untraced: {ir_res.untraced_numbers}"
+            )
+            assert standalone_res["passed"] == ir_res.passed
+            assert sorted(standalone_res["untraced_numbers"]) == sorted(
+                ir_res.untraced_numbers
+            )
 
 
 def test_cloud_standalone_plotly_spec_generators(tmp_path):
@@ -2747,3 +2989,678 @@ def test_recipe_20_riley_and_diagnostic_sample_size_invariants(recipes):
         power=0.90,
     )
     assert res_high_power["total_n"] > res_auroc["total_n"]
+
+
+# -----------------------------------------------------------------------------
+# 33. Recipes 12 (Mixed MICE), 21 (Ordinal/Brant), 22 (RCS), 23 (GEE/DEFF), 24 (Meta)
+# -----------------------------------------------------------------------------
+
+
+def test_ported_cloud_recipes_mixed_mice_ordinal_rcs_gee_meta(recipes):
+    # 1. Mixed-Type MICE (continuous + binary + categorical with nominal & ordinal conditioning)
+    impute_mixed = recipes["impute_mice_mixed_datasets"]
+    rng_mice = np.random.default_rng(42)
+    n = 80
+    stage_raw = np.where(
+        rng_mice.random(n) < 0.15,
+        None,
+        rng_mice.choice(["Stage I", "Stage II", "Stage III"], size=n),
+    )
+    df_mixed = pd.DataFrame(
+        {
+            "outcome": rng_mice.binomial(1, 0.35, size=n),
+            "age": np.where(
+                rng_mice.random(n) < 0.2, np.nan, rng_mice.normal(60, 10, size=n)
+            ),
+            "sex_bin": np.where(
+                rng_mice.random(n) < 0.15, np.nan, rng_mice.binomial(1, 0.5, size=n)
+            ),
+            "stage_cat": pd.Categorical(
+                stage_raw,
+                categories=["Stage I", "Stage II", "Stage III", "Stage IV"],
+                ordered=True,
+            ),
+            "site_id": rng_mice.choice([10, 20, 30], size=n),
+            "severity_ord": pd.Categorical(
+                rng_mice.choice(["Mild", "Moderate", "Severe"], size=n),
+                categories=["Mild", "Moderate", "Severe"],
+                ordered=True,
+            ),
+        }
+    )
+    mixed_dsets = impute_mixed(
+        df_mixed,
+        features_to_impute=["age", "sex_bin", "stage_cat"],
+        target_types={
+            "age": "continuous",
+            "sex_bin": "binary",
+            "stage_cat": "categorical",
+            "site_id": "categorical",
+            "severity_ord": "ordinal",
+        },
+        outcome_col="outcome",
+        m=3,
+        max_iter=3,
+        random_state=42,
+    )
+    assert len(mixed_dsets) == 3
+    obs_age = df_mixed["age"].dropna()
+    obs_sex = df_mixed["sex_bin"].dropna()
+    obs_stage = df_mixed["stage_cat"].dropna()
+    for d in mixed_dsets:
+        assert (d.loc[obs_age.index, "age"] == obs_age).all()
+        assert (d.loc[obs_sex.index, "sex_bin"] == obs_sex).all()
+        assert (d.loc[obs_stage.index, "stage_cat"] == obs_stage).all()
+        pd.testing.assert_series_equal(d["outcome"], df_mixed["outcome"])
+        assert (
+            not d[["age", "sex_bin", "stage_cat", "site_id", "severity_ord"]]
+            .isna()
+            .any()
+            .any()
+        )
+        assert set(d["sex_bin"].unique()).issubset({0, 1})
+        assert set(d["stage_cat"].unique()).issubset(
+            {"Stage I", "Stage II", "Stage III"}
+        )
+        assert isinstance(d["stage_cat"].dtype, pd.CategoricalDtype)
+        assert d["stage_cat"].cat.ordered is True
+        assert list(d["stage_cat"].cat.categories) == [
+            "Stage I",
+            "Stage II",
+            "Stage III",
+            "Stage IV",
+        ]
+        assert isinstance(d["severity_ord"].dtype, pd.CategoricalDtype)
+        assert d["severity_ord"].cat.ordered is True
+        assert list(d["severity_ord"].cat.categories) == ["Mild", "Moderate", "Severe"]
+        assert set(d["site_id"].unique()).issubset({10, 20, 30})
+
+    rng = np.random.default_rng(42)
+
+    # 2. Recipe 21: Ordinal Logistic & Brant Test (parallel vs non-parallel slopes)
+    fit_ord = recipes["fit_proportional_odds"]
+    brant_fn = recipes["assess_proportional_odds"]
+    fit_mnlogit = recipes["fit_multinomial_logistic"]
+    x1 = rng.normal(0, 1, size=240)
+    latent = 1.0 * x1 + rng.logistic(0, 1, size=240)
+    y_ord = np.digitize(latent, bins=[-0.8, 0.8])
+    X_ord = pd.DataFrame({"x1": x1}, index=np.arange(1000, 1240))
+    ord_res = fit_ord(pd.Series(y_ord, index=X_ord.index), X_ord)
+    assert ord_res["k_categories"] == 3
+    assert ord_res["predictor_df"].loc["x1", "odds_ratio"] > 1.0
+    brant_res = brant_fn(pd.Series(y_ord, index=X_ord.index), X_ord)
+    assert brant_res["omnibus"]["passed"] is True
+    assert brant_res["variables"]["x1"]["passed"] is True
+
+    # Non-parallel slopes fixture (strong threshold-specific slope disparity) -> passed == False -> MNLogit fallback
+    n_np = 600
+    x_np = rng.normal(0, 1, n_np)
+    p1 = 1.0 / (1.0 + np.exp(-(0.0 + 2.0 * x_np)))
+    p2 = 1.0 / (1.0 + np.exp(-(1.5 - 1.5 * x_np)))
+    u_np = rng.uniform(0, 1, n_np)
+    y_np = np.where(u_np < p2, 2, np.where(u_np < p1, 1, 0))
+    X_np = pd.DataFrame({"x1": x_np})
+    brant_viol = brant_fn(y_np, X_np)
+    assert brant_viol["omnibus"]["passed"] is False
+    assert brant_viol["variables"]["x1"]["passed"] is False
+    mn_res = fit_mnlogit(y_np, X_np)
+    assert mn_res["converged"] is True
+    assert "params" in mn_res
+
+    # 3. Recipe 22: Harrell Restricted Cubic Splines (Binomial & Cox PH)
+    fit_rcs = recipes["fit_rcs_spline_model"]
+    x_rcs = rng.uniform(-3, 3, size=150)
+    logits = -0.5 + 0.8 * (x_rcs**2)
+    y_rcs = rng.binomial(1, 1.0 / (1.0 + np.exp(-logits)))
+    df_rcs = pd.DataFrame(
+        {
+            "y": y_rcs,
+            "biomarker": x_rcs,
+            "time": rng.exponential(scale=np.exp(-0.3 * (x_rcs**2)), size=150) + 0.1,
+            "event": rng.binomial(1, 0.75, size=150),
+        }
+    )
+    rcs_res = fit_rcs(df_rcs, outcome_col="y", rcs_var="biomarker", knots=4)
+    assert rcs_res["p_nonlinearity"] < 0.05
+    assert len(rcs_res["contrast_df"]) == 100
+    rcs_cox = fit_rcs(
+        df_rcs,
+        outcome_col="time",
+        rcs_var="biomarker",
+        knots=4,
+        family="cox",
+        event_col="event",
+    )
+    assert rcs_cox["family"] == "cox"
+    assert rcs_cox["effect_label"] == "Hazard Ratio"
+    cox_est = rcs_cox["contrast_df"]["estimate"]
+    assert cox_est.iloc[0] > 1.0 and cox_est.iloc[-1] > 1.0
+    assert np.all(cox_est > 0)
+
+    # 4. Recipe 23: Clustered GEE & Design Effect (DEFF)
+    fit_gee = recipes["fit_gee"]
+    clusters = np.repeat(np.arange(15), 8)
+    cluster_eff = np.repeat(rng.normal(0, 0.9, size=15), 8)
+    x_gee = rng.normal(0, 1, size=120)
+    y_gee = (0.6 * x_gee + cluster_eff + rng.normal(0, 0.8, size=120) > 0).astype(int)
+    gee_res = fit_gee(y_gee, pd.DataFrame({"x": x_gee}), clusters, family="binomial")
+    assert gee_res["n_clusters"] == 15
+    assert gee_res["design_effect"] >= 1.0
+    assert "odds_ratio" in gee_res["summary_df"].columns
+
+    # 5. Recipe 24: DerSimonian-Laird Meta-Analysis (Binary & Continuous vs analytical reference)
+    from medstat.meta.models import run_meta_analysis as medstat_run_meta
+
+    comp_bin = recipes["compute_binary_effect_sizes"]
+    comp_cont = recipes["compute_continuous_effect_sizes"]
+    run_meta = recipes["run_meta_analysis"]
+    df_studies = pd.DataFrame(
+        {
+            "study": ["Trial 1", "Trial 2", "Trial 3", "Trial 4"],
+            "ev_t": [6, 28, 8, 35],
+            "n_t": [100, 120, 80, 150],
+            "ev_c": [26, 22, 24, 30],
+            "n_c": [100, 120, 80, 150],
+        }
+    )
+    es_df = comp_bin(df_studies, "ev_t", "n_t", "ev_c", "n_c", "study", "OR")
+    # Verify exact analytical log(OR) and SE for Trial 1: a=6, b=94, c=26, d=74
+    exp_log_or_0 = np.log((6 * 74) / (94 * 26))
+    exp_se_0 = np.sqrt(1 / 6 + 1 / 94 + 1 / 26 + 1 / 74)
+    assert np.isclose(es_df.loc[0, "log_effect"], exp_log_or_0, atol=1e-10)
+    assert np.isclose(es_df.loc[0, "se"], exp_se_0, atol=1e-10)
+
+    meta_res = run_meta(es_df, use_hksj=True)
+    ref_res = medstat_run_meta(es_df, use_hksj=True)
+    assert meta_res["k"] == 4
+    assert meta_res["heterogeneity"]["tau2"] > 0.0
+    assert np.isclose(
+        meta_res["fixed_effect"]["log_effect"],
+        ref_res["fixed_effect"]["log_effect"],
+        atol=1e-10,
+    )
+    assert np.isclose(
+        meta_res["random_effects"]["log_effect"],
+        ref_res["random_effects"]["log_effect"],
+        atol=1e-10,
+    )
+    assert np.isclose(
+        meta_res["random_effects"]["ci_lower"],
+        ref_res["random_effects"]["ci_lower"],
+        atol=1e-10,
+    )
+    assert np.isclose(
+        meta_res["random_effects"]["ci_upper"],
+        ref_res["random_effects"]["ci_upper"],
+        atol=1e-10,
+    )
+    assert np.isclose(
+        meta_res["heterogeneity"]["tau2"], ref_res["heterogeneity"]["tau2"], atol=1e-10
+    )
+    assert np.isclose(
+        meta_res["heterogeneity"]["Q"], ref_res["heterogeneity"]["Q"], atol=1e-10
+    )
+    assert np.isclose(
+        meta_res["heterogeneity"]["I2"], ref_res["heterogeneity"]["I2"], atol=1e-10
+    )
+    assert "H2" in meta_res["heterogeneity"]
+    assert len(meta_res["leave_one_out"]) == 4
+
+    df_cont = pd.DataFrame(
+        {
+            "study": ["S1", "S2", "S3"],
+            "m1": [-5.2, -4.8, -6.1],
+            "sd1": [2.1, 2.0, 2.3],
+            "n1": [60, 75, 50],
+            "m0": [-2.1, -1.9, -2.5],
+            "sd0": [2.0, 2.2, 2.1],
+            "n0": [60, 75, 50],
+        }
+    )
+    es_md = comp_cont(df_cont, "m1", "sd1", "n1", "m0", "sd0", "n0", "study", "MD")
+    meta_md = run_meta(es_md, use_hksj=False)
+    assert np.isclose(es_md.loc[0, "effect_size"], -3.1, atol=1e-10)
+    assert meta_md["random_effects"]["effect_disp"] < 0.0
+
+
+def test_cloud_recipes_and_figures_pr23_review_remediation(recipes, tmp_path):
+    """
+    Verifies all CodeRabbit PR #23 findings across cloud recipes and figure templates:
+    1. Continuous meta-analysis sample size & effect_measure validation.
+    2. Egger regression with constant precision.
+    3. MICE max_iter, continuous non-identifiability, and declared categorical/ordinal predictors.
+    4. Standalone figure templates (KM cardinality, CIF risk table & CIs, ROC optimal point,
+       Calibration CIs, DCA long-form, Love plot defaults, Bland-Altman validation & CIs, RCS families).
+    """
+    import re
+    from pathlib import Path
+
+    # 1. Recipe 24: Continuous effect sizes input validation
+    comp_cont = recipes["compute_continuous_effect_sizes"]
+    df_valid = pd.DataFrame(
+        {
+            "study": ["S1"],
+            "m1": [10.0],
+            "sd1": [2.0],
+            "n1": [20],
+            "m0": [8.0],
+            "sd0": [2.0],
+            "n0": [20],
+        }
+    )
+    # Reject fractional sample size
+    df_fractional = df_valid.copy()
+    df_fractional["n1"] = [2.5]
+    with pytest.raises(ValueError, match="Invalid continuous summary inputs"):
+        comp_cont(df_fractional, "m1", "sd1", "n1", "m0", "sd0", "n0", "study", "SMD")
+
+    # Reject unsupported effect measure
+    with pytest.raises(ValueError, match="Unsupported effect_measure"):
+        comp_cont(df_valid, "m1", "sd1", "n1", "m0", "sd0", "n0", "study", "RR")
+
+    # 2. Recipe 24: Egger regression with constant precision
+    run_meta = recipes["run_meta_analysis"]
+    df_constant_prec = pd.DataFrame(
+        {
+            "study": [f"Study_{i}" for i in range(12)],
+            "effect_size": np.linspace(0.1, 1.2, 12),
+            "se": [0.25] * 12,  # all identical standard errors -> constant precision
+            "is_ratio": [False] * 12,
+        }
+    )
+    meta_const_prec = run_meta(
+        df_constant_prec,
+        effect_col="effect_size",
+        se_col="se",
+        study_col="study",
+    )
+    assert meta_const_prec["heterogeneity"]["egger_p_value"] is None
+
+    # 3. Recipe 4: MICE max_iter validation and non-identifiable continuous models
+    impute_mixed = recipes["impute_mice_mixed_datasets"]
+    df_mice = pd.DataFrame(
+        {
+            "y": [1, 0, 1, 0, 1, 0],
+            "cont": [1.0, np.nan, 3.0, 4.0, np.nan, 6.0],
+            "bin": [1, 0, 1, np.nan, 0, 1],
+        }
+    )
+    for bad_iter in (0, -1, 2.5, True):
+        with pytest.raises(ValueError, match="max_iter must be an integer >= 1"):
+            impute_mixed(
+                df_mice,
+                features_to_impute=["cont"],
+                target_types={"cont": "continuous"},
+                outcome_col="y",
+                max_iter=bad_iter,
+            )
+
+    # Continuous model non-identifiability: n_obs <= p
+    df_rank_def = pd.DataFrame(
+        {
+            "y": [1, 0],
+            "x1": [1.0, 2.0],
+            "x2": [2.0, 4.0],
+            "x3": [3.0, 6.0],
+            "target": [1.0, np.nan],
+        }
+    )
+    with pytest.raises(ValueError, match="Non-identifiable continuous model"):
+        impute_mixed(
+            df_rank_def,
+            features_to_impute=["target"],
+            predictors=["x1", "x2", "x3"],
+            target_types={"target": "continuous"},
+            outcome_col="y",
+            m=1,
+            max_iter=1,
+        )
+
+    # 4. Standalone figure recipes in figures.md
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    fig_file = repo_root / "skills" / "shinystat-cloud" / "references" / "figures.md"
+    fig_content = fig_file.read_text(encoding="utf-8")
+    fig_blocks = re.findall(r"```python\n(.*?)\n```", fig_content, re.DOTALL)
+    fig_ns = {}
+    exec("\n".join(fig_blocks), fig_ns)
+
+    # A. KM risk table cardinality validation
+    km_df = pd.DataFrame(
+        {
+            "time": [0, 5, 10],
+            "survival": [1.0, 0.8, 0.5],
+            "ci_lower": [0.9, 0.7, 0.4],
+            "ci_upper": [1.0, 0.9, 0.6],
+        }
+    )
+    with pytest.raises(
+        ValueError, match="All risk_counts lists must have equal length to time_ticks"
+    ):
+        fig_ns["plot_standalone_km_with_risk_table"](
+            {"Arm A": km_df},
+            risk_counts={"Arm A": [10, 8]},
+            time_ticks=[0, 5, 10],
+            out_path=str(tmp_path / "km_fail.png"),
+        )
+    km_out = fig_ns["plot_standalone_km_with_risk_table"](
+        {"Arm A": km_df},
+        risk_counts={"Arm A": [10, 8, 5]},
+        time_ticks=[0, 5, 10],
+        out_path=str(tmp_path / "km_pass.png"),
+    )
+    assert Path(km_out).exists()
+
+    # B. CIF with risk table and primary CI columns
+    cif_df = pd.DataFrame(
+        {
+            "time": [0, 5, 10],
+            "cif_primary": [0.0, 0.1, 0.3],
+            "cif_primary_ci_lower": [0.0, 0.05, 0.2],
+            "cif_primary_ci_upper": [0.0, 0.15, 0.4],
+        }
+    )
+    cif_out = fig_ns["plot_standalone_cif"](
+        {"cif_table": cif_df},
+        risk_counts={"At Risk": [100, 80, 50]},
+        time_ticks=[0, 5, 10],
+        out_path=str(tmp_path / "cif.png"),
+    )
+    assert Path(cif_out).exists()
+
+    # C. ROC with optimal_point
+    roc_out = fig_ns["plot_standalone_roc"](
+        np.array([0, 0.2, 1]),
+        np.array([0, 0.8, 1]),
+        0.85,
+        0.75,
+        0.95,
+        optimal_point={"fpr": 0.2, "tpr": 0.8, "cutoff": 2.5},
+        out_path=str(tmp_path / "roc.png"),
+    )
+    assert Path(roc_out).exists()
+
+    # D. Calibration CIs and long-form DCA
+    calib_df = pd.DataFrame(
+        {
+            "pred_mean": [0.1, 0.5, 0.9],
+            "obs_rate": [0.12, 0.48, 0.88],
+            "ci_lower": [0.05, 0.38, 0.78],
+            "ci_upper": [0.19, 0.58, 0.98],
+        }
+    )
+    dca_df = pd.DataFrame(
+        {
+            "threshold": [0.1, 0.2, 0.1, 0.2, 0.1, 0.2],
+            "net_benefit": [0.15, 0.10, 0.12, 0.05, 0.0, 0.0],
+            "strategy": [
+                "Model",
+                "Model",
+                "Treat All",
+                "Treat All",
+                "Treat None",
+                "Treat None",
+            ],
+        }
+    )
+    calib_dca_out = fig_ns["plot_standalone_calibration_dca"](
+        calib_df, dca_df, out_path=str(tmp_path / "calib_dca.png")
+    )
+    assert Path(calib_dca_out).exists()
+
+    # E. Love plot default column schema
+    bal_df = pd.DataFrame(
+        {
+            "Variable": ["age", "bmi"],
+            "Pre-Match SMD": [0.35, 0.20],
+            "Post-Match SMD": [0.04, 0.02],
+        }
+    )
+    love_out = fig_ns["plot_standalone_love"](
+        bal_df, out_path=str(tmp_path / "love.png")
+    )
+    assert Path(love_out).exists()
+
+    # F. Bland-Altman validation and shaded CIs
+    with pytest.raises(ValueError, match="Length mismatch"):
+        fig_ns["plot_standalone_bland_altman"](
+            [1, 2], [1, 2, 3], out_path=str(tmp_path / "ba_fail.png")
+        )
+    with pytest.raises(ValueError, match="at least 2 valid paired measurements"):
+        fig_ns["plot_standalone_bland_altman"](
+            [1, np.nan], [np.nan, 2], out_path=str(tmp_path / "ba_fail2.png")
+        )
+
+    ba_out = fig_ns["plot_standalone_bland_altman"](
+        np.array([10.0, 20.0, 30.0, 40.0]),
+        np.array([10.5, 19.8, 30.2, 39.5]),
+        ba_result={
+            "mean_diff": -0.05,
+            "upper_loa": 0.95,
+            "lower_loa": -1.05,
+            "ci_mean_diff": (-0.3, 0.2),
+            "ci_upper_loa": (0.7, 1.2),
+            "ci_lower_loa": (-1.3, -0.8),
+        },
+        out_path=str(tmp_path / "ba.png"),
+    )
+    assert Path(ba_out).exists()
+
+    # G. RCS predictor column extraction and Gaussian vs Cox scales
+    rcs_df = pd.DataFrame(
+        {
+            "biomarker": np.linspace(0, 10, 50),
+            "estimate": np.exp(0.1 * np.linspace(0, 10, 50)),
+            "ci_lower": np.exp(0.05 * np.linspace(0, 10, 50)),
+            "ci_upper": np.exp(0.15 * np.linspace(0, 10, 50)),
+        }
+    )
+    rcs_cox_out = fig_ns["plot_standalone_rcs"](
+        rcs_df,
+        rcs_var="biomarker",
+        family="cox",
+        out_path=str(tmp_path / "rcs_cox.png"),
+    )
+    assert Path(rcs_cox_out).exists()
+    rcs_gauss_out = fig_ns["plot_standalone_rcs"](
+        rcs_df,
+        rcs_var="biomarker",
+        family="gaussian",
+        out_path=str(tmp_path / "rcs_gauss.png"),
+    )
+    assert Path(rcs_gauss_out).exists()
+
+
+def test_cloud_recipe_24_meta_analysis_exponentiation_and_inference(recipes):
+    """Verifies that run_meta_analysis in Recipe 24 correctly infers ratio scale from log_effect column or exponentiate flag."""
+    run_meta = recipes["run_meta_analysis"]
+
+    # 1. Default effect_col="log_effect" without is_ratio column -> infers is_ratio=True and exponentiates
+    df_log = pd.DataFrame(
+        {
+            "study": ["Trial 1", "Trial 2", "Trial 3"],
+            "log_effect": [0.2, 0.4, 0.3],
+            "se": [0.1, 0.15, 0.12],
+        }
+    )
+    res_inferred = run_meta(df_log)
+    assert res_inferred["is_ratio"] is True
+    assert np.isclose(
+        res_inferred["fixed_effect"]["effect_disp"],
+        np.exp(res_inferred["fixed_effect"]["log_effect"]),
+        rtol=0.0,
+        atol=1e-10,
+    )
+    assert np.isclose(
+        res_inferred["random_effects"]["effect_disp"],
+        np.exp(res_inferred["random_effects"]["log_effect"]),
+        rtol=0.0,
+        atol=1e-10,
+    )
+
+    # 2. Continuous effect (e.g. effect_col="md") -> is_ratio=False, effect_disp == log_effect
+    df_md = pd.DataFrame(
+        {
+            "study": ["Trial 1", "Trial 2", "Trial 3"],
+            "md": [2.5, 3.1, 2.8],
+            "se": [0.5, 0.6, 0.4],
+        }
+    )
+    res_md = run_meta(df_md, effect_col="md")
+    assert res_md["is_ratio"] is False
+    assert np.isclose(
+        res_md["fixed_effect"]["effect_disp"],
+        res_md["fixed_effect"]["log_effect"],
+        rtol=0.0,
+        atol=1e-10,
+    )
+
+    # 3. Explicit exponentiate=False override
+    res_override = run_meta(df_log, exponentiate=False)
+    assert res_override["is_ratio"] is False
+    assert np.isclose(
+        res_override["fixed_effect"]["effect_disp"],
+        res_override["fixed_effect"]["log_effect"],
+        rtol=0.0,
+        atol=1e-10,
+    )
+
+    # 4. Strict is_ratio metadata validation
+    df_ratio_valid = pd.DataFrame(
+        {
+            "study": ["Trial 1", "Trial 2"],
+            "log_effect": [0.2, 0.4],
+            "se": [0.1, 0.15],
+            "is_ratio": [True, True],
+        }
+    )
+    res_rv = run_meta(df_ratio_valid)
+    assert res_rv["is_ratio"] is True
+
+    # Conflicting booleans
+    df_conflicting = pd.DataFrame(
+        {
+            "study": ["Trial 1", "Trial 2"],
+            "log_effect": [0.2, 0.4],
+            "se": [0.1, 0.15],
+            "is_ratio": [True, False],
+        }
+    )
+    with pytest.raises(ValueError, match="conflicting values"):
+        run_meta(df_conflicting)
+
+    # Non-boolean or missing values
+    df_missing_bool = pd.DataFrame(
+        {
+            "study": ["Trial 1", "Trial 2"],
+            "log_effect": [0.2, 0.4],
+            "se": [0.1, 0.15],
+            "is_ratio": [True, None],
+        }
+    )
+    with pytest.raises(ValueError, match="missing or non-boolean"):
+        run_meta(df_missing_bool)
+
+
+def test_cloud_figures_templates_validation_and_safety(tmp_path):
+    """Verify standalone figures.md recipes enforce strict parameter validation and error resilience."""
+    fig_path = REPO_ROOT / "skills" / "shinystat-cloud" / "references" / "figures.md"
+    content = fig_path.read_text(encoding="utf-8")
+    blocks = re.findall(r"```python\n(.*?)\n```", content, re.DOTALL)
+    ns = {}
+    combined_code = "\n".join(blocks)
+    exec(combined_code, ns)
+
+    plot_km = ns["plot_standalone_km_with_risk_table"]
+    plot_cif = ns["plot_standalone_cif"]
+    plot_calib_dca = ns["plot_standalone_calibration_dca"]
+    plot_ba = ns["plot_standalone_bland_altman"]
+    plot_rcs = ns["plot_standalone_rcs"]
+
+    # 1. KM risk_counts length validation
+    km_data = {
+        "Group A": pd.DataFrame({"time": [0, 5, 10], "survival": [1.0, 0.8, 0.6]})
+    }
+    with pytest.raises(
+        ValueError, match="All risk_counts lists must have equal length to time_ticks"
+    ):
+        plot_km(km_data, time_ticks=[0, 5, 10], risk_counts={"Group A": [100, 80]})
+
+    km_out = plot_km(
+        km_data,
+        time_ticks=[0, 5, 10],
+        risk_counts={"Group A": [100, 80, 60]},
+        out_path=str(tmp_path / "km.png"),
+    )
+    assert Path(km_out).exists()
+
+    # 2. CIF risk_counts length validation
+    cif_data = pd.DataFrame({"time": [0, 5, 10], "cif_primary": [0.0, 0.1, 0.2]})
+    with pytest.raises(
+        ValueError, match="All risk_counts lists must have equal length to time_ticks"
+    ):
+        plot_cif(cif_data, time_ticks=[0, 5, 10], risk_counts={"At Risk": [100, 90]})
+
+    cif_out = plot_cif(
+        cif_data,
+        time_ticks=[0, 5, 10],
+        risk_counts={"At Risk": [100, 90, 80]},
+        out_path=str(tmp_path / "cif.png"),
+    )
+    assert Path(cif_out).exists()
+
+    # 3. Calibration / DCA dict normalization
+    calib_dict = {
+        "calibration_bins": {
+            "pred_mean": [0.1, 0.3, 0.5],
+            "obs_rate": [0.12, 0.28, 0.52],
+            "ci_lower": [0.08, 0.22, 0.44],
+            "ci_upper": [0.16, 0.34, 0.60],
+        }
+    }
+    dca_df = pd.DataFrame(
+        {
+            "threshold": [0.1, 0.2, 0.3],
+            "strategy": ["Model", "Model", "Model"],
+            "net_benefit": [0.08, 0.05, 0.02],
+        }
+    )
+    calib_out = plot_calib_dca(calib_dict, dca_df, out_path=str(tmp_path / "calib.png"))
+    assert Path(calib_out).exists()
+
+    # 4. Bland-Altman agreement with Student-t confidence intervals
+    m1 = np.array([10.0, 12.0, 14.0, 15.0, 18.0])
+    m2 = np.array([9.5, 12.2, 13.8, 15.4, 17.6])
+    ba_out = plot_ba(m1, m2, out_path=str(tmp_path / "ba.png"))
+    assert Path(ba_out).exists()
+
+    # 5. RCS predictor column and family validation
+    contrast_df = pd.DataFrame(
+        {
+            "biomarker": np.linspace(10, 50, 20),
+            "estimate": np.linspace(0.8, 2.5, 20),
+            "ci_lower": np.linspace(0.6, 1.8, 20),
+            "ci_upper": np.linspace(1.1, 3.5, 20),
+        }
+    )
+    with pytest.raises(ValueError, match="Unsupported family 'invalid'"):
+        plot_rcs(contrast_df, family="invalid")
+
+    with pytest.raises(
+        KeyError, match="Requested predictor column 'missing_col' not found"
+    ):
+        plot_rcs(contrast_df, x_col="missing_col")
+
+    rcs_binom = plot_rcs(
+        contrast_df,
+        rcs_var="biomarker",
+        family="binomial",
+        out_path=str(tmp_path / "rcs_binom.png"),
+    )
+    assert Path(rcs_binom).exists()
+
+    rcs_gauss = plot_rcs(
+        contrast_df,
+        family="gaussian",
+        out_path=str(tmp_path / "rcs_gauss.png"),
+    )
+    assert Path(rcs_gauss).exists()

@@ -34,21 +34,23 @@ shinystat-skills/
 ├── README.md                   # Project documentation
 ├── ARCHITECTURE.md             # System architecture & structural diary
 ├── CONTEXT.md                  # Domain vocabulary & naming diary
-├── DESIGN.md                   # Architectural Decision Records (ADRs 1–36)
-├── skills/                     # Canonical Agent Skills
-│   ├── shinystat/              # Flagship autonomous biostatistical engine
+├── DESIGN.md                   # Architectural Decision Records (ADRs 1–66)
+├── skills/                     # Canonical Agent Skills (Single Source of Truth)
+│   ├── _shared/
+│   │   └── references/         # Shared heuristics, flows, house styles, report builder
+│   ├── shinystat/              # Flagship autonomous biostatistical engine (local CLI/library)
 │   │   ├── SKILL.md            # Autonomous decision core (5 pillars + Grilling Gate)
-│   │   ├── references/         # Archetype heuristics, figures, report builder
+│   │   ├── requirements.txt    # Pinned Python 3.12 runtime stack
+│   │   ├── references/         # Synced shared references & medstat figure guides
 │   │   └── scripts/            # Bundled medstat CLI & engine
-│   └── shinystat-cloud/        # Standalone recipes for cloud sandboxes & lightweight agents
+│   └── shinystat-cloud/        # Zero-medstat standalone skill for cloud sandboxes
 │       ├── SKILL.md            # Autonomous decision core (Cloud sandbox edition)
-│       └── references/         # Standalone Python recipes & reporting guides
-├── .agent/skills/              # Antigravity Workspace mirror
-├── .agents/skills/             # Antigravity / Cursor mirror
-├── .claude/skills/             # Claude Code mirror
-├── .cursor/skills/             # Cursor mirror
+│       └── references/         # Cloud-native figures.md & modular Recipes 1–24 (recipes/01..05)
+├── agents/
+│   └── figure-tester.md        # Autonomous publication figure QA subagent
 ├── scripts/
-│   └── install-skills.sh       # Automated multi-agent skill installer
+│   ├── install-skills.sh       # Canonical SSOT linker & global agent installer
+│   └── package-cloud-skill.sh  # Builds standalone packaging/cloud/shinystat-cloud.zip
 ├── src/medstat/
 │   ├── __init__.py             # Public package exports
 │   ├── config.py               # Headless configuration manager
@@ -136,15 +138,15 @@ shinystat-skills/
 
 ---
 
-## Autonomous Agent Skill: `shinystat`
+## Autonomous Agent Skills: `shinystat` & `shinystat-cloud`
 
-This project ships the unified **`shinystat` agent skill** (`skills/shinystat/` and mirrored in `.agent/`, `.agents/`, `.claude/`, `.cursor/`), designed following `writing-for-agents` principles with **Hybrid Progressive Disclosure**. Rather than forcing agents through rigid canned CLI commands or fragmented multi-skill handoffs, `shinystat` empowers coding agents to exercise autonomous biostatistical judgment across 5 core pillars:
+This project ships two unified agent skills in `skills/` (`skills/shinystat/` for local Python/CLI environments and `skills/shinystat-cloud/` for zero-`medstat` cloud Python sandboxes), designed following `writing-for-agents` principles with **Hybrid Progressive Disclosure**. Rather than forcing agents through rigid canned CLI commands or fragmented multi-skill handoffs, `shinystat` empowers coding agents to exercise autonomous biostatistical judgment across 5 core pillars:
 
 ### The 5 Decision Pillars
 
 1. **Pillar 1: Data Reality Inspection**: Audits raw geometry, headers, missingness, and candidate sample sizes directly on raw data (`.csv`, `.xlsx`, `.tsv`, `.parquet`) without assuming pre-cleaned tidy shapes.
 2. **Pillar 2: Research & Estimand Triangulation**: Triangulates research proposals (PICO/PECO) against 10 clinical study archetypes (Cohort, Case-Control, RCT, Diagnostic Accuracy, Ordinal, Survival, Agreement, Clustered, Causal Inference IPTW/PSM, Competing Risks) documented in `references/decision-heuristics.md`.
-3. **Pillar 3: Adaptive Python Scripting (Autonomous Authority)**: Generates and adapts custom Python scripts combining `medstat` core calculation modules with standard scientific libraries (`pandas`, `scipy.stats`, `statsmodels`, `lifelines`, `scikit-learn`), supporting automated upgrades to Firth penalized regression, restricted cubic splines, Inverse Probability of Treatment Weighting (ATE/ATT/ATC/ATO), and Competing Risks analysis (Aalen-Johansen CIF, Cause-Specific Cox csHR, Fine-Gray SHR).
+3. **Pillar 3: Adaptive Python Scripting (Autonomous Authority)**: Generates and adapts custom Python scripts combining `medstat` core calculation modules (or standalone Recipes 1–24 in `shinystat-cloud`) with standard scientific libraries (`pandas`, `scipy.stats`, `statsmodels`, `lifelines`, `scikit-learn`), supporting automated upgrades to mixed-type MICE, Firth penalized regression, proportional odds ordinal regression with Brant Wald testing, Harrell restricted cubic splines (RCS), clustered GEE with sandwich SEs & Design Effect, Inverse Probability of Treatment Weighting (ATE/ATT/ATC/ATO), Competing Risks analysis (Aalen-Johansen CIF, Cause-Specific Cox csHR, Fine-Gray SHR), and DerSimonian-Laird random-effects meta-analysis.
 4. **Pillar 4: Biostatistical Safety Invariants**: Strictly enforces clinical safety rules:
    - **Numeric 0/1 encoding** for binary endpoints and survival event indicators (accepting explicitly mapped text labels like `"Yes"/"No"` or `"Dead"/"Alive"`, while rejecting unmapped text labels to eliminate clinical event inversion). Multi-state competing risk events strictly follow integer encoding (`0 = Censored, 1 = Event of Interest, 2+ = Competing Event`).
    - **Sample retention flow** ($N_{initial} \to N_{excluded} \to N_{analyzed}$) with explicit exclusion tracking.
@@ -153,7 +155,7 @@ This project ships the unified **`shinystat` agent skill** (`skills/shinystat/` 
    - **DeLong variance** for empirical ROC AUC comparisons.
    - **Distinct EPV rules**: $\text{EPV}_{\text{binary}} = \frac{\min(N_1, N_0)}{P}$ vs $\text{EPV}_{\text{Cox}} = \frac{N_{\text{failures}}}{P}$.
    - **Caliper 0.2×SD of logit propensity** for PSM, with Austin (2009) balance requirement (absolute SMD < 0.10).
-5. **Pillar 5: Reporting Integrity, Publication Figures & Multi-Format Documents**: Enforces Zero-PHI regex filtering, numerical traceability, 300 DPI publication standards, colorblind-safe palettes, and multi-format document rendering (HTML Dual-View, Word docx, PowerPoint pptx, PDF, Markdown).
+5. **Pillar 5: Reporting Integrity, Publication Figures & Multi-Format Documents**: Enforces Zero-PHI regex filtering, strict zero-tolerance numerical traceability (`len(untraced_numbers) == 0` with `allowed_untraced` whitelist and P-value floor verification), 300/600 DPI publication standards, colorblind-safe palettes, and multi-format document rendering (HTML Dual-View, Word `.docx`, PowerPoint `.pptx`, PDF, Markdown).
 
 ### Deterministic Grilling Gate
 
@@ -165,13 +167,23 @@ Following the open `SKILL.md` standard with progressive disclosure:
 
 ```text
 skills/
+├── _shared/
+│   └── references/                       # Shared heuristics, flows, house styles, report builder
 ├── shinystat/
 │   ├── SKILL.md                          # Autonomous decision core (5 pillars + Grilling Gate)
+│   ├── requirements.txt                  # Pinned runtime dependencies
 │   ├── references/                       # Archetype heuristics, figures, report builder
 │   └── scripts/                          # Bundled medstat CLI & engine
 └── shinystat-cloud/
     ├── SKILL.md                          # Autonomous decision core (Cloud sandbox edition)
-    └── references/                       # Standalone Python recipes & reporting guides
+    └── references/
+        ├── figures.md                    # Standalone zero-medstat publication figures guide
+        └── recipes/                      # Modular standalone Python recipes (Recipes 1–24)
+            ├── 01-data-missing-table1.md
+            ├── 02-regression-firth-ordinal.md
+            ├── 03-survival-competing-risks.md
+            ├── 04-causal-validation-agreement.md
+            └── 05-diagnostic-meta-power.md
 ```
 
 ### Installing Skills for Your AI Coding Agent
@@ -194,17 +206,20 @@ npx skills add NTWKKM/shinystat-skills --skill shinystat-cloud --yes
 npx skills add NTWKKM/shinystat-skills -g --yes
 ```
 
-#### 2. Local Repository Installer Script
+#### 2. Local Repository Installer & Cloud Packager Scripts
 
-You can also install skills across local environments using the provided installer script:
+You can also link canonical shared references or install dereferenced skills globally using the repository scripts:
 
 ```bash
-# Automated install into all supported environments (Antigravity, Claude, Cursor)
+# Sync canonical _shared/references and src/medstat into skills/ (symlink mode by default)
 ./scripts/install-skills.sh
 
-# Or target a specific platform / scope:
-./scripts/install-skills.sh --target antigravity --scope workspace
-./scripts/install-skills.sh --target claude --scope global
+# Install standalone dereferenced skills globally (Antigravity, Claude Code, Cursor)
+./scripts/install-skills.sh --global
+./scripts/install-skills.sh --global --target antigravity
+
+# Package standalone shinystat-cloud.zip for cloud sandboxes (e.g., Claude Web)
+./scripts/package-cloud-skill.sh
 ```
 
 Pick your platform and follow the corresponding manual setup if needed:
@@ -212,28 +227,27 @@ Pick your platform and follow the corresponding manual setup if needed:
 <details>
 <summary><strong>Google Antigravity</strong> (Desktop / CLI / IDE)</summary>
 
-**Auto-discovered** — no extra setup needed.
+Install into your global Antigravity skills directory or link into a project workspace:
 
 ```bash
 git clone https://github.com/NTWKKM/shinystat-skills.git
 cd shinystat-skills
-# Skills in .agent/skills/ are auto-discovered when this workspace is opened
+./scripts/install-skills.sh --global --target antigravity
 ```
 
-Antigravity scans `.agent/skills/` (and `.agents/skills/`) at the workspace root and loads all `SKILL.md` files via progressive disclosure. Simply open the cloned directory as your workspace.
+This installs dereferenced copies of `shinystat` and `shinystat-cloud` into `~/.gemini/config/skills/` and `~/.gemini/antigravity/skills/`.
 
 </details>
 
 <details>
 <summary><strong>Claude Code</strong> (Anthropic CLI)</summary>
 
-Copy skills into your Claude Code skills directory:
+Install skills into your Claude Code skills directory:
 
 ```bash
 git clone https://github.com/NTWKKM/shinystat-skills.git
-mkdir -p ~/.claude/skills && cp -r shinystat-skills/.agent/skills/* ~/.claude/skills/
-# Or for project-scoped:
-mkdir -p .claude/skills && cp -r shinystat-skills/.agent/skills/* .claude/skills/
+cd shinystat-skills
+./scripts/install-skills.sh --global --target claude
 ```
 
 Claude Code discovers skills in `~/.claude/skills/` (global) or `.claude/skills/` (project). Each `SKILL.md` with valid YAML frontmatter registers as an available skill.
@@ -243,126 +257,58 @@ Claude Code discovers skills in `~/.claude/skills/` (global) or `.claude/skills/
 <details>
 <summary><strong>Claude Web</strong> (claude.ai)</summary>
 
-Upload each skill as a `.zip` file via **Upload a skill**:
+Upload the cloud skill as a `.zip` file via **Upload a skill**:
 
 ```bash
-# Option 1: Package dedicated cloud skill for Claude Web (recommended, includes standalone recipes)
+# Option 1: Package dedicated cloud skill for Claude Web (recommended, includes standalone Recipes 1–24)
 ./scripts/package-cloud-skill.sh ~/Desktop
 
-# Option 2: Package original clean local skill
+# Option 2: Package local skill with dereferenced symlinks
+./scripts/install-skills.sh --copy
 (cd skills && zip -r ~/Desktop/shinystat.zip shinystat)
 ```
 
-Then in [claude.ai](https://claude.ai): Navigate to **Customize** → **Skills** → **+** → **Create skill** → **Upload a skill** and select the `.zip` file (e.g. `shinystat-cloud.zip`). Ensure **Code execution and file creation** is enabled. Claude reads the YAML frontmatter from `SKILL.md` inside the skill archive.
+Then in [claude.ai](https://claude.ai): Navigate to **Customize** → **Skills** → **+** → **Create skill** → **Upload a skill** and select `shinystat-cloud.zip`. Ensure **Code execution and file creation** is enabled. Claude reads the YAML frontmatter from `SKILL.md` inside the skill archive.
 
-> **Note:** The dedicated cloud package (`shinystat-cloud.zip`) contains pure-Python standalone formulas in `references/python-recipes.md` so that Claude Web can execute all advanced biostatistical analyses directly in its sandbox using standard scientific libraries (`pandas`, `scipy.stats`, `statsmodels`, `lifelines`, `scikit-learn`) without needing `medstat-core` installed.
+> **Note:** The dedicated cloud package (`packaging/cloud/shinystat-cloud.zip`) contains 24 modular pure-Python standalone recipes in `references/recipes/01-*.md` through `05-*.md`, standalone figure helpers in `references/figures.md`, and multi-format report generators (`.md`, `.html`, `.docx`, `.pptx`, `.pdf`) + `verify_standalone_integrity` in `references/report-builder.md` so cloud sandboxes can execute all analyses using standard scientific libraries (`pandas`, `scipy.stats`, `statsmodels`, `lifelines`, `scikit-learn`) without `medstat-core` installed.
 
 </details>
 
 <details>
 <summary><strong>OpenAI Codex</strong> (CLI)</summary>
 
-Codex uses `AGENTS.md` for project-level instructions. Copy skill content into your project:
+Codex uses `AGENTS.md` and `.agents/skills/` for project-level instructions:
 
 ```bash
 git clone https://github.com/NTWKKM/shinystat-skills.git
-cd your-project
+cd shinystat-skills && ./scripts/install-skills.sh --copy
 
-# Option A: Symlink the skills directory
-mkdir -p .agents
-ln -s /path/to/shinystat-skills/.agent/skills .agents/skills
-
-# Option B: Copy and reference from AGENTS.md
-mkdir -p .agents/skills
-cp -r /path/to/shinystat-skills/.agent/skills/* .agents/skills/
+# Copy into your project's .agents/skills/
+mkdir -p /path/to/your-project/.agents/skills
+cp -RL skills/shinystat skills/shinystat-cloud /path/to/your-project/.agents/skills/
 ```
 
-Codex discovers `AGENTS.md` and `.agents/` directories by walking up from the CWD. Use `AGENTS.override.md` for machine-specific local tweaks (not committed to VCS).
+Codex discovers `AGENTS.md` and `.agents/` directories by walking up from the CWD.
 
 </details>
 
 <details>
-<summary><strong>OpenClaw</strong></summary>
+<summary><strong>OpenClaw / Pi / Hermes / Meta Muse Code</strong></summary>
 
-OpenClaw supports the standard `SKILL.md` format:
+All `SKILL.md`-compatible agents can copy the dereferenced canonical skills from `skills/`:
 
 ```bash
 git clone https://github.com/NTWKKM/shinystat-skills.git
+cd shinystat-skills && ./scripts/install-skills.sh --copy
 
-# Global install
+# Global install (OpenClaw / Pi)
 mkdir -p ~/.agents/skills
-cp -r shinystat-skills/.agent/skills/* ~/.agents/skills/
+cp -RL skills/shinystat skills/shinystat-cloud ~/.agents/skills/
 
-# Or workspace-scoped
-mkdir -p .agents/skills
-cp -r shinystat-skills/.agent/skills/* .agents/skills/
-
-# Verify
-openclaw skills list
-```
-
-OpenClaw scans `<workspace>/.agents/skills/`, `~/.agents/skills/`, and other configured paths. Skills are registered automatically — restart the agent session if newly added skills are not detected.
-
-</details>
-
-<details>
-<summary><strong>Pi</strong> (Coding Agent by Mario Zechner)</summary>
-
-Pi supports the `SKILL.md` open standard:
-
-```bash
-git clone https://github.com/NTWKKM/shinystat-skills.git
-
-# Copy into Pi's skills directory
-mkdir -p ~/.agents/skills
-cp -r shinystat-skills/.agent/skills/* ~/.agents/skills/
-
-# Or project-scoped
-mkdir -p .agents/skills
-cp -r shinystat-skills/.agent/skills/* .agents/skills/
-```
-
-Pi dynamically loads skills when a task matches the skill's description. Supports multiple LLM backends (Anthropic, OpenAI, DeepSeek, Google Gemini).
-
-</details>
-
-<details>
-<summary><strong>Hermes</strong> (Nous Research)</summary>
-
-Copy skills into Hermes' skills directory:
-
-```bash
-git clone https://github.com/NTWKKM/shinystat-skills.git
-
-# Default location
+# Or Hermes global install
 mkdir -p ~/.hermes/skills
-cp -r shinystat-skills/.agent/skills/* ~/.hermes/skills/
-
-# Or configure external_dirs in ~/.hermes/config.yaml:
-# skills:
-#   external_dirs:
-#     - /path/to/shinystat-skills/.agent/skills
+cp -RL skills/shinystat skills/shinystat-cloud ~/.hermes/skills/
 ```
-
-Hermes detects skills automatically on next session. The `SKILL.md` format is portable across Hermes, Claude Code, and other SKILL.md-compatible agents.
-
-</details>
-
-<details>
-<summary><strong>Meta Muse Code</strong></summary>
-
-Muse Code reads skills from `.agents/skills/` at the project root:
-
-```bash
-git clone https://github.com/NTWKKM/shinystat-skills.git
-cd your-project
-
-# Copy or symlink
-mkdir -p .agents/skills
-cp -r /path/to/shinystat-skills/.agent/skills/* .agents/skills/
-```
-
-Muse Code also reads `AGENTS.md` at the project root for global instructions. Skills use the standard YAML frontmatter `SKILL.md` format.
 
 </details>
 
@@ -640,7 +586,7 @@ html_content = render_html(doc, output_path="reports/diagnostic_report.html")
 The project includes an automatic forwarding wrapper in `tests/conftest.py` that transparently forwards execution to the Python 3.12 virtual environment (`.venv/bin/pytest`) even if executed from older system Python environments.
 
 ```bash
-# Run full comprehensive test suite (591 passed tests)
+# Run full comprehensive test suite (741 passed tests)
 uv run pytest
 
 # Run unit tests for Reclassification & Time-Dependent ROC
