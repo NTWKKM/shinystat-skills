@@ -208,19 +208,32 @@ npx skills add NTWKKM/shinystat-skills -g --yes
 
 #### 2. Local Repository Installer & Cloud Packager Scripts
 
-You can also link canonical shared references or install dereferenced skills globally using the repository scripts:
+`./scripts/install-skills.sh` maintains Single Source of Truth (SSOT). It syncs canonical `_shared/references/` and `src/medstat/` into `skills/` (using symlinks by default or `--copy`), isolates standalone cloud figures, and safely removes legacy in-workspace mirror directories (`.agent/`, `.agents/`, `.claude/`, `.cursor/`) without touching any user-managed or third-party skills.
 
 ```bash
 # Sync canonical _shared/references and src/medstat into skills/ (symlink mode by default)
 ./scripts/install-skills.sh
 
+# Preview linking, packaging, and legacy mirror removals without modifying filesystem
+./scripts/install-skills.sh --dry-run
+
 # Install standalone dereferenced skills globally (Antigravity, Claude Code, Cursor)
 ./scripts/install-skills.sh --global
 ./scripts/install-skills.sh --global --target antigravity
+./scripts/install-skills.sh --global --target claude
+./scripts/install-skills.sh --global --target cursor
 
 # Package standalone shinystat-cloud.zip for cloud sandboxes (e.g., Claude Web)
 ./scripts/package-cloud-skill.sh
 ```
+
+**Installer Flags**:
+- `--symlink`: Link references and `src/medstat` via relative symlinks (default).
+- `--copy`: Copy references and `src/medstat` physically.
+- `--global`: Install standalone dereferenced skills into global configuration directories.
+- `-s, --scope <workspace|global>`: Installation scope (default: `workspace`). In workspace scope, duplicate harness mirrors are no longer created (SSOT, ADR 49).
+- `-t, --target <all|antigravity|claude|cursor>`: Target AI harness for global installation (default: `all`).
+- `--dry-run`: Print all sync, packaging, and legacy mirror deletion actions without modifying the filesystem.
 
 Pick your platform and follow the corresponding manual setup if needed:
 
