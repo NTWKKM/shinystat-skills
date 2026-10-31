@@ -7,9 +7,11 @@ clean, table1, model, diag, agreement, causal, meta, sample-size, and report.
 
 from __future__ import annotations
 
+import argparse
 import json
 import math
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +29,11 @@ from medstat.causal.balance import (
 )
 from medstat.causal.iptw import compute_iptw_weights, fit_iptw_outcome_model
 from medstat.causal.psm import propensity_score_match
-from medstat.cli.spec import AnalysisPlan
+from medstat.cli.spec import (
+    AnalysisPlan,
+    get_cli_schema_template,
+    preflight_validate_spec,
+)
 from medstat.data.clean import (
     MissingStrategyRequiredError,
     _is_id_column,
@@ -149,11 +155,103 @@ def _sanitize_for_json(obj: Any) -> Any:
     return obj
 
 
-@click.group()
+AGENT_ERROR_REMEDIATION_MAP = {
+    "separation": "Complete/quasi-complete separation detected. Action: Set model type to 'logistic' with 'options.method: firth' (or use Firth Cox via standalone script) in your spec YAML.",
+    "singular": "Singular matrix / collinearity detected. Action: Remove redundant collinear covariates or switch to 'logistic' with 'options.method: firth'.",
+    "proportional hazard": "Proportional hazards assumption violated (Schoenfeld p < 0.05). Action: Declarative plan cannot apply time-varying covariates or strata; halt execution unless using a standalone Python script applying strata, piecewise/time-varying HR, or RMST.",
+    "competing risk": "Competing events detected in Cox survival model. Action: Use 'competing_risk' model type instead of standard 'cox' to estimate subdistribution hazard ratios (sHR).",
+}
+
+
+def register_agent_ergonomic_flags(parser: argparse.ArgumentParser) -> None:
+    """Attach --schema and --validate-only flags to an argparse ArgumentParser."""
+    parser.add_argument(
+        "--schema",
+        action="store_true",
+        help="Print commented YAML analysis plan schema template for agents and exit.",
+    )
+    parser.add_argument(
+        "--validate-only",
+        metavar="YAML_PATH",
+        help="Validate YAML spec syntax and dataset column names without executing models.",
+    )
+
+
+def handle_agent_ergonomic_flags(args: argparse.Namespace) -> int | None:
+    """
+    Executes --schema or --validate-only if requested.
+    Returns an exit code (0 or 1) if handled, or None to continue normal CLI execution.
+    """
+    if getattr(args, "schema", False):
+        print(get_cli_schema_template())
+        return 0
+
+    validate_target = getattr(args, "validate_only", None)
+    if validate_target:
+        result = preflight_validate_spec(validate_target)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return 0 if result["valid"] else 1
+
+    return None
+
+
+def emit_agent_actionable_error(exc: Exception) -> None:
+    """Formats runtime statistical exceptions into structured JSON with remediation hints."""
+    msg = str(exc)
+    msg_lower = msg.lower()
+    hints = []
+    for keyword, hint in AGENT_ERROR_REMEDIATION_MAP.items():
+        if keyword == "competing risk":
+            is_competing_error = (
+                "competing risk" in msg_lower or "competing event" in msg_lower
+            ) and "cox" in msg_lower
+            is_obs_error = any(
+                term in msg_lower
+                for term in ("observation", "too few", "insufficient", "at least")
+            )
+            if is_competing_error and not is_obs_error:
+                hints.append(hint)
+            continue
+        if keyword in msg_lower:
+            hints.append(hint)
+    if not hints:
+        hints.append(
+            "Run `medstat_cli.py --validate-only <spec.yaml>` to verify column names and spec structure."
+        )
+
+    payload = {
+        "status": "error",
+        "error_type": type(exc).__name__,
+        "message": msg,
+        "agent_remediation": hints,
+    }
+    print(json.dumps(payload, indent=2, ensure_ascii=False), file=sys.stderr)
+
+
+@click.group(invoke_without_command=True)
+@click.option(
+    "--schema",
+    is_flag=True,
+    help="Print commented YAML analysis plan schema template for agents and exit.",
+)
+@click.option(
+    "--validate-only",
+    type=click.Path(),
+    metavar="YAML_PATH",
+    help="Validate YAML spec syntax and dataset column names without executing models.",
+)
 @click.version_option(version="0.1.0", prog_name="medstat")
-def cli() -> None:
+@click.pass_context
+def cli(ctx: click.Context, schema: bool, validate_only: str | None) -> None:
     """medstat: Clinical Biostatistics & Health Data Science CLI."""
-    pass
+    exit_code = handle_agent_ergonomic_flags(
+        argparse.Namespace(schema=schema, validate_only=validate_only)
+    )
+    if exit_code is not None:
+        ctx.exit(exit_code)
+    if ctx.invoked_subcommand is None:
+        print(ctx.get_help())
+        ctx.exit(0)
 
 
 # ==============================================================================
@@ -695,8 +793,12 @@ def model_cmd(
 ) -> None:
     """Fit regression or survival models or execute a pre-specified SAP plan."""
     if spec:
-        plan = AnalysisPlan.from_yaml(spec)
-        res = plan.execute()
+        try:
+            plan = AnalysisPlan.from_yaml(spec)
+            res = plan.execute()
+        except Exception as e:
+            emit_agent_actionable_error(e)
+            raise SystemExit(1)
         if output:
             Path(output).parent.mkdir(parents=True, exist_ok=True)
             with open(output, "w") as f:
@@ -885,6 +987,8 @@ def model_cmd(
             fit_res = fit_standard_logistic(y, X_df)
             sum_df = fit_res["summary_df"]
             result_data["coefficients"] = _serialize_summary_df(sum_df)
+            if fit_res.get("agent_remediation"):
+                result_data["agent_remediation"] = fit_res["agent_remediation"]
 
         if e_value and exposure:
             matching = [idx for idx in sum_df.index if str(idx) == exposure]

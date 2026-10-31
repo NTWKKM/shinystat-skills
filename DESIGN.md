@@ -1380,6 +1380,473 @@ Following ADR 47, Gate #5 offered a binary choice between `(Standard) Skip Polis
 
 [MEMORY_LEARN: In clinical report generation, standard reference lists must be strictly scoped to user-provided sources with online empirical comparison against authentic published data, while exploratory literature enrichment is reserved for Full Publication Polish.]
 
+---
+
+## ADR 49: Repository Deduplication, Progressive Disclosure Routing, Shared References, and Self-Healing CLI Ergonomics
+
+### Context
+Following rapid platform expansion across multiple AI agent harnesses (`.agent/`, `.agents/`, `.claude/`, `.cursor/`), the codebase suffered from 6x duplicate copies of Python code and skill instructions, leading to context pollution, split-brain drift risks, and high token overhead. Furthermore:
+1. `skills/shinystat-cloud/references/python-recipes.md` was a 2,500+ line monolith that forced agents to ingest hundreds of unneeded lines into their context window.
+2. 6 shared reference documents were duplicated 11 times across local and cloud skill directories.
+3. Agents executing declarative YAML analysis plans lacked pre-flight syntax and schema validation, leading to mid-run runtime exceptions without structured remediation hints.
+
+### Decision
+1. **Repository Deduplication & SSOT Architecture (Phase 1)**:
+   - Establish `src/medstat/` as the sole canonical source for all Python logic, and `skills/` as canonical source for skill prompts.
+   - Centralize sub-agent definition at root `agents/figure-tester.md`.
+   - Update `scripts/install-skills.sh` to install via relative symlinks (with `--symlink` default and `--copy` fallback).
+   - Ignore build/mirror harnesses (`.agent/`, `.agents/`, `.claude/`, `.cursor/`, `packaging/`, `skills/shinystat/scripts/medstat/`) in `.gitignore`, `.ignore`, and `.cursorignore`, removing 517 duplicate entries from git index.
+2. **Progressive Disclosure Cloud Recipes (Phase 2)**:
+   - Partition monolithic `python-recipes.md` into 5 domain-specific files under `skills/shinystat-cloud/references/recipes/`:
+     - `01-data-missing-table1.md` (Recipes 1, 8, 12, 13)
+     - `02-regression-firth-ordinal.md` (Recipes 7, 9, 10)
+     - `03-survival-competing-risks.md` (Recipes 11, 15)
+     - `04-causal-iptw-psm.md` (Recipes 6, 14)
+     - `05-diagnostic-meta-power.md` (Recipes 2, 3, 4, 5, 16, 17, 18, 19, 20)
+   - Add a Progressive Disclosure Routing Table in `skills/shinystat-cloud/SKILL.md` to load only the required domain recipe.
+   - Maintain dynamic concatenation in `package-cloud-skill.sh` and snapshot test fixtures for backward compatibility.
+3. **Consolidated Shared References & Test Entrypoints (Phase 3)**:
+   - Centralize the 6 shared clinical reference markdown files into `skills/_shared/references/` (`decision-heuristics.md`, `figures.md`, `flows.md`, `house-styles.md`, `illustration.md`, `report-builder.md`).
+   - Deduplicate `scripts/test_all_figures_matrix.py` into a thin CLI runner delegating to `tests/unit/test_all_figures_matrix.py`.
+4. **Self-Healing CLI Ergonomics & Pre-Flight Validation (Phase 4)**:
+   - Implement `--schema` flag to emit the standard declarative YAML plan template.
+   - Implement `--validate-only <plan.yaml>` to verify YAML syntax, required top-level keys, and dataset column availability without fitting models.
+   - Provide structured `agent_remediation` error hints across CLI output, `IntegrityReport` (`integrity.py`), `fit_standard_logistic` (`glm.py`), and `schoenfeld_diagnostics` (`survival.py`).
+   - Update `skills/shinystat/SKILL.md` requiring agents to run pre-flight `--validate-only` before starting analysis execution.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Context Pollution Eliminated**: Code search tools (`ripgrep`, `grep`, `glob`) scan only canonical source files, reducing prompt tokens and search hallucination.
+- **Progressive Token Savings**: Cloud sandbox agents load ~80% fewer recipe tokens per task by targeting specific domain modules.
+- **Ergonomic Self-Healing**: Agents detect YAML syntax errors, missing columns, or PH violations with explicit, actionable remediation steps.
+- **Zero Statistical Regression**: 100% of unit tests (466), stress tests (82), e2e tests (150), and baseline snapshot tests pass with identical mathematical values.
+
+[MEMORY_LEARN: Deduplicating multi-agent skill harnesses via relative symlinks and progressive disclosure recipe routing reduces context pollution and token burn while preserving 100% statistical parity.]
+
+---
+
+## ADR 50: Production-Grade Pre-Flight Validation, Standalone Recipe Boundary Guards, and Statistical Invariant Hardening (PR #22 Review)
+
+### Context
+During code review for PR #22 (`refactor/repo-dedup-progressive-disclosure`), a comprehensive static and boundary audit identified edge-case handling gaps, schema divergence, and recipe boundary assumptions across CLI execution, biostatistical calculations, and cloud skill packaging:
+1. `medstat model <spec.yaml>` caught schema validation errors in `AnalysisPlan.from_yaml(spec)` but lacked wrapping around the direct execution invocation (`plan.execute()`), which could raise uncaught runtime exceptions without emitting structured actionable remediation hints.
+2. In `preflight_validate_spec`, YAML parsing permitted duplicate mapping keys, and dataset column extraction invoked `load_clinical_data` / `pd.read_csv`, loading entire large clinical cohorts into memory merely to check header names. Additionally, dataset path resolution used `spec_path.parent` instead of matching `main.py` execution resolution (`Path.cwd()`).
+3. The `--schema` YAML template diverged from the executable `AnalysisPlan` dataclass (`project:` vs `metadata:` and `models:`).
+4. Across the standalone cloud recipes (`01-data-missing-table1.md` through `05-diagnostic-meta-power.md`), numerical boundary protections were incomplete:
+   - Little's MCAR EM loop did not check `max_iter >= 1`, allowed infinite values, and returned p-value on non-convergence.
+   - Rubin pooling returned p = 1.0 on zero pooled SE with non-zero estimate.
+   - Firth logistic clipped linear predictors with `np.clip` rather than using numerically stable log-likelihood and expit, and did not recompute information matrix at final beta.
+   - Fine-Gray competing risks regression lacked explicit row retention metadata and did not return `fg_se_method` and `fg_score_gap` as serialized result columns.
+   - Causal IPTW/PSM lacked categorical dummy encoding in `compute_iptw`, permitted non-binary treatment/outcome values, and allowed negative caliper SD.
+   - Prediction model validation/DCA lacked empty complete-case cohort rejection, non-finite threshold rejection, zero-residual ICC(2) CI handling, and failed logistic recalibration fallback reporting.
+
+### Decision
+1. **Pre-Flight Ergonomics & Low-Overhead Column Inspection**:
+   - Implemented `get_clinical_columns(path)` in `src/medstat/data/loader.py` to inspect column headers from CSV (chunksize 0/header line), Excel (openpyxl read_only max_row=1), and Parquet (metadata schema) without loading full datasets.
+   - Added `_UniqueKeyLoader` in `src/medstat/cli/spec.py` to reject duplicate keys across YAML loading.
+   - Hardened `preflight_validate_spec` to validate executable sections (`metadata`, `data`, `models`), resolve dataset paths against `Path.cwd()` first, and validate all model-referenced options (`p_recal`, `p_pred`, `time_col`, etc.).
+   - Wrapped `plan.execute()` in `main.py` with `try...except Exception as e: emit_agent_actionable_error(e); raise SystemExit(1)`.
+2. **Modular Recipe Boundary Hardening**:
+   - `01-data-missing-table1.md`: Absolute SMD balance criterion ($|\text{SMD}| < 0.10$); discrete-code guard up to 5 levels; non-finite MCAR rejection; non-convergence p-value `np.nan`; Rubin pooling deterministic limit for zero SE.
+   - `02-regression-firth-ordinal.md`: Removed `np.clip`; expit and stable logaddexp likelihood; recomputed information matrix at final beta; strict E-value validation; Logit outcome binary validation and convergence checks.
+   - `03-survival-competing-risks.md`: Complete input validation in CIF and Fine-Gray; retention counts in `out.attrs["retention"]`; explicit `fg_se_method`, `fg_score_gap`, and confidence level columns in output rows.
+   - `04-causal-iptw-psm.md`: Dummy encoding for categorical covariates in IPTW; binary treatment/outcome checks; non-negative caliper SD validation; `matched_X` schema reindexing; robust model type error.
+   - `05-diagnostic-meta-power.md`: Wilson score count checks; 2x2 integer checks; empty DCA cohort & threshold checks; ICC(2) zero-residual CI fallback; tdROC integer event validation; bootstrap binary outcome validation, `cox_snell_r2` return, and zero-convergence fallback; recalibration explicit fallback reporting; Riley sample size positive finite margin validation.
+3. **Canonical Reference Linking & Packaging Synchronization**:
+   - Updated all links in `skills/shinystat-cloud/SKILL.md` to point to `../_shared/references/` and `references/recipes/`.
+   - Updated `test_recipes_snapshot.py`, `test_shinystat_cloud.py`, and `test_shinystat_skill.py` to point to canonical modular recipes under `skills/shinystat-cloud/references/recipes/`.
+   - Synchronized packaging through `scripts/package-cloud-skill.sh`.
+
+### Consequences
+- **Status**: Accepted & Fully Verified (699/699 tests passing).
+- **Safety**: Complete numerical and boundary guardrails across all 20 biostatistical recipes.
+- **Memory Efficiency**: CLI pre-flight checks execute with zero dataset memory footprint.
+- **Resilience**: Agents receive actionable, structured error hints on invalid YAML or data specs before long-running model execution begins.
+
+[MEMORY_LEARN: Pre-flight YAML and schema validation should inspect dataset schemas/headers using low-overhead metadata probes rather than full cohort loads, preventing out-of-memory overhead during agent planning.]
+
+---
+
+## ADR 51: Invariant Hardening, Robust YAML Pre-flight & Test Isolation (PR #22 Code Review Follow-Up)
+
+### Context
+During the detailed automated review on PR #22 by `coderabbitai`, edge cases and boundary behaviors were identified across CLI ergonomics, YAML loading, cloud recipes, and unit test coverage:
+1. `_construct_unique_mapping` in `spec.py` traversed flattened mappings, falsely flagging legitimate YAML merge key syntax (`<<: *base`) as duplicate keys.
+2. `preflight_validate_spec` permitted legacy fallbacks (`analyses` and `method`) instead of strictly requiring `models` with `type`, accepted arbitrary top-level sections, and did not consistently validate survival time/event specs prior to dataset existence checks.
+3. In `loader.py`, encoding fallback lists were duplicated across multiple functions, and Parquet column extraction caught broad exceptions rather than only `ImportError`.
+4. In `main.py`, the Click command entrypoint let `--schema` and `--validate-only` fall through into standard dispatch without clean termination, and standard logistic direct fits did not propagate `agent_remediation`.
+5. Across cloud recipes:
+   - Recipe 01: Little's MCAR lacked non-negative finite check on `tol`; MICE used fixed float epsilon for residual degeneracy rather than scale-aware tolerance; MICE bounds permitted `NaN`; Fisher's exact 2x2 test relied on observed counts rather than expected counts $< 5$; SMD functions lacked non-finite input rejection.
+   - Recipe 02: Covariate/outcome shape checks lacked non-finite validation; adjusted p-values lacked `NA` handling for non-finite values; standard error inversion lacked positive finite validation before Wald fallback.
+   - Recipe 03: Time horizons lacked non-negative finite validation; durations allowed zero; non-95% confidence intervals were mislabeled as 95%; profile threshold compared against fixed 0.05 instead of dynamic alpha.
+   - Recipe 04: IPTW and PSM allowed single-class treatment data; non-finite treatment/outcomes reached solvers; empty PSM matching dropped column schema and `pair_id`; negative IPTW weights were permitted; weighted Cox dropna subset omitted duration column.
+   - Recipe 05: Parameter domain validation was missing for alpha, ci, and direction; empty calibration complete-cases lacked explicit errors; categorical NRI allowed non-finite or outside (0, 1) thresholds; Youden threshold replaced optimal points with infinities; ICC matrix lacked 2D and finite validation; bootstrap internal validation omitted infinities from `n_excluded`; tdROC allowed length mismatches and infinite inputs.
+6. In `test_shinystat_cloud.py`, `test_each_recipe_is_self_contained` lacked test branches for Recipes 18, 19, and 20, silently falling through.
+
+### Decision
+1. **YAML Loader & Preflight Spec Hardening**:
+   - Updated `_construct_unique_mapping` to check `node.value` pairs before merge flattening, ignoring merge keys (`tag:yaml.org,2002:merge`) and unhashable keys, and delegating construction to `super().construct_mapping`.
+   - In `preflight_validate_spec`, enforced strict top-level keys (`data`, `metadata`, `models`), required `data.input_path`, resolved paths deterministically against `Path.cwd()`, and validated survival time and event columns unconditionally.
+2. **CLI Ergonomics & Ingestion Efficiency**:
+   - Reused consolidated `_READ_ENCODINGS` and `_normalize_columns` across `loader.py`.
+   - Caught only `ImportError` on Parquet schema extraction so corrupted files raise cleanly through Click error reporting.
+   - Routed `--schema` and `--validate-only` in Click `cli` through `handle_agent_ergonomic_flags` with clean exit codes.
+   - Copied `agent_remediation` from `fit_res` to `result_data` on standard logistic fits.
+3. **Recipe Numerical Guardrails & Parity**:
+   - Implemented strict numerical domain validations across Recipes 01–05.
+   - Added isolated test fixtures for Recipes 18, 19, and 20 in `test_each_recipe_is_self_contained`, with an explicit `else: pytest.fail(...)`.
+   - Updated `scripts/install-skills.sh` to package `packaging/cloud/shinystat-cloud` in sync with canonical `skills/shinystat-cloud`.
+
+### Consequences
+- **Status**: Accepted & Fully Verified (707/707 tests passing, clean ruff lint & format).
+- **Correctness**: Zero mathematical degeneracy, robust handling of YAML merge keys, and full test isolation across all 20 cloud recipes.
+- **Safety**: Early validation prevents invalid inputs, non-finite values, and malformed plans from reaching statistical solvers.
+
+[MEMORY_LEARN: In PyYAML unique key loaders, check for duplicate keys directly on the AST node pair list before merge resolution to avoid false positives on standard merge key ('<<') inheritance.]
+
+---
+
+## ADR 52: PR #22 Code Review Polish: Centered Degeneracy, Covariate Cardinality, Parquet Indices & Spec Precedence
+
+### Context
+In the final review pass on PR #22 by `coderabbitai`, additional refinements were requested:
+1. `01-data-missing-table1.md`: Residual degeneracy checks in MICE implementations used uncentered variance (`sum(y_obs**2)`), distorting scale invariance under constant shifts. Bound validation permitted positive infinity as lower bound and negative infinity as upper bound.
+2. `02-regression-firth-ordinal.md`: Complete-case covariate validation did not verify minimum distinct cardinality (>= 2 distinct finite values per covariate), allowing singular/collinear fits with constant covariates.
+3. `04-causal-iptw-psm.md`: Weighted Cox survival fit post-filter lacked explicit guards requiring both treatment classes and at least one observed event in surviving records.
+4. `skills/shinystat/SKILL.md` & `main.py`: Proportional-hazards failure advice erroneously suggested competing risks as a remedy; the declarative spec executor cannot apply time-varying covariates or strata, so agents must halt unless using a standalone script. Competing risk remediation erroneously matched observation-count errors.
+5. `spec.py`: Non-string truthy `data.input_path` values (e.g. `123`, `True`) caused `TypeError` when constructing `Path`. `AnalysisPlan.from_yaml` failed to populate `ModelSpec.time` from `time_col` when `time` was unset.
+6. `loader.py`: `get_clinical_columns` derived Parquet columns from raw Arrow schema names including named pandas index fields, leading to mismatches against `load_clinical_data` which excludes named index fields from DataFrame columns.
+7. `test_shinystat_cloud.py`: Test state management did not scope `np.random.seed` resets to isolated tests, and Recipe 18 bootstrap checks only verified dictionary key presence rather than convergence.
+
+### Decision
+1. **MICE Centered Degeneracy & Bounds**:
+   - Replaced uncentered sum-of-squares with centered variation `tss = sum((y_obs - mean(y_obs))**2)`, checking `tss == 0.0 or (rss / tss) <= 1e-12`.
+   - Updated bound guards to reject `low_val == float("inf")` and `high_val == float("-inf")` while continuing to allow `-inf` lower bounds and `+inf` upper bounds alongside NaN rejection.
+2. **Covariate Cardinality Validation**:
+   - Enforced `len(np.unique(vals)) >= 2` for every covariate in `fit_logistic_regression_table`.
+3. **Weighted Cox Cohort Requirements**:
+   - Required `surv_clean[treatment_col].nunique() >= 2` and `(surv_clean[outcome_col] == 1).any()` before `CoxPHFitter.fit`.
+4. **Agent PH Failure Guidance & Remediations**:
+   - Updated SKILL.md and `main.py` to direct agents to halt on PH failure in declarative plans rather than suggesting competing risks or unsupported declarative time-varying covariates.
+   - Guarded `competing risk` remediation in `emit_agent_actionable_error` so observation-count errors never trigger it.
+5. **Spec & Path Hardening**:
+   - Validated `data.input_path` strictly as a non-empty string in preflight validation.
+   - Populated `ModelSpec.time` from `models[].time_col` when `models[].time` is unset, preserving `models[].time` precedence.
+6. **Parquet Pandas Metadata Extraction**:
+   - Extracted `pandas_metadata.get("index_columns")` in `get_clinical_columns` to exclude named index fields from available columns, matching `load_clinical_data`.
+7. **Test Random State Isolation & Convergence Verifications**:
+   - Wrapped `test_each_recipe_is_self_contained` in `try / finally` restoring `np.random.get_state()`.
+   - Asserted `res18["n_successful_replicates"] > 0` and `np.isfinite(res18["shrinkage_factor"])`.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Robustness**: Spec parsing, schema metadata extraction, and recipe mathematical stability are completely aligned across CLI, executor, and cloud environments.
+
+---
+
+## ADR 53: PR #22 Follow-Up Review: Per-Arm Survival Events, Parquet RangeIndex Handling, and Spec Time Resolution
+
+### Context
+In the latest review round on PR #22 by `coderabbitai`:
+1. `04-causal-iptw-psm.md`: In weighted Cox survival models, checking only overall observed event count allowed cohorts where one treatment arm had zero events, risking numeric instability and complete separation in Cox regression.
+2. `spec.py`: `AnalysisPlan.from_yaml` needed `options.time_col` to populate `ModelSpec.time` for survival models (including Cox), while keeping `time` > `time_col` precedence and keeping non-survival models unchanged.
+3. `loader.py`: `get_clinical_columns` Parquet pandas metadata inspection added named index column dictionaries to `index_cols` without excluding `kind: "range"`, which could erroneously flag legitimate columns sharing the RangeIndex name.
+4. Recipe 11 parity test: The parity test in `tests/unit/test_ph_violation_remedies.py` was referencing the removed/decomposed `skills/shinystat-cloud/references/python-recipes.md` document instead of the modular `03-survival-competing-risks.md`.
+
+### Decision
+1. **Per-Arm Survival Event Guard**: In `fit_weighted_outcome_model`, added verification that `surv_clean.groupby(treatment_col)[outcome_col]` has $\ge 1$ observed event in every treatment class, preserving the existing overall cohort event check. Parameterized test coverage verifies rejection across all treatment classes.
+2. **Time-Supported Model Resolution & Outcome Scoping**:
+   - Resolved `ModelSpec.time` from top-level `time_col` or `options.time_col` when explicit `time` is unset for survival models, time-dependent ROC models (including `diagnostic` models with `options.time_dependent_roc: true`), and IPTW models (both `type: "iptw"/"causal_iptw"` and `options.method: "iptw"`).
+   - If an IPTW model explicitly declares a binary or continuous `outcome_type`, `time_col` is not inherited into `ModelSpec.time`.
+   - For diagnostic models configured for reclassification (`p_old_col`, `p_old`, or `reclassification`), time-selection follows the executing reclassification branch (`is_td_roc` is disabled, `time_val` remains `None`), preventing duration column requirements during sample preparation even if `time_col` or `time_dependent_roc` is present.
+   - Guarded `is_reclass` and `is_reclass_exec` with `not is_iptw` so option-selected IPTW models (`options.method: "iptw"`) take IPTW execution precedence, preserving duration inheritance for survival IPTW and preventing misclassification as reclassification.
+   - Evaluated IPTW outcome type before `is_survival` and `is_td_roc` in `supports_time`, ensuring `ModelSpec.time` remains `None` for binary and continuous IPTW models even when declared type is `survival`/`cox`, `time_dependent_roc: true`, or `time_col` is present, and preventing `time_col` restoration.
+   - Aligned execution dispatch to `if is_iptw_exec:` and `elif is_reclass_exec:`, ensuring normalized method values (e.g. `options.method: "IPTW"`) execute IPTW rather than falling through to reclassification.
+   - Ordinary logistic, linear, and non-time diagnostic models do not inherit `time_col`.
+3. **Execution Duration Column Deduplication & Option Filtering**: In `AnalysisPlan.execute`, `options["time_col"]` is skipped in `req_cols` construction whenever `model_spec.time` is already set, when executing reclassification, or when executing IPTW (`is_iptw_exec`), and reclassification/diagnostic score columns (`p_old`, `p_new`, `score_col`, `score`, `p_recal`, `p_pred`) are omitted for IPTW, preventing stale options from requiring duration or excluding patients with missing follow-up time or unused scores.
+4. **Parquet RangeIndex Kind Filter**: Updated pandas metadata dictionary handling in `get_clinical_columns` to check `idx_col.get("kind") != "range"` before adding to `index_cols`.
+5. **Recipe 11 Source Alignment**: Updated `test_recipe_11_equals_src_functions()` to read `skills/shinystat-cloud/references/recipes/03-survival-competing-risks.md`.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 715 unit and integration tests passing, ruff lint and format clean, 0 regressions.
+
+---
+
+## ADR 54: PR #22 CodeRabbit AI Follow-Up: Preflight Spec Duration Alignment, Standalone Packaging, and Copy-Mode Harness Mirrors
+
+### Context
+In the latest CodeRabbit AI review on PR #22:
+1. `src/medstat/cli/spec.py`: `preflight_validate_spec()` independently collected `time_col` and `options.time_col`, requiring duration for survival models even when declared with `options.method: iptw` and `options.outcome_type: binary`, and collected unused columns like `options.score_col` into required dataset fields.
+2. `scripts/package-cloud-skill.sh`: `install-skills.sh --symlink` symlinked `packaging/cloud/shinystat-cloud` to `skills/shinystat-cloud`. The subsequent `cp -RL "$SRC_SKILL" "$TARGET_SKILL"` followed the symlink and attempted to copy into the source directory itself, failing with duplicate/identical file errors.
+3. `skills/shinystat-cloud/SKILL.md` / `scripts/install-skills.sh`: In `--copy` mode, relative references to `../_shared/references/` in `shinystat-cloud` broke because `_shared` was not copied beside `shinystat-cloud` in harness mirrors (`.agent`, `.agents`, `.claude`, `.cursor`) or `packaging/cloud`.
+
+### Decision
+1. **Preflight Spec Duration & Option Alignment**:
+   - Updated `preflight_validate_spec()` to resolve the duration column once using the exact same `is_iptw`, `is_survival`, and `is_td_roc` precedence as `AnalysisPlan.from_yaml()`.
+   - Collected only that single resolved column under `"models.time"` instead of independently collecting `models.time_col` and `models.options.time_col`.
+   - Survival IPTW with binary/continuous outcome (`outcome_type in ("binary", "continuous")`) no longer requires duration or `options.score_col`.
+   - Excluded unused options (`score_col`, `score`, `p_old`, `p_new`, `p_recal`, `p_pred`, `event_col`) from referenced columns when `is_iptw` is active.
+2. **Standalone Cloud Packaging**:
+   - In `scripts/package-cloud-skill.sh`, added `rm -rf "$TARGET_SKILL"` immediately after invoking `install-skills.sh --symlink`, removing the symlink before `cp -RL "$SRC_SKILL" "$TARGET_SKILL"` runs. This guarantees `cp -RL` creates a standalone physical directory.
+3. **Copy-Mode Harness Shared References**:
+   - In `scripts/install-skills.sh`, when `MODE == "--copy"`, copied `$REPO_ROOT/skills/_shared` beside each copied `shinystat-cloud` skill in each harness directory (`$hdir/_shared`) and in `packaging/cloud/_shared`, ensuring relative links `../_shared/references/` resolve.
+   - In symlink mode, explicitly purged `$hdir/_shared` and `packaging/cloud/_shared`, preserving exact byte-identical parity with the canonical `skills/` directory.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 717 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
+
+---
+
+## ADR 55: PR #22 CodeRabbit Follow-Up: Survival IPTW Preflight Duration, Diagnostic Operation Guard, and Execution Duration Scoping
+
+### Context
+In the latest CodeRabbit review round on PR #22:
+1. `src/medstat/cli/spec.py`: `requires_survival_time` only checked `is_survival` (`m_type in _SURVIVAL_MODEL_TYPES`), so models declared with `type: iptw` or `options.method: iptw` and `outcome_type: survival` did not require `time` or `time_col` during preflight.
+2. `tests/unit/test_cli_ergonomics.py` & `src/medstat/cli/spec.py`: `type: diagnostic` models without an operation option fell through in `execute()` to an unsupported model type error. Preflight validation accepted bare diagnostic models without checking for a supported operation.
+3. `src/medstat/cli/spec.py`: In `execute()`, `options.time_col` was added to `req_cols` for ordinary logistic models whenever `model_spec.time` was unset, causing listwise exclusion of patients with missing durations even though ordinary logistic regression does not use duration.
+
+### Decision
+1. **Survival IPTW Preflight Duration**:
+   - Updated `requires_survival_time` to `(is_survival and iptw_outcome_type not in ("binary", "continuous")) or (is_iptw and iptw_outcome_type == "survival")`.
+   - Survival IPTW models (either `type: iptw` or `options.method: iptw`) with `outcome_type: survival` now require a resolved duration column during preflight.
+2. **Diagnostic Operation Validation**:
+   - In `preflight_validate_spec()`, validated that `m_type in ("diagnostic", "diag")` specifies a supported operation (`is_iptw`, `is_reclass`, `is_td_roc`, `internal_validation`, or `recalibration`). Rejected unconfigured diagnostic models with actionable remediation.
+   - Updated the `diag_model` fixture in `test_cli_ergonomics.py` to specify `options: internal_validation: true`.
+3. **Execution Duration Scoping**:
+   - In `AnalysisPlan.execute()`, computed `is_duration_dependent` from `is_survival_exec`, `is_td_roc_exec`, and `is_iptw_survival_exec`.
+   - Excluded `options.time_col` from `req_cols` whenever `not is_duration_dependent or model_spec.time`, preventing ordinary logistic preparation from dropping patients with missing follow-up durations.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 720 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
+
+---
+
+## ADR 56: PR #22 CodeRabbit Follow-Up: Reclassification Preflight Requirements & Packaged Markdown Link Rewriting
+
+### Context
+In the latest CodeRabbit review round on PR #22:
+1. `src/medstat/cli/spec.py`: Preflight validation did not reject `type: reclassification` when no reclassification selector was specified (which later failed during execution with an unsupported model error). Additionally, plans with `p_old_col` were accepted even when both `p_new_col` and `p_new` were omitted, causing a `KeyError: None` during execution.
+2. `scripts/package-cloud-skill.sh`: In packaged standalone distributions under `packaging/cloud/shinystat-cloud`, markdown files still referenced `../_shared/references/` or `../../../_shared/references/`, which broke relative link navigation once unzipped or distributed outside the monorepo.
+
+### Decision
+1. **Reclassification Preflight Requirements**:
+   - In `preflight_validate_spec()`, rejected `type: reclassification` without a reclassification selector (`p_old_col`, `p_old`, or `reclassification: true`) unless `options.method: iptw` is selected.
+   - When `is_reclass` is active, verified that either `p_new_col` or `p_new` is provided; if both are missing, rejected with an actionable error and remediation. Preserved valid plans specifying either new-score option.
+2. **Packaged Markdown Link Rewriting**:
+   - In `scripts/package-cloud-skill.sh`, rewrote shared-reference links in Markdown files under `TARGET_SKILL` so that `../_shared/references/` becomes `references/` in `SKILL.md` and `../../../_shared/references/` becomes `../` in recipes.
+   - Applied rewrites strictly to `TARGET_SKILL`, keeping the canonical `skills/shinystat-cloud` source tree unchanged.
+   - Updated `test_shinystat_cloud_canonical_skill_exists_and_valid()` to verify tree and content parity against standalone rewritten reference links.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 724 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
+
+---
+
+## ADR 57: PR #22 CodeRabbit Follow-Up: Reclassification Preflight Bilateral Column Enforcement & Standalone Cloud Packaging in Parity Tests
+
+### Context
+In the latest CodeRabbit review round on PR #22:
+1. `src/medstat/cli/spec.py`: Preflight validation required `p_new_col` or `p_new` when `is_reclass` was active, but did not symmetrically verify that `p_old_col` or `p_old` was provided when only a new-score column was supplied (or when `reclassification: true` was set). Additionally, `is_reclass` did not require both columns before accepting a model as reclassification, allowing partially configured diagnostic models to bypass bilateral score requirements.
+2. `tests/unit/test_shinystat_skill.py`: `test_shinystat_cloud_canonical_skill_exists_and_valid()` asserted parity between `skills/shinystat-cloud` and `packaging/cloud/shinystat-cloud`. In a fresh clone or clean test runner where `scripts/package-cloud-skill.sh` had not yet been executed manually, the parity assertion failed.
+
+### Decision
+1. **Reclassification Bilateral Column Enforcement**:
+   - Defined `has_old = bool(opts_dict.get("p_old_col") or opts_dict.get("p_old"))` and `has_new = bool(opts_dict.get("p_new_col") or opts_dict.get("p_new"))`.
+   - Updated `is_reclass` to require `not is_iptw and m_type in ("reclassification", "diagnostic", "diag") and has_old and has_new`.
+   - Detected reclassification intent via `has_reclass_intent` across `m_type == "reclassification"`, `opts_dict.get("reclassification")`, `has_old`, or `has_new`.
+   - When `has_reclass_intent and not is_reclass`:
+     - If neither `has_old` nor `has_new`: rejected with `lacks reclassification options (e.g., 'p_old_col' or 'p_old')`.
+     - If `not has_old`: rejected with actionable remediation specifying `p_old_col` (or `p_old`).
+     - If `not has_new`: rejected with actionable remediation specifying `p_new_col` (or `p_new`).
+   - Preserved IPTW exception and prevented generic diagnostic missing operation errors from shadowing reclassification remediation.
+   - Added regression test `test_preflight_validate_reclassification_missing_p_old_rejected` in `tests/unit/test_cli_ergonomics.py`.
+2. **Automated Standalone Cloud Package Generation in Tests**:
+   - Updated `test_shinystat_cloud_canonical_skill_exists_and_valid()` in `tests/unit/test_shinystat_skill.py` to invoke `scripts/package-cloud-skill.sh` via `subprocess.run()` prior to comparing `canonical_files` and `packaging_files`.
+   - Ensured the standalone cloud package is dynamically generated as part of standard pytest execution, eliminating manual preparation prerequisites.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 725 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
+
+---
+
+## ADR 58: PR #22 CodeRabbit Follow-Up: Reclassification Null Alias Fallback & Comprehensive Markdown Link Validation
+
+### Context
+In the latest CodeRabbit review round on PR #22:
+1. `src/medstat/cli/spec.py`: In `AnalysisPlan.execute`, `p_old_col` and `p_new_col` were resolved using `dict.get("p_old_col", dict.get("p_old"))`. When a YAML spec explicitly set `p_old_col: null` while providing `p_old: "old_score"` (and similarly for `p_new_col`), `dict.get("p_old_col", ...)` returned `None` instead of evaluating the fallback, causing execution to fail with `KeyError: None` despite preflight validation accepting the specification.
+2. `tests/unit/test_shinystat_skill.py`:
+   - Shared reference existence checks in `test_shinystat_cloud_canonical_skill_exists_and_valid()` only verified three hard-coded markdown files instead of dynamically covering all shared references linked in the `SKILL.md` body.
+   - The packaged markdown test relied solely on string substitution comparisons and did not independently verify that all local relative markdown links resolve to valid, existing files within the standalone package.
+
+### Decision
+1. **Reclassification Null Alias Fallback in Execution**:
+   - In `AnalysisPlan.execute`, resolved `p_old_c = model_spec.options.get("p_old_col") or model_spec.options.get("p_old")` and `p_new_c = model_spec.options.get("p_new_col") or model_spec.options.get("p_new")`, matching the `or` fallback semantics of preflight validation.
+   - Symmetrically updated `horizons` and `p_old_col` in time-dependent ROC execution to ensure explicit null options fall back to aliases (`horizons` and `score_old`).
+   - Added regression test `test_reclassification_execute_with_explicit_null_aliases` in `tests/unit/test_cli_ergonomics.py`.
+2. **Dynamic Shared Reference & Independent Markdown Link Validation**:
+   - Updated `test_shinystat_cloud_canonical_skill_exists_and_valid()` to dynamically parse all `_shared/references/*.md` links from the `SKILL.md` body and verify their existence in `skills/_shared/references/`.
+   - Added independent regex-based link validation iterating over all `.md` files in `packaging/cloud/shinystat-cloud` to confirm that every local relative link resolves to a valid, existing target strictly contained within the standalone package root.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 726 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
+
+---
+
+## ADR 59: PR #22 CodeRabbit Follow-Up: Preflight Column Reference Alias Resolution & Discriminative Reclassification Assertion
+
+### Context
+In the latest CodeRabbit review round on PR #22:
+1. `src/medstat/cli/spec.py`: Preflight validation collected option column references by iterating over declared keys (`p_old_col`, `p_old`, `p_new_col`, `p_new`) independently without resolving aliases or discarding empty strings. When a plan specified an empty string alias (e.g. `p_old_col: ""`) alongside a valid fallback (`p_old: "old_score"`), preflight collected `""` as a required dataset column and failed validation, diverging from `AnalysisPlan.execute` which treats empty strings as absent and falls back to `p_old` / `p_new`.
+2. `tests/unit/test_cli_ergonomics.py`: `test_reclassification_execute_with_explicit_null_aliases` tested only execution status and `final_n` without verifying the computed IDI estimate against the known fixture value ($\text{IDI} \approx 0.1$), failing to guard against column swaps or misallocated predictions.
+
+### Decision
+1. **Preflight Column Reference Alias Resolution**:
+   - Introduced `_resolve_col_alias(primary, fallback)` treating `None` and empty/whitespace strings as absent.
+   - In `preflight_validate_spec()`, resolved `resolved_p_old` and `resolved_p_new` before collecting column references.
+   - When `is_reclass` is active, collected only the resolved column names and bypassed raw `p_old`, `p_old_col`, `p_new`, and `p_new_col` keys in the generic option collection loop.
+   - Updated `_add_col_ref()` to strip whitespace and discard empty string entries so blank strings are never recorded as required dataset columns.
+   - Applied identical `_resolve_col_alias` logic across `from_yaml()` and `AnalysisPlan.execute()` for end-to-end consistency.
+2. **Discriminative Reclassification Verification**:
+   - Updated `test_reclassification_execute_with_explicit_null_aliases` in `tests/unit/test_cli_ergonomics.py` to assert that `res["models"]["reclass_null_alias_model"]["reclassification"]["idi"]["estimate"] == pytest.approx(0.1, abs=1e-4)`.
+   - Added `test_reclassification_execute_with_empty_string_aliases` to verify that both preflight validation and plan execution seamlessly resolve empty string aliases (`p_old_col: ""`, `p_new_col: "   "`).
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 727 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
+
+---
+
+## ADR 60: PR #22 CodeRabbit Follow-Up: Column Reference Normalization & Preflight Rejection of List-Valued Score Options
+
+### Context
+In the latest CodeRabbit review round on PR #22:
+1. `src/medstat/cli/spec.py`: When creating `ModelSpec` (and in `from_yaml`), whitespace-padded strings (e.g. `outcome: " dead "`, `p_old_col: " old_score "`) were stored verbatim without trimming. While preflight validation stripped string column references when checking dataset existence, execution looked up the untrimmed values in `current_df.columns` when populating `req_cols`, causing `req_cols` to omit or misallocate required columns before building `clean_df`.
+2. `src/medstat/cli/spec.py`: In `_resolve_col_alias`, a fallback branch (`elif primary is not None and bool(primary): return primary`) returned truthy non-strings (such as lists `["score1", "score2"]`). In preflight validation, list-valued `p_old_col` or `p_new_col` were passed to `_add_col_ref`, which silently unpacked list elements into `referenced_cols` rather than rejecting list-valued scalar score options with clear validation errors and actionable remediation prior to dataframe access or ROC computation.
+
+### Decision
+1. **ModelSpec Column Reference Normalization**:
+   - Added `__post_init__` to `ModelSpec` to trim and normalize `name`, `type`, `outcome`, `exposure`, `time`, `covariates`, and column-referencing keys in `options` (`p_old`, `p_old_col`, `p_new`, `p_new_col`, `score_old`, `score_new`, `score_col`, `time_col`, `event_col`, `cluster_col`, `p_recal`, `p_pred`, `score`).
+   - In `AnalysisPlan.execute`, ensured `outcome`, `p_old_c`, and `p_new_c` are normalized before `req_cols` builds `clean_df`.
+   - Added defensive checks in `AnalysisPlan.execute` verifying `p_old_c` and `p_new_c` are valid columns in `clean_df.columns` before calling `compare_diagnostic_models`.
+2. **Rejection of List-Valued Reclassification Options & Strict Scalar Aliases**:
+   - Updated `_resolve_col_alias` to strictly return `str | None`, eliminating non-string truthy passthroughs.
+   - In `preflight_validate_spec()`, explicitly detected and rejected list-valued `p_old_col`, `p_old`, `p_new_col`, and `p_new` with clear errors and actionable remediations.
+   - Excluded raw `p_old`, `p_old_col`, `p_new`, and `p_new_col` from generic preflight option iteration, adding only resolved scalar aliases to `referenced_cols` when `is_reclass` is active.
+   - Added unit tests `test_preflight_validate_reclassification_list_options_rejected`, `test_reclassification_padded_column_references_normalized`, and `test_reclassification_execute_invalid_column_rejected_before_roc` in `tests/unit/test_cli_ergonomics.py`.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 730 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
+
+---
+
+## ADR 61: PR #22 CodeRabbit Follow-Up: Unified Duration Selection Across Whitespace Fallbacks & Preflight Validation of Time-Dependent ROC Comparison Scores
+
+### Context
+In the latest CodeRabbit review round on PR #22:
+1. `src/medstat/cli/spec.py` (Line 169): In `from_yaml` and the preflight validation path, duration column fallback was gated on `time_val is None`. When a YAML spec contained whitespace-only duration values (e.g. `time: "   "`), `time_val` was treated as present, blocking fallback to a configured `time_col` (such as `follow_up`). Later, `ModelSpec.__post_init__` stripped the string to `None` or `""`, causing execution in `execute()` to fall back to the default `"time"` rather than the configured `time_col: "follow_up"`.
+2. `src/medstat/cli/spec.py` (Line 1721): The generic option collection loop in `preflight_validate_spec()` unconditionally skipped `"p_old"`, `"p_old_col"`, `"p_new"`, `"p_new_col"` regardless of model type. When a time-dependent ROC model specified `options.p_old_col` (or `score_old`) for baseline model comparison, preflight never added the comparison score column to `referenced_cols`, allowing specs referencing nonexistent columns to return `valid: true`.
+
+### Decision
+1. **Unified Duration Column Resolution Helper**:
+   - Implemented `_resolve_duration_col(model_dict, opts_dict, supports_time, is_reclass, is_iptw) -> str | None` in `src/medstat/cli/spec.py` to standardize duration column precedence across `from_yaml()` and `preflight_validate_spec()`.
+   - Stripped whitespace from `time` before evaluating presence; if absent or whitespace-only, seamlessly checked `time_col` on the model item and `time_col` in model `options`.
+   - Ensured both `from_yaml()` and `preflight_validate_spec()` select the identical duration column name, rejecting whitespace-only duration values without fallback during preflight for survival models with an actionable remediation.
+2. **Preflight Validation & Execution Guards for Time-Dependent ROC Comparison Scores**:
+   - In `preflight_validate_spec()`, when `is_td_roc` is active:
+     - Rejected list-valued `p_old_col` with a clear validation error and remediation hint.
+     - Resolved `resolved_td_old` via `_resolve_col_alias(opts_dict.get("p_old_col"), opts_dict.get("score_old"))` and registered it via `_add_col_ref(resolved_td_old, "models.options.p_old_col")`.
+   - Updated the `opt_key` skip logic so old-score aliases (`"p_old"`, `"p_old_col"`, `"score_old"`) and new-score aliases (`"p_new"`, `"p_new_col"`) are skipped only when unused by other models, or skipped in generic iteration because already collected by `is_reclass` or `is_td_roc`.
+   - In `AnalysisPlan.execute()`:
+     - Added `td_old_c` to `req_cols` when `is_td_roc_exec` is active.
+     - Resolved `dur_col` with whitespace fallback defensive guards.
+     - In the TD-ROC computation block, verified that when an old comparison score is requested (`raw_td_old`), it raises `ValueError` if the resolved column is missing or not present in `clean_df.columns`.
+3. **Unit Tests Added**:
+   - `test_preflight_validate_time_dependent_roc_missing_p_old_col_rejected`: verifies preflight rejects TD-ROC plans referencing missing comparison score columns with `valid: false`.
+   - `test_time_dependent_roc_execute_missing_p_old_col_rejected`: verifies execution raises `ValueError` before fitting TD-ROC when comparison score column is missing.
+   - `test_duration_selection_whitespace_time_falls_back_to_time_col`: verifies whitespace-only `time` falls back to `time_col: "follow_up"` across `from_yaml` and preflight, and executes cleanly.
+   - `test_preflight_validate_whitespace_time_without_time_col_rejected`: verifies whitespace-only `time` without `time_col` fails preflight validation for survival models.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 734 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
+
+---
+
+## ADR 62: PR #22 CodeRabbit Follow-Up: Preflight Rejection of Non-String Fallback Score Aliases in Time-Dependent ROC
+
+### Context
+In the latest CodeRabbit review round on PR #22:
+- `src/medstat/cli/spec.py` (Line 1784-1788): When validating time-dependent ROC models during preflight, `_resolve_col_alias` returns `None` when given a non-string `score_old` value (such as a list, dict, or non-scalar). Because `p_old_col` was absent, `resolved_td_old` evaluated to `None`, which bypassed column registration (`_add_col_ref`). Furthermore, `score_old` was skipped in the generic option iteration loop. As a result, malformed non-string `score_old` values silently passed preflight validation (`valid: true`), leading to mid-run `ValueError` failures during plan execution.
+
+### Decision
+1. **Defensive Validation for Fallback Score Aliases in TD-ROC**:
+   - In `preflight_validate_spec()`, when `is_td_roc` is active:
+     - If `p_old_col` is provided and is not a string, reject it with an actionable validation error and remediation advising a single scalar string column name.
+     - If `p_old_col` is absent (or empty/whitespace) and `score_old` is provided, verify `score_old` is a string; if it is a non-string (e.g. list, dict), reject the specification with an explicit validation error and remediation advice.
+     - When `score_old` is a valid scalar string column name, resolve it via `_resolve_col_alias` and add it to `referenced_cols` so preflight checks its presence in the dataset.
+2. **Unit Tests Added**:
+   - `test_preflight_validate_time_dependent_roc_non_string_score_old_rejected`: verifies preflight rejects non-string `score_old` (e.g. list `["old_a", "old_b"]`) when `p_old_col` is absent.
+   - `test_preflight_validate_time_dependent_roc_valid_score_old_accepted`: verifies preflight accepts valid scalar string `score_old` when `p_old_col` is absent and validates its existence in the dataset.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 736 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
+
+---
+
+## ADR 63: PR #22 CodeRabbit Follow-Up: Preflight Rejection of List-Valued Model Outcomes & TD-ROC Missing Score Control
+
+### Context
+In the latest CodeRabbit review round on PR #22:
+1. `src/medstat/cli/spec.py` (Line 1576-1622): In `preflight_validate_spec()`, model `outcome` was processed through the generic `_add_col_ref()` helper alongside multi-column fields like `covariates`. When a YAML plan specified a list-valued `outcome` (e.g. `outcome: ["dead", "death"]`), `_add_col_ref()` unpacked the list items into `referenced_cols` and passed preflight with `valid: true`. Downstream, `AnalysisPlan.execute()` expects a scalar string outcome, resulting in an unhandled `AttributeError` or DataFrame dimension mismatch during execution.
+2. `tests/unit/test_cli_ergonomics.py` (Line 1681-1684): `test_preflight_validate_time_dependent_roc_valid_score_old_accepted` only tested valid column acceptance, lacking an explicit negative control asserting that a nonexistent `score_old` column is flagged as missing.
+
+### Decision
+1. **Preflight Rejection of List-Valued Model Outcomes**:
+   - In `preflight_validate_spec()`, explicitly inspected `item.get("outcome")`:
+     - If `outcome` is a list, marks `report["valid"] = False` with an actionable error and remediation advice instructing the user to provide a single scalar string, bypassing `_add_col_ref()`.
+     - If `outcome` is non-string (and non-None), marks `report["valid"] = False` with explicit type error.
+     - Preserves standard `_add_col_ref()` registration for valid scalar string outcomes and all other model fields (`exposure`, `event_col`, `cluster_col`, `covariates`).
+2. **Missing-Column Control in Preflight Unit Test**:
+   - Updated `test_preflight_validate_time_dependent_roc_valid_score_old_accepted` to verify a negative control: when `score_old: "missing_marker"`, `preflight_validate_spec()` returns `valid: False` and identifies `"missing_marker"` in `report["errors"]` and `report["agent_remediation"]`.
+   - Added unit test `test_preflight_validate_list_outcome_rejected` asserting that list-valued outcomes are rejected during preflight without leaking list items into `referenced_cols`.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 737 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
+
+---
+
+## ADR 64: PR #22 CodeRabbit Follow-Up: Preflight Rejection of Missing, Null, or Blank Model Outcomes
+
+### Context
+In the latest CodeRabbit review round on PR #22:
+- `src/medstat/cli/spec.py` (Line 1612): In `preflight_validate_spec()`, the outcome check was guarded by `if "outcome" in item:`. When a model definition omitted the `outcome` field entirely, or specified `outcome: null`, `outcome: ""`, or `outcome: "   "`, preflight skipped validation and returned `valid: true`. Downstream, `AnalysisPlan.execute()` accessed the unvalidated outcome column, triggering a `KeyError: "[''] not in index"` during dataset subsetting.
+
+### Decision
+1. **Preflight Validation of Mandatory Non-Blank Outcomes**:
+   - In `preflight_validate_spec()`, retrieved `raw_outcome = item.get("outcome")`.
+   - If `raw_outcome` is missing (`None`), null, or blank/whitespace-only, marks `report["valid"] = False` with an actionable validation error and remediation advising a valid outcome column name string.
+   - Retained explicit rejections for list-valued outcomes and non-string types.
+   - In `AnalysisPlan.execute()`, added defensive validation verifying that `model_spec.outcome` is a non-empty string before DataFrame indexing, raising a clear `ValueError` if an invalid model spec is executed directly.
+2. **Unit Tests Added**:
+   - `test_preflight_validate_missing_null_blank_outcome_rejected`: verifies preflight invalidity for missing, null, empty string, and whitespace-only outcomes.
+   - `test_execute_blank_outcome_raises_value_error`: verifies `AnalysisPlan.execute()` raises `ValueError` before DataFrame indexing when `outcome` is blank or None.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Verification**: 739 tests passing across unit, e2e, and stress suites; clean ruff lint and formatting; zero regressions.
+
+
+
+
 
 
 

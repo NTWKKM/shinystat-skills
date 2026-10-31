@@ -279,6 +279,19 @@ def schoenfeld_diagnostics(
             )
         note = " ".join(notes)
 
+    remediation = None
+    if strong_violations or weak_violations:
+        remediation = (
+            "Proportional hazards assumption violated (Schoenfeld p < 0.05). "
+            "Action: Add stratification (refit_cox_with_strata / strata_cols) for nuisance covariates, "
+            "or period-specific time-varying hazard ratios (piecewise_hr) for exposure."
+        )
+    elif indeterminate_tests:
+        remediation = (
+            f"Indeterminate proportional hazards test result: non-finite p-value for {indeterminate_tests}. "
+            "Action: Inspect Schoenfeld residual plots (plot_schoenfeld_residuals) and verify event density across follow-up."
+        )
+
     return {
         "p_values": p_values,
         "test_statistics": test_statistics,
@@ -289,6 +302,7 @@ def schoenfeld_diagnostics(
         "no_ph_violation_detected": passed,
         "PH_Assumptions_Passed": passed,
         "PH_Note": note,
+        "agent_remediation": remediation,
     }
 
 

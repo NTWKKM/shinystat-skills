@@ -3022,6 +3022,9 @@
         "fine_gray_shr": 0.785,
         "fg_95_ci": "0.785 (0.527 to 1.169)",
         "fg_p_value": 0.23353328766659043,
+        "fg_se_method": "sandwich",
+        "fg_score_gap": 0.0004010999562032214,
+        "confidence_level": 0.95,
         "profile": "Concordant"
       },
       {
@@ -3032,6 +3035,9 @@
         "fine_gray_shr": 1.905,
         "fg_95_ci": "1.905 (1.282 to 2.831)",
         "fg_p_value": 0.0014366845944599896,
+        "fg_se_method": "sandwich",
+        "fg_score_gap": 0.0004010999562032214,
+        "confidence_level": 0.95,
         "profile": "Concordant"
       }
     ]

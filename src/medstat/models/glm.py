@@ -112,6 +112,16 @@ def fit_standard_logistic(
     # McFadden's pseudo R-squared
     prsquared = getattr(result, "prsquared", np.nan)
 
+    remediation = None
+    bse_arr = np.asarray(result.bse)
+    if np.any(bse_arr > 50.0) or np.any(~np.isfinite(bse_arr)):
+        remediation = (
+            "Large or non-finite standard errors detected in standard logistic regression (standard error > 50 or infinite). "
+            "Inconclusive warning: this may indicate complete or quasi-complete separation, extreme predictor scaling, or severe collinearity. "
+            "Action: Inspect predictor scales and cross-tabulations. If separation is confirmed, switch model to Firth penalized logistic regression "
+            "(medstat.models.firth.fit_firth_logistic) or set type: logistic with options.method: firth in your spec YAML."
+        )
+
     return {
         "model": result,
         "summary_df": summary_df,
@@ -119,6 +129,7 @@ def fit_standard_logistic(
         "log_likelihood": float(result.llf),
         "aic": float(result.aic),
         "bic": float(result.bic),
+        "agent_remediation": remediation,
     }
 
 

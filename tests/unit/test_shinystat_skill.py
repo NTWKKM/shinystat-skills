@@ -2,6 +2,9 @@
 tests/unit/test_shinystat_skill.py: Multi-agent mirror parity and schema test for shinystat skill.
 """
 
+import os
+import re
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -106,6 +109,18 @@ def _is_valid_skill_file(path: Path) -> bool:
     )
 
 
+def _collect_valid_skill_files(root: Path) -> set[Path]:
+    import os
+
+    files = set()
+    for dirpath, _, filenames in os.walk(root, followlinks=True):
+        for f in filenames:
+            p = Path(dirpath) / f
+            if _is_valid_skill_file(p):
+                files.add(p.relative_to(root))
+    return files
+
+
 def test_shinystat_cloud_canonical_skill_exists_and_valid():
     """Verify skills/shinystat-cloud/SKILL.md exists, has valid YAML frontmatter, references, and matches packaging/cloud/shinystat-cloud."""
     repo_root = Path(__file__).resolve().parent.parent.parent
@@ -131,30 +146,41 @@ def test_shinystat_cloud_canonical_skill_exists_and_valid():
     # Body checks
     body = parts[2]
     assert "The 5 Decision Pillars" in body
-    assert "references/decision-heuristics.md" in body
-    assert "references/figures.md" in body
-    assert "references/python-recipes.md" in body
-    assert "references/report-builder.md" in body
+    assert "_shared/references/decision-heuristics.md" in body
+    assert "_shared/references/figures.md" in body
+    assert "references/recipes/01-data-missing-table1.md" in body
+    assert "_shared/references/report-builder.md" in body
 
-    # References existence check
-    ref_dir = cloud_skill.parent / "references"
-    assert (ref_dir / "decision-heuristics.md").exists()
-    assert (ref_dir / "figures.md").exists()
-    assert (ref_dir / "python-recipes.md").exists()
-    assert (ref_dir / "report-builder.md").exists()
+    # References existence check: verify all shared references linked in body exist under shared_ref_dir
+    shared_ref_dir = repo_root / "skills" / "_shared" / "references"
+    shared_ref_links = set(re.findall(r"_shared/references/([\w.-]+\.md)", body))
+    assert shared_ref_links, (
+        "Expected at least one shared reference linked in SKILL.md body"
+    )
+    for ref_name in sorted(shared_ref_links):
+        assert (shared_ref_dir / ref_name).exists(), (
+            f"Linked shared reference '{ref_name}' missing from {shared_ref_dir}"
+        )
+
+    recipes_dir = cloud_skill.parent / "references" / "recipes"
+    for r_num in range(1, 6):
+        pattern = f"0{r_num}-*.md"
+        matched = list(recipes_dir.glob(pattern))
+        assert len(matched) == 1, (
+            f"Expected 1 recipe file matching {pattern}, found {len(matched)}"
+        )
+
+    # Ensure standalone cloud package is generated via the supported packaging workflow
+    package_script = repo_root / "scripts" / "package-cloud-skill.sh"
+    assert package_script.exists(), "scripts/package-cloud-skill.sh not found"
+    subprocess.run(
+        ["bash", str(package_script)], check=True, cwd=repo_root, capture_output=True
+    )
 
     # Full tree and content parity with packaging/cloud/shinystat-cloud
     assert packaging_cloud.exists(), "packaging/cloud/shinystat-cloud not found"
-    canonical_files = {
-        path.relative_to(canonical_cloud)
-        for path in canonical_cloud.rglob("*")
-        if _is_valid_skill_file(path)
-    }
-    packaging_files = {
-        path.relative_to(packaging_cloud)
-        for path in packaging_cloud.rglob("*")
-        if _is_valid_skill_file(path)
-    }
+    canonical_files = _collect_valid_skill_files(canonical_cloud)
+    packaging_files = _collect_valid_skill_files(packaging_cloud)
     assert canonical_files == packaging_files, (
         f"Tree mismatch between skills/shinystat-cloud and packaging/cloud/shinystat-cloud: "
         f"missing={sorted(canonical_files - packaging_files)}, "
@@ -164,9 +190,60 @@ def test_shinystat_cloud_canonical_skill_exists_and_valid():
     for rel_path in canonical_files:
         canon_file = canonical_cloud / rel_path
         pack_file = packaging_cloud / rel_path
-        assert pack_file.read_bytes() == canon_file.read_bytes(), (
-            f"Byte mismatch in {rel_path} between skills/shinystat-cloud and packaging/cloud/shinystat-cloud"
-        )
+        if pack_file.read_bytes() == canon_file.read_bytes():
+            continue
+        # In packaged standalone distributions, relative links to _shared references
+        # are rewritten to resolve to the packaged copies under references/
+        if rel_path.suffix == ".md":
+            ref_rel = os.path.relpath(packaging_cloud / "references", pack_file.parent)
+            prefix = "" if ref_rel == "." else f"{ref_rel}/"
+            expected = (
+                canon_file.read_text(encoding="utf-8")
+                .replace("../../../_shared/references/", prefix)
+                .replace("../../_shared/references/", prefix)
+                .replace("../_shared/references/", prefix)
+                .replace("(`../_shared/references/`)", f"(`{prefix}`)")
+            )
+            assert pack_file.read_text(encoding="utf-8") == expected, (
+                f"Content mismatch in {rel_path} between skills/shinystat-cloud and packaging/cloud/shinystat-cloud"
+            )
+        else:
+            assert pack_file.read_bytes() == canon_file.read_bytes(), (
+                f"Byte mismatch in {rel_path} between skills/shinystat-cloud and packaging/cloud/shinystat-cloud"
+            )
+
+    # Independent validation: verify every local relative Markdown link resolves to an
+    # existing target strictly within packaging_cloud, without relying on string replacement
+    md_link_pattern = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+    resolved_links_count = 0
+    for pack_file in packaging_cloud.rglob("*.md"):
+        if not pack_file.is_file():
+            continue
+        text = pack_file.read_text(encoding="utf-8")
+        for match in md_link_pattern.finditer(text):
+            target = match.group(2).strip()
+            if target.startswith(("http://", "https://", "mailto:", "#")):
+                continue
+            target_path = target.split()[0].split("#")[0].strip()
+            if not target_path:
+                continue
+            resolved_target = (pack_file.parent / target_path).resolve()
+            assert resolved_target.exists(), (
+                f"Broken relative link in {pack_file.relative_to(packaging_cloud)}: "
+                f"target '{target}' does not exist at {resolved_target}"
+            )
+            assert (
+                packaging_cloud.resolve() in resolved_target.parents
+                or resolved_target == packaging_cloud.resolve()
+            ), (
+                f"Escaping relative link in {pack_file.relative_to(packaging_cloud)}: "
+                f"target '{target}' resolves outside packaging directory at {resolved_target}"
+            )
+            resolved_links_count += 1
+
+    assert resolved_links_count > 0, (
+        "Expected at least one relative Markdown link in packaged cloud skill"
+    )
 
 
 def test_shinystat_reference_manual_exists():
@@ -194,19 +271,13 @@ def test_shinystat_multi_agent_mirrors_byte_identical():
     ]
 
     canonical_files = {
-        path.relative_to(canonical_dir)
-        for path in canonical_dir.rglob("*")
-        if _is_valid_skill_file(path)
+        p for p in _collect_valid_skill_files(canonical_dir) if "_shared" not in p.parts
     }
     assert canonical_files, "No files found in canonical skills directory"
 
     for mirror in mirrors:
         assert mirror.exists(), f"Mirror {mirror} missing"
-        mirror_files = {
-            path.relative_to(mirror)
-            for path in mirror.rglob("*")
-            if _is_valid_skill_file(path)
-        }
+        mirror_files = _collect_valid_skill_files(mirror)
         assert mirror_files == canonical_files, (
             f"Path mismatch for mirror {mirror}: "
             f"missing={sorted(canonical_files - mirror_files)}, "
@@ -249,20 +320,12 @@ def test_src_medstat_and_skills_bundled_medstat_byte_identical():
         ),
     ]
 
-    src_files = {
-        path.relative_to(src_dir)
-        for path in src_dir.rglob("*")
-        if _is_valid_skill_file(path)
-    }
+    src_files = _collect_valid_skill_files(src_dir)
     assert src_files, "No valid files found in src/medstat"
 
     for label, target_dir in targets:
         assert target_dir.exists(), f"{label} target directory not found: {target_dir}"
-        target_files = {
-            path.relative_to(target_dir)
-            for path in target_dir.rglob("*")
-            if _is_valid_skill_file(path)
-        }
+        target_files = _collect_valid_skill_files(target_dir)
         assert src_files == target_files, (
             f"File tree mismatch between src/medstat and {label} ({target_dir}): "
             f"missing_in_target={sorted(src_files - target_files)}, "
