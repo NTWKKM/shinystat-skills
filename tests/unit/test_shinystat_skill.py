@@ -455,21 +455,74 @@ def test_subagent_protocol_and_gate5_delta_parity():
 
     # Preprocessing provenance invalidation behavior test
     def _should_invalidate_cleaned_data(provenance: dict, gate4_decision: dict) -> bool:
-        return provenance.get("missing_data_strategy") != gate4_decision.get(
-            "missing_data_strategy"
+        # Compare all recorded preprocessing settings determining cleaned-cohort compatibility
+        keys_to_compare = (
+            "missing_data_strategy",
+            "imputation_m",
+            "exclusion_criteria",
         )
+        for k in keys_to_compare:
+            if k in gate4_decision and provenance.get(k) != gate4_decision.get(k):
+                return True
+        return False
 
-    prov = {"missing_data_strategy": "complete_case", "imputation_m": 0}
+    prov = {
+        "missing_data_strategy": "complete_case",
+        "imputation_m": 0,
+        "exclusion_criteria": "missing_lactate_dropped",
+    }
     # Strategy changed to MICE -> must invalidate cleaned cohort
     assert (
-        _should_invalidate_cleaned_data(prov, {"missing_data_strategy": "mice"}) is True
+        _should_invalidate_cleaned_data(
+            prov,
+            {
+                "missing_data_strategy": "mice",
+                "imputation_m": 10,
+                "exclusion_criteria": "missing_lactate_dropped",
+            },
+        )
+        is True
     )
-    # Strategy unchanged -> selective resume preserved
+    # Strategy unchanged and parameters identical -> selective resume preserved
     assert (
         _should_invalidate_cleaned_data(
-            prov, {"missing_data_strategy": "complete_case"}
+            prov,
+            {
+                "missing_data_strategy": "complete_case",
+                "imputation_m": 0,
+                "exclusion_criteria": "missing_lactate_dropped",
+            },
         )
         is False
+    )
+    # Same strategy (MICE) but parameter changed (e.g. imputation_m 10 -> 20) -> must invalidate
+    mice_prov = {
+        "missing_data_strategy": "mice",
+        "imputation_m": 10,
+        "exclusion_criteria": "none",
+    }
+    assert (
+        _should_invalidate_cleaned_data(
+            mice_prov,
+            {
+                "missing_data_strategy": "mice",
+                "imputation_m": 20,
+                "exclusion_criteria": "none",
+            },
+        )
+        is True
+    )
+    # Same strategy but exclusion criteria changed -> must invalidate
+    assert (
+        _should_invalidate_cleaned_data(
+            prov,
+            {
+                "missing_data_strategy": "complete_case",
+                "imputation_m": 0,
+                "exclusion_criteria": "missing_sofa_dropped",
+            },
+        )
+        is True
     )
 
     for skill_path, expected_link in (
