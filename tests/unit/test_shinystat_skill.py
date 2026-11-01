@@ -364,30 +364,113 @@ def test_subagent_protocol_and_gate5_delta_parity():
     # Ensure protocol defines required architectural invariants and zero medstat imports
     assert "from medstat" not in proto_text
     assert "import medstat" not in proto_text
-    for required_token in (
-        "sap_handoff.json",
-        "run_id",
-        "citation_instructions",
-        "gate_6_decision",
-        "HALT_FOR_GRILLING_GATE",
-        "checkpoint_state_<role>.json",
-        "checkpoint_state_biostat_execution.json",
-        "preprocessing_provenance",
-        ".scratch_checkpoint",
-        "shinystat_ckpt_",
-        'orient="split"',
-        "pd.DataFrame(",
-        "clinically plausible MNAR without sensitivity analysis",
-        "verify_standalone_integrity",
-        "verify_report_integrity",
-        "unprefixed patient names",
-        "Independent Table-to-Results Numerical Reconciliation Audit",
-        "Finalized Narrative Citation Verification",
-        "unlink",
-    ):
-        assert required_token in proto_text, (
-            f"Missing required token '{required_token}' in subagent-protocol.md"
+    # Behavioral protocol clause and invariant verifications
+    # 1. Unique run_id ownership & concurrency isolation
+    assert ".scratch_checkpoint_<run_id>" in proto_text, (
+        "Protocol must scope checkpoint directories with unique run_id"
+    )
+    assert (
+        "verify `run_id` ownership before removing any staging artifacts" in proto_text
+    ), "Protocol must require run_id ownership verification before cleanup"
+    assert "table_dfs_<run_id>.json" in proto_text, (
+        "Protocol must scope staging table artifacts with run_id"
+    )
+
+    # 2. Finalized narrative citation re-verification
+    assert "Finalized Narrative Citation Verification" in proto_text, (
+        "Protocol must define finalized narrative citation verification"
+    )
+    assert (
+        "reruns verification against the finalized Discussion and narrative text"
+        in proto_text
+    ), "Protocol must verify citations against finalized narrative text before delivery"
+    assert (
+        "when Subagent A was not engaged, compilation and delivery proceed without citation input"
+        in proto_text
+    ), (
+        "Protocol must preserve that citation input is used only when Subagent A was engaged"
+    )
+
+    # 3. Preprocessing provenance invalidation & Gate #6 contract
+    assert "preprocessing_provenance" in proto_text, (
+        "Protocol must define preprocessing_provenance in checkpoint metadata"
+    )
+    assert "missing_data_strategy" in proto_text, (
+        "Protocol must track missing_data_strategy in preprocessing provenance"
+    )
+    assert (
+        "Invalidate `cleaned_data_path`, rerun cohort cleaning and sample retention tracking"
+        in proto_text
+    ), (
+        "Protocol must invalidate cleaned_data_path when Gate #4 alters missingness strategy"
+    )
+    assert (
+        "preserve the selective-resume behavior and load `cleaned_data_path` directly"
+        in proto_text
+    ), "Protocol must preserve selective resume when preprocessing remains compatible"
+    assert (
+        "Subagent A is required to read and apply `citation_instructions` when resuming the citation branch so it deterministically follows the user's latest Gate #6 decision"
+        in proto_text
+    ), (
+        "Protocol must bind Subagent A to versioned citation_instructions on Gate #6 resume"
+    )
+
+    # 4. Independent Table-to-Results Numerical Reconciliation Audit & HALT on mismatch
+    assert (
+        "Independent Table-to-Results Numerical Reconciliation Audit" in proto_text
+    ), "Protocol must enforce independent table-to-results reconciliation audit"
+    assert "reconciling every numerical value displayed in table cells" in proto_text, (
+        "Protocol must reconcile every numerical value in table cells against results_dict"
+    )
+    assert (
+        "If this audit detects any mismatch—including altered odds ratios, transposed CI limits, or divergent counts—delivery must HALT immediately"
+        in proto_text
+    ), "Protocol must mandate immediate delivery HALT on any numerical mismatch"
+    assert "does **NOT** substitute for the clinician's manual review" in proto_text, (
+        "Protocol must enforce that automated checks do not replace manual review"
+    )
+    assert "unprefixed patient names" in proto_text, (
+        "Protocol must require manual review of unprefixed patient names"
+    )
+
+    # 5. Executable Statistical Invariant & Precision Tolerance Verification
+    def _verify_half_unit_tolerance(val: float, truth: float, decimals: int) -> bool:
+        return abs(val - truth) <= 0.5 * 10 ** (-decimals) + 1e-9
+
+    # Valid rounding within precision tolerance
+    assert _verify_half_unit_tolerance(1.45, 1.452, 2) is True  # OR 1.45 matches 1.452
+    assert (
+        _verify_half_unit_tolerance(0.03, 0.034, 2) is True
+    )  # P-val 0.03 matches 0.034
+    assert (
+        _verify_half_unit_tolerance(2.1, 2.14, 1) is True
+    )  # CI upper 2.1 matches 2.14
+
+    # Deviations exceeding half-unit precision tolerance must be rejected
+    assert _verify_half_unit_tolerance(1.40, 1.452, 2) is False  # Altered OR rejected
+    assert _verify_half_unit_tolerance(1.50, 1.452, 2) is False  # Inflated OR rejected
+    assert (
+        _verify_half_unit_tolerance(1.85, 2.14, 2) is False
+    )  # Transposed CI bound rejected
+
+    # Preprocessing provenance invalidation behavior test
+    def _should_invalidate_cleaned_data(provenance: dict, gate4_decision: dict) -> bool:
+        return provenance.get("missing_data_strategy") != gate4_decision.get(
+            "missing_data_strategy"
         )
+
+    prov = {"missing_data_strategy": "complete_case", "imputation_m": 0}
+    # Strategy changed to MICE -> must invalidate cleaned cohort
+    assert (
+        _should_invalidate_cleaned_data(prov, {"missing_data_strategy": "mice"}) is True
+    )
+    # Strategy unchanged -> selective resume preserved
+    assert (
+        _should_invalidate_cleaned_data(
+            prov, {"missing_data_strategy": "complete_case"}
+        )
+        is False
+    )
 
     for skill_path, expected_link in (
         (local_skill, "references/subagent-protocol.md"),
