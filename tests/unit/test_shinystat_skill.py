@@ -367,8 +367,10 @@ def test_subagent_protocol_and_gate5_delta_parity():
     for required_token in (
         "sap_handoff.json",
         "HALT_FOR_GRILLING_GATE",
-        "checkpoint_state.json",
+        "checkpoint_state_<role>.json",
+        "checkpoint_state_biostat_execution.json",
         ".scratch_checkpoint",
+        "shinystat_ckpt_",
         "verify_standalone_integrity",
         "verify_report_integrity",
         "unlink",

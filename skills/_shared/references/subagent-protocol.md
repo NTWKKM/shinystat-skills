@@ -10,7 +10,7 @@ Reference protocol for `shinystat` and `shinystat-cloud` when the runtime provid
 - **Role Division**:
   1. **Main Agent (*Orchestrator & Clinical Gatekeeper*)**:
      - Runs **Pillar 1** pre-flight profiling (`df.info()`, `df.describe()`, missingness %, numeric `0/1` coding check, and pre-flight $\text{EPV}_{\text{binary}}$ / $\text{EPV}_{\text{Cox}}$) and **Pillar 2** archetype triangulation.
-     - Conducts the **single consolidated pre-flight inquiry** with the user for any triggered `#1`, `#2`, and `#5` items.
+     - Conducts the **single consolidated pre-flight inquiry** with the user for any triggered `#1`, `#2`, `#4` (when pre-flight confirms $> 40\%$ non-primary missingness or known MNAR), and `#5` items.
      - Writes `<output_dir>/sap_handoff.json` and dispatches Subagent(s).
      - Performs **independent on-disk integrity verification** (§4) before delivering final outputs to the user.
   2. **Subagent B (*Biostatistical Execution & Report Subagent*)**:
@@ -22,7 +22,7 @@ Reference protocol for `shinystat` and `shinystat-cloud` when the runtime provid
      - Reads `<output_dir>/sap_handoff.json` and loads `report-builder.md §4` (*Evidence-Base Verification & Superscript Citations Pipeline*).
      - Queries available literature MCPs or web search tools strictly under the **Zero-PHI Literature Query Boundary**, verifies source-appropriate metadata and comparable empirical benchmarks (**Anti-Phantom Citation Invariant**), and writes `<output_dir>/citations_verified.json`.
   4. **Report Assembly**:
-     - Once both active branches (`Subagent B`, and `Subagent A` when engaged) reach `COMPLETED`, Subagent B (or the report compilation step) merges `<output_dir>/results_dict.json`, figure bundles, and `<output_dir>/citations_verified.json` into the target deliverable (`.html`, `.docx`, `.pptx`, `.pdf`, or `.md`).
+     - Once active branches (`Subagent B`, and `Subagent A` when engaged) reach `COMPLETED`, Subagent B (or the report compilation step) merges `<output_dir>/results_dict.json` and figure bundles—plus `<output_dir>/citations_verified.json` only when Subagent A was engaged (compiling without citation input when Subagent A was not dispatched)—into the target deliverable (`.html`, `.docx`, `.pptx`, `.pdf`, or `.md`).
 
 ---
 
@@ -74,14 +74,14 @@ The Main Agent writes `<output_dir>/sap_handoff.json` to disk before spawning an
 Because **Gate #3** (monotone separation), **Gate #4** ($> 40\%$ non-primary missingness or plausible MNAR without sensitivity analysis), and **Gate #6** (unverified, retracted, or contradictory citation) are detected *during* model fitting or literature verification inside a subagent—while only the Main Agent communicates with the user—subagents must follow this deterministic checkpoint-and-halt protocol:
 
 ### A. On-Disk Checkpointing & Row-Level Data Isolation
-1. Create an isolated staging directory `<output_dir>/.scratch_checkpoint/` (excluded from user-facing deliverable bundles and archives).
-2. If Subagent B has cleaned or recoded the cohort prior to halting, save the intermediate cohort inside `<output_dir>/.scratch_checkpoint/cleaned_cohort.parquet` (or `.csv`) and save the executable script to `<output_dir>/analysis_script.py`.
-3. Write `<output_dir>/.scratch_checkpoint/checkpoint_state.json`:
+1. Create an isolated control directory `<output_dir>/.scratch_checkpoint/` for non-PHI checkpoint metadata, and create a restricted workspace directory **outside** the user-facing `<output_dir>` (e.g., `<scratch_dir>/shinystat_ckpt_<run_id>/` via `tempfile.mkdtemp(prefix="shinystat_ckpt_")`) for any row-level cohort checkpoints.
+2. If Subagent B has cleaned or recoded the cohort before halting, save the intermediate cohort inside the restricted external workspace `<scratch_dir>/shinystat_ckpt_<run_id>/cleaned_cohort.parquet` (or `.csv`) outside `<output_dir>`, while keeping the executable script at `<output_dir>/analysis_script.py`.
+3. Write a role-specific checkpoint-state file `<output_dir>/.scratch_checkpoint/checkpoint_state_<role>.json` (e.g., `checkpoint_state_biostat_execution.json` or `checkpoint_state_literature_verifier.json`):
    ```json
    {
      "subagent_role": "biostat_execution | literature_verifier",
      "completed_steps": ["preflight_clean", "retention_tracker", "table1"],
-     "cleaned_data_path": "/abs/path/to/output/.scratch_checkpoint/cleaned_cohort.parquet",
+     "cleaned_data_path": "/abs/path/to/scratch/shinystat_ckpt_<run_id>/cleaned_cohort.parquet",
      "retention_audit_path": "/abs/path/to/output/retention_audit.json",
      "partial_results_path": "/abs/path/to/output/results_dict.json",
      "script_path": "/abs/path/to/output/analysis_script.py"
@@ -100,7 +100,7 @@ The halting subagent writes its payload to disk and returns the exact JSON struc
     "A: Apply Firth penalized likelihood logistic regression with profile likelihood 95% CIs",
     "B: Remove or collapse 'mechanical_ventilation' from the multivariable model"
   ],
-  "checkpoint_path": "/abs/path/to/output/.scratch_checkpoint/checkpoint_state.json",
+  "checkpoint_path": "/abs/path/to/output/.scratch_checkpoint/checkpoint_state_biostat_execution.json",
   "script_path": "/abs/path/to/output/analysis_script.py"
 }
 ```
@@ -109,7 +109,7 @@ The halting subagent writes its payload to disk and returns the exact JSON struc
 When Subagent A and Subagent B run in parallel and one branch halts:
 1. **Sibling Continues to Completion**: Let the unaffected sibling subagent run to completion and write its output (`results_dict.json` or `citations_verified.json`) to `<output_dir>` without cancelling or killing it.
 2. **Wait & Aggregate**: The Main Agent waits until both parallel branches reach a terminal state (`COMPLETED` or `HALT_FOR_GRILLING_GATE`), aggregates all triggered HALT payloads, and presents a **single consolidated question turn** to the user.
-3. **Selective Resume**: After the user responds, the Main Agent updates `sap_handoff.json["gate_decisions"]["resolved_gates_1_to_4"]` (or citation instructions) and resumes **only** the halted subagent branch(es) from `<output_dir>/.scratch_checkpoint/checkpoint_state.json` without re-running the already-completed sibling branch or repeating pre-flight cleaning.
+3. **Selective Resume**: After the user responds, the Main Agent updates `sap_handoff.json["gate_decisions"]["resolved_gates_1_to_4"]` (or citation instructions) and resumes **only** the halted subagent branch(es) from its role-specific `<output_dir>/.scratch_checkpoint/checkpoint_state_<role>.json` without re-running the already-completed sibling branch or repeating pre-flight cleaning.
 4. **Deferred Compilation**: Final report compilation runs only after all active branches return `COMPLETED`.
 
 ---
@@ -123,7 +123,7 @@ Before presenting the final deliverable to the user, the Main Agent must indepen
 2. **Independent Execution of Pillar 5 Integrity Gate**:
    - **In `shinystat` (Local Engine)**: The Main Agent runs a lightweight verification check importing `verify_report_integrity` from `medstat.reporting.integrity` against the serialized `ReportDocument` / narrative and `<output_dir>/results_dict.json`.
    - **In `shinystat-cloud` (Standalone Cloud Sandbox)**: To keep the Main Agent's context window lean without loading the full `report-builder.md` file:
-     - Subagent B writes the standalone `verify_standalone_integrity` function (from `report-builder.md §3`) to `<output_dir>/.scratch_checkpoint/verify_integrity.py` alongside `<output_dir>/results_dict.json` and `<output_dir>/report_narrative.txt`.
-     - The Main Agent executes `python <output_dir>/.scratch_checkpoint/verify_integrity.py` (or reads strictly `report-builder.md §3` if the script was not emitted) to independently confirm `passed == True`, `len(untraced_numbers) == 0`, `len(phi_violations) == 0`, and `has_causal_caveat == True`.
+     - Subagent B writes `<output_dir>/.scratch_checkpoint/verify_integrity.py`. The script loads `<output_dir>/report_narrative.txt` and `<output_dir>/results_dict.json`, supplies the table data (`<output_dir>/table_dfs.json`) that `verify_standalone_integrity` (from `report-builder.md §3`) requires, calls that function, and exits non-zero (`sys.exit(1)`) unless the returned result has `passed == True`, `len(untraced_numbers) == 0`, `len(phi_violations) == 0`, and `has_causal_caveat == True`.
+     - The Main Agent executes `python <output_dir>/.scratch_checkpoint/verify_integrity.py` and treats a missing script or a non-zero exit code as a failed integrity check.
 3. **Scratch Row-Level Checkpoint Cleanup**:
-   - Immediately after independent verification confirms `passed == True`, `unlink` / delete any temporary row-level cohort files in `<output_dir>/.scratch_checkpoint/` (e.g., `cleaned_cohort.parquet` / `.csv`) so no unbundled row-level patient data remains in the output workspace.
+   - Across all terminal outcomes—(a) successful completion (`passed == True`), (b) verification failure or unrecoverable halt, and (c) abandoned or superseded resumes—`unlink` and remove the external row-level checkpoint directory (`<scratch_dir>/shinystat_ckpt_<run_id>/cleaned_cohort.parquet` / `.csv`) and `.scratch_checkpoint/` staging artifacts so row-level checkpoints cannot remain in deliverables or on disk.
