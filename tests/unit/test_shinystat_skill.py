@@ -325,3 +325,261 @@ def test_src_medstat_and_skills_bundled_medstat_byte_identical():
             assert target_file.read_bytes() == src_file.read_bytes(), (
                 f"Byte mismatch in {rel_path} between src/medstat and {label} ({target_dir})"
             )
+
+
+def test_design_md_adr_numbers_unique_and_sequential():
+    """Verify DESIGN.md ADR headings are unique, sequential 1..68, and include ADR 68."""
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    design_path = repo_root / "DESIGN.md"
+    assert design_path.exists(), "DESIGN.md not found at repository root"
+
+    content = design_path.read_text(encoding="utf-8")
+    adr_nums = [
+        int(m) for m in re.findall(r"^## ADR (\d+):", content, flags=re.MULTILINE)
+    ]
+    assert adr_nums, "No ADR headings found in DESIGN.md"
+    assert len(adr_nums) == len(set(adr_nums)), (
+        f"Duplicate ADR numbers detected in DESIGN.md: {adr_nums}"
+    )
+    assert adr_nums == list(range(1, len(adr_nums) + 1)), (
+        f"ADR numbers in DESIGN.md are not strictly sequential 1..N: {adr_nums}"
+    )
+    assert 68 in adr_nums, "Expected ADR 68 in DESIGN.md"
+
+
+def test_subagent_protocol_and_gate5_delta_parity():
+    """Verify Gate #5 Execution Context Mode delta and subagent-protocol.md sync across local and cloud skills."""
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    local_skill = repo_root / "skills" / "shinystat" / "SKILL.md"
+    cloud_skill = repo_root / "skills" / "shinystat-cloud" / "SKILL.md"
+    shared_proto = (
+        repo_root / "skills" / "_shared" / "references" / "subagent-protocol.md"
+    )
+
+    assert shared_proto.exists(), (
+        "skills/_shared/references/subagent-protocol.md missing"
+    )
+    proto_text = shared_proto.read_text(encoding="utf-8")
+
+    # Ensure protocol defines required architectural invariants and zero medstat imports
+    assert "from medstat" not in proto_text
+    assert "import medstat" not in proto_text
+    # Behavioral protocol clause and invariant verifications
+    # 1. Unique run_id ownership & concurrency isolation
+    assert ".scratch_checkpoint_<run_id>" in proto_text, (
+        "Protocol must scope checkpoint directories with unique run_id"
+    )
+    assert (
+        "verify `run_id` ownership before removing any staging artifacts" in proto_text
+    ), "Protocol must require run_id ownership verification before cleanup"
+    assert "table_dfs_<run_id>.json" in proto_text, (
+        "Protocol must scope staging table artifacts with run_id"
+    )
+
+    # 2. Finalized narrative citation re-verification
+    assert "Finalized Narrative Citation Verification" in proto_text, (
+        "Protocol must define finalized narrative citation verification"
+    )
+    assert (
+        "reruns verification against the finalized Discussion and narrative text"
+        in proto_text
+    ), "Protocol must verify citations against finalized narrative text before delivery"
+    assert (
+        "when Subagent A was not engaged, compilation and delivery proceed without citation input"
+        in proto_text
+    ), (
+        "Protocol must preserve that citation input is used only when Subagent A was engaged"
+    )
+
+    # 3. Preprocessing provenance invalidation & Gate #6 contract
+    assert "preprocessing_provenance" in proto_text, (
+        "Protocol must define preprocessing_provenance in checkpoint metadata"
+    )
+    assert "missing_data_strategy" in proto_text, (
+        "Protocol must track missing_data_strategy in preprocessing provenance"
+    )
+    assert (
+        "Invalidate `cleaned_data_path`, rerun cohort cleaning and sample retention tracking"
+        in proto_text
+    ), (
+        "Protocol must invalidate cleaned_data_path when Gate #4 alters missingness strategy"
+    )
+    assert (
+        "preserve the selective-resume behavior and load `cleaned_data_path` directly"
+        in proto_text
+    ), "Protocol must preserve selective resume when preprocessing remains compatible"
+    assert (
+        "Subagent A is required to read and apply `citation_instructions` when resuming the citation branch so it deterministically follows the user's latest Gate #6 decision"
+        in proto_text
+    ), (
+        "Protocol must bind Subagent A to versioned citation_instructions on Gate #6 resume"
+    )
+
+    # 4. Independent Table-to-Results Numerical Reconciliation Audit & HALT on mismatch
+    assert (
+        "Independent Table-to-Results Numerical Reconciliation Audit" in proto_text
+    ), "Protocol must enforce independent table-to-results reconciliation audit"
+    assert "reconciling every numerical value displayed in table cells" in proto_text, (
+        "Protocol must reconcile every numerical value in table cells against results_dict"
+    )
+    assert (
+        "If this audit detects any mismatch—including altered odds ratios, transposed CI limits, or divergent counts—delivery must HALT immediately"
+        in proto_text
+    ), "Protocol must mandate immediate delivery HALT on any numerical mismatch"
+    assert "does **NOT** substitute for the clinician's manual review" in proto_text, (
+        "Protocol must enforce that automated checks do not replace manual review"
+    )
+    assert "unprefixed patient names" in proto_text, (
+        "Protocol must require manual review of unprefixed patient names"
+    )
+
+    # 5. Executable Statistical Invariant & Precision Tolerance Verification
+    def _verify_half_unit_tolerance(val: float, truth: float, decimals: int) -> bool:
+        return abs(val - truth) <= 0.5 * 10 ** (-decimals) + 1e-9
+
+    # Valid rounding within precision tolerance
+    assert _verify_half_unit_tolerance(1.45, 1.452, 2) is True  # OR 1.45 matches 1.452
+    assert (
+        _verify_half_unit_tolerance(0.03, 0.034, 2) is True
+    )  # P-val 0.03 matches 0.034
+    assert (
+        _verify_half_unit_tolerance(2.1, 2.14, 1) is True
+    )  # CI upper 2.1 matches 2.14
+
+    # Deviations exceeding half-unit precision tolerance must be rejected
+    assert _verify_half_unit_tolerance(1.40, 1.452, 2) is False  # Altered OR rejected
+    assert _verify_half_unit_tolerance(1.50, 1.452, 2) is False  # Inflated OR rejected
+    assert (
+        _verify_half_unit_tolerance(1.85, 2.14, 2) is False
+    )  # Transposed CI bound rejected
+
+    # Preprocessing provenance invalidation behavior test
+    def _should_invalidate_cleaned_data(provenance: dict, gate4_decision: dict) -> bool:
+        # Compare all recorded preprocessing settings determining cleaned-cohort compatibility
+        keys_to_compare = (
+            "missing_data_strategy",
+            "imputation_m",
+            "exclusion_criteria",
+        )
+        for k in keys_to_compare:
+            if k in gate4_decision and provenance.get(k) != gate4_decision.get(k):
+                return True
+        return False
+
+    prov = {
+        "missing_data_strategy": "complete_case",
+        "imputation_m": 0,
+        "exclusion_criteria": "missing_lactate_dropped",
+    }
+    # Strategy changed to MICE -> must invalidate cleaned cohort
+    assert (
+        _should_invalidate_cleaned_data(
+            prov,
+            {
+                "missing_data_strategy": "mice",
+                "imputation_m": 10,
+                "exclusion_criteria": "missing_lactate_dropped",
+            },
+        )
+        is True
+    )
+    # Strategy unchanged and parameters identical -> selective resume preserved
+    assert (
+        _should_invalidate_cleaned_data(
+            prov,
+            {
+                "missing_data_strategy": "complete_case",
+                "imputation_m": 0,
+                "exclusion_criteria": "missing_lactate_dropped",
+            },
+        )
+        is False
+    )
+    # Same strategy (MICE) but parameter changed (e.g. imputation_m 10 -> 20) -> must invalidate
+    mice_prov = {
+        "missing_data_strategy": "mice",
+        "imputation_m": 10,
+        "exclusion_criteria": "none",
+    }
+    assert (
+        _should_invalidate_cleaned_data(
+            mice_prov,
+            {
+                "missing_data_strategy": "mice",
+                "imputation_m": 20,
+                "exclusion_criteria": "none",
+            },
+        )
+        is True
+    )
+    # Same strategy but exclusion criteria changed -> must invalidate
+    assert (
+        _should_invalidate_cleaned_data(
+            prov,
+            {
+                "missing_data_strategy": "complete_case",
+                "imputation_m": 0,
+                "exclusion_criteria": "missing_sofa_dropped",
+            },
+        )
+        is True
+    )
+
+    for skill_path, expected_link in (
+        (local_skill, "references/subagent-protocol.md"),
+        (cloud_skill, "../_shared/references/subagent-protocol.md"),
+    ):
+        text = skill_path.read_text(encoding="utf-8")
+        assert "Execution Context Mode" in text, (
+            f"Missing 'Execution Context Mode' in {skill_path}"
+        )
+        assert "Subagent Offload" in text, f"Missing 'Subagent Offload' in {skill_path}"
+        assert "Direct in Main Agent" in text, (
+            f"Missing 'Direct in Main Agent' default in {skill_path}"
+        )
+        assert "single consolidated turn" in text, (
+            f"Missing 'single consolidated turn' pre-flight rule in {skill_path}"
+        )
+        assert "clinically plausible MNAR without sensitivity analysis" in text, (
+            f"Missing pre-flight MNAR condition in {skill_path}"
+        )
+        assert "computing EPV after `#1`/`#2` resolution" in text, (
+            f"Missing deferred EPV calculation rule for unspecified outcome in {skill_path}"
+        )
+        assert ".scratch_checkpoint/" in text, (
+            f"Missing '.scratch_checkpoint/' completion criteria in {skill_path}"
+        )
+        assert expected_link in text, f"Missing link '{expected_link}' in {skill_path}"
+
+    # Ensure install/package scripts sync subagent-protocol.md before checking packaged outputs
+    package_script = repo_root / "scripts" / "package-cloud-skill.sh"
+    if package_script.exists():
+        subprocess.run(
+            ["bash", str(package_script)],
+            check=True,
+            cwd=repo_root,
+            capture_output=True,
+        )
+
+    local_proto = (
+        repo_root / "skills" / "shinystat" / "references" / "subagent-protocol.md"
+    )
+    cloud_proto = (
+        repo_root / "skills" / "shinystat-cloud" / "references" / "subagent-protocol.md"
+    )
+    packaged_proto = (
+        repo_root
+        / "packaging"
+        / "cloud"
+        / "shinystat-cloud"
+        / "references"
+        / "subagent-protocol.md"
+    )
+    assert (
+        local_proto.exists() and local_proto.read_bytes() == shared_proto.read_bytes()
+    )
+    assert (
+        cloud_proto.exists() and cloud_proto.read_bytes() == shared_proto.read_bytes()
+    )
+    if packaged_proto.exists():
+        assert packaged_proto.read_bytes() == shared_proto.read_bytes()

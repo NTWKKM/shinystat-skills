@@ -1924,6 +1924,34 @@ Enforce a uniform, mathematically sound matching rule across both `src/medstat/r
 - **Fail-Closed Security**: Fabricated ORs (1.46, 1.47), sample sizes (415, 408), CI limits (1.15, 1.20), bare years `(1950)`, and out-of-spec whitelist entries (73.9) are all deterministically rejected.
 - **Parity Guarantee**: Validated by automated tests running all 24 canonical cases and mutation suites side-by-side across both implementations.
 
+---
+
+## ADR 68: Conditional Subagent Context-Offload Protocol, On-Disk HALT Checkpointing, and Independent Integrity Verification
+
+### Context
+When executing multi-model clinical analyses or `Full Publication Polish` workflows across `shinystat` and `shinystat-cloud`, loading full recipe manuals (`01-*.md` to `05-*.md`), figure templates (`figures.md`, `flows.md`, `illustration.md`), `report-builder.md` (~1,800 lines), and raw MCP/web search literature payloads directly into the main agent conversation consumes substantial context budget. However, naive subagent delegation introduces four architectural failure modes:
+1. **Runtime Coupling**: Hardcoding platform-specific subagent tool names in `SKILL.md` breaks portability across cloud sandboxes and multi-agent IDEs.
+2. **Mid-Run Grilling Gate Loss**: Diagnostic gates such as Gate `#3` (monotone separation), Gate `#4` ($> 40\%$ missingness or plausible MNAR), and Gate `#6` (unverified, retracted, or contradictory citation) are discovered *mid-execution* inside a subagent, whereas only the Main Agent can query the user. Without on-disk checkpointing and parallel branch synchronization, halting discards in-progress work or triggers duplicate user prompts.
+3. **Row-Level Checkpoint Exposure**: Saving intermediate cleaned cohorts directly inside user-facing deliverable directories risks bundling row-level clinical data.
+4. **Blind Trust in Subagent Self-Reporting**: Accepting a subagent's conversational assertion that `IntegrityReport.passed == True` without independent verification on disk risks silent numerical traceability or Zero-PHI regressions.
+
+### Decision
+1. **Surgical Gate `#5` Delta & Consolidated Pre-Flight Inquiry (`SKILL.md`)**:
+   - After **Pillar 1** pre-flight inspection, ask all triggered pre-flight questions (`#1`, `#2`, `#4` when pre-flight confirms $> 40\%$ non-primary missingness or clinically plausible MNAR without sensitivity analysis, and `#5`) in a **single consolidated turn** (computing EPV after `#1`/`#2` resolution when outcome or event geometry was unspecified), while halting directly in **Direct in Main Agent** mode or via the checkpoint/resume protocol in **Subagent Offload** mode when `#3`, mid-run `#4`, or `#6` triggers.
+   - Add a capability-conditional **Execution Context Mode** option to Gate `#5` (*ask only when the runtime provides a subagent-spawning tool; defaults to **Direct in Main Agent** if unspecified or unavailable*).
+   - Keep `SKILL.md` compact (~3–4 lines added) by disclosing the full specification in `skills/_shared/references/subagent-protocol.md`.
+2. **Disclosed Protocol (`skills/_shared/references/subagent-protocol.md`)**:
+   - **Zero-PHI Hand-Off Contract (`sap_handoff.json`) & Concurrency Isolation**: Defines `run_id`, `data_path`, `output_dir`, `column_mapping`, `preflight_profile`, and `gate_decisions` (including versioned `citation_instructions` with `gate_6_decision`) without embedding raw patient rows or PHI. Enforces unique per-run namespaces and run ownership verification to prevent concurrent collisions.
+   - **Parallel Subagent A $\parallel$ Subagent B Execution & Halt Synchronization**: Dispatches `Subagent A` (*Literature & Citation Verifier*) and `Subagent B` (*Biostatistical Execution*) in parallel when `Full Publication Polish` is engaged (compiling without citation input when Subagent A is omitted). If one branch halts while its sibling is running, the unaffected sibling runs to completion; the Main Agent aggregates halts into a single turn, checks `preprocessing_provenance` against new Gate #4 decisions (invalidating and re-running cleaning/retention tracking if the missing-data strategy changes), and selectively resumes halted branches with updated Gate decisions and citation instructions.
+   - **External Row-Level Staging & Lifecycle Cleanup**: Stores intermediate `cleaned_data_path` in an external restricted temporary workspace (`<scratch_dir>/shinystat_ckpt_<run_id>/`) while keeping executable scripts in `<output_dir>`, and selectively unlinks row-level checkpoints and run-scoped staging artifacts across all terminal states after ownership verification.
+   - **Lean Independent On-Disk Integrity Verification & Audits**: The Main Agent verifies deliverable and figure bundle existence on disk; verifies finalized narrative citations when Subagent A was engaged; audits finalized Discussion and Results against `results_dict.json` and study design; runs an independent table-to-results numerical reconciliation audit (halting on any point estimate, OR, HR, CI bound, or sample count mismatch); verifies full document block coverage (including callouts, figure captions/alt-text, and table captions/footnotes) via `verify_report_integrity` (`shinystat`) or `verify_standalone_integrity` (`shinystat-cloud`); and enforces mandatory manual review for unprefixed patient names before delivery.
+
+### Consequences
+- **Status**: Accepted & Verified (Document/Schema Parity & Link Resolution).
+- **Context Efficiency**: Discloses the subagent orchestration specification behind a 1-line pointer in `SKILL.md`, keeping always-loaded skill instructions minimal.
+- **Known Scope / Testing Boundary**: Automated unit tests (`test_shinystat_skill.py`, `test_shinystat_cloud.py`) deterministically verify ADR sequence uniqueness (`1..68`), Gate `#5` delta parity across both skills, Zero-`medstat` cloud hygiene, and `subagent-protocol.md` synchronization/link resolution. They do not simulate live multi-agent runtime `HALT_FOR_GRILLING_GATE` message passing, which requires end-to-end execution in a host runtime equipped with subagent tools.
+
+
 
 
 

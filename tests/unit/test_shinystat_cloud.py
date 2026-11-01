@@ -3794,3 +3794,35 @@ def test_cloud_standalone_qualified_p_values_and_dict_records_parity():
     assert ir_zi.passed is True
     assert sa_zi["passed"] is True
     assert ir_zi.untraced_numbers == sa_zi["untraced_numbers"] == []
+
+
+def test_cloud_subagent_protocol_and_gate5_alignment():
+    """Verify packaged cloud skill rewrites subagent-protocol.md links and bundles byte-identical protocol."""
+    import subprocess
+
+    package_script = REPO_ROOT / "scripts" / "package-cloud-skill.sh"
+    if not CLOUD_DIR.exists():
+        if package_script.exists():
+            subprocess.run(
+                ["bash", str(package_script)],
+                check=True,
+                cwd=REPO_ROOT,
+                capture_output=True,
+            )
+        else:
+            pytest.skip(
+                "packaging/cloud/shinystat-cloud not built and package script unavailable"
+            )
+
+    skill_md = (CLOUD_DIR / "SKILL.md").read_text(encoding="utf-8")
+    assert "(references/subagent-protocol.md)" in skill_md
+    assert "../_shared/references/subagent-protocol.md" not in skill_md
+
+    shared_proto = (
+        REPO_ROOT / "skills" / "_shared" / "references" / "subagent-protocol.md"
+    )
+    proto_file = CLOUD_DIR / "references" / "subagent-protocol.md"
+    assert proto_file.exists(), (
+        "packaging/cloud/shinystat-cloud/references/subagent-protocol.md missing"
+    )
+    assert proto_file.read_bytes() == shared_proto.read_bytes()
