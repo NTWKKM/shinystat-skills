@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -258,13 +259,49 @@ def test_argument_validation_and_errors(fake_repo: dict[str, Path]):
     assert "Invalid target 'invalid_target'" in res5.stderr
 
 
+def capture_workspace_state(repo: Path) -> dict[str, Any]:
+    """Capture recursive snapshot of repo files, directories, symlink destinations, and content."""
+    state = {}
+    for path in sorted(repo.rglob("*")):
+        rel_path = str(path.relative_to(repo))
+        if path.is_symlink():
+            state[rel_path] = ("symlink", os.readlink(path))
+        elif path.is_file():
+            state[rel_path] = ("file", path.read_text(encoding="utf-8"))
+        elif path.is_dir():
+            state[rel_path] = ("dir",)
+    return state
+
+
 def test_installer_is_idempotent(fake_repo: dict[str, Path]):
-    """Running installer consecutively leaves a clean status and succeeds identically."""
+    """Running installer consecutively leaves an identical filesystem state and succeeds cleanly."""
     repo = fake_repo["repo"]
     home = fake_repo["home"]
 
-    res_first = run_installer(repo, home)
-    assert res_first.returncode == 0
+    # Seed an unmanaged user skill and a legacy mirror before the first run
+    unmanaged = repo / ".claude" / "skills" / "my-unmanaged"
+    unmanaged.mkdir(parents=True)
+    (unmanaged / "SKILL.md").write_text("# Unmanaged Skill", encoding="utf-8")
 
+    legacy = repo / ".claude" / "skills" / "shinystat"
+    legacy.mkdir(parents=True)
+    (legacy / "SKILL.md").write_text("# Old Mirror", encoding="utf-8")
+
+    # First run
+    res_first = run_installer(repo, home)
+    assert res_first.returncode == 0, f"First run failed: {res_first.stderr}"
+
+    # Unmanaged skill survived, legacy mirror removed
+    assert (unmanaged / "SKILL.md").is_file()
+    assert not legacy.exists()
+
+    # Capture workspace state after the first run
+    state_first = capture_workspace_state(repo)
+
+    # Second run
     res_second = run_installer(repo, home)
-    assert res_second.returncode == 0
+    assert res_second.returncode == 0, f"Second run failed: {res_second.stderr}"
+
+    # Capture workspace state after the second run and assert zero changes
+    state_second = capture_workspace_state(repo)
+    assert state_second == state_first

@@ -412,8 +412,8 @@ def assert_snapshot_equal(actual: Any, expected: Any, path: str = "") -> None:
                 f"Snapshot mismatch at '{path}': NaN status differs ({act_f} vs {exp_f})"
             )
 
-        # Sub-1e-100 tiny values (e.g. tiny p-values in ICC): relative tolerance only
-        if abs(exp_f) < 1e-100 and abs(act_f) < 1e-100:
+        # Sub-1e-100 tiny values (e.g. tiny p-values in ICC) or zero-vs-tiny: relative tolerance only
+        if abs(exp_f) <= 1e-100 or abs(act_f) <= 1e-100:
             assert act_f == pytest.approx(exp_f, rel=1e-9, abs=0), (
                 f"Snapshot mismatch at '{path}': actual={act_f} != expected={exp_f} (tiny float, rel=1e-9, abs=0)"
             )
@@ -557,6 +557,12 @@ def test_assert_snapshot_equal_helper():
     p4 = 7.24578e-143
     with pytest.raises(AssertionError, match="Snapshot mismatch"):
         assert_snapshot_equal(p3, p4)
+
+    # Zero vs tiny value fails (does not erroneously pass through absolute tolerance)
+    with pytest.raises(AssertionError, match="Snapshot mismatch"):
+        assert_snapshot_equal(1e-100, 0.0)
+    with pytest.raises(AssertionError, match="Snapshot mismatch"):
+        assert_snapshot_equal(0.0, 1e-100)
 
     # 4. Count equivalence: 412 vs 412.0 passes
     assert_snapshot_equal(412, 412.0)
