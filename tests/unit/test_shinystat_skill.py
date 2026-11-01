@@ -371,6 +371,9 @@ def test_subagent_protocol_and_gate5_delta_parity():
         "checkpoint_state_biostat_execution.json",
         ".scratch_checkpoint",
         "shinystat_ckpt_",
+        'orient="split"',
+        "pd.DataFrame(",
+        "clinically plausible MNAR without sensitivity analysis",
         "verify_standalone_integrity",
         "verify_report_integrity",
         "unlink",
@@ -393,6 +396,12 @@ def test_subagent_protocol_and_gate5_delta_parity():
         )
         assert "single consolidated turn" in text, (
             f"Missing 'single consolidated turn' pre-flight rule in {skill_path}"
+        )
+        assert "clinically plausible MNAR without sensitivity analysis" in text, (
+            f"Missing pre-flight MNAR condition in {skill_path}"
+        )
+        assert "computing EPV after `#1`/`#2` resolution" in text, (
+            f"Missing deferred EPV calculation rule for unspecified outcome in {skill_path}"
         )
         assert ".scratch_checkpoint/" in text, (
             f"Missing '.scratch_checkpoint/' completion criteria in {skill_path}"
