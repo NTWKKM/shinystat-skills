@@ -3797,7 +3797,7 @@ def test_cloud_standalone_qualified_p_values_and_dict_records_parity():
 
 
 def test_cloud_subagent_protocol_and_gate5_alignment():
-    """Verify packaged cloud skill includes subagent-protocol.md and Gate #5 Execution Context Mode."""
+    """Verify packaged cloud skill rewrites subagent-protocol.md links and bundles byte-identical protocol."""
     import subprocess
 
     package_script = REPO_ROOT / "scripts" / "package-cloud-skill.sh"
@@ -3815,15 +3815,14 @@ def test_cloud_subagent_protocol_and_gate5_alignment():
             )
 
     skill_md = (CLOUD_DIR / "SKILL.md").read_text(encoding="utf-8")
-    assert "Execution Context Mode" in skill_md
-    assert "references/subagent-protocol.md" in skill_md
+    assert "(references/subagent-protocol.md)" in skill_md
+    assert "../_shared/references/subagent-protocol.md" not in skill_md
 
+    shared_proto = (
+        REPO_ROOT / "skills" / "_shared" / "references" / "subagent-protocol.md"
+    )
     proto_file = CLOUD_DIR / "references" / "subagent-protocol.md"
     assert proto_file.exists(), (
         "packaging/cloud/shinystat-cloud/references/subagent-protocol.md missing"
     )
-    proto_content = proto_file.read_text(encoding="utf-8")
-    assert "from medstat" not in proto_content
-    assert "sap_handoff.json" in proto_content
-    assert "HALT_FOR_GRILLING_GATE" in proto_content
-    assert "checkpoint_state.json" in proto_content
+    assert proto_file.read_bytes() == shared_proto.read_bytes()

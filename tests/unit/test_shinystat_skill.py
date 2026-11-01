@@ -371,6 +371,7 @@ def test_subagent_protocol_and_gate5_delta_parity():
         ".scratch_checkpoint",
         "verify_standalone_integrity",
         "verify_report_integrity",
+        "unlink",
     ):
         assert required_token in proto_text, (
             f"Missing required token '{required_token}' in subagent-protocol.md"
@@ -390,6 +391,9 @@ def test_subagent_protocol_and_gate5_delta_parity():
         )
         assert "single consolidated turn" in text, (
             f"Missing 'single consolidated turn' pre-flight rule in {skill_path}"
+        )
+        assert ".scratch_checkpoint/" in text, (
+            f"Missing '.scratch_checkpoint/' completion criteria in {skill_path}"
         )
         assert expected_link in text, f"Missing link '{expected_link}' in {skill_path}"
 

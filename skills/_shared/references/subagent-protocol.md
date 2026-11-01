@@ -107,7 +107,7 @@ The halting subagent writes its payload to disk and returns the exact JSON struc
 
 ### C. Parallel Sibling Completion & Single-Turn Halt Aggregation
 When Subagent A and Subagent B run in parallel and one branch halts:
-1. **Sibling Continues to Completion**: Do **not** cancel or kill the unaffected sibling subagent. Let the unaffected branch finish its work and write its output (`results_dict.json` or `citations_verified.json`) to `<output_dir>`.
+1. **Sibling Continues to Completion**: Let the unaffected sibling subagent run to completion and write its output (`results_dict.json` or `citations_verified.json`) to `<output_dir>` without cancelling or killing it.
 2. **Wait & Aggregate**: The Main Agent waits until both parallel branches reach a terminal state (`COMPLETED` or `HALT_FOR_GRILLING_GATE`), aggregates all triggered HALT payloads, and presents a **single consolidated question turn** to the user.
 3. **Selective Resume**: After the user responds, the Main Agent updates `sap_handoff.json["gate_decisions"]["resolved_gates_1_to_4"]` (or citation instructions) and resumes **only** the halted subagent branch(es) from `<output_dir>/.scratch_checkpoint/checkpoint_state.json` without re-running the already-completed sibling branch or repeating pre-flight cleaning.
 4. **Deferred Compilation**: Final report compilation runs only after all active branches return `COMPLETED`.
@@ -116,7 +116,7 @@ When Subagent A and Subagent B run in parallel and one branch halts:
 
 ## 4. Independent Main-Agent On-Disk Integrity Verification & Scratch Cleanup
 
-The Main Agent must **never** trust a subagent's conversational claim that `IntegrityReport.passed == True`. Before presenting the final deliverable to the user, the Main Agent must independently verify the on-disk artifacts:
+Before presenting the final deliverable to the user, the Main Agent must independently verify the on-disk artifacts rather than relying on a subagent's conversational claim that `IntegrityReport.passed == True`:
 
 1. **Artifact Existence & Non-Zero Size Check**:
    - Confirm that the deliverable file (`.html`, `.docx`, `.pptx`, `.pdf`, or `.md`), `<output_dir>/results_dict.json`, and every figure's bundle files (`.png`, TrueType `.pdf`, `.svg`, `_source.csv`) exist on disk with byte size $> 0$.
@@ -126,4 +126,4 @@ The Main Agent must **never** trust a subagent's conversational claim that `Inte
      - Subagent B writes the standalone `verify_standalone_integrity` function (from `report-builder.md §3`) to `<output_dir>/.scratch_checkpoint/verify_integrity.py` alongside `<output_dir>/results_dict.json` and `<output_dir>/report_narrative.txt`.
      - The Main Agent executes `python <output_dir>/.scratch_checkpoint/verify_integrity.py` (or reads strictly `report-builder.md §3` if the script was not emitted) to independently confirm `passed == True`, `len(untraced_numbers) == 0`, `len(phi_violations) == 0`, and `has_causal_caveat == True`.
 3. **Scratch Row-Level Checkpoint Cleanup**:
-   - Immediately after independent verification confirms `passed == True`, delete any temporary row-level cohort files in `<output_dir>/.scratch_checkpoint/` (e.g., `cleaned_cohort.parquet` / `.csv`) so no unbundled row-level patient data remains in the output workspace.
+   - Immediately after independent verification confirms `passed == True`, `unlink` / delete any temporary row-level cohort files in `<output_dir>/.scratch_checkpoint/` (e.g., `cleaned_cohort.parquet` / `.csv`) so no unbundled row-level patient data remains in the output workspace.
