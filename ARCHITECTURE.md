@@ -170,7 +170,7 @@ All subcommands and renderers emit structured contracts allowing deterministic c
 
 - **SSOT Integrity**: `src/medstat/` and `skills/` are the single canonical sources of truth tracked in Git. `skills/shinystat/scripts/medstat/` is linked from `src/medstat/` via `./scripts/install-skills.sh` and git-ignored to prevent duplication.
 - **Progressive Disclosure Recipes**: `skills/shinystat-cloud/references/recipes/` divides 24 standalone zero-`medstat` recipes into 5 focused modules (`01-data-missing-table1`, `02-regression-firth-ordinal`, `03-survival-competing-risks`, `04-causal-validation-agreement`, `05-diagnostic-meta-power`), routed contextually by `SKILL.md`.
-- **Shared Reference Repository & Cloud Figures Separation**: Common references (`decision-heuristics.md`, `flows.md`, `house-styles.md`, `illustration.md`, `report-builder.md`) are centralized in `skills/_shared/references/` and synced via `./scripts/install-skills.sh`, while `skills/shinystat-cloud/references/figures.md` is maintained as a dedicated zero-`medstat` cloud reference.
+- **Shared Reference Repository & Cloud Figures Separation**: Common references (`decision-heuristics.md`, `flows.md`, `house-styles.md`, `illustration.md`, `report-builder.md`, `subagent-protocol.md`) are centralized in `skills/_shared/references/` and synced via `./scripts/install-skills.sh`, while `skills/shinystat-cloud/references/figures.md` is maintained as a dedicated zero-`medstat` cloud reference.
 - **Self-Healing CLI & Pre-Flight Validation**: `medstat_cli.py` exposes `--schema` and `--validate-only <plan.yaml>`, returning structured JSON with `agent_remediation` hints for automatic self-correction.
 
 ---

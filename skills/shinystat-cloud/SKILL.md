@@ -38,6 +38,7 @@ Execute clinical biostatistics in cloud Python sandboxes through the 5 Decision 
 | Apply journal typography, dimensions & colorblind-safe palettes | `../_shared/references/house-styles.md` | You are configuring figure DPI, column widths, or journal house styling (`NEJM`, `JAMA`, `Lancet`, `BMJ`, `Clinical`) |
 | Draw medical/anatomical or conceptual vector illustrations | `../_shared/references/illustration.md` | The user asks for schematic or conceptual artwork |
 | Compile multi-format manuscripts (DOCX, PDF, HTML, PPTX, MD) | `../_shared/references/report-builder.md` | You are assembling tables, narrative text, citations, and figures into a report deliverable |
+| Offload execution & literature verification to subagents | `../_shared/references/subagent-protocol.md` | The runtime provides a subagent tool and **Subagent Offload** is selected at **Grilling Gate #5** |
 
 ---
 
@@ -54,6 +55,7 @@ Execute clinical biostatistics in cloud Python sandboxes through the 5 Decision 
 
 3. **Pillar 3: Adaptive Standalone Python Scripting (Autonomous Biostatistical Authority)**
    - **Cloud Sandbox Protocol**: Execute self-contained Python scripts using standard scientific libraries (`pandas`, `numpy`, `scipy.stats`, `statsmodels`, `lifelines`, `scikit-learn`, `matplotlib`) from `references/recipes/01-data-missing-table1.md` through `05-diagnostic-meta-power.md` (`Recipe 1`–`Recipe 24`), keeping cloud scripts free of `medstat` package imports.
+   - **Subagent Context-Offload**: When **Subagent Offload** is selected at **Grilling Gate #5**, read and execute [subagent-protocol.md](../_shared/references/subagent-protocol.md) (`sap_handoff.json`, parallel Subagent A/B dispatch, on-disk `HALT_FOR_GRILLING_GATE` checkpoint/resume, and independent Main-Agent on-disk integrity verification).
    - **EPV & Sparse-Data Routing** ([decision-heuristics.md §2.A](../_shared/references/decision-heuristics.md#a-events-per-variable-epv-sparse-data--separation)):
      - Compute $\text{EPV}_{\text{binary}} = \min(N_{\text{events}}, N_{\text{non-events}}) / P_{\text{parameters}}$ and $\text{EPV}_{\text{Cox}} = N_{\text{failures}} / P_{\text{parameters}}$ ($P_{\text{parameters}}$ counts $k-1$ factor levels and spline df).
      - Halt at **Grilling Gate #3** when monotone separation is present.
@@ -88,7 +90,7 @@ Execute clinical biostatistics in cloud Python sandboxes through the 5 Decision 
 - Decide, execute, and document routine biostatistical mechanics autonomously: parametric vs non-parametric tests, Mean (SD) vs Median [IQR], PH and Brant parallel-slopes tests, low-EPV penalization (**EPV & Sparse-Data Routing**), $< 40\%$ MAR missingness (**Zero Silent Deletion & Missing-Data Routing**), spline knots, Youden cutpoints, and NEJM/JAMA/APA table styling.
 
 ### Situations Requiring Mandatory Grilling / Inquiry
-Halt **pre-flight** (or upon diagnostic detection) and ask the user directly when any of these 6 conditions (`#1`–`#6`) holds:
+After **Pillar 1** pre-flight inspection, ask all triggered pre-flight questions (`#1`, `#2`, and `#5`) in a **single consolidated turn**; halt mid-run via the checkpoint protocol if diagnostic gates (`#3`, `#4`, or `#6`) trigger during modeling or citation verification:
 1. **Outcome, Event Direction, or Missing Outcome Ambiguity**: Primary event definition, censoring code, biomarker direction ([decision-heuristics.md §2.C](../_shared/references/decision-heuristics.md#c-diagnostic-test-directionality--cutpoint-selection)), or missing primary outcome disposition is unspecified.
 2. **Proposal vs Data Geometry Mismatch**: Survival modeling is requested without follow-up time or censoring status, or clustered modeling without cluster IDs.
 3. **Severe Sparse Data & Monotone Separation**: Monotone separation occurs in logistic or Cox regression; confirm between Firth/penalized estimation (`Recipe 7` / `Recipe 11`) vs domain-guided covariate reduction.
@@ -99,6 +101,7 @@ Halt **pre-flight** (or upon diagnostic detection) and ask the user directly whe
    - **Manuscript Polish Mode** (authoritative specification in [report-builder.md §4](../_shared/references/report-builder.md#4-evidence-base-verification--superscript-citations-pipeline)):
      - **(Standard) Skip Polish (User-Scoped References)**: Scope citations strictly to user-provided sources (omitting References if none provided) and verify metadata and claim support via [report-builder.md §4 Step 2A](../_shared/references/report-builder.md#4-evidence-base-verification--superscript-citations-pipeline).
      - **(Optional) Full Publication Polish (Execute Gate #6)**: Execute full claim-vs-data audit and exploratory literature enrichment via [report-builder.md §4 Steps 1–4](../_shared/references/report-builder.md#4-evidence-base-verification--superscript-citations-pipeline).
+   - **Execution Context Mode** *(ask only when the runtime provides a subagent-spawning tool; defaults to **Direct in Main Agent** if unspecified or unavailable)*: **(Recommended for multi-model/polish runs) Subagent Offload** ([subagent-protocol.md](../_shared/references/subagent-protocol.md)) vs. **Direct in Main Agent**.
 6. **Polish Grilling Gate (Evidence-Base Verification & Superscript Citations)**: When engaged (via prompt request, Gate #5 Full Polish selection, or on-demand), read and execute the 4-step pipeline in [report-builder.md §4](../_shared/references/report-builder.md#4-evidence-base-verification--superscript-citations-pipeline) using any available literature MCPs or any available web search tool (e.g., `web_search`, `search_web`), and optional `medical-terminology` MCP when available. Halt at Gate #6 if any cited source is unverified, retracted, or contradicts the narrative (Anti-Phantom Citation Invariant).
 
 ---

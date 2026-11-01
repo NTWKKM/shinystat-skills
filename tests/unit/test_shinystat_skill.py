@@ -325,3 +325,103 @@ def test_src_medstat_and_skills_bundled_medstat_byte_identical():
             assert target_file.read_bytes() == src_file.read_bytes(), (
                 f"Byte mismatch in {rel_path} between src/medstat and {label} ({target_dir})"
             )
+
+
+def test_design_md_adr_numbers_unique_and_sequential():
+    """Verify DESIGN.md ADR headings are unique, sequential 1..68, and include ADR 68."""
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    design_path = repo_root / "DESIGN.md"
+    assert design_path.exists(), "DESIGN.md not found at repository root"
+
+    content = design_path.read_text(encoding="utf-8")
+    adr_nums = [
+        int(m) for m in re.findall(r"^## ADR (\d+):", content, flags=re.MULTILINE)
+    ]
+    assert adr_nums, "No ADR headings found in DESIGN.md"
+    assert len(adr_nums) == len(set(adr_nums)), (
+        f"Duplicate ADR numbers detected in DESIGN.md: {adr_nums}"
+    )
+    assert adr_nums == list(range(1, len(adr_nums) + 1)), (
+        f"ADR numbers in DESIGN.md are not strictly sequential 1..N: {adr_nums}"
+    )
+    assert 68 in adr_nums, "Expected ADR 68 in DESIGN.md"
+
+
+def test_subagent_protocol_and_gate5_delta_parity():
+    """Verify Gate #5 Execution Context Mode delta and subagent-protocol.md sync across local and cloud skills."""
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    local_skill = repo_root / "skills" / "shinystat" / "SKILL.md"
+    cloud_skill = repo_root / "skills" / "shinystat-cloud" / "SKILL.md"
+    shared_proto = (
+        repo_root / "skills" / "_shared" / "references" / "subagent-protocol.md"
+    )
+
+    assert shared_proto.exists(), (
+        "skills/_shared/references/subagent-protocol.md missing"
+    )
+    proto_text = shared_proto.read_text(encoding="utf-8")
+
+    # Ensure protocol defines required architectural invariants and zero medstat imports
+    assert "from medstat" not in proto_text
+    assert "import medstat" not in proto_text
+    for required_token in (
+        "sap_handoff.json",
+        "HALT_FOR_GRILLING_GATE",
+        "checkpoint_state.json",
+        ".scratch_checkpoint",
+        "verify_standalone_integrity",
+        "verify_report_integrity",
+    ):
+        assert required_token in proto_text, (
+            f"Missing required token '{required_token}' in subagent-protocol.md"
+        )
+
+    for skill_path, expected_link in (
+        (local_skill, "references/subagent-protocol.md"),
+        (cloud_skill, "../_shared/references/subagent-protocol.md"),
+    ):
+        text = skill_path.read_text(encoding="utf-8")
+        assert "Execution Context Mode" in text, (
+            f"Missing 'Execution Context Mode' in {skill_path}"
+        )
+        assert "Subagent Offload" in text, f"Missing 'Subagent Offload' in {skill_path}"
+        assert "Direct in Main Agent" in text, (
+            f"Missing 'Direct in Main Agent' default in {skill_path}"
+        )
+        assert "single consolidated turn" in text, (
+            f"Missing 'single consolidated turn' pre-flight rule in {skill_path}"
+        )
+        assert expected_link in text, f"Missing link '{expected_link}' in {skill_path}"
+
+    # Ensure install/package scripts sync subagent-protocol.md before checking packaged outputs
+    package_script = repo_root / "scripts" / "package-cloud-skill.sh"
+    if package_script.exists():
+        subprocess.run(
+            ["bash", str(package_script)],
+            check=True,
+            cwd=repo_root,
+            capture_output=True,
+        )
+
+    local_proto = (
+        repo_root / "skills" / "shinystat" / "references" / "subagent-protocol.md"
+    )
+    cloud_proto = (
+        repo_root / "skills" / "shinystat-cloud" / "references" / "subagent-protocol.md"
+    )
+    packaged_proto = (
+        repo_root
+        / "packaging"
+        / "cloud"
+        / "shinystat-cloud"
+        / "references"
+        / "subagent-protocol.md"
+    )
+    assert (
+        local_proto.exists() and local_proto.read_bytes() == shared_proto.read_bytes()
+    )
+    assert (
+        cloud_proto.exists() and cloud_proto.read_bytes() == shared_proto.read_bytes()
+    )
+    if packaged_proto.exists():
+        assert packaged_proto.read_bytes() == shared_proto.read_bytes()

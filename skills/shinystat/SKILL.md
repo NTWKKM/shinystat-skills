@@ -23,6 +23,7 @@ Execute clinical biostatistics through the 5 Decision Pillars below, exercising 
 3. **Pillar 3: Adaptive Python Scripting (Autonomous Biostatistical Authority)**
    - Write standalone Python scripts using the bundled `medstat` engine in `scripts/medstat/` (CLI: `python <skill-dir>/scripts/medstat_cli.py`) or standard scientific libraries (`pandas`, `scipy.stats`, `statsmodels`, `lifelines`, `scikit-learn`).
    - Run every script with the pinned stack: `uv run --with-requirements <skill-dir>/requirements.txt python <script.py>` (append `--with <pkg>` only for packages outside that file).
+   - **Subagent Context-Offload**: When **Subagent Offload** is selected at **Grilling Gate #5**, read and execute [subagent-protocol.md](references/subagent-protocol.md) (`sap_handoff.json`, parallel Subagent A/B dispatch, on-disk `HALT_FOR_GRILLING_GATE` checkpoint/resume, and independent Main-Agent on-disk integrity verification).
    - **Pre-Flight Spec Validation & Self-Healing Ergonomics**: When executing declarative Statistical Analysis Plans (`--spec <plan.yaml>`), validate the YAML specification before running analysis:
      `python <skill-dir>/scripts/medstat_cli.py --validate-only <plan.yaml>`
      To inspect the reference schema template or generate starter specs, run:
@@ -64,7 +65,7 @@ Execute clinical biostatistics through the 5 Decision Pillars below, exercising 
 - Decide, execute, and document routine biostatistical mechanics autonomously: parametric vs non-parametric tests, Mean (SD) vs Median [IQR], PH and Brant parallel-slopes tests, low-EPV penalization (**EPV & Sparse-Data Routing**), $< 40\%$ MAR missingness (**Zero Silent Deletion & Missing-Data Routing**), spline knots, Youden cutpoints, and NEJM/JAMA/APA table styling.
 
 ### Situations Requiring Mandatory Grilling / Inquiry
-Halt **pre-flight** (or upon diagnostic detection) and ask the user directly when any of these 6 conditions (`#1`–`#6`) holds:
+After **Pillar 1** pre-flight inspection, ask all triggered pre-flight questions (`#1`, `#2`, and `#5`) in a **single consolidated turn**; halt mid-run via the checkpoint protocol if diagnostic gates (`#3`, `#4`, or `#6`) trigger during modeling or citation verification:
 1. **Outcome, Event Direction, or Missing Outcome Ambiguity**: Primary event definition, censoring code, biomarker direction ([decision-heuristics.md §2.C](references/decision-heuristics.md#c-diagnostic-test-directionality--cutpoint-selection)), or missing primary outcome disposition is unspecified.
 2. **Proposal vs Data Geometry Mismatch**: Survival modeling is requested without follow-up time or censoring status, or clustered modeling without cluster IDs.
 3. **Severe Sparse Data & Monotone Separation**: Monotone separation occurs in logistic or Cox regression; confirm between Firth penalized estimation (`medstat.models.firth`) vs domain-guided covariate reduction.
@@ -75,6 +76,7 @@ Halt **pre-flight** (or upon diagnostic detection) and ask the user directly whe
    - **Manuscript Polish Mode** (authoritative specification in [report-builder.md §4](references/report-builder.md#4-evidence-base-verification--superscript-citations-pipeline)):
      - **(Standard) Skip Polish (User-Scoped References)**: Scope citations strictly to user-provided sources (omitting References if none provided) and verify metadata and claim support via [report-builder.md §4 Step 2A](references/report-builder.md#4-evidence-base-verification--superscript-citations-pipeline).
      - **(Optional) Full Publication Polish (Execute Gate #6)**: Execute full claim-vs-data audit and exploratory literature enrichment via [report-builder.md §4 Steps 1–4](references/report-builder.md#4-evidence-base-verification--superscript-citations-pipeline).
+   - **Execution Context Mode** *(ask only when the runtime provides a subagent-spawning tool; defaults to **Direct in Main Agent** if unspecified or unavailable)*: **(Recommended for multi-model/polish runs) Subagent Offload** ([subagent-protocol.md](references/subagent-protocol.md)) vs. **Direct in Main Agent**.
 6. **Polish Grilling Gate (Evidence-Base Verification & Superscript Citations)**: When engaged (via prompt request, Gate #5 Full Polish selection, or on-demand), read and execute the 4-step pipeline in [report-builder.md §4](references/report-builder.md#4-evidence-base-verification--superscript-citations-pipeline) using any available literature MCPs or any available web search tool (e.g., `web_search`, `search_web`), and optional `medical-terminology` MCP when available. Halt at Gate #6 if any cited source is unverified, retracted, or contradicts the narrative (Anti-Phantom Citation Invariant).
 
 ---
