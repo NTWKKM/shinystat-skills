@@ -366,9 +366,13 @@ def test_subagent_protocol_and_gate5_delta_parity():
     assert "import medstat" not in proto_text
     for required_token in (
         "sap_handoff.json",
+        "run_id",
+        "citation_instructions",
+        "gate_6_decision",
         "HALT_FOR_GRILLING_GATE",
         "checkpoint_state_<role>.json",
         "checkpoint_state_biostat_execution.json",
+        "preprocessing_provenance",
         ".scratch_checkpoint",
         "shinystat_ckpt_",
         'orient="split"',
@@ -376,6 +380,9 @@ def test_subagent_protocol_and_gate5_delta_parity():
         "clinically plausible MNAR without sensitivity analysis",
         "verify_standalone_integrity",
         "verify_report_integrity",
+        "unprefixed patient names",
+        "Independent Table-to-Results Numerical Reconciliation Audit",
+        "Finalized Narrative Citation Verification",
         "unlink",
     ):
         assert required_token in proto_text, (
