@@ -19,28 +19,9 @@ rm -rf "$TARGET_SKILL"
 
 # Copy with -L to dereference all symlinks into standalone physical files
 cp -RL "$SRC_SKILL" "$TARGET_SKILL"
+rm -f "$TARGET_SKILL/references/python-recipes.md" "$SRC_SKILL/references/python-recipes.md"
 
-echo "[2/3] Generating combined python-recipes.md for snapshot/backward compatibility..."
-RECIPES_DIR="$TARGET_SKILL/references/recipes"
-COMBINED_RECIPES="$TARGET_SKILL/references/python-recipes.md"
-
-if [[ -d "$RECIPES_DIR" ]]; then
-    {
-        echo "# ShinyStat Cloud — Combined Python Recipes (Auto-generated)"
-        echo ""
-        echo "> **Note for Agents:** Prefer reading modular files in \`references/recipes/\` to save context tokens."
-        echo ""
-        for part in "$RECIPES_DIR"/*.md; do
-            [[ -e "$part" ]] || continue
-            cat "$part"
-            echo -e "\n\n---\n"
-        done
-    } > "$COMBINED_RECIPES"
-    # Sync back to source reference if unit tests inspect skills/shinystat-cloud directly
-    cp "$COMBINED_RECIPES" "$SRC_SKILL/references/python-recipes.md"
-fi
-
-echo "[2.5/3] Rewriting shared-reference links in packaged Markdown files..."
+echo "[2/3] Rewriting shared-reference links in packaged Markdown files..."
 TARGET_SKILL="$TARGET_SKILL" python3 - <<'PY'
 import os
 from pathlib import Path
@@ -64,6 +45,7 @@ for md_file in target_dir.rglob("*.md"):
 PY
 
 echo "[3/3] Creating distributable zip archive..."
-(cd "$DIST_DIR" && zip -rq "shinystat-cloud.zip" "shinystat-cloud")
+rm -f "$DIST_DIR/shinystat-cloud.zip"
+(cd "$DIST_DIR" && zip -rq "shinystat-cloud.zip" "shinystat-cloud" -x "*.DS_Store" -x "*__pycache__*")
 
 echo "Cloud skill packaged successfully at: $DIST_DIR/shinystat-cloud.zip"

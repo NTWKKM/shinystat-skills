@@ -225,7 +225,7 @@ Grouped horizontal bar chart of **Apparent vs Optimism-Corrected** metrics (incl
 
 ## 3. Standalone Interactive HTML Figures (Zero-Dependency Plotly Dicts)
 
-In cloud sandboxes (such as Claude Web Analysis Tool), `medstat` is not available as an external package. Instead of importing `medstat.figures.html`, use the standalone pure-Python Plotly spec generators provided in [report-builder.md](report-builder.md#b1-standalone-pure-python-plotly-spec-generators-zero-dependencies). They build native JSON-serializable dictionaries (`{"data": [...], "layout": {...}}`) with zero external dependencies and pass directly into `generate_html_report(..., plotly_figs=[spec])`:
+In cloud Python sandboxes, `medstat` is not available as an external package. Instead of importing `medstat.figures.html`, use the standalone pure-Python Plotly spec generators provided in [report-builder.md](report-builder.md#b1-standalone-pure-python-plotly-spec-generators-zero-dependencies). They build native JSON-serializable dictionaries (`{"data": [...], "layout": {...}}`) with zero external dependencies and pass directly into `generate_html_report(..., plotly_figs=[spec])`:
 
 - **`build_plotly_roc_spec(roc_data, ...)`**: Empirical ROC curve with interactive threshold/sensitivity/specificity hover tooltips, chance diagonal, and optimal cutoff markers.
 - **`build_plotly_reclassification_spec(reclass_data, ...)`**: Interactive scatter plot of baseline vs updated risks with hover tooltips and event/non-event toggles.

@@ -43,12 +43,10 @@ skills/shinystat/scripts/medstat
 skills/shinystat/scripts/medstat/
 skills/shinystat/references/*.md
 skills/shinystat-cloud/references/decision-heuristics.md
-skills/shinystat-cloud/references/figures.md
 skills/shinystat-cloud/references/flows.md
 skills/shinystat-cloud/references/house-styles.md
 skills/shinystat-cloud/references/illustration.md
 skills/shinystat-cloud/references/report-builder.md
-skills/shinystat-cloud/references/python-recipes.md
 
 # Antigravity agent run workspaces & transients
 .agents/orchestrator*

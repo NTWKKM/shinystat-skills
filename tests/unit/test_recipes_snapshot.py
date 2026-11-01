@@ -8,6 +8,7 @@ for all 13 biostatistical recipes in python-recipes.md.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import sys
@@ -313,6 +314,124 @@ def run_all_recipes(ns: dict[str, Any]) -> dict[str, Any]:
     return results
 
 
+def assert_snapshot_equal(actual: Any, expected: Any, path: str = "") -> None:
+    """Recursively compare actual and expected data structures with floating-point tolerance.
+
+    - Floats are compared using pytest.approx(rel=1e-9, abs=1e-12).
+    - Tiny floats (|x| < 1e-100) are compared with relative tolerance only (rel=1e-9, abs=0)
+      to prevent absolute tolerance from masking subtle deviations.
+    - Count equivalence between int and float is allowed only when numeric values match exactly
+      (e.g., 412 vs 412.0).
+    - int, str, bool, and None must match exactly.
+    - Path of differing key/index is preserved and displayed upon assertion failure.
+    """
+    # 1. Check bool first (in Python, bool subclasses int)
+    if isinstance(actual, bool) or isinstance(expected, bool):
+        assert isinstance(actual, bool) and isinstance(expected, bool), (
+            f"Type mismatch at '{path}': {type(actual).__name__} != {type(expected).__name__}"
+        )
+        assert actual is expected, (
+            f"Snapshot mismatch at '{path}': {actual!r} != {expected!r}"
+        )
+        return
+
+    # 2. None check
+    if actual is None or expected is None:
+        assert actual is expected, (
+            f"Snapshot mismatch at '{path}': {actual!r} != {expected!r}"
+        )
+        return
+
+    # 3. Dict comparison
+    if isinstance(actual, dict) or isinstance(expected, dict):
+        assert isinstance(actual, dict) and isinstance(expected, dict), (
+            f"Type mismatch at '{path}': {type(actual).__name__} != {type(expected).__name__}"
+        )
+        actual_keys = set(actual.keys())
+        expected_keys = set(expected.keys())
+        assert actual_keys == expected_keys, (
+            f"Key mismatch at '{path}': missing {expected_keys - actual_keys}, unexpected {actual_keys - expected_keys}"
+        )
+        for k in sorted(expected_keys):
+            sub_path = f"{path}.{k}" if path else str(k)
+            assert_snapshot_equal(actual[k], expected[k], path=sub_path)
+        return
+
+    # 4. List / Sequence comparison
+    if isinstance(actual, (list, tuple)) or isinstance(expected, (list, tuple)):
+        assert isinstance(actual, (list, tuple)) and isinstance(
+            expected, (list, tuple)
+        ), (
+            f"Type mismatch at '{path}': {type(actual).__name__} != {type(expected).__name__}"
+        )
+        assert len(actual) == len(expected), (
+            f"Length mismatch at '{path}': len(actual)={len(actual)} != len(expected)={len(expected)}"
+        )
+        for i, (act_elem, exp_elem) in enumerate(zip(actual, expected)):
+            sub_path = f"{path}[{i}]"
+            assert_snapshot_equal(act_elem, exp_elem, path=sub_path)
+        return
+
+    # 5. Numeric comparisons
+    is_act_num = isinstance(actual, (int, float, np.integer, np.floating))
+    is_exp_num = isinstance(expected, (int, float, np.integer, np.floating))
+
+    if is_act_num or is_exp_num:
+        assert is_act_num and is_exp_num, (
+            f"Type mismatch at '{path}': {type(actual).__name__} != {type(expected).__name__}"
+        )
+
+        is_act_int = isinstance(actual, (int, np.integer))
+        is_exp_int = isinstance(expected, (int, np.integer))
+
+        # Both are integer types
+        if is_act_int and is_exp_int:
+            assert actual == expected, (
+                f"Snapshot mismatch at '{path}': {actual!r} != {expected!r}"
+            )
+            return
+
+        # Count equivalence: int vs float where float is an integer value (e.g. 412 vs 412.0)
+        if is_act_int != is_exp_int:
+            act_f = float(actual)
+            exp_f = float(expected)
+            if act_f.is_integer() and exp_f.is_integer() and int(act_f) == int(exp_f):
+                return
+            assert False, (
+                f"Type mismatch at '{path}': count integer vs non-integer float ({actual!r} vs {expected!r})"
+            )
+
+        # Both are floating types
+        act_f = float(actual)
+        exp_f = float(expected)
+
+        if math.isnan(act_f) and math.isnan(exp_f):
+            return
+        if math.isnan(act_f) != math.isnan(exp_f):
+            assert False, (
+                f"Snapshot mismatch at '{path}': NaN status differs ({act_f} vs {exp_f})"
+            )
+
+        # Sub-1e-100 tiny values (e.g. tiny p-values in ICC) or zero-vs-tiny: relative tolerance only
+        if abs(exp_f) <= 1e-100 or abs(act_f) <= 1e-100:
+            assert act_f == pytest.approx(exp_f, rel=1e-9, abs=0), (
+                f"Snapshot mismatch at '{path}': actual={act_f} != expected={exp_f} (tiny float, rel=1e-9, abs=0)"
+            )
+        else:
+            assert act_f == pytest.approx(exp_f, rel=1e-9, abs=1e-12), (
+                f"Snapshot mismatch at '{path}': actual={act_f} != expected={exp_f} (rel=1e-9, abs=1e-12)"
+            )
+        return
+
+    # 6. Strings and other primitive equality
+    assert type(actual) is type(expected), (
+        f"Type mismatch at '{path}': {type(actual).__name__} != {type(expected).__name__}"
+    )
+    assert actual == expected, (
+        f"Snapshot mismatch at '{path}': {actual!r} != {expected!r}"
+    )
+
+
 def test_capture_or_verify_baseline_snapshot():
     """Verify that current recipe executions match baseline snapshot exactly."""
     ns = extract_recipes_namespace()
@@ -334,17 +453,7 @@ def test_capture_or_verify_baseline_snapshot():
 
     # Subsequent runs: assert zero regression on all baseline keys
     snapshot = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
-    for recipe_key, baseline_val in snapshot.items():
-        assert recipe_key in current_results, f"Missing {recipe_key} in current results"
-        curr_val = current_results[recipe_key]
-        if isinstance(baseline_val, dict):
-            for k, expected_v in baseline_val.items():
-                assert k in curr_val, f"Baseline key '{k}' dropped in {recipe_key}!"
-                assert curr_val[k] == expected_v, (
-                    f"Regression in {recipe_key}['{k}']: {curr_val[k]} != {expected_v}"
-                )
-        else:
-            assert curr_val == baseline_val, f"Regression detected in {recipe_key}!"
+    assert_snapshot_equal(current_results, snapshot)
 
     # Assert new additive plot-ready keys are present
     r2_raw = ns["calculate_2x2_metrics"](10, 5, 2, 80)
@@ -426,3 +535,59 @@ def test_capture_or_verify_baseline_snapshot():
     )
     assert "n_cases" in r20_auroc
     assert "n_controls" in r20_auroc
+
+
+def test_assert_snapshot_equal_helper():
+    """Unit tests for assert_snapshot_equal verifying tolerance, tiny p-values, count equivalence, and type mismatch checks."""
+    # 1. 1e-16 difference passes
+    assert_snapshot_equal(0.8266978749306636, 0.8266978749306637)
+    assert_snapshot_equal({"val": 0.8266978749306636}, {"val": 0.8266978749306637})
+
+    # 2. 1e-6 difference fails
+    with pytest.raises(AssertionError, match="Snapshot mismatch"):
+        assert_snapshot_equal(0.826698, 0.826697)
+
+    # 3. Tiny p-value (< 1e-100): 1e-15 relative difference passes
+    p1 = 7.24578719862681e-143
+    p2 = 7.24578719862680e-143
+    assert_snapshot_equal(p1, p2)
+
+    # Tiny p-value: 1e-6 relative difference fails
+    p3 = 7.24579e-143
+    p4 = 7.24578e-143
+    with pytest.raises(AssertionError, match="Snapshot mismatch"):
+        assert_snapshot_equal(p3, p4)
+
+    # Zero vs tiny value fails (does not erroneously pass through absolute tolerance)
+    with pytest.raises(AssertionError, match="Snapshot mismatch"):
+        assert_snapshot_equal(1e-100, 0.0)
+    with pytest.raises(AssertionError, match="Snapshot mismatch"):
+        assert_snapshot_equal(0.0, 1e-100)
+
+    # 4. Count equivalence: 412 vs 412.0 passes
+    assert_snapshot_equal(412, 412.0)
+    assert_snapshot_equal(412.0, 412)
+    assert_snapshot_equal([412], [412.0])
+
+    # Non-integer float vs int fails
+    with pytest.raises(AssertionError):
+        assert_snapshot_equal(412.5, 412)
+
+    # 5. Type mismatches fail
+    with pytest.raises(AssertionError, match="Type mismatch"):
+        assert_snapshot_equal("412", 412)
+
+    with pytest.raises(AssertionError, match="Type mismatch"):
+        assert_snapshot_equal(True, 1)
+
+    with pytest.raises(AssertionError, match="Type mismatch"):
+        assert_snapshot_equal(False, 0)
+
+    with pytest.raises(AssertionError, match="Type mismatch"):
+        assert_snapshot_equal([1, 2], {"a": 1})
+
+    with pytest.raises(AssertionError, match="Snapshot mismatch"):
+        assert_snapshot_equal("hello", "world")
+
+    with pytest.raises(AssertionError, match="Snapshot mismatch"):
+        assert_snapshot_equal(None, 0)
