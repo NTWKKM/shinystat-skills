@@ -3864,21 +3864,46 @@ def test_consort_single_field_derivation_and_superscript_allowlist(tmp_path):
 
     draw_consort = ns_flows["draw_standalone_consort_rct"]
     out_png = tmp_path / "consort_single_field.png"
-    res = draw_consort(
-        assessed=220,
-        excluded={"Ineligible": 20},
-        arms=[
-            {"name": "Arm A", "allocated": 100, "received": 80, "analyzed": 80},
-            {
-                "name": "Arm B",
-                "allocated": 100,
-                "did_not_receive": 0,
-                "excluded_from_analysis": 0,
-            },
-        ],
-        out_path=str(out_png),
-    )
-    assert Path(res).exists() and Path(res).stat().st_size > 0
+
+    import matplotlib.pyplot as plt
+
+    captured_texts = []
+    orig_subplots = plt.subplots
+
+    def wrap_subplots(*args, **kwargs):
+        fig, ax = orig_subplots(*args, **kwargs)
+        orig_savefig = fig.savefig
+
+        def wrap_savefig(*sargs, **skwargs):
+            captured_texts.extend([t.get_text() for t in ax.texts])
+            return orig_savefig(*sargs, **skwargs)
+
+        fig.savefig = wrap_savefig
+        return fig, ax
+
+    plt.subplots = wrap_subplots
+    try:
+        res = draw_consort(
+            assessed=220,
+            excluded={"Ineligible": 20},
+            arms=[
+                {"name": "Arm A", "allocated": 100, "received": 80, "analyzed": 80},
+                {
+                    "name": "Arm B",
+                    "allocated": 100,
+                    "did_not_receive": 0,
+                    "excluded_from_analysis": 0,
+                },
+            ],
+            out_path=str(out_png),
+        )
+        assert Path(res).exists() and Path(res).stat().st_size > 0
+    finally:
+        plt.subplots = orig_subplots
+
+    all_rendered = "\n".join(captured_texts)
+    assert "Did not receive intervention (n = 20)" in all_rendered
+    assert "Excluded from analysis (n = 20)" in all_rendered
 
     with pytest.raises(
         ValueError, match="must specify at least one observed receipt field"

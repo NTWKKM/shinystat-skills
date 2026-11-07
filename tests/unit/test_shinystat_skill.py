@@ -648,3 +648,75 @@ EOF
     assert "another-fake-heading" not in slugs
     assert not any("examplecom" in s for s in slugs)
     assert not any("guide" in s for s in slugs)
+
+
+def test_consort_flow_rendered_labels_single_field_inputs(tmp_path):
+    """Regression test against canonical skills/shinystat/references/flows.md.
+
+    Verifies that when single-field inputs are supplied (e.g. allocated=100, received=80,
+    analyzed=80), the derived missing counts (did_not_receive=20, excluded_from_analysis=20)
+    are rendered as labels in the resulting diagram ('Did not receive intervention (n = 20)'
+    and 'Excluded from analysis (n = 20)').
+    """
+    import matplotlib.pyplot as plt
+
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    flows_file = repo_root / "skills" / "shinystat" / "references" / "flows.md"
+    assert flows_file.exists(), "skills/shinystat/references/flows.md not found"
+
+    flows_md = flows_file.read_text(encoding="utf-8")
+    blocks = re.findall(r"```python\n(.*?)\n```", flows_md, re.DOTALL)
+    ns = {}
+    for b in blocks:
+        exec(b, ns)
+
+    draw_consort = ns["draw_standalone_consort_rct"]
+
+    captured_texts = []
+    orig_subplots = plt.subplots
+
+    def wrap_subplots(*args, **kwargs):
+        fig, ax = orig_subplots(*args, **kwargs)
+        orig_savefig = fig.savefig
+
+        def wrap_savefig(*sargs, **skwargs):
+            captured_texts.extend([t.get_text() for t in ax.texts])
+            return orig_savefig(*sargs, **skwargs)
+
+        fig.savefig = wrap_savefig
+        return fig, ax
+
+    plt.subplots = wrap_subplots
+    try:
+        out_png = tmp_path / "consort_rendered_labels.png"
+        arms = [
+            {
+                "name": "Intervention",
+                "allocated": 100,
+                "received": 80,
+                "analyzed": 80,
+            },
+            {
+                "name": "Control",
+                "allocated": 100,
+                "did_not_receive": 0,
+                "excluded_from_analysis": 0,
+            },
+        ]
+        res = draw_consort(
+            assessed=220,
+            excluded={"Ineligible": 20},
+            arms=arms,
+            out_path=str(out_png),
+        )
+        assert Path(res).exists()
+    finally:
+        plt.subplots = orig_subplots
+
+    all_rendered = "\n".join(captured_texts)
+    assert "Did not receive intervention (n = 20)" in all_rendered, (
+        "Derived 'Did not receive intervention (n = 20)' label not found in rendered text"
+    )
+    assert "Excluded from analysis (n = 20)" in all_rendered, (
+        "Derived 'Excluded from analysis (n = 20)' label not found in rendered text"
+    )
