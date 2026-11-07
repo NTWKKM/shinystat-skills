@@ -456,6 +456,18 @@ def test_subagent_protocol_and_gate5_delta_parity():
     ), (
         "Protocol must protect shared files outside run_output_dir from unverified deletion"
     )
+    assert (
+        "persist the exact returned directory path (`row_level_checkpoint_dir`) and `run_id` in a role-specific file in the control directory"
+        in proto_text
+    ), (
+        "Protocol must persist row_level_checkpoint_dir in control directory before writing cohort data"
+    )
+    assert (
+        "Read the role-specific workspace registration record in the control directory to identify and remove the workspace even if Subagent B crashes before writing checkpoint state"
+        in proto_text
+    ), (
+        "Protocol must read workspace registration during cleanup if Subagent B crashes before writing checkpoint state"
+    )
 
     # 2. Finalized narrative citation re-verification
     assert "Finalized Narrative Citation Verification" in proto_text, (
