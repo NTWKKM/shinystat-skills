@@ -441,6 +441,12 @@ def test_subagent_protocol_and_gate5_delta_parity():
     assert "<output_dir>/.scratch_checkpoint_<run_id>/" not in proto_text, (
         "Protocol must not place checkpoints directly under shared output_dir"
     )
+    assert "**outside** the user-facing `<output_dir>`" in proto_text, (
+        "Protocol must require row-level checkpoints to be outside output_dir"
+    )
+    assert "cleaned_cohort.parquet` (or `.csv`) outside `<output_dir>`" in proto_text, (
+        "Protocol must isolate row-level cleaned cohort files outside output_dir"
+    )
     assert "never delete unowned or shared staging files" in proto_text, (
         "Protocol must forbid deleting unowned or shared staging files from other runs"
     )
