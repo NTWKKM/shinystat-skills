@@ -53,11 +53,11 @@ jobs:
             echo "✓ Successfully auto-synced skills and pushed to $TARGET_BRANCH."
           fi
 
-      - name: Run test suite
-        run: uv run --extra dev pytest
-
       - name: Build standalone cloud package
         run: ./scripts/package-cloud-skill.sh
+
+      - name: Run test suite
+        run: uv run --extra dev pytest
 
   release:
     name: Release Distribution

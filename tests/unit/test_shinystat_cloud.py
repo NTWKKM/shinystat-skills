@@ -6,6 +6,7 @@ verification for the shinystat-cloud standalone package and recipes.
 # ruff: noqa: E402
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -30,6 +31,15 @@ from tests.fixtures.integrity_cases import (
 )
 
 CLOUD_DIR = REPO_ROOT / "packaging" / "cloud" / "shinystat-cloud"
+if not (CLOUD_DIR / "references" / "report-builder.md").exists():
+    pkg_script = REPO_ROOT / "scripts" / "package-cloud-skill.sh"
+    if pkg_script.exists():
+        subprocess.run(
+            ["bash", str(pkg_script)],
+            check=True,
+            cwd=REPO_ROOT,
+            capture_output=True,
+        )
 RECIPES_DIR = REPO_ROOT / "skills" / "shinystat-cloud" / "references" / "recipes"
 
 
