@@ -31,15 +31,29 @@ from tests.fixtures.integrity_cases import (
 )
 
 CLOUD_DIR = REPO_ROOT / "packaging" / "cloud" / "shinystat-cloud"
-if not (CLOUD_DIR / "references" / "report-builder.md").exists():
+
+
+@pytest.fixture(scope="session", autouse=True)
+def ensure_packaged_cloud_skill():
+    """Ensure packaging/cloud/shinystat-cloud is built and validated before running tests."""
     pkg_script = REPO_ROOT / "scripts" / "package-cloud-skill.sh"
-    if pkg_script.exists():
-        subprocess.run(
-            ["bash", str(pkg_script)],
-            check=True,
-            cwd=REPO_ROOT,
-            capture_output=True,
-        )
+    required_files = [
+        CLOUD_DIR / "SKILL.md",
+        CLOUD_DIR / "references" / "report-builder.md",
+        CLOUD_DIR / "references" / "decision-heuristics.md",
+        CLOUD_DIR / "references" / "figures.md",
+    ]
+    if not all(p.exists() for p in required_files):
+        if pkg_script.exists():
+            subprocess.run(
+                ["bash", str(pkg_script)],
+                check=True,
+                cwd=REPO_ROOT,
+                capture_output=True,
+            )
+    return CLOUD_DIR
+
+
 RECIPES_DIR = REPO_ROOT / "skills" / "shinystat-cloud" / "references" / "recipes"
 
 

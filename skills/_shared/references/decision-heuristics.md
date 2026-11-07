@@ -10,7 +10,7 @@ Reference guide for the `shinystat-cloud` and `shinystat` autonomous agents in c
 | :--- | :--- | :--- | :--- | :--- |
 | **Type 1: Baseline Cohort** | Cohort characteristics | Table 1 (Mean/SD, Median/IQR, Count/%, SMD) | Normality inspection; Fisher exact fallback for small cells | [Recipe 1: Table 1 & SMD](recipes/01-data-missing-table1.md#1-table-1-baseline-characteristics--standardized-mean-difference-smd) |
 | **Type 2: Binary Outcome** | Odds Ratio (OR), Risk factors | Multivariable Binary Logistic Regression | Linearity of log-odds; Crude & Adjusted OR table | [Recipe 10: Logistic Regression Table](recipes/02-regression-firth-ordinal.md#10-multivariable-binary-logistic-regression-table) & [Recipe 22: Harrell RCS Splines](recipes/02-regression-firth-ordinal.md#22-restricted-cubic-splines-harrell-rcs-for-non-linear-continuous-predictors) |
-| **Type 2-Sparse: Separation** | Unbiased OR in rare events | Firth Penalized Logistic Regression | Profile likelihood CIs; resolves monotone separation | [Recipe 7: Firth Logistic Regression](recipes/02-regression-firth-ordinal.md#7-firths-penalized-likelihood-logistic-regression) |
+| **Type 2-Sparse: Separation** | OR estimate in rare events | Firth Penalized Logistic Regression | Profile likelihood CIs; resolves monotone separation | [Recipe 7: Firth Logistic Regression](recipes/02-regression-firth-ordinal.md#7-firths-penalized-likelihood-logistic-regression) |
 | **Type 2b: Ordinal Scale** | Cumulative Odds Ratio | Cumulative Logit Proportional Odds | Brant test for parallel lines; multinomial logit fallback | [Recipe 21: Ordinal Logistic & Brant Test](recipes/02-regression-firth-ordinal.md#21-proportional-odds-ordinal-logistic-regression--brant-test) |
 | **Type 3: Survival / Time-to-Event** | Hazard Ratio (HR), Median survival | Kaplan-Meier, Log-Rank & Cox Proportional Hazards | Proportional hazards test (Schoenfeld residuals); L2 shrinkage | [Recipe 11: Survival Analysis Suite](recipes/03-survival-competing-risks.md#11-survival-analysis-kaplan-meier-log-rank--cox-proportional-hazards) |
 | **Type 3b: Competing Risks Survival** | Subdistribution Hazard (SHR) & Cause-Specific HR (csHR) | Aalen-Johansen CIF & Fine-Gray Model (IPCW) | Competing risk probability conservation; Naive KM overestimation audit | [Recipe 15: Competing Risks Survival](recipes/03-survival-competing-risks.md#15-competing-risks-survival-analysis-aalen-johansen-cif--fine-gray-model) |
@@ -38,14 +38,14 @@ Calculate diagnostic EPV:
 ├── EPV ≥ 10 & No Separation ──▶ Standard Multivariable Logistic (Recipe 10) / Standard Unpenalized Cox PH (Recipe 11 with default `penalizer=0.0`)
 ├── Monotone Separation Detected ──▶ Halt at Grilling Gate for clinical confirmation:
 │   ├── Binary Logistic: (A) Firth penalized likelihood with profile likelihood CIs (Recipe 7), or (B) Remove/collapse separating covariate
-│   └── Cox Proportional Hazards (Monotone Likelihood): (A) Scale-aware, data-validated L2-penalized Cox regression via lifelines (Recipe 11: standardize continuous predictors and report the transformation, or select and validate `penalizer > 0` on the supported data), or (B) Remove/collapse separating covariate
+│   └── Cox Proportional Hazards (Monotone Likelihood): (A) Scale-aware, data-validated L2-penalized Cox regression via lifelines (Recipe 11: standardize continuous predictors when scales differ and select and validate a positive penalty `penalizer > 0` on the supported data, reporting the transformation), or (B) Remove/collapse separating covariate
 └── Low EPV (< 10) without Separation
     ├── Binary Logistic:
     │   ├── Strategy 1 (Etiological Effect): Firth penalized logistic regression with profile likelihood CIs (Recipe 7)
     │   ├── Strategy 2 (Prediction Model): L2 Ridge penalization / shrinkage to prevent overfitting (Riley et al., 2019)
     │   └── Strategy 3: Domain-guided clinical composite score or univariable reporting with sparse-data disclaimer
     └── Cox Proportional Hazards:
-        ├── Strategy 1: Scale-aware, data-validated L2-penalized Cox regression via lifelines (Recipe 11: standardize continuous predictors and report the transformation, or select and validate `penalizer > 0` on the supported data)
+        ├── Strategy 1: Scale-aware, data-validated L2-penalized Cox regression via lifelines (Recipe 11: standardize continuous predictors when scales differ and select and validate a positive penalty `penalizer > 0` on the supported data, reporting the transformation)
         ├── Strategy 2: Pre-specified clinical risk index / score reduction
         └── Strategy 3: Univariable survival analysis (Kaplan-Meier / univariable Cox) with sparse-data disclaimer
 ```
@@ -59,7 +59,7 @@ Audit Missingness Pattern & Mechanism (Recipe 8: Little's MCAR Test; note H0: MC
 ├── Per-variable missingness < 5% in non-primary covariates ──▶ Complete-case analysis with documented justification
 ├── Missing 5%–40% under Missing at Random (MAR) ──▶ Multiple Imputation by Chained Equations (Recipe 12: MICE; proper Bayesian draws, M ≥ 5 for ≤ 30% missing, M ≥ 20 for > 30% missing; always run Complete-Case Analysis as sensitivity analysis, noting agreement does not prove MAR or exclude MNAR bias)
 ├── Non-Primary Missing > 40% (Not MNAR) ──▶ Halt at Grilling Gate: (a) drop auxiliary covariate, (b) high-M MICE (M ≥ 40, tracking FMI) under MAR, or (c) pattern-mixture modeling (or missing-indicator adjustment restricted to randomized-trial baseline covariates or explicitly labeled sensitivity analyses)
-├── Primary Outcome Missing ──▶ Never impute outcome; preserve true sample retention flow (N_initial ➔ N_analyzed)
+├── Primary Outcome Missing ──▶ Default: avoid outcome imputation in observational cohorts and preserve retention flow (N_initial ➔ N_analyzed); for trial/longitudinal dropout under MAR, allow protocol-justified outcome imputation (MICE) or MMRM with mandatory complete-case and tipping-point sensitivity analyses
 └── Missingness Informative / MNAR ──▶ Halt for clinical domain review or sensitivity bounds
 ```
 
@@ -78,7 +78,7 @@ Identify Clinical Biomarker Mechanism
 ```
 Evaluate Treatment Assignment & Causal Target
 ├── Target Population
-│   ├── Target = Treated Population (ATT) ──▶ 1:1 Nearest-Neighbor PSM with caliper 0.2 SD (Recipe 6) OR IPTW (estimand='ATT', Recipe 14)
+│   ├── Target = Treated Population (ATT) ──▶ IPTW (estimand='ATT', Recipe 14) OR 1:1 Nearest-Neighbor PSM with caliper 0.2 SD (Recipe 6; if caliper drops unmatched treated units, report unmatched-treated count and label estimand as matched-population effect, distinguishing from full ATT)
 │   ├── Target = Whole Target Population (ATE) ──▶ IPTW (estimand='ATE') with stabilized weights (Recipe 14)
 │   └── Significant Propensity Truncation / Lack of Overlap ──▶ Overlap Weights (estimand='ATO', Li et al. 2018, Recipe 14)
 ├── Weight Stability & Positivity Audit
@@ -96,7 +96,7 @@ Audit Event Types: Event of Interest vs. Competing Risks (e.g., CV death vs. non
 │       On Schoenfeld P <= 0.05, inspect plot_schoenfeld_residuals (figures.md §9), then:
 │       ├── P <= 0.05/k (k = covariates tested) is a strong violation
 │       ├── 0.05/k < P <= 0.05 is a weak violation (plot decides)
-│       ├── Nuisance covariate ──▶ refit with strata=[...] for meaningful categorical or defensibly grouped continuous variables (`refit_cox_with_strata`; its HR is no longer reported); otherwise retain and model non-linearity (RCS)
+│       ├── Nuisance covariate ──▶ refit with strata=[...] for meaningful categorical or defensibly grouped continuous variables (`refit_cox_with_strata`; its HR is no longer reported); if continuous non-linear misspecification is suspected, refit with RCS and reassess PH; if PH violation persists, model the time-varying effect or report as a limitation
 │       ├── Exposure ──▶ piecewise/time-varying HR (`piecewise_hr`), or RMST
 │       └── Reporting ──▶ report both models and name the remedy beside each violator
 └── Multiple / Mutually Exclusive Failures

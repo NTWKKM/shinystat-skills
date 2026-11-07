@@ -21,10 +21,10 @@ Every plotting function returns a `FigureResult` dataclass:
 ```python
 @dataclass
 class FigureResult:
-    png_path: str  # Absolute or relative path to saved 300 DPI PNG
+    png_path: str  # Path to saved PNG (default 300 DPI for publication target='docx'/'pdf'; 150 DPI when plot_dca uses target='web' without journal theme)
     alt_text: str  # Accessibility description for web and markdown
     caption: str  # Publication-ready figure caption with statistical notes
-    source_df: pd.DataFrame  # Underlying numerical values plotted
+    source_df: pd.DataFrame  # Underlying numerical values plotted (Note: plot_missingness_map exports per-variable missingness summaries rather than raw row-level matrix)
     csv_path: str  # Path to exported raw data CSV for auditability
 ```
 
@@ -34,7 +34,7 @@ class FigureResult:
 
 ### 1. Forest Plot (`plot_forest`)
 Visualizes effect estimates (Odds Ratios, Hazard Ratios, Risk Ratios) from multivariable models or meta-analyses.
-- **Features**: Logarithmic scale, reference vertical dashed line at 1.0, point estimates proportional to sample weight, annotated values and 95% CIs on right margin.
+- **Features**: Logarithmic scale, reference vertical dashed line at 1.0, fixed or weight-annotated marker sizes, annotated values and 95% CIs on right margin.
 - **Usage**:
 ```python
 from medstat.figures.forest import plot_forest
@@ -67,7 +67,7 @@ res = plot_kaplan_meier(
 
 ### 3. ROC Curve & DeLong CI (`plot_roc_curve`)
 Evaluates diagnostic discrimination accuracy.
-- **Features**: Empirical True Positive vs False Positive rates, 45-degree chance diagonal, optimal cutoff marker via Youden's J index, DeLong 95% CI label, optional paired overlay comparison.
+- **Features**: Empirical True Positive vs False Positive rates, 45-degree chance diagonal, optimal cutoff marker via Youden's J index, DeLong or bootstrap 95% CI label (caption reflects supplied method; callers precompute bootstrap bounds if used), optional paired overlay comparison.
 - **Usage**:
 ```python
 from medstat.figures.roc import plot_roc_curve
@@ -79,6 +79,7 @@ res = plot_roc_curve(
         "auc": 0.865,
         "ci_lower": 0.812,
         "ci_upper": 0.918,
+        "ci_method": "delong",  # or "bootstrap"
         "optimal_point": {"cutoff": 5.0, "fpr": 0.15, "tpr": 0.75},
         "name": "Biomarker Model",
     },
@@ -89,7 +90,7 @@ res = plot_roc_curve(
 
 ### 4. Calibration Curve (`plot_calibration`)
 Validates agreement between predicted risk probabilities and observed event frequencies.
-- **Features**: Decile grouping, Wilson score 95% error bars, LOESS smoothed curve, 45-degree ideal reference, Brier score and Integrated Calibration Index (ICI) annotation.
+- **Features**: Grouping by deciles or custom risk quantiles, Wilson score or bootstrap 95% error bars reflecting supplied limits, LOESS smoothed curve, 45-degree ideal reference, Brier score and Integrated Calibration Index (ICI) annotation.
 - **Usage**:
 ```python
 from medstat.figures.calibration import plot_calibration
@@ -169,8 +170,8 @@ res = plot_love(
 ```
 
 ### 8. Participant Retention Flowchart (`plot_retention_flow`)
-Generates STROBE / CONSORT participant disposition flowcharts.
-- **Features**: Assessed for eligibility, excluded with breakdown, randomized / assigned, lost to follow-up, analyzed cohorts.
+Renders a 3-stage cohort retention summary (Initial ➔ Excluded ➔ Analyzed) for observational data filtering. For full randomized trial CONSORT diagrams with arm allocation or multi-stage STROBE flows, see [flows.md](flows.md).
+- **Features**: Assessed cohort, excluded breakdown with reasons, and analyzed cohort.
 - **Usage**:
 ```python
 from medstat.figures.retention import plot_retention_flow
@@ -182,7 +183,7 @@ res = plot_retention_flow(
         "n_analyzed": 1085,
         "exclusion_reasons": ["Prior cardiac surgery: 120", "Missing key lab: 45"],
     },
-    title="Participant Retention Flow Diagram (STROBE / CONSORT)",
+    title="Participant Retention Flow Diagram (Cohort Screening)",
     out_path="figures/strobe_retention_flow.png",
     target="docx",
 )
@@ -193,7 +194,7 @@ Automates pre-modeling and post-modeling diagnostic validation plots.
 
 ### 10. Cumulative Incidence Function (`plot_cif`)
 Visualizes non-parametric Aalen-Johansen CIF curves alongside Naive $1 - \text{Kaplan-Meier}$ overestimation audit.
-- **Features**: Event of interest CIF with Greenwood 95% confidence bands, competing risk CIF curves, and Naive $1 - \text{KM}$ curve illustrating bias when competing events are treated as independent censoring.
+- **Features**: Event of interest CIF with Greenwood 95% confidence bands, competing risk CIF curves, and optional Naive $1 - \text{KM}$ curve (rendered when `'naive_1_minus_km'` is present and `show_naive_km=True`) illustrating bias when competing events are treated as independent censoring.
 - **Column Contract**: `cif_table` DataFrame must contain `'time'`, `'cif_primary'`, and `'cif_competing'` columns (with optional `'cif_primary_ci_lower'`, `'cif_primary_ci_upper'`, `'cif_competing_ci_lower'`, `'cif_competing_ci_upper'`, `'naive_1_minus_km'`).
 - **Usage**:
 ```python

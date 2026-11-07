@@ -32,6 +32,7 @@ def generate_markdown_report(
     title: str,
     results: dict,
     tables: dict[str, pd.DataFrame],
+    figure_paths: list[str] = None,
     out_path: str = "report.md",
 ) -> str:
     lines = [
@@ -50,7 +51,18 @@ def generate_markdown_report(
         try:
             lines.append(df.to_markdown(index=False) + "\n")
         except Exception:
-            lines.append(df.to_string(index=False) + "\n")
+            # Table formatting fallback preserving Markdown pipe structure without tabulate
+            hdr = "| " + " | ".join(str(c) for c in df.columns) + " |"
+            sep = "| " + " | ".join(["---"] * len(df.columns)) + " |"
+            rows = ["| " + " | ".join(str(val) for val in row) + " |" for _, row in df.iterrows()]
+            lines.append("\n".join([hdr, sep] + rows) + "\n")
+
+    # Figures
+    if figure_paths:
+        lines.append("\n## Figures\n")
+        for fp in figure_paths:
+            p = Path(fp)
+            lines.append(f"![{p.stem}]" + f"({fp})\n")
 
     out_p = Path(out_path)
     out_p.parent.mkdir(parents=True, exist_ok=True)
@@ -111,9 +123,16 @@ def generate_html_report(
         f"<h1>{html.escape(title)}</h1>",
     ])
 
-    # Narrative
+    # Narrative with Citation Links
     if "narrative" in results:
-        parts.append(f"<p>{html.escape(results['narrative'])}</p>")
+        narr = html.escape(str(results["narrative"]))
+        # Convert in-text citation markers [1] or [1, 2] to anchor links
+        narr = re.sub(
+            r"\[(\d+(?:,\s*\d+)*)\]",
+            lambda m: "[" + ", ".join(f'<a href="#ref-{n.strip()}">{n.strip()}</a>' for n in m.group(1).split(",")) + "]",
+            narr,
+        )
+        parts.append(f"<p>{narr}</p>")
 
     # Tables
     for caption, df in tables.items():
@@ -135,11 +154,29 @@ def generate_html_report(
         for idx, fig_p_str in enumerate(figure_paths):
             fp = Path(fig_p_str)
             if not fp.exists():
-                continue
+                raise FileNotFoundError(f"Figure file not found: {fig_p_str}")
+            suffix = fp.suffix.lower()
+            if suffix == ".png":
+                mime = "image/png"
+                dl_label = "Download 300 DPI PNG"
+                dl_ext = "png"
+            elif suffix in {".jpg", ".jpeg"}:
+                mime = "image/jpeg"
+                dl_label = "Download JPEG"
+                dl_ext = "jpg"
+            elif suffix == ".svg":
+                mime = "image/svg+xml"
+                dl_label = "Download SVG"
+                dl_ext = "svg"
+            else:
+                raise ValueError(
+                    f"Unsupported figure format for HTML embedding: {fp.suffix}. Figures must be PNG, JPEG, or SVG."
+                )
+
             b64 = base64.b64encode(fp.read_bytes()).decode("utf-8")
             plt_fig = plotly_figs[idx] if plotly_figs and idx < len(plotly_figs) else None
             idx_str = str(idx + 1)
-            stem = fp.stem
+            escaped_stem = html.escape(fp.stem, quote=True)
 
             parts.append(f"<div class='figure-card' id='fig-card-{idx_str}'>")
             parts.append("<div class='figure-toolbar'>")
@@ -150,7 +187,7 @@ def generate_html_report(
                 parts.append("</div>")
             else:
                 parts.append("<span style='font-size:12.5px; font-weight:600;'>Publication 300 DPI Figure (Static)</span>")
-            parts.append(f"<div class='fig-actions'><a href='data:image/png;base64,{b64}' download='{stem}.png'>Download 300 DPI PNG</a></div>")
+            parts.append(f"<div class='fig-actions'><a href='data:{mime};base64,{b64}' download='{escaped_stem}.{dl_ext}'>{dl_label}</a></div>")
             parts.append("</div>")
 
             if plt_fig:
@@ -165,12 +202,12 @@ def generate_html_report(
                 parts.append(f"<div id='offline-msg-{idx_str}' class='offline-banner' style='display:none;'>📡 โหมดออฟไลน์: ไม่สามารถโหลด Plotly CDN ได้ กรุณาสลับไปดูรูป 300 DPI <button onclick=\"switchFig('{idx_str}', 's')\" style='margin-left:8px; cursor:pointer;'>สลับไปดูรูป 300 DPI</button></div>")
                 parts.append("</div>")
                 parts.append(f"<div class='figure-view view-static' id='view-s-{idx_str}' style='display:none;'>")
-                parts.append(f"<img src='data:image/png;base64,{b64}' alt='{stem}'>")
+                parts.append(f"<img src='data:{mime};base64,{b64}' alt='{escaped_stem}'>")
                 parts.append("</div>")
                 parts.append(f"<script type='application/json' id='spec-{idx_str}'>{plotly_json}</script>")
             else:
                 parts.append(f"<div class='figure-view view-static' id='view-s-{idx_str}'>")
-                parts.append(f"<img src='data:image/png;base64,{b64}' alt='{stem}'>")
+                parts.append(f"<img src='data:{mime};base64,{b64}' alt='{escaped_stem}'>")
                 parts.append("</div>")
             parts.append("</div>")
 
@@ -267,15 +304,18 @@ def build_plotly_roc_spec(
             continue
     fpr = [p[0] for p in clean_pairs]
     tpr = [p[1] for p in clean_pairs]
-    auc = _clean_float(roc_data.get("auc"), default=0.5)
+    auc = _clean_float(roc_data.get("auc"))
     ci_l = _clean_float(roc_data.get("ci_lower"))
     ci_u = _clean_float(roc_data.get("ci_upper"))
     model_name = str(roc_data.get("name", "Model 1"))
 
-    if ci_l is not None and ci_u is not None:
-        label_1 = f"{model_name}: AUC = {auc:.3f} (95% CI, {ci_l:.3f}–{ci_u:.3f})"
+    if auc is not None:
+        if ci_l is not None and ci_u is not None:
+            label_1 = f"{model_name}: AUC = {auc:.3f} (95% CI, {ci_l:.3f}–{ci_u:.3f})"
+        else:
+            label_1 = f"{model_name}: AUC = {auc:.3f}"
     else:
-        label_1 = f"{model_name}: AUC = {auc:.3f}"
+        label_1 = f"{model_name}: AUC = N/A"
 
     traces = [
         {
@@ -336,14 +376,17 @@ def build_plotly_roc_spec(
                 continue
         p_fpr = [p[0] for p in p_pairs]
         p_tpr = [p[1] for p in p_pairs]
-        p_auc = _clean_float(paired_roc_data.get("auc"), default=0.5)
+        p_auc = _clean_float(paired_roc_data.get("auc"))
         p_ci_l = _clean_float(paired_roc_data.get("ci_lower"))
         p_ci_u = _clean_float(paired_roc_data.get("ci_upper"))
         p_name = str(paired_roc_data.get("name", "Model 2"))
-        if p_ci_l is not None and p_ci_u is not None:
-            p_label = f"{p_name}: AUC = {p_auc:.3f} (95% CI, {p_ci_l:.3f}–{p_ci_u:.3f})"
+        if p_auc is not None:
+            if p_ci_l is not None and p_ci_u is not None:
+                p_label = f"{p_name}: AUC = {p_auc:.3f} (95% CI, {p_ci_l:.3f}–{p_ci_u:.3f})"
+            else:
+                p_label = f"{p_name}: AUC = {p_auc:.3f}"
         else:
-            p_label = f"{p_name}: AUC = {p_auc:.3f}"
+            p_label = f"{p_name}: AUC = N/A"
         traces.append({
             "type": "scatter",
             "x": p_fpr,
@@ -419,31 +462,42 @@ def build_plotly_km_spec(
                 s_val = float(raw_s[i])
                 if not (math.isfinite(t_val) and math.isfinite(s_val)):
                     continue
-                if has_ci:
-                    cl = float(raw_cil[i])
-                    cu = float(raw_ciu[i])
-                    if not (math.isfinite(cl) and math.isfinite(cu)):
-                        continue
-                    ci_lower.append(cl)
-                    ci_upper.append(cu)
                 timeline.append(t_val)
                 survival.append(s_val)
+                if has_ci:
+                    try:
+                        cl = float(raw_cil[i])
+                        cu = float(raw_ciu[i])
+                        if math.isfinite(cl) and math.isfinite(cu):
+                            ci_lower.append(cl)
+                            ci_upper.append(cu)
+                        else:
+                            ci_lower.append(None)
+                            ci_upper.append(None)
+                    except (TypeError, ValueError):
+                        ci_lower.append(None)
+                        ci_upper.append(None)
             except (TypeError, ValueError, IndexError):
                 continue
 
-        if has_ci and len(timeline) == len(ci_lower) == len(ci_upper) and timeline:
+        valid_ci_indices = [
+            k for k in range(len(timeline))
+            if has_ci and ci_lower[k] is not None and ci_upper[k] is not None
+        ]
+        if valid_ci_indices:
             step_t = []
             step_ci_u = []
             step_ci_l = []
-            for i in range(len(timeline)):
-                if i == 0:
-                    step_t.append(timeline[0])
-                    step_ci_u.append(ci_upper[0])
-                    step_ci_l.append(ci_lower[0])
+            for idx_pos, k in enumerate(valid_ci_indices):
+                if idx_pos == 0:
+                    step_t.append(timeline[k])
+                    step_ci_u.append(ci_upper[k])
+                    step_ci_l.append(ci_lower[k])
                 else:
-                    step_t.extend([timeline[i], timeline[i]])
-                    step_ci_u.extend([ci_upper[i - 1], ci_upper[i]])
-                    step_ci_l.extend([ci_lower[i - 1], ci_lower[i]])
+                    prev_k = valid_ci_indices[idx_pos - 1]
+                    step_t.extend([timeline[k], timeline[k]])
+                    step_ci_u.extend([ci_upper[prev_k], ci_upper[k]])
+                    step_ci_l.extend([ci_lower[prev_k], ci_lower[k]])
 
             traces.append({
                 "type": "scatter",
@@ -546,42 +600,51 @@ def build_plotly_calibration_spec(
     """Builds a pure-dict Plotly specification for a decile calibration curve with Wilson 95% CIs."""
     raw_pred = calib_bins.get("pred_mean", [])
     raw_obs = calib_bins.get("obs_rate", [])
-    raw_cil = calib_bins.get("ci_lower", raw_obs)
-    raw_ciu = calib_bins.get("ci_upper", raw_obs)
+    raw_cil = calib_bins.get("ci_lower")
+    raw_ciu = calib_bins.get("ci_upper")
+    has_ci = (
+        raw_cil is not None
+        and raw_ciu is not None
+        and len(raw_cil) == len(raw_obs)
+        and len(raw_ciu) == len(raw_obs)
+    )
 
     pred_mean, obs_rate, ci_low, ci_high = [], [], [], []
-    for p, o, l, h in zip(raw_pred, raw_obs, raw_cil, raw_ciu):
+    for idx, (p, o) in enumerate(zip(raw_pred, raw_obs)):
         try:
-            fp, fo, fl, fh = float(p), float(o), float(l), float(h)
-            if math.isfinite(fp) and math.isfinite(fo) and math.isfinite(fl) and math.isfinite(fh):
+            fp, fo = float(p), float(o)
+            if math.isfinite(fp) and math.isfinite(fo):
                 pred_mean.append(fp)
                 obs_rate.append(fo)
-                ci_low.append(fl)
-                ci_high.append(fh)
+                if has_ci:
+                    try:
+                        fl, fh = float(raw_cil[idx]), float(raw_ciu[idx])
+                        if math.isfinite(fl) and math.isfinite(fh):
+                            ci_low.append(fl)
+                            ci_high.append(fh)
+                        else:
+                            ci_low.append(fo)
+                            ci_high.append(fo)
+                    except (TypeError, ValueError):
+                        ci_low.append(fo)
+                        ci_high.append(fo)
         except (TypeError, ValueError):
             continue
 
-    error_y_plus = [h - o for h, o in zip(ci_high, obs_rate)]
-    error_y_minus = [o - l for l, o in zip(ci_low, obs_rate)]
-    customdata = [[l, h] for l, h in zip(ci_low, ci_high)]
+    obs_trace = {
+        "type": "scatter",
+        "x": pred_mean,
+        "y": obs_rate,
+        "mode": "markers+lines",
+        "line": {"color": "#0284C7", "width": 2.0},
+        "marker": {"size": 8, "color": "#0284C7", "symbol": "circle"},
+    }
 
-    traces = [
-        {
-            "type": "scatter",
-            "x": [0, 1],
-            "y": [0, 1],
-            "mode": "lines",
-            "line": {"dash": "dash", "color": "#94A3B8", "width": 1.5},
-            "name": "Perfect Calibration",
-            "hoverinfo": "skip",
-        },
-        {
-            "type": "scatter",
-            "x": pred_mean,
-            "y": obs_rate,
-            "mode": "markers+lines",
-            "line": {"color": "#0284C7", "width": 2.0},
-            "marker": {"size": 8, "color": "#0284C7", "symbol": "circle"},
+    if has_ci and len(ci_low) == len(obs_rate) and any(h > o for h, o in zip(ci_high, obs_rate)):
+        error_y_plus = [h - o for h, o in zip(ci_high, obs_rate)]
+        error_y_minus = [o - l for l, o in zip(ci_low, obs_rate)]
+        customdata = [[l, h] for l, h in zip(ci_low, ci_high)]
+        obs_trace.update({
             "error_y": {
                 "type": "data",
                 "symmetric": False,
@@ -599,7 +662,28 @@ def build_plotly_calibration_spec(
                 "Observed Rate: %{y:.3f}<br>"
                 "95% CI: [%{customdata[0]:.3f}, %{customdata[1]:.3f}]<extra></extra>"
             ),
+        })
+    else:
+        obs_trace.update({
+            "name": f"Observed vs Predicted ({len(pred_mean)} bins)",
+            "hovertemplate": (
+                "<b>Bin Group</b><br>"
+                "Predicted Risk: %{x:.3f}<br>"
+                "Observed Rate: %{y:.3f}<extra></extra>"
+            ),
+        })
+
+    traces = [
+        {
+            "type": "scatter",
+            "x": [0, 1],
+            "y": [0, 1],
+            "mode": "lines",
+            "line": {"dash": "dash", "color": "#94A3B8", "width": 1.5},
+            "name": "Perfect Calibration",
+            "hoverinfo": "skip",
         },
+        obs_trace,
     ]
 
     clean_brier = _clean_float(brier_score)
@@ -1040,6 +1124,8 @@ def build_plotly_love_spec(
 
 ```python
 try:
+    from pathlib import Path
+    import pandas as pd
     import docx
     from docx.shared import Inches, Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -1068,7 +1154,7 @@ try:
                 tbl.cell(0, j).text = str(col)
                 tbl.cell(0, j).paragraphs[0].runs[0].bold = True
             # Populate data
-            for i, row in df.iterrows():
+            for i, (_, row) in enumerate(df.iterrows()):
                 for j, col in enumerate(df.columns):
                     val = str(row[col]) if pd.notna(row[col]) else ""
                     tbl.cell(i + 1, j).text = val
@@ -1140,39 +1226,42 @@ try:
         if slide.shapes.title:
             slide.shapes.title.text = str(title)
         if len(slide.placeholders) > 1 and "narrative" in results:
-            clean_narr = re.sub(r"<[^>]+>", "", str(results["narrative"]))
+            clean_narr = re.sub(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s+[^>]*)?>", "", str(results["narrative"]))
             slide.placeholders[1].text = clean_narr
 
         blank_layout = prs.slide_layouts[6] if len(prs.slide_layouts) > 6 else prs.slide_layouts[0]
 
-        # 2. Key Findings & KPI Cards Slide
+        # 2. Key Findings & KPI Cards Slides (paginated up to 4 per slide)
         cards = kpi_cards if kpi_cards is not None else results.get("kpi_cards", [])
         if cards:
-            kslide = prs.slides.add_slide(blank_layout)
-            hdr = kslide.shapes.add_textbox(Inches(0.6), Inches(0.4), Inches(12.0), Inches(0.6))
-            hdr.text_frame.text = "Key Clinical Findings & KPI Summary"
-            n_cards = min(len(cards), 4)
-            card_w = 11.6 / max(1, n_cards)
-            for idx, card in enumerate(cards[:4]):
-                left = Inches(0.6 + idx * (card_w + 0.15))
-                box = kslide.shapes.add_textbox(left, Inches(1.5), Inches(card_w), Inches(2.5))
-                tf = box.text_frame
-                tf.word_wrap = True
-                p_lbl = tf.paragraphs[0]
-                p_lbl.text = str(card.get("label", f"Metric {idx + 1}"))
-                for r in p_lbl.runs:
-                    r.font.size = Pt(12)
-                    r.font.bold = True
-                p_val = tf.add_paragraph()
-                p_val.text = str(card.get("value", ""))
-                for r in p_val.runs:
-                    r.font.size = Pt(22)
-                    r.font.bold = True
-                if card.get("subtitle"):
-                    p_sub = tf.add_paragraph()
-                    p_sub.text = str(card["subtitle"])
-                    for r in p_sub.runs:
-                        r.font.size = Pt(10)
+            for chunk_idx in range(0, len(cards), 4):
+                chunk = cards[chunk_idx : chunk_idx + 4]
+                kslide = prs.slides.add_slide(blank_layout)
+                hdr = kslide.shapes.add_textbox(Inches(0.6), Inches(0.4), Inches(12.0), Inches(0.6))
+                slide_num = f" (Part {chunk_idx // 4 + 1})" if len(cards) > 4 else ""
+                hdr.text_frame.text = f"Key Clinical Findings & KPI Summary{slide_num}"
+                n_cards = len(chunk)
+                card_w = 11.6 / max(1, n_cards)
+                for idx, card in enumerate(chunk):
+                    left = Inches(0.6 + idx * (card_w + 0.15))
+                    box = kslide.shapes.add_textbox(left, Inches(1.5), Inches(card_w), Inches(2.5))
+                    tf = box.text_frame
+                    tf.word_wrap = True
+                    p_lbl = tf.paragraphs[0]
+                    p_lbl.text = str(card.get("label", f"Metric {chunk_idx + idx + 1}"))
+                    for r in p_lbl.runs:
+                        r.font.size = Pt(12)
+                        r.font.bold = True
+                    p_val = tf.add_paragraph()
+                    p_val.text = str(card.get("value", ""))
+                    for r in p_val.runs:
+                        r.font.size = Pt(22)
+                        r.font.bold = True
+                    if card.get("subtitle"):
+                        p_sub = tf.add_paragraph()
+                        p_sub.text = str(card["subtitle"])
+                        for r in p_sub.runs:
+                            r.font.size = Pt(10)
 
         # 3. Table Slides
         for caption, df in (tables or {}).items():
@@ -1221,8 +1310,11 @@ except ImportError:
     ) -> str:
         if Path(out_path).suffix.lower() == ".pptx":
             out_path = str(Path(out_path).with_suffix(".html"))
+        merged_results = dict(results) if results else {}
+        if kpi_cards is not None and "kpi_cards" not in merged_results:
+            merged_results["kpi_cards"] = kpi_cards
         return generate_html_report(
-            title, results, tables, figure_paths, out_path=out_path
+            title, merged_results, tables, figure_paths, out_path=out_path
         )
 ```
 
@@ -1232,8 +1324,6 @@ except ImportError:
 import re
 import textwrap
 from pathlib import Path
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
 import pandas as pd
 
 
@@ -1263,7 +1353,9 @@ def generate_pdf_report(
         styles = getSampleStyleSheet()
         story = [Paragraph(str(title), styles["Title"]), Spacer(1, 0.2 * inch)]
         if "narrative" in results:
-            clean_narr = re.sub(r"<[^>]+>", "", str(results["narrative"]))
+            clean_narr = re.sub(
+                r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s+[^>]*)?>", "", str(results["narrative"])
+            )
             for para in clean_narr.split("\n\n"):
                 if para.strip():
                     story.append(Paragraph(para.strip(), styles["BodyText"]))
@@ -1294,13 +1386,25 @@ def generate_pdf_report(
         for fp in figure_paths or []:
             p = Path(fp)
             if p.exists() and p.suffix.lower() in {".png", ".jpg", ".jpeg"}:
-                story.append(RLImage(str(p), width=5.8 * inch, height=3.8 * inch))
+                img = RLImage(str(p))
+                target_w = 5.8 * inch
+                if getattr(img, "imageWidth", 0) > 0:
+                    aspect = img.imageHeight / img.imageWidth
+                    img.drawWidth = target_w
+                    img.drawHeight = target_w * aspect
+                else:
+                    img.drawWidth = target_w
+                    img.drawHeight = 3.8 * inch
+                story.append(img)
                 story.append(Spacer(1, 0.2 * inch))
 
         doc.build(story)
         return out_path
     except Exception:
         pass
+
+    import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_pdf import PdfPages
 
     plt.rcParams["pdf.fonttype"] = 42
     plt.rcParams["ps.fonttype"] = 42
@@ -1310,7 +1414,9 @@ def generate_pdf_report(
         fig = plt.figure(figsize=(8.27, 11.69))
         fig.text(0.08, 0.92, str(title), fontsize=16, fontweight="bold", ha="left", va="top")
         if "narrative" in results:
-            clean_narr = re.sub(r"<[^>]+>", "", str(results["narrative"]))
+            clean_narr = re.sub(
+                r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s+[^>]*)?>", "", str(results["narrative"])
+            )
             wrapped = "\n".join(
                 textwrap.fill(line, width=88) if line.strip() else ""
                 for line in clean_narr.splitlines()
@@ -1528,8 +1634,7 @@ def verify_standalone_integrity(
 
     known_nums = _flatten_nums(results_dict)
     qualified_p_vals = _extract_qualified_p_vals(results_dict)
-    if not qualified_p_vals:
-        qualified_p_vals = [(None, kn) for kn in known_nums if 0.0 <= kn <= 1.0]
+    # Require an actual identified p-value in results_dict to support p-value inequalities
     allowed_list = (
         [float(x) for x in allowed_untraced] if allowed_untraced is not None else []
     )
@@ -1564,23 +1669,20 @@ def verify_standalone_integrity(
         window_after = clean_text[m.end() : min(len(clean_text), m.end() + 80)].split("\n")[0]
         window = f"{window_before}{raw_str}{window_after}"
 
-        is_alpha_cutoff = val in (0.05, 0.01, 0.001, 0.005, 0.0001) and bool(
-            re.search(
-                r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff)\b",
-                window,
-                re.IGNORECASE,
-            )
-            and not (
-                re.search(r"\bp\s*(?:-\s*value\s*)?=\s*$", window_before, re.IGNORECASE)
-                and not re.search(
-                    r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff)\b",
-                    window_before,
-                    re.IGNORECASE,
-                )
-            )
-        )
         p_ineq_match = re.search(
             r"\bp\s*(?:[-_\s]*value\s*)?([<>]=?|[≤≥])\s*$", window_before, re.IGNORECASE
+        )
+        is_alpha_cutoff = (
+            not p_ineq_match
+            and val in (0.05, 0.01, 0.001, 0.005, 0.0001)
+            and bool(
+                re.search(
+                    r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff)\b",
+                    window,
+                    re.IGNORECASE,
+                )
+                and not re.search(r"\bp\s*(?:-\s*value\s*)?=\s*$", window_before, re.IGNORECASE)
+            )
         )
         p_val = val / 100.0 if has_pct else val
         p_inequality = None

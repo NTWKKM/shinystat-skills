@@ -6,21 +6,34 @@ This reference provides self-contained, standalone Python recipes for generating
 
 ## 1. Strict Mathematical Reconciliation Invariant
 
-Every flow diagram must satisfy mathematical reconciliation:
-$$\text{Assessed} - \sum \text{Excluded} = \text{Randomized} = \sum \text{Allocated}$$
-$$\text{Allocated} = \text{Analyzed} + \text{Excluded from Analysis}$$
+Every clinical flow diagram must satisfy mathematical reconciliation before rendering:
 
-If values do not sum exactly, an exception must be raised to prevent reporting discrepancies.
+### A. Randomized Controlled Trials (CONSORT 2025/2010)
+$$\text{Assessed} - \sum \text{Excluded} = \text{Randomized} = \sum \text{Allocated}$$
+For each trial arm $i$:
+$$\text{Allocated}_i = \text{Analyzed}_i + \text{Lost to Follow-up}_i + \text{Discontinued Intervention}_i + \text{Excluded from Analysis}_i$$
+
+### B. Observational Cohort Studies (STROBE)
+$$\text{Retained}_{k} - \text{Excluded}_{k+1} = \text{Retained}_{k+1}$$
+
+### C. Systematic Reviews & Meta-Analyses (PRISMA 2020)
+$$\text{Identified} - \text{Duplicates Removed} = \text{Screened}$$
+$$\text{Screened} - \text{Excluded Screening} = \text{Reports Sought for Retrieval}$$
+$$\text{Reports Sought} - \text{Reports Not Retrieved} = \text{Assessed for Eligibility}$$
+$$\text{Assessed for Eligibility} - \sum \text{Excluded Eligibility} = \text{Included Studies}$$
+
+All participant counts must be non-negative integers ($\ge 0$). If any equation does not balance exactly, a `ValueError` must be raised.
 
 ---
 
-## 2. Recipe: Standalone CONSORT 2025 Flow Diagram
+## 2. Recipe: Standalone CONSORT 2025/2010 Flow Diagram
 
 ```python
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyBboxPatch
 import numpy as np
 from pathlib import Path
+import textwrap
 
 def draw_standalone_consort_rct(
     assessed: int,
@@ -33,73 +46,126 @@ def draw_standalone_consort_rct(
     """
     Renders an audit-reconciled CONSORT 2025/2010 flow diagram using pure matplotlib.
     """
+    if str(version) not in ("2025", "2010"):
+        raise ValueError(f"Unsupported CONSORT version '{version}'. Supported: '2025', '2010'")
+    if assessed < 0 or any(v < 0 for v in excluded.values()):
+        raise ValueError("Participant counts must be non-negative integers")
+    if len(arms) not in (2, 3):
+        raise ValueError(f"Only 2-arm and 3-arm trials are currently supported (got {len(arms)})")
+
     n_ex = sum(excluded.values())
     n_rand = assessed - n_ex
     n_alloc = sum(a["allocated"] for a in arms)
     if n_rand != n_alloc:
         raise ValueError(f"CONSORT reconciliation mismatch: randomized ({n_rand}) != allocated ({n_alloc})")
 
-    fig, ax = plt.subplots(figsize=(7.0, 8.5), dpi=300)
-    ax.set_xlim(0, 100)
-    ax.set_ylim(0, 100)
-    ax.axis("off")
-
-    def box(cx, cy, w, h, title, subtitle=None, fc="#FFFFFF", ec="#222222"):
-        rect = FancyBboxPatch(
-            (cx - w / 2, cy - h / 2), w, h,
-            boxstyle="square,pad=0",
-            facecolor=fc, edgecolor=ec, linewidth=0.8,
-        )
-        ax.add_patch(rect)
-        if subtitle:
-            ax.text(cx, cy + h * 0.18, title, ha="center", va="center", fontsize=8.0, fontweight="bold", color="#111111")
-            ax.text(cx, cy - h * 0.20, subtitle, ha="center", va="center", fontsize=7.5, color="#333333")
-        else:
-            ax.text(cx, cy, title, ha="center", va="center", fontsize=8.0, fontweight="bold", color="#111111")
-        return cx, cy
-
-    def arrow(x0, y0, x1, y1):
-        ax.annotate(
-            "", xy=(x1, y1), xytext=(x0, y0),
-            arrowprops=dict(arrowstyle="->", color="#222222", lw=0.9),
-        )
-
-    # 1. Enrollment
-    box(45, 94, 38, 6, "Assessed for eligibility", f"(N = {assessed:,})")
-    arrow(45, 91, 45, 80)
-    
-    # Excluded box
-    excl_lines = [f"\u2022 {k} (n = {v:,})" for k, v in excluded.items()]
-    box(78, 85, 30, 8, f"Excluded (n = {n_ex:,})", "\n".join(excl_lines[:2]))
-    arrow(45, 85, 63, 85)
-
-    # 2. Randomized
-    box(45, 77, 34, 6, "Randomized" if version == "2025" else "Randomised", f"(N = {n_rand:,})")
-
-    # Split to arms
-    arrow(45, 74, 25, 66)
-    arrow(45, 74, 75, 66)
-
-    # 3. Allocation
-    for idx, (arm, cx) in enumerate(zip(arms, [25, 75])):
-        box(cx, 63, 40, 6, f"Allocated to {arm['name']}", f"(n = {arm['allocated']:,})")
-        arrow(cx, 60, cx, 48)
-        
-        # Follow-up
+    # Arm-level mathematical reconciliation check
+    for arm in arms:
+        if arm["allocated"] < 0 or arm["analyzed"] < 0:
+            raise ValueError("Arm counts must be non-negative integers")
         lo = sum(arm.get("lost", {}).values()) if isinstance(arm.get("lost"), dict) else arm.get("lost", 0)
         di = sum(arm.get("discontinued", {}).values()) if isinstance(arm.get("discontinued"), dict) else arm.get("discontinued", 0)
-        box(cx, 44, 40, 7, "Follow-Up", f"\u2022 Lost to follow-up (n = {lo})\n\u2022 Discontinued (n = {di})")
-        arrow(cx, 40.5, cx, 28)
+        ex_an = sum(arm.get("excluded_from_analysis", {}).values()) if isinstance(arm.get("excluded_from_analysis"), dict) else arm.get("excluded_from_analysis", 0)
+        expected_alloc = arm["analyzed"] + lo + di + ex_an
+        if arm["allocated"] != expected_alloc:
+            raise ValueError(
+                f"Arm '{arm.get('name')}' reconciliation mismatch: allocated ({arm['allocated']}) "
+                f"!= analyzed ({arm['analyzed']}) + lost ({lo}) + discontinued ({di}) + excluded_from_analysis ({ex_an})"
+            )
 
-        # Analysis (2025: itemized primary outcome)
-        po = " for primary outcome" if version == "2025" else ""
-        box(cx, 24, 40, 7, f"Analysed{po}", f"(n = {arm['analyzed']:,})")
+    journal_colors = {
+        "NEJM": "#002D62",
+        "JAMA": "#005A9C",
+        "LANCET": "#EE1C25",
+        "BMJ": "#003B5C",
+        "CLINICAL": "#2B6CB0",
+    }
+    accent_color = journal_colors.get(journal.upper(), "#222222")
 
-    p = Path(out_path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(p, dpi=600, bbox_inches="tight")
-    plt.close(fig)
-    return str(p)
+    fig, ax = plt.subplots(figsize=(7.5 if len(arms) == 2 else 9.5, 8.5), dpi=300)
+    try:
+        ax.set_xlim(0, 100)
+        ax.set_ylim(0, 100)
+        ax.axis("off")
+
+        def box(cx, cy, w, h, title, subtitle=None, fc="#FFFFFF", ec=accent_color):
+            rect = FancyBboxPatch(
+                (cx - w / 2, cy - h / 2), w, h,
+                boxstyle="square,pad=0",
+                facecolor=fc, edgecolor=ec, linewidth=0.9,
+            )
+            ax.add_patch(rect)
+            if subtitle:
+                ax.text(cx, cy + h * 0.20, title, ha="center", va="center", fontsize=8.0, fontweight="bold", color="#111111")
+                ax.text(cx, cy - h * 0.18, subtitle, ha="center", va="center", fontsize=7.0, color="#333333")
+            else:
+                ax.text(cx, cy, title, ha="center", va="center", fontsize=8.0, fontweight="bold", color="#111111")
+            return cx, cy
+
+        def arrow(x0, y0, x1, y1):
+            ax.annotate(
+                "", xy=(x1, y1), xytext=(x0, y0),
+                arrowprops=dict(arrowstyle="->", color=accent_color, lw=0.9),
+            )
+
+        # 1. Enrollment
+        box(45, 94, 38, 6, "Assessed for eligibility", f"(N = {assessed:,})")
+        arrow(45, 91, 45, 80)
+
+        # Excluded box with all exclusion reasons rendered
+        excl_lines = [f"\u2022 {k} (n = {v:,})" for k, v in excluded.items()]
+        excl_text = "\n".join(excl_lines)
+        h_excl = max(8, 2.5 + len(excl_lines) * 2.2)
+        box(78, 85, 32, h_excl, f"Excluded (n = {n_ex:,})", excl_text)
+        arrow(45, 85, 62, 85)
+
+        # 2. Randomized
+        box(45, 77, 34, 6, "Randomized" if version == "2025" else "Randomised", f"(N = {n_rand:,})")
+
+        # 3. Allocation & Follow-up
+        cx_coords = [25, 75] if len(arms) == 2 else [18, 50, 82]
+        arm_w = 38 if len(arms) == 2 else 28
+
+        for arm, cx in zip(arms, cx_coords):
+            arrow(45, 74, cx, 66)
+            box(cx, 63, arm_w, 6, f"Allocated to {arm['name']}", f"(n = {arm['allocated']:,})")
+            arrow(cx, 60, cx, 49)
+
+            # Detailed follow-up reasons
+            lo_dict = arm.get("lost") if isinstance(arm.get("lost"), dict) else {}
+            di_dict = arm.get("discontinued") if isinstance(arm.get("discontinued"), dict) else {}
+            lo = sum(lo_dict.values()) if lo_dict else arm.get("lost", 0)
+            di = sum(di_dict.values()) if di_dict else arm.get("discontinued", 0)
+
+            fu_lines = [f"\u2022 Lost to follow-up (n = {lo})"]
+            for r_k, r_v in lo_dict.items():
+                fu_lines.append(f"   - {r_k} (n = {r_v})")
+            fu_lines.append(f"\u2022 Discontinued intervention (n = {di})")
+            for r_k, r_v in di_dict.items():
+                fu_lines.append(f"   - {r_k} (n = {r_v})")
+
+            fu_text = "\n".join(fu_lines)
+            h_fu = max(7, 3.0 + len(fu_lines) * 1.8)
+            box(cx, 44, arm_w, h_fu, "Follow-Up", fu_text)
+            arrow(cx, 44 - h_fu / 2, cx, 28)
+
+            # Analysis
+            po = " for primary outcome" if version == "2025" else ""
+            ex_an_dict = arm.get("excluded_from_analysis") if isinstance(arm.get("excluded_from_analysis"), dict) else {}
+            ex_an = sum(ex_an_dict.values()) if ex_an_dict else arm.get("excluded_from_analysis", 0)
+            an_lines = [f"(n = {arm['analyzed']:,})"]
+            if ex_an > 0:
+                an_lines.append(f"\u2022 Excluded from analysis (n = {ex_an})")
+                for r_k, r_v in ex_an_dict.items():
+                    an_lines.append(f"   - {r_k} (n = {r_v})")
+            box(cx, 24, arm_w, max(7, 3.0 + len(an_lines) * 1.8), f"Analysed{po}", "\n".join(an_lines))
+
+        p = Path(out_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(p, dpi=600, bbox_inches="tight")
+        return str(p)
+    finally:
+        plt.close(fig)
 ```
 
 ---
@@ -107,6 +173,11 @@ def draw_standalone_consort_rct(
 ## 3. Recipe: Standalone STROBE Observational Flow
 
 ```python
+import matplotlib.pyplot as plt
+from matplotlib.patches import FancyBboxPatch
+from pathlib import Path
+import textwrap
+
 def draw_standalone_strobe_flow(
     stages: list[tuple[str, int, int, str]],  # (stage_name, retained_n, excluded_n, exclusion_reason)
     out_path: str = "figures/strobe_flow.png",
@@ -114,35 +185,167 @@ def draw_standalone_strobe_flow(
     """
     Renders an audit-reconciled sequential cohort exclusion flow diagram.
     """
+    # Reconcile adjacent stages: previous - excluded == retained
+    for idx in range(len(stages) - 1):
+        curr_name, curr_retain, _, _ = stages[idx]
+        next_name, next_retain, next_ex, _ = stages[idx + 1]
+        if curr_retain - next_ex != next_retain:
+            raise ValueError(
+                f"STROBE reconciliation mismatch between '{curr_name}' and '{next_name}': "
+                f"previous ({curr_retain}) - excluded ({next_ex}) != retained ({next_retain})"
+            )
+
     fig, ax = plt.subplots(figsize=(6.5, 2.0 + len(stages) * 1.5), dpi=300)
-    ax.set_xlim(0, 100)
-    ax.set_ylim(0, len(stages) * 20 + 10)
-    ax.axis("off")
+    try:
+        ax.set_xlim(0, 100)
+        ax.set_ylim(0, len(stages) * 20 + 10)
+        ax.axis("off")
 
-    y_cursor = len(stages) * 20
-    for idx, (name, n_retain, n_ex, reason) in enumerate(stages):
-        # Center cohort box
-        rect = FancyBboxPatch((20, y_cursor - 6), 40, 10, boxstyle="square,pad=0", fc="#FFFFFF", ec="#222222", lw=0.8)
-        ax.add_patch(rect)
-        ax.text(40, y_cursor - 0.5, name, ha="center", va="center", fontsize=8.0, fontweight="bold")
-        ax.text(40, y_cursor - 4.0, f"(N = {n_retain:,})", ha="center", va="center", fontsize=7.5, color="#333333")
+        y_cursor = len(stages) * 20
+        for idx, (name, n_retain, n_ex, reason) in enumerate(stages):
+            # Center cohort box
+            rect = FancyBboxPatch((20, y_cursor - 6), 40, 10, boxstyle="square,pad=0", fc="#FFFFFF", ec="#222222", lw=0.8)
+            ax.add_patch(rect)
+            ax.text(40, y_cursor - 0.5, name, ha="center", va="center", fontsize=8.0, fontweight="bold")
+            ax.text(40, y_cursor - 4.0, f"(N = {n_retain:,})", ha="center", va="center", fontsize=7.5, color="#333333")
 
-        # Excluded side box if n_ex > 0
-        if n_ex > 0:
-            ax.annotate("", xy=(68, y_cursor - 1), xytext=(60, y_cursor - 1), arrowprops=dict(arrowstyle="->", color="#222222", lw=0.9))
-            ex_rect = FancyBboxPatch((68, y_cursor - 6), 28, 8, boxstyle="square,pad=0", fc="#F8F9FA", ec="#777777", lw=0.7)
-            ax.add_patch(ex_rect)
-            ax.text(82, y_cursor - 1.5, f"Excluded (n = {n_ex:,})", ha="center", va="center", fontsize=7.0, fontweight="bold")
-            ax.text(82, y_cursor - 4.5, reason, ha="center", va="center", fontsize=6.5, color="#555555")
+            # Excluded side box if n_ex > 0
+            if n_ex > 0:
+                ax.annotate("", xy=(68, y_cursor - 1), xytext=(60, y_cursor - 1), arrowprops=dict(arrowstyle="->", color="#222222", lw=0.9))
+                wrapped_reason = textwrap.fill(reason, width=28)
+                line_count = len(wrapped_reason.split('\n'))
+                box_h = max(8, 3.0 + line_count * 2.0)
+                ex_rect = FancyBboxPatch((68, y_cursor - box_h / 2 - 1), 30, box_h, boxstyle="square,pad=0", fc="#F8F9FA", ec="#777777", lw=0.7)
+                ax.add_patch(ex_rect)
+                ax.text(83, y_cursor + box_h * 0.15 - 1, f"Excluded (n = {n_ex:,})", ha="center", va="center", fontsize=7.0, fontweight="bold")
+                ax.text(83, y_cursor - box_h * 0.20 - 1, wrapped_reason, ha="center", va="center", fontsize=6.5, color="#555555")
 
-        if idx < len(stages) - 1:
-            ax.annotate("", xy=(40, y_cursor - 16), xytext=(40, y_cursor - 6), arrowprops=dict(arrowstyle="->", color="#222222", lw=0.9))
+            if idx < len(stages) - 1:
+                ax.annotate("", xy=(40, y_cursor - 16), xytext=(40, y_cursor - 6), arrowprops=dict(arrowstyle="->", color="#222222", lw=0.9))
 
-        y_cursor -= 18
+            y_cursor -= 18
 
-    p = Path(out_path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(p, dpi=600, bbox_inches="tight")
-    plt.close(fig)
-    return str(p)
+        p = Path(out_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(p, dpi=600, bbox_inches="tight")
+        return str(p)
+    finally:
+        plt.close(fig)
+```
+
+---
+
+## 4. Recipe: Standalone PRISMA 2020 Systematic Review Flow
+
+```python
+import matplotlib.pyplot as plt
+from matplotlib.patches import FancyBboxPatch
+from pathlib import Path
+import textwrap
+
+def draw_standalone_prisma_flow(
+    identified_databases: int,
+    duplicates_removed: int,
+    screened: int,
+    screen_excluded: int,
+    retrieval_sought: int,
+    not_retrieved: int,
+    assessed_eligibility: int,
+    excluded_eligibility: dict[str, int],
+    included_studies: int,
+    included_reports: int = None,
+    out_path: str = "figures/prisma_flow.png",
+):
+    """
+    Renders an audit-reconciled PRISMA 2020 systematic review flow diagram.
+    """
+    if identified_databases < 0 or duplicates_removed < 0 or screened < 0 or screen_excluded < 0:
+        raise ValueError("PRISMA counts must be non-negative integers")
+
+    # 1. Identification reconciliation
+    if identified_databases - duplicates_removed != screened:
+        raise ValueError(
+            f"PRISMA Identification mismatch: identified ({identified_databases}) - duplicates ({duplicates_removed}) "
+            f"!= screened ({screened})"
+        )
+    # 2. Screening reconciliation
+    if screened - screen_excluded != retrieval_sought:
+        raise ValueError(
+            f"PRISMA Screening mismatch: screened ({screened}) - excluded ({screen_excluded}) "
+            f"!= reports sought ({retrieval_sought})"
+        )
+    # 3. Retrieval reconciliation
+    if retrieval_sought - not_retrieved != assessed_eligibility:
+        raise ValueError(
+            f"PRISMA Retrieval mismatch: sought ({retrieval_sought}) - not retrieved ({not_retrieved}) "
+            f"!= assessed ({assessed_eligibility})"
+        )
+    # 4. Eligibility reconciliation
+    n_ex_el = sum(excluded_eligibility.values())
+    if assessed_eligibility - n_ex_el != included_studies:
+        raise ValueError(
+            f"PRISMA Eligibility mismatch: assessed ({assessed_eligibility}) - excluded ({n_ex_el}) "
+            f"!= included ({included_studies})"
+        )
+
+    fig, ax = plt.subplots(figsize=(8.0, 9.5), dpi=300)
+    try:
+        ax.set_xlim(0, 100)
+        ax.set_ylim(0, 100)
+        ax.axis("off")
+
+        def box(cx, cy, w, h, title, subtitle=None, fc="#FFFFFF", ec="#2B6CB0"):
+            rect = FancyBboxPatch(
+                (cx - w / 2, cy - h / 2), w, h,
+                boxstyle="square,pad=0",
+                facecolor=fc, edgecolor=ec, linewidth=0.9,
+            )
+            ax.add_patch(rect)
+            if subtitle:
+                ax.text(cx, cy + h * 0.20, title, ha="center", va="center", fontsize=8.0, fontweight="bold", color="#111111")
+                ax.text(cx, cy - h * 0.18, subtitle, ha="center", va="center", fontsize=7.0, color="#333333")
+            else:
+                ax.text(cx, cy, title, ha="center", va="center", fontsize=8.0, fontweight="bold", color="#111111")
+            return cx, cy
+
+        def arrow(x0, y0, x1, y1):
+            ax.annotate("", xy=(x1, y1), xytext=(x0, y0), arrowprops=dict(arrowstyle="->", color="#2B6CB0", lw=0.9))
+
+        # 1. Identification
+        box(35, 93, 46, 7, "Records identified from databases", f"(n = {identified_databases:,})")
+        box(75, 84, 34, 7, "Duplicate records removed", f"(n = {duplicates_removed:,})")
+        arrow(35, 89.5, 75, 87.5)
+        arrow(35, 89.5, 35, 76.5)
+
+        # 2. Screening
+        box(35, 73, 46, 7, "Records screened", f"(n = {screened:,})")
+        box(75, 73, 34, 7, "Records excluded", f"(n = {screen_excluded:,})")
+        arrow(58, 73, 58, 73)
+        arrow(35, 69.5, 35, 56.5)
+
+        # 3. Retrieval
+        box(35, 53, 46, 7, "Reports sought for retrieval", f"(n = {retrieval_sought:,})")
+        box(75, 53, 34, 7, "Reports not retrieved", f"(n = {not_retrieved:,})")
+        arrow(35, 49.5, 35, 36.5)
+
+        # 4. Eligibility
+        box(35, 33, 46, 7, "Reports assessed for eligibility", f"(n = {assessed_eligibility:,})")
+        excl_lines = [f"\u2022 {k} (n = {v:,})" for k, v in excluded_eligibility.items()]
+        h_excl = max(8, 3.0 + len(excl_lines) * 2.0)
+        box(75, 33, 36, h_excl, f"Reports excluded (n = {n_ex_el:,})", "\n".join(excl_lines))
+        arrow(58, 33, 57, 33)
+        arrow(35, 29.5, 35, 14.5)
+
+        # 5. Included
+        inc_sub = f"Studies included in review: {included_studies:,}"
+        if included_reports:
+            inc_sub += f"\nReports of included studies: {included_reports:,}"
+        box(35, 10, 46, 8, "New studies included in review", inc_sub)
+
+        p = Path(out_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(p, dpi=600, bbox_inches="tight")
+        return str(p)
+    finally:
+        plt.close(fig)
 ```

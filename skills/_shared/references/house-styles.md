@@ -115,6 +115,7 @@ def apply_standalone_journal_theme(
         "axes.edgecolor": "#222222",
         "axes.linewidth": spec["spine_lw"],
         "axes.facecolor": bg,
+        "axes.prop_cycle": mpl.cycler(color=spec["palette"]),
         "figure.facecolor": bg,
         "savefig.facecolor": bg,
         "xtick.direction": spec["tick_dir"],
@@ -134,6 +135,9 @@ def apply_standalone_journal_theme(
     return spec
 
 
+apply_journal_style = apply_standalone_journal_theme
+
+
 def style_standalone_axis(ax, journal: str = "NEJM") -> None:
     """Applies L-frame spine, dotted grid (JAMA/CLINICAL), and Lancet mid-dot ticks."""
     j_key = journal.upper() if journal and journal.upper() in JOURNAL_SPECS else "NEJM"
@@ -146,8 +150,19 @@ def style_standalone_axis(ax, journal: str = "NEJM") -> None:
     else:
         ax.grid(False)
     if j_key == "LANCET":
-        ax.xaxis.set_major_formatter(mpl.ticker.FuncFormatter(lambda x, _: f"{x:g}".replace(".", "\u00b7")))
-        ax.yaxis.set_major_formatter(mpl.ticker.FuncFormatter(lambda y, _: f"{y:g}".replace(".", "\u00b7")))
+        # Apply mid-dot replacement strictly to numeric continuous formatters, preserving category and date labels
+        def _lancet_num(val, pos):
+            try:
+                if isinstance(val, (int, float, np.number)):
+                    return f"{val:g}".replace(".", "\u00b7")
+            except Exception:
+                pass
+            return str(val)
+
+        if isinstance(ax.xaxis.get_major_formatter(), (mpl.ticker.ScalarFormatter, mpl.ticker.NullFormatter)):
+            ax.xaxis.set_major_formatter(mpl.ticker.FuncFormatter(_lancet_num))
+        if isinstance(ax.yaxis.get_major_formatter(), (mpl.ticker.ScalarFormatter, mpl.ticker.NullFormatter)):
+            ax.yaxis.set_major_formatter(mpl.ticker.FuncFormatter(_lancet_num))
 ```
 
 ---
@@ -190,11 +205,18 @@ def save_standalone_bundle(fig, out_path: str, source_df=None, dpi: int = 300) -
     png_path = p.with_suffix(".png")
     pdf_path = p.with_suffix(".pdf")
     svg_path = p.with_suffix(".svg")
+    mpl.rcParams["pdf.fonttype"] = 42
     fig.savefig(png_path, dpi=dpi, bbox_inches="tight", facecolor=fig.get_facecolor())
     fig.savefig(pdf_path, format="pdf", bbox_inches="tight", facecolor=fig.get_facecolor())
     fig.savefig(svg_path, format="svg", bbox_inches="tight", facecolor=fig.get_facecolor())
-    csv_path = p.with_name(p.stem + "_source.csv")
+
+    csv_str = None
     if source_df is not None:
-        source_df.to_csv(csv_path, index=False)
-    return {"png_path": str(png_path), "vector_path": str(pdf_path), "svg_path": str(svg_path), "csv_path": str(csv_path)}
+        csv_path = p.with_name(p.stem + "_source.csv")
+        # Preserve plotted index coordinates (e.g. survival times or cutpoints) if non-trivial
+        has_index = source_df.index.name is not None or not isinstance(source_df.index, pd.RangeIndex)
+        source_df.to_csv(csv_path, index=has_index)
+        csv_str = str(csv_path)
+
+    return {"png_path": str(png_path), "vector_path": str(pdf_path), "svg_path": str(svg_path), "csv_path": csv_str}
 ```

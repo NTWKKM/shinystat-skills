@@ -6,6 +6,7 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -158,13 +159,30 @@ def test_shinystat_cloud_canonical_skill_exists_and_valid():
         "Cloud figures.md must not contain any medstat imports"
     )
 
-    # References existence check: verify all references linked in body exist under canonical references
-    ref_links = set(re.findall(r"references/([\w.-]+\.md)", body))
-    assert ref_links, "Expected at least one reference linked in SKILL.md body"
-    for ref_name in sorted(ref_links):
-        assert (canonical_cloud / "references" / ref_name).exists(), (
-            f"Linked reference '{ref_name}' missing from {canonical_cloud / 'references'}"
+    # References existence check: verify all references and fragments linked in body exist
+    raw_ref_links = set(re.findall(r"\(references/([^)]+)\)", body))
+    assert raw_ref_links, "Expected at least one reference linked in SKILL.md body"
+    for link in sorted(raw_ref_links):
+        rel_file, fragment = link.split("#", 1) if "#" in link else (link, None)
+        target_path = canonical_cloud / "references" / rel_file
+        assert target_path.exists(), (
+            f"Linked reference '{rel_file}' missing from {canonical_cloud / 'references'}"
         )
+        if fragment:
+            doc_headings = re.findall(
+                r"^#+\s+(.+)$",
+                target_path.read_text(encoding="utf-8"),
+                flags=re.MULTILINE,
+            )
+            slugs = [
+                re.sub(
+                    r"\s", "-", re.sub(r"[^\w\s-]", "", re.sub(r"[`*_]", "", h).lower())
+                )
+                for h in doc_headings
+            ]
+            assert fragment in slugs, (
+                f"Linked fragment '#{fragment}' not found in {rel_file} headings"
+            )
 
     recipes_dir = cloud_skill.parent / "references" / "recipes"
     for r_num in range(1, 6):
@@ -308,6 +326,8 @@ def test_src_medstat_and_skills_bundled_medstat_byte_identical():
 def test_sync_skills_script_execution_and_drift_check():
     """Verify scripts/sync-skills.sh --check executes cleanly with zero git drift."""
     repo_root = Path(__file__).resolve().parent.parent.parent
+    if not (repo_root / ".git").exists():
+        pytest.skip("Drift check requires a Git working tree")
     sync_script = repo_root / "scripts" / "sync-skills.sh"
     assert sync_script.exists(), "scripts/sync-skills.sh not found"
 

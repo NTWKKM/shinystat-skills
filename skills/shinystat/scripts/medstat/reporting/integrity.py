@@ -235,7 +235,7 @@ def _is_structural_context(
         if re.search(r"\b(?:CI|confidence|credible)\b", window, re.IGNORECASE):
             return True
 
-    # 2. Alpha thresholds and p-value cutoffs (e.g., alpha = 0.05, significance threshold p < 0.05)
+    # 2. Alpha thresholds and p-value cutoffs (e.g., alpha = 0.05, significance threshold 0.05)
     if val in (0.05, 0.01, 0.001, 0.005, 0.0001):
         has_threshold_kw = bool(
             re.search(
@@ -252,7 +252,14 @@ def _is_structural_context(
                 re.IGNORECASE,
             )
         )
-        if has_threshold_kw and not is_direct_p_eq:
+        is_p_ineq = bool(
+            re.search(
+                r"\bp\s*(?:[-_\s]*value\s*)?([<>]=?|[≤≥])\s*$",
+                window_before,
+                re.IGNORECASE,
+            )
+        )
+        if has_threshold_kw and not is_direct_p_eq and not is_p_ineq:
             return True
 
     # 3. Calendar & Publication years (1900-2035) when preceded by date or journal/citation context
@@ -482,8 +489,7 @@ def verify_report_integrity(
     # 2. Numerical Traceability
     known_numbers = _flatten_numbers(doc.results_dict)
     qualified_p_values = _extract_qualified_p_values(doc.results_dict)
-    if not qualified_p_values:
-        qualified_p_values = [(None, kn) for kn in known_numbers if 0.0 <= kn <= 1.0]
+    # Require an actual identified p-value in results_dict to support p-value inequalities
     allowed_list = (
         [float(x) for x in allowed_untraced] if allowed_untraced is not None else []
     )
