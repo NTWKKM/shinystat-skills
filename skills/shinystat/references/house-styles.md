@@ -151,18 +151,15 @@ def style_standalone_axis(ax, journal: str = "NEJM") -> None:
         ax.grid(False)
     if j_key == "LANCET":
         # Apply mid-dot replacement strictly to numeric continuous formatters, preserving category and date labels
-        def _lancet_num(val, pos):
-            try:
-                if isinstance(val, (int, float, np.number)):
-                    return f"{val:g}".replace(".", "\u00b7")
-            except Exception:
-                pass
-            return str(val)
+        class LancetFormatter(mpl.ticker.ScalarFormatter):
+            def __call__(self, x, pos=None):
+                res = super().__call__(x, pos)
+                return res.replace(".", "\u00b7") if isinstance(res, str) else res
 
         if isinstance(ax.xaxis.get_major_formatter(), (mpl.ticker.ScalarFormatter, mpl.ticker.NullFormatter)):
-            ax.xaxis.set_major_formatter(mpl.ticker.FuncFormatter(_lancet_num))
+            ax.xaxis.set_major_formatter(LancetFormatter())
         if isinstance(ax.yaxis.get_major_formatter(), (mpl.ticker.ScalarFormatter, mpl.ticker.NullFormatter)):
-            ax.yaxis.set_major_formatter(mpl.ticker.FuncFormatter(_lancet_num))
+            ax.yaxis.set_major_formatter(LancetFormatter())
 ```
 
 ---
@@ -198,6 +195,11 @@ def format_standalone_p(p: float, journal: str = "NEJM") -> str:
 ## 4. Recipe: Exporting Multi-Format Bundle (PNG, TrueType PDF, SVG, CSV)
 
 ```python
+from pathlib import Path
+import matplotlib as mpl
+import pandas as pd
+
+
 def save_standalone_bundle(fig, out_path: str, source_df=None, dpi: int = 300) -> dict:
     """Saves 300/600 DPI PNG, TrueType vector PDF (fonttype=42), SVG, and traceable _source.csv."""
     p = Path(out_path)

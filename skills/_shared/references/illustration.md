@@ -213,5 +213,11 @@ def draw_standalone_signaling_pathway(
         ax.add_patch(rect)
         ax.text(x, start_y, name, ha="center", va="center", fontsize=7.5, fontweight="bold", color="#1B4F72")
         if idx < len(steps) - 1:
-            ax.annotate("", xy=(x + 12, start_y), xytext=(x + 7.5, start_y), arrowprops=dict(arrowstyle="->", color="#2980B9", lw=1.2))
+            ax.annotate("", xy=(x + step_dx - 7.5, start_y), xytext=(x + 7.5, start_y), arrowprops=dict(arrowstyle="->", color="#2980B9", lw=1.2))
+
+    if steps:
+        min_x = start_x - 10.0
+        max_x = start_x + (len(steps) - 1) * step_dx + 10.0
+        ax.update_datalim([(min_x, start_y - 10.0), (max_x, start_y + 10.0)])
+        ax.autoscale_view()
 ```

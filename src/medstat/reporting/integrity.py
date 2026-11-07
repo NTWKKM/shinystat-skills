@@ -254,12 +254,23 @@ def _is_structural_context(
         )
         is_p_ineq = bool(
             re.search(
-                r"\bp\s*(?:[-_\s]*value\s*)?([<>]=?|[≤≥])\s*$",
+                r"\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+[a-zA-Z_-]+\)?|\(?[a-zA-Z_-]+\)?))?\s*([<>]=?|[≤≥])\s*$",
                 window_before,
                 re.IGNORECASE,
             )
         )
-        if has_threshold_kw and not is_direct_p_eq and not is_p_ineq:
+        is_threshold_def = bool(
+            re.search(
+                r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff|prespecified|defined\s+as)\b[^.;:]*?\bp(?=[-_\s(\<>=≤≥]).*?([<>]=?|[≤≥])\s*$",
+                window_before,
+                re.IGNORECASE,
+            )
+        )
+        if (
+            has_threshold_kw
+            and not is_direct_p_eq
+            and (not is_p_ineq or is_threshold_def)
+        ):
             return True
 
     # 3. Calendar & Publication years (1900-2035) when preceded by date or journal/citation context
@@ -396,7 +407,9 @@ def _extract_text_tokens(text: str) -> list[TextToken]:
             doc_has_references=doc_has_references,
         )
         p_ineq_match = re.search(
-            r"\bp\s*(?:[-_\s]*value\s*)?([<>]=?|[≤≥])\s*$", window_before, re.IGNORECASE
+            r"\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+[a-zA-Z_-]+\)?|\(?[a-zA-Z_-]+\)?))?\s*([<>]=?|[≤≥])\s*$",
+            window_before,
+            re.IGNORECASE,
         )
         p_val = val / 100.0 if has_pct else val
         p_inequality: str | None = None

@@ -32,8 +32,8 @@ def generate_markdown_report(
     title: str,
     results: dict,
     tables: dict[str, pd.DataFrame],
-    figure_paths: list[str] = None,
     out_path: str = "report.md",
+    figure_paths: list[str] = None,
 ) -> str:
     lines = [
         f"# {title}\n",
@@ -57,14 +57,21 @@ def generate_markdown_report(
             rows = ["| " + " | ".join(str(val) for val in row) + " |" for _, row in df.iterrows()]
             lines.append("\n".join([hdr, sep] + rows) + "\n")
 
+    out_p = Path(out_path)
+    out_dir = out_p.parent.resolve()
+
     # Figures
     if figure_paths:
         lines.append("\n## Figures\n")
         for fp in figure_paths:
             p = Path(fp)
-            lines.append(f"![{p.stem}]" + f"({fp})\n")
+            try:
+                rel_path = p.resolve().relative_to(out_dir).as_posix()
+            except ValueError:
+                rel_path = p.name
+            escaped_link = rel_path.replace(" ", "%20")
+            lines.append(f"![{p.stem}]" + f"({escaped_link})\n")
 
-    out_p = Path(out_path)
     out_p.parent.mkdir(parents=True, exist_ok=True)
     out_p.write_text("\n".join(lines), encoding="utf-8")
     return str(out_p)
@@ -79,6 +86,7 @@ import base64
 import html
 import json
 from pathlib import Path
+import re
 import pandas as pd
 
 
@@ -108,6 +116,10 @@ def generate_html_report(
         "  table.pub-table thead tr { border-top: 2px solid #0f172a; border-bottom: 1px solid #0f172a; }",
         "  table.pub-table tbody tr:last-child { border-bottom: 2px solid #0f172a; }",
         "  table.pub-table th, table.pub-table td { padding: 8px 12px; text-align: left; }",
+        "  sup.citation { font-size: 11px; vertical-align: super; line-height: 0; }",
+        "  sup.citation a { text-decoration: none; color: #0284c7; font-weight: 600; }",
+        "  ol.references-list { padding-left: 20px; font-size: 13.5px; color: #334155; }",
+        "  ol.references-list li { margin-bottom: 6px; }",
         "  .figure-card { margin: 30px 0; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; background: #fff; }",
         "  .figure-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; flex-wrap: wrap; gap: 8px; }",
         "  .fig-tabs { display: inline-flex; background: #e2e8f0; border-radius: 6px; padding: 2px; }",
@@ -124,14 +136,27 @@ def generate_html_report(
     ])
 
     # Narrative with Citation Links
+    referenced_ids = set()
     if "narrative" in results:
-        narr = html.escape(str(results["narrative"]))
+        raw_narr = str(results["narrative"])
+        for m in re.finditer(r"\[(\d+(?:,\s*\d+)*)\]", raw_narr):
+            for n_str in m.group(1).split(","):
+                referenced_ids.add(int(n_str.strip()))
+        for m in re.finditer(r"<sup[^>]*>.*?(\d+).*?</sup>", raw_narr):
+            for n_str in re.findall(r"\d+", m.group(0)):
+                referenced_ids.add(int(n_str))
+
+        narr = html.escape(raw_narr)
         # Convert in-text citation markers [1] or [1, 2] to anchor links
         narr = re.sub(
             r"\[(\d+(?:,\s*\d+)*)\]",
-            lambda m: "[" + ", ".join(f'<a href="#ref-{n.strip()}">{n.strip()}</a>' for n in m.group(1).split(",")) + "]",
+            lambda m: '<sup class="citation">'
+            + ", ".join(f'<a href="#ref-{n.strip()}">{n.strip()}</a>' for n in m.group(1).split(","))
+            + "</sup>",
             narr,
         )
+        # Preserve unescaped superscript tags if originally present
+        narr = re.sub(r"&lt;sup(.*?)&gt;(.*?)&lt;/sup&gt;", r"<sup\1>\2</sup>", narr)
         parts.append(f"<p>{narr}</p>")
 
     # Tables
@@ -210,6 +235,23 @@ def generate_html_report(
                 parts.append(f"<img src='data:{mime};base64,{b64}' alt='{escaped_stem}'>")
                 parts.append("</div>")
             parts.append("</div>")
+
+    # References
+    citations = results.get("references") or results.get("citations")
+    if citations or referenced_ids:
+        parts.append("<h2>References</h2><ol class='references-list'>")
+        if citations:
+            for idx, ref in enumerate(citations, 1):
+                ref_str = (
+                    ref.get("formatted") or ref.get("citation") or ref.get("text") or str(ref)
+                    if isinstance(ref, dict)
+                    else str(ref)
+                )
+                parts.append(f"<li id='ref-{idx}'>{html.escape(ref_str)}</li>")
+        else:
+            for idx in sorted(referenced_ids):
+                parts.append(f"<li id='ref-{idx}'>Reference {idx}</li>")
+        parts.append("</ol>")
 
     if has_plotly:
         parts.append("""
@@ -623,11 +665,11 @@ def build_plotly_calibration_spec(
                             ci_low.append(fl)
                             ci_high.append(fh)
                         else:
-                            ci_low.append(fo)
-                            ci_high.append(fo)
+                            ci_low.append(None)
+                            ci_high.append(None)
                     except (TypeError, ValueError):
-                        ci_low.append(fo)
-                        ci_high.append(fo)
+                        ci_low.append(None)
+                        ci_high.append(None)
         except (TypeError, ValueError):
             continue
 
@@ -640,10 +682,21 @@ def build_plotly_calibration_spec(
         "marker": {"size": 8, "color": "#0284C7", "symbol": "circle"},
     }
 
-    if has_ci and len(ci_low) == len(obs_rate) and any(h > o for h, o in zip(ci_high, obs_rate)):
-        error_y_plus = [h - o for h, o in zip(ci_high, obs_rate)]
-        error_y_minus = [o - l for l, o in zip(ci_low, obs_rate)]
-        customdata = [[l, h] for l, h in zip(ci_low, ci_high)]
+    if has_ci and len(ci_low) == len(obs_rate) and any(h is not None and h > o for h, o in zip(ci_high, obs_rate)):
+        error_y_plus = [
+            h - o if (h is not None and math.isfinite(h) and h >= o) else 0
+            for h, o in zip(ci_high, obs_rate)
+        ]
+        error_y_minus = [
+            o - l if (l is not None and math.isfinite(l) and o >= l) else 0
+            for l, o in zip(ci_low, obs_rate)
+        ]
+        ci_hover = [
+            f"<br>95% CI: [{l:.3f}, {h:.3f}]"
+            if (l is not None and h is not None and math.isfinite(l) and math.isfinite(h))
+            else ""
+            for l, h in zip(ci_low, ci_high)
+        ]
         obs_trace.update({
             "error_y": {
                 "type": "data",
@@ -654,13 +707,13 @@ def build_plotly_calibration_spec(
                 "thickness": 1.5,
                 "width": 4,
             },
-            "customdata": customdata,
+            "customdata": ci_hover,
             "name": "Decile Bins (95% CI)",
             "hovertemplate": (
                 "<b>Decile Group</b><br>"
                 "Predicted Risk: %{x:.3f}<br>"
-                "Observed Rate: %{y:.3f}<br>"
-                "95% CI: [%{customdata[0]:.3f}, %{customdata[1]:.3f}]<extra></extra>"
+                "Observed Rate: %{y:.3f}"
+                "%{customdata}<extra></extra>"
             ),
         })
     else:
@@ -1670,10 +1723,19 @@ def verify_standalone_integrity(
         window = f"{window_before}{raw_str}{window_after}"
 
         p_ineq_match = re.search(
-            r"\bp\s*(?:[-_\s]*value\s*)?([<>]=?|[≤≥])\s*$", window_before, re.IGNORECASE
+            r"\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+[a-zA-Z_-]+\)?|\(?[a-zA-Z_-]+\)?))?\s*([<>]=?|[≤≥])\s*$",
+            window_before,
+            re.IGNORECASE,
+        )
+        is_threshold_def = bool(
+            re.search(
+                r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff|prespecified|defined\s+as)\b[^.;:]*?\bp(?=[-_\s(\<>=≤≥]).*?([<>]=?|[≤≥])\s*$",
+                window_before,
+                re.IGNORECASE,
+            )
         )
         is_alpha_cutoff = (
-            not p_ineq_match
+            (not p_ineq_match or is_threshold_def)
             and val in (0.05, 0.01, 0.001, 0.005, 0.0001)
             and bool(
                 re.search(

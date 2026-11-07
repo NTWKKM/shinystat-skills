@@ -33,7 +33,7 @@ from tests.fixtures.integrity_cases import (
 CLOUD_DIR = REPO_ROOT / "packaging" / "cloud" / "shinystat-cloud"
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def ensure_packaged_cloud_skill():
     """Ensure packaging/cloud/shinystat-cloud is built and validated before running tests."""
     pkg_script = REPO_ROOT / "scripts" / "package-cloud-skill.sh"
@@ -42,15 +42,19 @@ def ensure_packaged_cloud_skill():
         CLOUD_DIR / "references" / "report-builder.md",
         CLOUD_DIR / "references" / "decision-heuristics.md",
         CLOUD_DIR / "references" / "figures.md",
+        CLOUD_DIR / "references" / "subagent-protocol.md",
     ]
-    if not all(p.exists() for p in required_files):
-        if pkg_script.exists():
-            subprocess.run(
-                ["bash", str(pkg_script)],
-                check=True,
-                cwd=REPO_ROOT,
-                capture_output=True,
-            )
+    if not all(p.exists() for p in required_files) and pkg_script.exists():
+        res = subprocess.run(
+            ["bash", str(pkg_script)],
+            check=False,
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+        )
+        assert res.returncode == 0, (
+            f"package-cloud-skill.sh failed:\n{res.stderr}\n{res.stdout}"
+        )
     return CLOUD_DIR
 
 
@@ -81,7 +85,7 @@ def recipes():
 # -----------------------------------------------------------------------------
 
 
-def test_cloud_skill_metadata_and_frontmatter():
+def test_cloud_skill_metadata_and_frontmatter(ensure_packaged_cloud_skill):
     skill_file = CLOUD_DIR / "SKILL.md"
     assert skill_file.exists(), "packaging/cloud/shinystat-cloud/SKILL.md missing"
     content = skill_file.read_text(encoding="utf-8")
@@ -102,7 +106,9 @@ def test_cloud_skill_metadata_and_frontmatter():
     assert "Competing Risks" in fm["description"]
 
 
-def test_decision_heuristics_has_no_phantom_medstat_modules():
+def test_decision_heuristics_has_no_phantom_medstat_modules(
+    ensure_packaged_cloud_skill,
+):
     heuristics_file = CLOUD_DIR / "references" / "decision-heuristics.md"
     assert heuristics_file.exists()
     content = heuristics_file.read_text(encoding="utf-8")
@@ -1998,7 +2004,9 @@ def test_table_one_column_mapping_and_html_escaping(recipes):
     assert "&lt;b&gt;high&lt;/b&gt;" in html_out
 
 
-def test_cloud_report_builder_docx_fallback_and_integrity(tmp_path):
+def test_cloud_report_builder_docx_fallback_and_integrity(
+    tmp_path, ensure_packaged_cloud_skill
+):
     """Verifies that cloud report builder fallback redirects .docx to .html and tests standalone integrity."""
     rb_path = CLOUD_DIR / "references" / "report-builder.md"
     content = rb_path.read_text(encoding="utf-8")
@@ -2199,7 +2207,7 @@ def test_integrity_parity_fixture_cardinality():
 
 
 @pytest.mark.parametrize("case", INTEGRITY_PARITY_CASES, ids=lambda c: c.id)
-def test_cloud_verify_standalone_integrity_parity(case):
+def test_cloud_verify_standalone_integrity_parity(case, ensure_packaged_cloud_skill):
     """
     Task 2a: Asserts that verify_standalone_integrity (extracted from report-builder.md)
     and verify_report_integrity (via ReportDocument) have exact 100% parity across each test case.
@@ -2237,7 +2245,7 @@ def test_cloud_verify_standalone_integrity_parity(case):
     )
 
 
-def test_cloud_verify_standalone_integrity_mutations():
+def test_cloud_verify_standalone_integrity_mutations(ensure_packaged_cloud_skill):
     """
     Task 2b: Asserts that unmodified BASE_NARRATIVE passes both implementations,
     and all single-token mutations to the 5 statistical values fail both implementations.
@@ -2293,7 +2301,7 @@ def test_cloud_verify_standalone_integrity_mutations():
             )
 
 
-def test_cloud_standalone_plotly_spec_generators(tmp_path):
+def test_cloud_standalone_plotly_spec_generators(tmp_path, ensure_packaged_cloud_skill):
     """Verifies that all 7 standalone Plotly spec generators produce valid, JSON-serializable dictionaries."""
     import json
 
@@ -3733,7 +3741,9 @@ def test_cloud_figures_templates_validation_and_safety(tmp_path):
         plot_love(balance_inf)
 
 
-def test_cloud_standalone_qualified_p_values_and_dict_records_parity():
+def test_cloud_standalone_qualified_p_values_and_dict_records_parity(
+    ensure_packaged_cloud_skill,
+):
     """Verifies that verify_standalone_integrity mirrors verify_report_integrity for qualified p-values and dict records."""
     ns = _extract_report_builder_namespace()
     verify_standalone = ns["verify_standalone_integrity"]
@@ -3820,23 +3830,9 @@ def test_cloud_standalone_qualified_p_values_and_dict_records_parity():
     assert ir_zi.untraced_numbers == sa_zi["untraced_numbers"] == []
 
 
-def test_cloud_subagent_protocol_and_gate5_alignment():
+def test_cloud_subagent_protocol_and_gate5_alignment(ensure_packaged_cloud_skill):
     """Verify packaged cloud skill rewrites subagent-protocol.md links and bundles byte-identical protocol."""
-    import subprocess
-
-    package_script = REPO_ROOT / "scripts" / "package-cloud-skill.sh"
-    if not CLOUD_DIR.exists():
-        if package_script.exists():
-            subprocess.run(
-                ["bash", str(package_script)],
-                check=True,
-                cwd=REPO_ROOT,
-                capture_output=True,
-            )
-        else:
-            pytest.skip(
-                "packaging/cloud/shinystat-cloud not built and package script unavailable"
-            )
+    assert CLOUD_DIR.exists(), "packaging/cloud/shinystat-cloud not found"
 
     skill_md = (CLOUD_DIR / "SKILL.md").read_text(encoding="utf-8")
     assert "(references/subagent-protocol.md)" in skill_md

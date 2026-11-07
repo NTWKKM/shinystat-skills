@@ -121,6 +121,22 @@ def _collect_valid_skill_files(root: Path) -> set[Path]:
     return files
 
 
+def _extract_heading_slugs(text: str) -> set[str]:
+    """Generates heading anchor slugs following GitHub Markdown specifications."""
+    doc_headings = re.findall(r"^#+\s+(.+)$", text, flags=re.MULTILINE)
+    slugs = set()
+    seen: dict[str, int] = {}
+    for h in doc_headings:
+        h_clean = re.sub(r"\s*#+\s*$", "", h).strip()
+        base = re.sub(
+            r"\s", "-", re.sub(r"[^\w\s-]", "", re.sub(r"[`*]", "", h_clean).lower())
+        )
+        n = seen.get(base, 0)
+        seen[base] = n + 1
+        slugs.add(base if n == 0 else f"{base}-{n}")
+    return slugs
+
+
 def test_shinystat_cloud_canonical_skill_exists_and_valid():
     """Verify skills/shinystat-cloud/SKILL.md exists, has valid YAML frontmatter, references, and matches packaging/cloud/shinystat-cloud."""
     repo_root = Path(__file__).resolve().parent.parent.parent
@@ -169,17 +185,7 @@ def test_shinystat_cloud_canonical_skill_exists_and_valid():
             f"Linked reference '{rel_file}' missing from {canonical_cloud / 'references'}"
         )
         if fragment:
-            doc_headings = re.findall(
-                r"^#+\s+(.+)$",
-                target_path.read_text(encoding="utf-8"),
-                flags=re.MULTILINE,
-            )
-            slugs = [
-                re.sub(
-                    r"\s", "-", re.sub(r"[^\w\s-]", "", re.sub(r"[`*_]", "", h).lower())
-                )
-                for h in doc_headings
-            ]
+            slugs = _extract_heading_slugs(target_path.read_text(encoding="utf-8"))
             assert fragment in slugs, (
                 f"Linked fragment '#{fragment}' not found in {rel_file} headings"
             )
@@ -226,23 +232,34 @@ def test_shinystat_cloud_canonical_skill_exists_and_valid():
         text = pack_file.read_text(encoding="utf-8")
         for match in md_link_pattern.finditer(text):
             target = match.group(2).strip()
-            if target.startswith(("http://", "https://", "mailto:", "#")):
+            if target.startswith(("http://", "https://", "mailto:")):
                 continue
-            target_path = target.split()[0].split("#")[0].strip()
-            if not target_path:
-                continue
-            resolved_target = (pack_file.parent / target_path).resolve()
-            assert resolved_target.exists(), (
-                f"Broken relative link in {pack_file.relative_to(packaging_cloud)}: "
-                f"target '{target}' does not exist at {resolved_target}"
-            )
-            assert (
-                packaging_cloud.resolve() in resolved_target.parents
-                or resolved_target == packaging_cloud.resolve()
-            ), (
-                f"Escaping relative link in {pack_file.relative_to(packaging_cloud)}: "
-                f"target '{target}' resolves outside packaging directory at {resolved_target}"
-            )
+            target_clean = target.split()[0]
+            if target_clean.startswith("#"):
+                fragment = target_clean[1:]
+                target_file = pack_file
+            else:
+                rel_part, _, fragment = target_clean.partition("#")
+                if not rel_part:
+                    continue
+                target_file = (pack_file.parent / rel_part).resolve()
+                assert target_file.exists(), (
+                    f"Broken relative link in {pack_file.relative_to(packaging_cloud)}: "
+                    f"target '{target}' does not exist at {target_file}"
+                )
+                assert (
+                    packaging_cloud.resolve() in target_file.parents
+                    or target_file == packaging_cloud.resolve()
+                ), (
+                    f"Escaping relative link in {pack_file.relative_to(packaging_cloud)}: "
+                    f"target '{target}' resolves outside packaging directory at {target_file}"
+                )
+            if fragment and target_file.suffix == ".md":
+                slugs = _extract_heading_slugs(target_file.read_text(encoding="utf-8"))
+                assert fragment in slugs, (
+                    f"Linked fragment '#{fragment}' in {pack_file.relative_to(packaging_cloud)} "
+                    f"not found in {target_file.relative_to(packaging_cloud)} headings"
+                )
             resolved_links_count += 1
 
     assert resolved_links_count > 0, (

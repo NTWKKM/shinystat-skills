@@ -256,19 +256,20 @@ def draw_standalone_strobe_flow(
             ax.text(40, y_cursor - 0.5, name, ha="center", va="center", fontsize=8.0, fontweight="bold")
             ax.text(40, y_cursor - 4.0, f"(N = {n_retain:,})", ha="center", va="center", fontsize=7.5, color="#333333")
 
-            # Excluded side box if n_ex > 0
-            if n_ex > 0:
-                ax.annotate("", xy=(68, y_cursor - 1), xytext=(60, y_cursor - 1), arrowprops=dict(arrowstyle="->", color="#222222", lw=0.9))
-                wrapped_reason = textwrap.fill(reason, width=28)
-                line_count = len(wrapped_reason.split('\n'))
-                box_h = max(8, 3.0 + line_count * 2.0)
-                ex_rect = FancyBboxPatch((68, y_cursor - box_h / 2 - 1), 30, box_h, boxstyle="square,pad=0", fc="#F8F9FA", ec="#777777", lw=0.7)
-                ax.add_patch(ex_rect)
-                ax.text(83, y_cursor + box_h * 0.15 - 1, f"Excluded (n = {n_ex:,})", ha="center", va="center", fontsize=7.0, fontweight="bold")
-                ax.text(83, y_cursor - box_h * 0.20 - 1, wrapped_reason, ha="center", va="center", fontsize=6.5, color="#555555")
-
+            # Exclusion occurs along transition from current stage (idx) into next stage (idx + 1)
             if idx < len(stages) - 1:
-                ax.annotate("", xy=(40, y_cursor - 16), xytext=(40, y_cursor - 6), arrowprops=dict(arrowstyle="->", color="#222222", lw=0.9))
+                _, _, next_ex, next_reason = stages[idx + 1]
+                ax.annotate("", xy=(40, y_cursor - 14), xytext=(40, y_cursor - 6), arrowprops=dict(arrowstyle="->", color="#222222", lw=0.9))
+                if next_ex > 0:
+                    y_branch = y_cursor - 10
+                    ax.annotate("", xy=(68, y_branch), xytext=(40, y_branch), arrowprops=dict(arrowstyle="->", color="#222222", lw=0.9))
+                    wrapped_reason = textwrap.fill(next_reason, width=28)
+                    line_count = len(wrapped_reason.split('\n'))
+                    box_h = max(8, 3.0 + line_count * 2.0)
+                    ex_rect = FancyBboxPatch((68, y_branch - box_h / 2), 30, box_h, boxstyle="square,pad=0", fc="#F8F9FA", ec="#777777", lw=0.7)
+                    ax.add_patch(ex_rect)
+                    ax.text(83, y_branch + box_h * 0.15, f"Excluded (n = {next_ex:,})", ha="center", va="center", fontsize=7.0, fontweight="bold")
+                    ax.text(83, y_branch - box_h * 0.20, wrapped_reason, ha="center", va="center", fontsize=6.5, color="#555555")
 
             y_cursor -= 18
 
@@ -306,7 +307,20 @@ def draw_standalone_prisma_flow(
     """
     Renders an audit-reconciled PRISMA 2020 systematic review flow diagram.
     """
-    if identified_databases < 0 or duplicates_removed < 0 or screened < 0 or screen_excluded < 0:
+    all_counts = [
+        identified_databases,
+        duplicates_removed,
+        screened,
+        screen_excluded,
+        retrieval_sought,
+        not_retrieved,
+        assessed_eligibility,
+        included_studies,
+        *(excluded_eligibility.values()),
+    ]
+    if included_reports is not None:
+        all_counts.append(included_reports)
+    if any(not isinstance(c, int) or c < 0 for c in all_counts):
         raise ValueError("PRISMA counts must be non-negative integers")
 
     # 1. Identification reconciliation
@@ -329,10 +343,11 @@ def draw_standalone_prisma_flow(
         )
     # 4. Eligibility reconciliation
     n_ex_el = sum(excluded_eligibility.values())
-    if assessed_eligibility - n_ex_el != included_studies:
+    target_reports = included_reports if included_reports is not None else included_studies
+    if assessed_eligibility - n_ex_el != target_reports:
         raise ValueError(
             f"PRISMA Eligibility mismatch: assessed ({assessed_eligibility}) - excluded ({n_ex_el}) "
-            f"!= included ({included_studies})"
+            f"!= included reports ({target_reports})"
         )
 
     fig, ax = plt.subplots(figsize=(8.0, 9.5), dpi=300)
@@ -359,35 +374,36 @@ def draw_standalone_prisma_flow(
             ax.annotate("", xy=(x1, y1), xytext=(x0, y0), arrowprops=dict(arrowstyle="->", color="#2B6CB0", lw=0.9))
 
         # 1. Identification
-        box(35, 93, 46, 7, "Records identified from databases", f"(n = {identified_databases:,})")
-        box(75, 84, 34, 7, "Duplicate records removed", f"(n = {duplicates_removed:,})")
-        arrow(35, 89.5, 75, 87.5)
-        arrow(35, 89.5, 35, 76.5)
+        box(30, 93, 42, 7, "Records identified from databases", f"(n = {identified_databases:,})")
+        box(76, 84, 34, 7, "Duplicate records removed", f"(n = {duplicates_removed:,})")
+        arrow(30, 89.5, 30, 76.5)
+        arrow(30, 84, 59, 84)
 
         # 2. Screening
-        box(35, 73, 46, 7, "Records screened", f"(n = {screened:,})")
-        box(75, 73, 34, 7, "Records excluded", f"(n = {screen_excluded:,})")
-        arrow(58, 73, 58, 73)
-        arrow(35, 69.5, 35, 56.5)
+        box(30, 73, 42, 7, "Records screened", f"(n = {screened:,})")
+        box(76, 73, 34, 7, "Records excluded", f"(n = {screen_excluded:,})")
+        arrow(51, 73, 59, 73)
+        arrow(30, 69.5, 30, 56.5)
 
         # 3. Retrieval
-        box(35, 53, 46, 7, "Reports sought for retrieval", f"(n = {retrieval_sought:,})")
-        box(75, 53, 34, 7, "Reports not retrieved", f"(n = {not_retrieved:,})")
-        arrow(35, 49.5, 35, 36.5)
+        box(30, 53, 42, 7, "Reports sought for retrieval", f"(n = {retrieval_sought:,})")
+        box(76, 53, 34, 7, "Reports not retrieved", f"(n = {not_retrieved:,})")
+        arrow(51, 53, 59, 53)
+        arrow(30, 49.5, 30, 36.5)
 
         # 4. Eligibility
-        box(35, 33, 46, 7, "Reports assessed for eligibility", f"(n = {assessed_eligibility:,})")
+        box(30, 33, 42, 7, "Reports assessed for eligibility", f"(n = {assessed_eligibility:,})")
         excl_lines = [f"\u2022 {k} (n = {v:,})" for k, v in excluded_eligibility.items()]
         h_excl = max(8, 3.0 + len(excl_lines) * 2.0)
-        box(75, 33, 36, h_excl, f"Reports excluded (n = {n_ex_el:,})", "\n".join(excl_lines))
-        arrow(58, 33, 57, 33)
-        arrow(35, 29.5, 35, 14.5)
+        box(76, 33, 34, h_excl, f"Reports excluded (n = {n_ex_el:,})", "\n".join(excl_lines))
+        arrow(51, 33, 59, 33)
+        arrow(30, 29.5, 30, 15.0)
 
         # 5. Included
         inc_sub = f"Studies included in review: {included_studies:,}"
         if included_reports:
             inc_sub += f"\nReports of included studies: {included_reports:,}"
-        box(35, 10, 46, 8, "New studies included in review", inc_sub)
+        box(30, 11, 42, 8, "New studies included in review", inc_sub)
 
         p = Path(out_path)
         p.parent.mkdir(parents=True, exist_ok=True)
