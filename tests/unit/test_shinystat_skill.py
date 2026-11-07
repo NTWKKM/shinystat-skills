@@ -423,6 +423,15 @@ def test_subagent_protocol_and_gate5_delta_parity():
     assert "<run_output_dir>/table_dfs.json" in proto_text, (
         "Protocol must use run_output_dir for table_dfs.json"
     )
+    assert "never delete unowned or shared staging files" in proto_text, (
+        "Protocol must forbid deleting unowned or shared staging files from other runs"
+    )
+    assert (
+        "shared files outside `run_output_dir` are never deleted without verified ownership"
+        in proto_text
+    ), (
+        "Protocol must protect shared files outside run_output_dir from unverified deletion"
+    )
 
     # 2. Finalized narrative citation re-verification
     assert "Finalized Narrative Citation Verification" in proto_text, (
