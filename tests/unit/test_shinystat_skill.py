@@ -463,6 +463,12 @@ def test_subagent_protocol_and_gate5_delta_parity():
         "Protocol must persist row_level_checkpoint_dir in control directory before writing cohort data"
     )
     assert (
+        "reuse the registered workspace on later halts after verifying `run_id` ownership"
+        in proto_text
+    ), (
+        "Protocol must reuse registered workspace across repeated halts for the same role and run"
+    )
+    assert (
         "Read the role-specific workspace registration record in the control directory to identify and remove the workspace even if Subagent B crashes before writing checkpoint state"
         in proto_text
     ), (
