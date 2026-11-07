@@ -105,7 +105,7 @@ def draw_standalone_consort_rct(
             lo = _normalize_count(lo_val, f"Arm '{arm.get('name', 'unnamed')}' lost")
             lo_dict = {}
         else:
-            lo = 0
+            lo = None
             lo_dict = {}
 
         di_val = arm.get("discontinued")
@@ -116,7 +116,7 @@ def draw_standalone_consort_rct(
             di = _normalize_count(di_val, f"Arm '{arm.get('name', 'unnamed')}' discontinued")
             di_dict = {}
         else:
-            di = 0
+            di = None
             di_dict = {}
 
         # Partition 2: Analysis partition (analyzed and/or excluded_from_analysis)
@@ -141,10 +141,10 @@ def draw_standalone_consort_rct(
 
         analyzed = analyzed_val if has_analyzed else (allocated - ex_an)
 
-        if lo < 0 or di < 0 or ex_an < 0 or dnr < 0 or rec < 0:
+        if (lo is not None and lo < 0) or (di is not None and di < 0) or ex_an < 0 or dnr < 0 or rec < 0:
             raise ValueError("Follow-up and allocation counts must be non-negative integers")
 
-        if lo > allocated or di > allocated:
+        if (lo is not None and lo > allocated) or (di is not None and di > allocated):
             raise ValueError(
                 f"Arm '{arm.get('name', 'unnamed')}' follow-up counts (lost: {lo}, discontinued: {di}) cannot exceed allocated ({allocated})"
             )
@@ -262,10 +262,12 @@ def draw_standalone_consort_rct(
             box(cx, 63, arm_w, h_alloc, f"Allocated to {v_arm['name']}", alloc_text)
 
             # Detailed follow-up reasons
-            fu_lines = [f"\u2022 Lost to follow-up (n = {lo})"]
+            lo_str = f"n = {lo:,}" if lo is not None else "unknown"
+            fu_lines = [f"\u2022 Lost to follow-up ({lo_str})"]
             for r_k, r_v in lo_dict.items():
                 fu_lines.append(f"   - {r_k} (n = {r_v})")
-            fu_lines.append(f"\u2022 Discontinued intervention (n = {di})")
+            di_str = f"n = {di:,}" if di is not None else "unknown"
+            fu_lines.append(f"\u2022 Discontinued intervention ({di_str})")
             for r_k, r_v in di_dict.items():
                 fu_lines.append(f"   - {r_k} (n = {r_v})")
 

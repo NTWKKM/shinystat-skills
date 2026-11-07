@@ -417,6 +417,12 @@ def test_subagent_protocol_and_gate5_delta_parity():
     assert "table_dfs_<run_id>.json" in proto_text, (
         "Protocol must scope staging table artifacts with run_id"
     )
+    assert "<run_output_dir>/table_dfs_<run_id>.json" in proto_text, (
+        "Protocol must use run_output_dir for table assembly and cleanup"
+    )
+    assert "<run_output_dir>/table_dfs.json" in proto_text, (
+        "Protocol must use run_output_dir for table_dfs.json"
+    )
 
     # 2. Finalized narrative citation re-verification
     assert "Finalized Narrative Citation Verification" in proto_text, (
@@ -727,6 +733,44 @@ def test_consort_flow_rendered_labels_single_field_inputs(monkeypatch, tmp_path)
     assert "Excluded from analysis (n = 20)" in all_rendered, (
         "Derived 'Excluded from analysis (n = 20)' label not found in rendered text"
     )
+    assert "Lost to follow-up (unknown)" in all_rendered, (
+        "Omitted lost count must be rendered as unknown"
+    )
+    assert "Discontinued intervention (unknown)" in all_rendered, (
+        "Omitted discontinued count must be rendered as unknown"
+    )
+
+    # Explicit counts (including explicit 0) are rendered as (n = X)
+    captured_texts.clear()
+    out_png_explicit = tmp_path / "consort_explicit.png"
+    draw_consort(
+        assessed=220,
+        excluded={"Ineligible": 20},
+        arms=[
+            {
+                "name": "Intervention",
+                "allocated": 100,
+                "received": 80,
+                "lost": 0,
+                "discontinued": 5,
+                "analyzed": 80,
+            },
+            {
+                "name": "Control",
+                "allocated": 100,
+                "did_not_receive": 0,
+                "lost": {"Relocated": 2},
+                "discontinued": 0,
+                "excluded_from_analysis": 0,
+            },
+        ],
+        out_path=str(out_png_explicit),
+    )
+    all_explicit = "\n".join(captured_texts)
+    assert "Lost to follow-up (n = 0)" in all_explicit
+    assert "Discontinued intervention (n = 5)" in all_explicit
+    assert "Lost to follow-up (n = 2)" in all_explicit
+    assert "Discontinued intervention (n = 0)" in all_explicit
 
 
 def test_consort_flow_count_normalization_and_unsigned_prevention(tmp_path):

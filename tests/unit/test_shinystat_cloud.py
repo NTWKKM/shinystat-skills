@@ -3960,6 +3960,8 @@ def test_consort_single_field_derivation_and_superscript_allowlist(
     all_rendered = "\n".join(captured_texts)
     assert "Did not receive intervention (n = 20)" in all_rendered
     assert "Excluded from analysis (n = 20)" in all_rendered
+    assert "Lost to follow-up (unknown)" in all_rendered
+    assert "Discontinued intervention (unknown)" in all_rendered
 
     with pytest.raises(
         ValueError, match="must specify at least one observed receipt field"
