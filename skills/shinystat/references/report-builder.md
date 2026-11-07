@@ -164,9 +164,9 @@ def generate_html_report(
             attrs_clean = html.unescape(attrs).strip()
             m_cls = re.fullmatch(r'class=(["\'])(.*?)\1', attrs_clean)
             if m_cls:
-                cls_val = m_cls.group(2)
+                cls_tokens = m_cls.group(2).split()
                 allowed = {"citation", "footnote", "ref"}
-                if all(c in allowed or c.isalnum() or c in "_-" for c in cls_val.split()):
+                if cls_tokens and all(c in allowed for c in cls_tokens):
                     return f'<sup {attrs_clean}>{content}</sup>'
             return f"<sup>{content}</sup>"
 

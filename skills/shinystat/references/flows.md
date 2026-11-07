@@ -59,6 +59,7 @@ def draw_standalone_consort_rct(
     if n_rand != n_alloc:
         raise ValueError(f"CONSORT reconciliation mismatch: randomized ({n_rand}) != allocated ({n_alloc})")
 
+    validated_arms = []
     # Arm-level mathematical reconciliation check
     for arm in arms:
         if arm["allocated"] < 0:
@@ -74,6 +75,7 @@ def draw_standalone_consort_rct(
         dnr_val = arm.get("did_not_receive")
         dnr = sum(dnr_val.values()) if isinstance(dnr_val, dict) else (dnr_val if dnr_val is not None else (arm["allocated"] - arm["received"]))
         rec = arm["received"] if has_rec else (arm["allocated"] - dnr)
+        dnr_dict = arm["did_not_receive"] if isinstance(arm.get("did_not_receive"), dict) else {}
 
         lo_dict = arm["lost"] if isinstance(arm.get("lost"), dict) else {}
         lo = sum(lo_dict.values()) if isinstance(arm.get("lost"), dict) else (arm.get("lost") or 0)
@@ -91,6 +93,7 @@ def draw_standalone_consort_rct(
         ex_an_val = arm.get("excluded_from_analysis")
         ex_an = sum(ex_an_val.values()) if isinstance(ex_an_val, dict) else (ex_an_val if ex_an_val is not None else (arm["allocated"] - arm["analyzed"]))
         analyzed = arm["analyzed"] if has_analyzed else (arm["allocated"] - ex_an)
+        ex_an_dict = arm["excluded_from_analysis"] if isinstance(arm.get("excluded_from_analysis"), dict) else {}
 
         if lo < 0 or di < 0 or ex_an < 0 or dnr < 0 or rec < 0:
             raise ValueError("Follow-up and allocation counts must be non-negative integers")
@@ -118,6 +121,21 @@ def draw_standalone_consort_rct(
                 f"Arm '{arm.get('name')}' analysis partition mismatch: allocated ({arm['allocated']}) "
                 f"!= analyzed ({analyzed}) + excluded_from_analysis ({ex_an})"
             )
+
+        validated_arms.append({
+            "name": arm.get("name", "unnamed"),
+            "allocated": arm["allocated"],
+            "rec": rec,
+            "dnr": dnr,
+            "dnr_dict": dnr_dict,
+            "lo": lo,
+            "lo_dict": lo_dict,
+            "di": di,
+            "di_dict": di_dict,
+            "analyzed": analyzed,
+            "ex_an": ex_an,
+            "ex_an_dict": ex_an_dict,
+        })
 
     journal_colors = {
         "NEJM": "#002D62",
@@ -172,23 +190,20 @@ def draw_standalone_consort_rct(
         cx_coords = [25, 75] if len(arms) == 2 else [18, 50, 82]
         arm_w = 38 if len(arms) == 2 else 28
 
-        for arm, cx in zip(arms, cx_coords):
-            dnr_dict = arm["did_not_receive"] if isinstance(arm.get("did_not_receive"), dict) else {}
-            dnr = sum(dnr_dict.values()) if isinstance(arm.get("did_not_receive"), dict) else (arm.get("did_not_receive") or 0)
-            rec = arm.get("received", arm["allocated"] - dnr)
-
-            lo_dict = arm["lost"] if isinstance(arm.get("lost"), dict) else {}
-            lo = sum(lo_dict.values()) if isinstance(arm.get("lost"), dict) else (arm.get("lost") or 0)
-
-            di_dict = arm["discontinued"] if isinstance(arm.get("discontinued"), dict) else {}
-            di = sum(di_dict.values()) if isinstance(arm.get("discontinued"), dict) else (arm.get("discontinued") or 0)
-
-            ex_an_dict = arm["excluded_from_analysis"] if isinstance(arm.get("excluded_from_analysis"), dict) else {}
-            ex_an = sum(ex_an_dict.values()) if isinstance(arm.get("excluded_from_analysis"), dict) else (arm.get("excluded_from_analysis") or 0)
-            analyzed = arm.get("analyzed", arm["allocated"] - ex_an)
+        for v_arm, cx in zip(validated_arms, cx_coords):
+            rec = v_arm["rec"]
+            dnr = v_arm["dnr"]
+            dnr_dict = v_arm["dnr_dict"]
+            lo = v_arm["lo"]
+            lo_dict = v_arm["lo_dict"]
+            di = v_arm["di"]
+            di_dict = v_arm["di_dict"]
+            analyzed = v_arm["analyzed"]
+            ex_an = v_arm["ex_an"]
+            ex_an_dict = v_arm["ex_an_dict"]
 
             # Allocation box with intervention receipt details (CONSORT 2025/2010)
-            alloc_lines = [f"(n = {arm['allocated']:,})"]
+            alloc_lines = [f"(n = {v_arm['allocated']:,})"]
             alloc_lines.append(f"\u2022 Received allocated intervention (n = {rec:,})")
             if dnr > 0 or dnr_dict:
                 alloc_lines.append(f"\u2022 Did not receive intervention (n = {dnr:,})")
@@ -198,7 +213,7 @@ def draw_standalone_consort_rct(
             h_alloc = max(6.5, 2.5 + len(alloc_lines) * 1.5)
 
             arrow(45, 74, cx, 63 + h_alloc / 2)
-            box(cx, 63, arm_w, h_alloc, f"Allocated to {arm['name']}", alloc_text)
+            box(cx, 63, arm_w, h_alloc, f"Allocated to {v_arm['name']}", alloc_text)
 
             # Detailed follow-up reasons
             fu_lines = [f"\u2022 Lost to follow-up (n = {lo})"]

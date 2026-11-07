@@ -3846,3 +3846,104 @@ def test_cloud_subagent_protocol_and_gate5_alignment(ensure_packaged_cloud_skill
         "packaging/cloud/shinystat-cloud/references/subagent-protocol.md missing"
     )
     assert proto_file.read_bytes() == shared_proto.read_bytes()
+
+
+def test_consort_single_field_derivation_and_superscript_allowlist(tmp_path):
+    """Regression test for CodeRabbit review findings:
+    1. Single-field inputs in CONSORT (allocated=100, received=80, analyzed=80)
+       properly derive missing fields (dnr=20, ex_an=20) and render without omission.
+    2. Missing receipt or analysis partitions (both fields absent) are rejected.
+    3. Narrative superscript restoration allowlists only safe citation/footnote classes,
+       stripping unlisted classes (e.g. 'unexpected') and event attributes (e.g. 'onclick').
+    """
+    flows_md = (CLOUD_DIR / "references" / "flows.md").read_text(encoding="utf-8")
+    blocks = re.findall(r"```python\n(.*?)\n```", flows_md, re.DOTALL)
+    ns_flows = {}
+    for b in blocks:
+        exec(b, ns_flows)
+
+    draw_consort = ns_flows["draw_standalone_consort_rct"]
+    out_png = tmp_path / "consort_single_field.png"
+    res = draw_consort(
+        assessed=220,
+        excluded={"Ineligible": 20},
+        arms=[
+            {"name": "Arm A", "allocated": 100, "received": 80, "analyzed": 80},
+            {
+                "name": "Arm B",
+                "allocated": 100,
+                "did_not_receive": 0,
+                "excluded_from_analysis": 0,
+            },
+        ],
+        out_path=str(out_png),
+    )
+    assert Path(res).exists() and Path(res).stat().st_size > 0
+
+    with pytest.raises(
+        ValueError, match="must specify at least one observed receipt field"
+    ):
+        draw_consort(
+            assessed=220,
+            excluded={"Ineligible": 20},
+            arms=[
+                {"name": "Arm A", "allocated": 100, "analyzed": 80},
+                {
+                    "name": "Arm B",
+                    "allocated": 100,
+                    "received": 100,
+                    "analyzed": 100,
+                },
+            ],
+            out_path=str(tmp_path / "invalid_receipt.png"),
+        )
+
+    with pytest.raises(
+        ValueError, match="must specify at least one observed analysis field"
+    ):
+        draw_consort(
+            assessed=220,
+            excluded={"Ineligible": 20},
+            arms=[
+                {"name": "Arm A", "allocated": 100, "received": 80},
+                {
+                    "name": "Arm B",
+                    "allocated": 100,
+                    "received": 100,
+                    "analyzed": 100,
+                },
+            ],
+            out_path=str(tmp_path / "invalid_analysis.png"),
+        )
+
+    # HTML narrative superscript class allowlist and attribute stripping
+    rb_md = (CLOUD_DIR / "references" / "report-builder.md").read_text(encoding="utf-8")
+    rb_blocks = re.findall(r"```python\n(.*?)\n```", rb_md, re.DOTALL)
+    ns_rb = {}
+    for b in rb_blocks:
+        exec(b, ns_rb)
+
+    gen_html = ns_rb["generate_html_report"]
+    narr_text = (
+        "Testing superscripts: "
+        '<sup onclick="alert(1)">1</sup>, '
+        '<sup class="unexpected">2</sup>, '
+        '<sup class="citation">3</sup>, '
+        '<sup class="footnote">4</sup>, '
+        "<sup>5</sup>."
+    )
+    html_out = tmp_path / "superscript_test.html"
+    gen_html(
+        title="Superscript Security Test",
+        results={"narrative": narr_text},
+        tables={"T": pd.DataFrame({"X": [1]})},
+        out_path=str(html_out),
+    )
+    html_content = html_out.read_text(encoding="utf-8")
+    assert "onclick" not in html_content
+    assert 'class="unexpected"' not in html_content
+    assert '<sup class="citation">' in html_content
+    assert '<sup class="footnote">' in html_content
+    assert "<sup>1</sup>" in html_content
+    assert "<sup>2</sup>" in html_content
+    assert "<sup>5</sup>" in html_content
