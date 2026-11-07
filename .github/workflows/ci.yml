@@ -11,9 +11,14 @@ jobs:
   verify-and-test:
     name: Verify Sync & Run Tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -23,11 +28,30 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
-      - name: Verify zero SSOT sync drift in skills/
+      - name: Check SSOT sync and auto-sync if drifted
         run: |
           chmod +x ./scripts/sync-skills.sh ./scripts/install-skills.sh ./scripts/package-cloud-skill.sh
           ./scripts/sync-skills.sh
-          git diff --exit-code skills/
+          if git diff --quiet skills/; then
+            echo "✓ skills/ is already in sync with SSOT. Passing directly."
+          else
+            echo "⚡ Drift detected between SSOT and skills/! Auto-syncing..."
+            if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+              echo "::error::Cannot auto-push on a static release tag. Please sync skills before tagging."
+              git diff --exit-code skills/
+            fi
+            if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+              echo "::error::Cannot auto-push to a fork PR. Please run './scripts/sync-skills.sh' locally and push."
+              git diff --exit-code skills/
+            fi
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add skills/
+            git commit -m "chore(skills): auto-sync skills with SSOT [skip ci]"
+            TARGET_BRANCH="${{ github.head_ref || github.ref_name }}"
+            git push origin HEAD:"$TARGET_BRANCH"
+            echo "✓ Successfully auto-synced skills and pushed to $TARGET_BRANCH."
+          fi
 
       - name: Run test suite
         run: uv run pytest
