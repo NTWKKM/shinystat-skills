@@ -1,6 +1,6 @@
 # Biostatistical Decision Heuristics & Reference Manual (Cloud Sandbox Edition)
 
-Reference guide for the `shinystat-cloud` and `shinystat` autonomous agents in cloud Python sandboxes and local environments. Consult this manual during Pillar 2 (Research & Estimand Triangulation) to map clinical research questions to optimal biostatistical models and standalone recipes under `../../shinystat-cloud/references/recipes/`.
+Reference guide for the `shinystat-cloud` and `shinystat` autonomous agents in cloud Python sandboxes and local environments. Consult this manual during Pillar 2 (Research & Estimand Triangulation) to map clinical research questions to optimal biostatistical models and standalone recipes under `recipes/`.
 
 ---
 
@@ -8,22 +8,22 @@ Reference guide for the `shinystat-cloud` and `shinystat` autonomous agents in c
 
 | Study Archetype | Target Estimand / Goal | Primary Model / Method | Key Assumption / Diagnostics | Recommended Recipe / Library |
 | :--- | :--- | :--- | :--- | :--- |
-| **Type 1: Baseline Cohort** | Cohort characteristics | Table 1 (Mean/SD, Median/IQR, Count/%, SMD) | Normality inspection; Fisher exact fallback for small cells | [Recipe 1: Table 1 & SMD](../../shinystat-cloud/references/recipes/01-data-missing-table1.md#1-table-1-baseline-characteristics--standardized-mean-difference-smd) |
-| **Type 2: Binary Outcome** | Odds Ratio (OR), Risk factors | Multivariable Binary Logistic Regression | Linearity of log-odds; Crude & Adjusted OR table | [Recipe 10: Logistic Regression Table](../../shinystat-cloud/references/recipes/02-regression-firth-ordinal.md#10-multivariable-binary-logistic-regression-table) & [Recipe 22: Harrell RCS Splines](../../shinystat-cloud/references/recipes/02-regression-firth-ordinal.md#22-restricted-cubic-splines-harrell-rcs-for-non-linear-continuous-predictors) |
-| **Type 2-Sparse: Separation** | Unbiased OR in rare events | Firth Penalized Logistic Regression | Profile likelihood CIs; resolves monotone separation | [Recipe 7: Firth Logistic Regression](../../shinystat-cloud/references/recipes/02-regression-firth-ordinal.md#7-firths-penalized-likelihood-logistic-regression) |
-| **Type 2b: Ordinal Scale** | Cumulative Odds Ratio | Cumulative Logit Proportional Odds | Brant test for parallel lines; multinomial logit fallback | [Recipe 21: Ordinal Logistic & Brant Test](../../shinystat-cloud/references/recipes/02-regression-firth-ordinal.md#21-proportional-odds-ordinal-logistic-regression--brant-test) |
-| **Type 3: Survival / Time-to-Event** | Hazard Ratio (HR), Median survival | Kaplan-Meier, Log-Rank & Cox Proportional Hazards | Proportional hazards test (Schoenfeld residuals); L2 shrinkage | [Recipe 11: Survival Analysis Suite](../../shinystat-cloud/references/recipes/03-survival-competing-risks.md#11-survival-analysis-kaplan-meier-log-rank--cox-proportional-hazards) |
-| **Type 3b: Competing Risks Survival** | Subdistribution Hazard (SHR) & Cause-Specific HR (csHR) | Aalen-Johansen CIF & Fine-Gray Model (IPCW) | Competing risk probability conservation; Naive KM overestimation audit | [Recipe 15: Competing Risks Survival](../../shinystat-cloud/references/recipes/03-survival-competing-risks.md#15-competing-risks-survival-analysis-aalen-johansen-cif--fine-gray-model) |
-| **Type 4: Diagnostic Test Accuracy** | Sens, Spec, PPV, NPV, AUC, LRs | 2x2 Contingency Matrix & Empirical ROC | Wilson score CIs; Haldane correction; Single/Paired DeLong | [Recipe 2: 2x2 Diagnostics](../../shinystat-cloud/references/recipes/05-diagnostic-meta-power.md#2-2x2-diagnostic-accuracy-with-wilson-score--log-scale-95-cis) & [Recipe 3: ROC & DeLong](../../shinystat-cloud/references/recipes/05-diagnostic-meta-power.md#3-empirical-roc-optimal-cutoff--single--paired-delong-95-cis) |
-| **Type 4b: Clinical Utility & Calib** | Net Benefit, Model Calibration | Decision Curve Analysis (DCA) & Recalibration | Brier score; Calibration slope & intercept; Austin-Steyerberg ICI | [Recipe 4: Calibration & DCA](../../shinystat-cloud/references/recipes/05-diagnostic-meta-power.md#4-model-calibration--vickers-decision-curve-analysis-dca) |
-| **Type 4c: Internal Validation & Shrinkage** | Optimism-corrected C-statistic, Brier, R2, Slope | TRIPOD+AI Bootstrap Internal Validation | B >= 200 resamples; uniform shrinkage factor s_hat, re-estimated intercept | [Recipe 18: Internal Validation & Shrinkage](../../shinystat-cloud/references/recipes/05-diagnostic-meta-power.md#18-tripodai-optimism-corrected-bootstrap-internal-validation--uniform-shrinkage) |
-| **Type 4d: Model Recalibration & Updating** | Target Population Calibration, Intercept, Slope | Intercept-only & Logistic Recalibration | Alpha and Beta recalibration parameters, ICI, Emax, AUROC preserved | [Recipe 19: Model Recalibration](../../shinystat-cloud/references/recipes/05-diagnostic-meta-power.md#19-prediction-model-recalibration-and-updating-logistic--intercept-only) |
-| **Type 5: Observational Causal (PSM)** | Average Treatment Effect in Treated (ATT) | Propensity Score Matching (PSM, 1:1, Caliper 0.2 SD) | Austin (2009) balance (SMD < 0.10); Pair ID tracking; E-value | [Recipe 6: PSM & Balance](../../shinystat-cloud/references/recipes/04-causal-iptw-psm.md#6-propensity-score-matching-psm-with-pair-ids--covariate-balance) & [Recipe 9: E-Value](../../shinystat-cloud/references/recipes/02-regression-firth-ordinal.md#9-vanderweele--ding-2017-sensitivity-e-value) |
-| **Type 5b: Causal Weighting (IPTW)** | Population Effect (ATE, ATT, ATC, Overlap ATO) | Inverse Probability Treatment Weighting (IPTW) | Kish's Effective Sample Size ($N_{\text{eff}} \ge 0.5 \times N$), Positivity (PS 0.05–0.95), Robust SE | [Recipe 14: IPTW & Balance](../../shinystat-cloud/references/recipes/04-causal-iptw-psm.md#14-inverse-probability-of-treatment-weighting-iptw--weighted-balance) |
-| **Type 6: Device / Rater Agreement** | Limits of Agreement, Reliability | Bland-Altman Difference Analysis & ICC (1–3k) | Bland-Altman 1999 large-sample CIs; Shrout-Fleiss exact F CIs | [Recipe 5: Bland-Altman & ICC](../../shinystat-cloud/references/recipes/05-diagnostic-meta-power.md#5-observer-agreement-bland-altman--shrout-fleiss-1979-icc) |
-| **Type 7: Systematic Meta-Analysis** | Pooled Effect (RR/OR/MD/SMD) | Inverse-Variance Fixed-Effects & DerSimonian-Laird | Cochran's $Q$, Higgins' $I^2$, $\hat{\tau}^2$, 95% Prediction Interval | [Recipe 24: Meta-Analysis Suite](../../shinystat-cloud/references/recipes/05-diagnostic-meta-power.md#24-fixed-effects--dersimonian-laird-random-effects-meta-analysis-prisma-2020) |
-| **Type 8: Clustered / Multi-Center** | Population-averaged effect | Generalized Estimating Equations (GEE) | Cluster Design Effect ($\text{DEFF}$), $\text{ICC}_{\text{cluster}}$; Robust sandwich SEs | [Recipe 23: Clustered GEE & DEFF](../../shinystat-cloud/references/recipes/02-regression-firth-ordinal.md#23-clustered-gee-with-robust-sandwich-ses-icc--design-effect-textdeff) |
-| **Type 9: Sample Size Determination** | Required N, Events, EPP, Statistical Power | Riley et al. (BMJ 2020) & Obuchowski (1998) | 4 criteria (intercept, MAPE, shrinkage, optimism); Obuchowski AUROC variance | [Recipe 20: Sample Size Determination](../../shinystat-cloud/references/recipes/05-diagnostic-meta-power.md#20-sample-size-determination-for-clinical-prediction-models-riley-et-al-2020--diagnostic-auroc-obuchowski-1998) |
+| **Type 1: Baseline Cohort** | Cohort characteristics | Table 1 (Mean/SD, Median/IQR, Count/%, SMD) | Normality inspection; Fisher exact fallback for small cells | [Recipe 1: Table 1 & SMD](recipes/01-data-missing-table1.md#1-table-1-baseline-characteristics--standardized-mean-difference-smd) |
+| **Type 2: Binary Outcome** | Odds Ratio (OR), Risk factors | Multivariable Binary Logistic Regression | Linearity of log-odds; Crude & Adjusted OR table | [Recipe 10: Logistic Regression Table](recipes/02-regression-firth-ordinal.md#10-multivariable-binary-logistic-regression-table) & [Recipe 22: Harrell RCS Splines](recipes/02-regression-firth-ordinal.md#22-restricted-cubic-splines-harrell-rcs-for-non-linear-continuous-predictors) |
+| **Type 2-Sparse: Separation** | OR estimate in rare events | Firth Penalized Logistic Regression | Profile likelihood CIs; resolves monotone separation | [Recipe 7: Firth Logistic Regression](recipes/02-regression-firth-ordinal.md#7-firths-penalized-likelihood-logistic-regression) |
+| **Type 2b: Ordinal Scale** | Cumulative Odds Ratio | Cumulative Logit Proportional Odds | Brant test for parallel lines; multinomial logit fallback | [Recipe 21: Ordinal Logistic & Brant Test](recipes/02-regression-firth-ordinal.md#21-proportional-odds-ordinal-logistic-regression--brant-test) |
+| **Type 3: Survival / Time-to-Event** | Hazard Ratio (HR), Median survival | Kaplan-Meier, Log-Rank & Cox Proportional Hazards | Proportional hazards test (Schoenfeld residuals); L2 shrinkage | [Recipe 11: Survival Analysis Suite](recipes/03-survival-competing-risks.md#11-survival-analysis-kaplan-meier-log-rank--cox-proportional-hazards) |
+| **Type 3b: Competing Risks Survival** | Subdistribution Hazard (SHR) & Cause-Specific HR (csHR) | Aalen-Johansen CIF & Fine-Gray Model (IPCW) | Competing risk probability conservation; Naive KM overestimation audit | [Recipe 15: Competing Risks Survival](recipes/03-survival-competing-risks.md#15-competing-risks-survival-analysis-aalen-johansen-cif--fine-gray-model) |
+| **Type 4: Diagnostic Test Accuracy** | Sens, Spec, PPV, NPV, AUC, LRs | 2x2 Contingency Matrix & Empirical ROC | Wilson score CIs; Haldane correction; Single/Paired DeLong | [Recipe 2: 2x2 Diagnostics](recipes/05-diagnostic-meta-power.md#2-2x2-diagnostic-accuracy-with-wilson-score--log-scale-95-cis) & [Recipe 3: ROC & DeLong](recipes/05-diagnostic-meta-power.md#3-empirical-roc-optimal-cutoff--single--paired-delong-95-cis) |
+| **Type 4b: Clinical Utility & Calib** | Net Benefit, Model Calibration | Decision Curve Analysis (DCA) & Recalibration | Brier score; Calibration slope & intercept; Austin-Steyerberg ICI | [Recipe 4: Calibration & DCA](recipes/05-diagnostic-meta-power.md#4-model-calibration--vickers-decision-curve-analysis-dca) |
+| **Type 4c: Internal Validation & Shrinkage** | Optimism-corrected C-statistic, Brier, R2, Slope | TRIPOD+AI Bootstrap Internal Validation | B >= 200 resamples; uniform shrinkage factor s_hat, re-estimated intercept | [Recipe 18: Internal Validation & Shrinkage](recipes/05-diagnostic-meta-power.md#18-tripodai-optimism-corrected-bootstrap-internal-validation--uniform-shrinkage) |
+| **Type 4d: Model Recalibration & Updating** | Target Population Calibration, Intercept, Slope | Intercept-only & Logistic Recalibration | Alpha and Beta recalibration parameters, ICI, Emax, AUROC preserved | [Recipe 19: Model Recalibration](recipes/05-diagnostic-meta-power.md#19-prediction-model-recalibration-and-updating-logistic--intercept-only) |
+| **Type 5: Observational Causal (PSM)** | Average Treatment Effect in Treated (ATT) | Propensity Score Matching (PSM, 1:1, Caliper 0.2 SD) | Austin (2009) balance (SMD < 0.10); Pair ID tracking; E-value | [Recipe 6: PSM & Balance](recipes/04-causal-iptw-psm.md#6-propensity-score-matching-psm-with-pair-ids--covariate-balance) & [Recipe 9: E-Value](recipes/02-regression-firth-ordinal.md#9-vanderweele--ding-2017-sensitivity-e-value) |
+| **Type 5b: Causal Weighting (IPTW)** | Population Effect (ATE, ATT, ATC, Overlap ATO) | Inverse Probability Treatment Weighting (IPTW) | Kish's Effective Sample Size ($N_{\text{eff}} \ge 0.5 \times N$), Positivity (PS 0.05–0.95), Robust SE | [Recipe 14: IPTW & Balance](recipes/04-causal-iptw-psm.md#14-inverse-probability-of-treatment-weighting-iptw--weighted-balance) |
+| **Type 6: Device / Rater Agreement** | Limits of Agreement, Reliability | Bland-Altman Difference Analysis & ICC (1–3k) | Bland-Altman 1999 large-sample CIs; Shrout-Fleiss exact F CIs | [Recipe 5: Bland-Altman & ICC](recipes/05-diagnostic-meta-power.md#5-observer-agreement-bland-altman--shrout-fleiss-1979-icc) |
+| **Type 7: Systematic Meta-Analysis** | Pooled Effect (RR/OR/MD/SMD) | Inverse-Variance Fixed-Effects & DerSimonian-Laird | Cochran's $Q$, Higgins' $I^2$, $\hat{\tau}^2$, 95% Prediction Interval | [Recipe 24: Meta-Analysis Suite](recipes/05-diagnostic-meta-power.md#24-fixed-effects--dersimonian-laird-random-effects-meta-analysis-prisma-2020) |
+| **Type 8: Clustered / Multi-Center** | Population-averaged effect | Generalized Estimating Equations (GEE) | Cluster Design Effect ($\text{DEFF}$), $\text{ICC}_{\text{cluster}}$; Robust sandwich SEs | [Recipe 23: Clustered GEE & DEFF](recipes/02-regression-firth-ordinal.md#23-clustered-gee-with-robust-sandwich-ses-icc--design-effect-textdeff) |
+| **Type 9: Sample Size Determination** | Required N, Events, EPP, Statistical Power | Riley et al. (BMJ 2020) & Obuchowski (1998) | 4 criteria (intercept, MAPE, shrinkage, optimism); Obuchowski AUROC variance | [Recipe 20: Sample Size Determination](recipes/05-diagnostic-meta-power.md#20-sample-size-determination-for-clinical-prediction-models-riley-et-al-2020--diagnostic-auroc-obuchowski-1998) |
 
 ---
 
@@ -38,14 +38,14 @@ Calculate diagnostic EPV:
 ├── EPV ≥ 10 & No Separation ──▶ Standard Multivariable Logistic (Recipe 10) / Standard Unpenalized Cox PH (Recipe 11 with default `penalizer=0.0`)
 ├── Monotone Separation Detected ──▶ Halt at Grilling Gate for clinical confirmation:
 │   ├── Binary Logistic: (A) Firth penalized likelihood with profile likelihood CIs (Recipe 7), or (B) Remove/collapse separating covariate
-│   └── Cox Proportional Hazards (Monotone Likelihood): (A) Scale-aware, data-validated L2-penalized Cox regression via lifelines (Recipe 11: standardize continuous predictors and report the transformation, or select and validate `penalizer > 0` on the supported data), or (B) Remove/collapse separating covariate
+│   └── Cox Proportional Hazards (Monotone Likelihood): (A) Scale-aware, data-validated L2-penalized Cox regression via lifelines (Recipe 11: standardize continuous predictors when scales differ and select and validate a positive penalty `penalizer > 0` on the supported data, reporting the transformation), or (B) Remove/collapse separating covariate
 └── Low EPV (< 10) without Separation
     ├── Binary Logistic:
     │   ├── Strategy 1 (Etiological Effect): Firth penalized logistic regression with profile likelihood CIs (Recipe 7)
     │   ├── Strategy 2 (Prediction Model): L2 Ridge penalization / shrinkage to prevent overfitting (Riley et al., 2019)
     │   └── Strategy 3: Domain-guided clinical composite score or univariable reporting with sparse-data disclaimer
     └── Cox Proportional Hazards:
-        ├── Strategy 1: Scale-aware, data-validated L2-penalized Cox regression via lifelines (Recipe 11: standardize continuous predictors and report the transformation, or select and validate `penalizer > 0` on the supported data)
+        ├── Strategy 1: Scale-aware, data-validated L2-penalized Cox regression via lifelines (Recipe 11: standardize continuous predictors when scales differ and select and validate a positive penalty `penalizer > 0` on the supported data, reporting the transformation)
         ├── Strategy 2: Pre-specified clinical risk index / score reduction
         └── Strategy 3: Univariable survival analysis (Kaplan-Meier / univariable Cox) with sparse-data disclaimer
 ```
@@ -59,7 +59,7 @@ Audit Missingness Pattern & Mechanism (Recipe 8: Little's MCAR Test; note H0: MC
 ├── Per-variable missingness < 5% in non-primary covariates ──▶ Complete-case analysis with documented justification
 ├── Missing 5%–40% under Missing at Random (MAR) ──▶ Multiple Imputation by Chained Equations (Recipe 12: MICE; proper Bayesian draws, M ≥ 5 for ≤ 30% missing, M ≥ 20 for > 30% missing; always run Complete-Case Analysis as sensitivity analysis, noting agreement does not prove MAR or exclude MNAR bias)
 ├── Non-Primary Missing > 40% (Not MNAR) ──▶ Halt at Grilling Gate: (a) drop auxiliary covariate, (b) high-M MICE (M ≥ 40, tracking FMI) under MAR, or (c) pattern-mixture modeling (or missing-indicator adjustment restricted to randomized-trial baseline covariates or explicitly labeled sensitivity analyses)
-├── Primary Outcome Missing ──▶ Never impute outcome; preserve true sample retention flow (N_initial ➔ N_analyzed)
+├── Primary Outcome Missing ──▶ Default: avoid outcome imputation in observational cohorts and preserve retention flow (N_initial ➔ N_analyzed); for trial/longitudinal dropout under MAR, allow protocol-justified outcome imputation (MICE) or MMRM with mandatory complete-case and tipping-point sensitivity analyses
 └── Missingness Informative / MNAR ──▶ Halt for clinical domain review or sensitivity bounds
 ```
 
@@ -78,11 +78,11 @@ Identify Clinical Biomarker Mechanism
 ```
 Evaluate Treatment Assignment & Causal Target
 ├── Target Population
-│   ├── Target = Treated Population (ATT) ──▶ 1:1 Nearest-Neighbor PSM with caliper 0.2 SD (Recipe 6) OR IPTW (estimand='ATT', Recipe 14)
+│   ├── Target = Treated Population (ATT) ──▶ IPTW (estimand='ATT', Recipe 14; if propensity-score trimming removes treated units, report excluded treated count and revise estimand to retained treated population, distinguishing from full ATT) OR 1:1 Nearest-Neighbor PSM with caliper 0.2 SD (Recipe 6; if caliper drops unmatched treated units, report unmatched-treated count and label estimand as matched-population effect, distinguishing from full ATT)
 │   ├── Target = Whole Target Population (ATE) ──▶ IPTW (estimand='ATE') with stabilized weights (Recipe 14)
 │   └── Significant Propensity Truncation / Lack of Overlap ──▶ Overlap Weights (estimand='ATO', Li et al. 2018, Recipe 14)
 ├── Weight Stability & Positivity Audit
-│   ├── Positivity Alert (PS < 0.05 or > 0.95) ──▶ Trim extreme tails OR switch to Overlap Weights (ATO)
+│   ├── Positivity Alert (PS < 0.05 or > 0.95) ──▶ Trim extreme tails (if trimming removes treated patients under ATT, report excluded treated count and revised estimand) OR switch to Overlap Weights (ATO)
 │   ├── Extreme Weights (> 10.0) ──▶ Quantile Truncation (0.01, 0.99) OR Overlap Weights
 │   └── Kish's Effective Sample Size (Neff < 0.5 * N) ──▶ Warning for variance inflation; use robust SE (HC1)
 └── Balance Diagnostics: Austin (2009) Love Plot (absolute SMD < 0.10)
@@ -96,7 +96,7 @@ Audit Event Types: Event of Interest vs. Competing Risks (e.g., CV death vs. non
 │       On Schoenfeld P <= 0.05, inspect plot_schoenfeld_residuals (figures.md §9), then:
 │       ├── P <= 0.05/k (k = covariates tested) is a strong violation
 │       ├── 0.05/k < P <= 0.05 is a weak violation (plot decides)
-│       ├── Nuisance covariate ──▶ refit with strata=[...] for meaningful categorical or defensibly grouped continuous variables (`refit_cox_with_strata`; its HR is no longer reported); otherwise retain and model non-linearity (RCS)
+│       ├── Nuisance covariate ──▶ refit with strata=[...] for meaningful categorical or defensibly grouped continuous variables (`refit_cox_with_strata`; its HR is no longer reported); if continuous non-linear misspecification is suspected, refit with RCS and reassess PH; if PH violation persists, model the time-varying effect or report as a limitation
 │       ├── Exposure ──▶ piecewise/time-varying HR (`piecewise_hr`), or RMST
 │       └── Reporting ──▶ report both models and name the remedy beside each violator
 └── Multiple / Mutually Exclusive Failures
@@ -188,7 +188,7 @@ Polish Grilling Gate #6 Activation & Routing
 
 ## 3. Reporting & Publication Standards
 
-- **NEJM Style**: 3 horizontal rules (top border 2px, header border 1px, bottom border 2px), zero vertical dividers, $P$-values formatted as $P = 0.04$ or $P < 0.001$. Render via [Recipe 13: Publication Table Formatter](../../shinystat-cloud/references/recipes/01-data-missing-table1.md#13-publication-grade-html-table-renderer-nejm--jama-standards).
+- **NEJM Style**: 3 horizontal rules (top border 2px, header border 1px, bottom border 2px), zero vertical dividers, $P$-values formatted as $P = 0.04$ or $P < 0.001$. Render via [Recipe 13: Publication Table Formatter](recipes/01-data-missing-table1.md#13-publication-grade-html-table-renderer-nejm--jama-standards).
 - **JAMA Style**: Clean minimal dividers, $P$-values formatted without leading zero: $P = .04$ or $P < .001$.
 - **Precision Invariants**: Unrounded intermediate calculations (`float64`); OR/HR reported to 2 decimal places with 95% CIs; percentages reported to 1 decimal place; explicit units mandatory (`mg/dL`, `mL/min/1.73m²`).
 - **Reporting Checklists**: Consult EQUATOR standards: STROBE (observational cohorts), CONSORT (trials), TRIPOD (prediction models), STARD (diagnostic accuracy), or PRISMA (systematic reviews).

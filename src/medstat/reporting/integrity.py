@@ -101,7 +101,7 @@ def _detect_p_qualifier(key_str: str) -> str | None:
         return "nonlinear"
     if "omnibus" in k_lower:
         return "omnibus"
-    if "lrt" in k_lower:
+    if "lrt" in k_lower or "likelihood" in k_lower:
         return "lrt"
     if "wald" in k_lower:
         return "wald"
@@ -235,7 +235,7 @@ def _is_structural_context(
         if re.search(r"\b(?:CI|confidence|credible)\b", window, re.IGNORECASE):
             return True
 
-    # 2. Alpha thresholds and p-value cutoffs (e.g., alpha = 0.05, significance threshold p < 0.05)
+    # 2. Alpha thresholds and p-value cutoffs (e.g., alpha = 0.05, significance threshold 0.05)
     if val in (0.05, 0.01, 0.001, 0.005, 0.0001):
         has_threshold_kw = bool(
             re.search(
@@ -252,7 +252,27 @@ def _is_structural_context(
                 re.IGNORECASE,
             )
         )
-        if has_threshold_kw and not is_direct_p_eq:
+        is_p_ineq = bool(
+            re.search(
+                r"\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+[a-zA-Z_-]+\)?|\(?[a-zA-Z_-]+\)?))?\s*([<>]=?|[≤≥])\s*$",
+                window_before,
+                re.IGNORECASE,
+            )
+        )
+        is_threshold_def = bool(
+            re.search(
+                r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff|prespecified(?:\s+(?:level|threshold|cutoff))?|defined\s+as)"
+                r"(?:\s*(?:[:=]|\b(?:was|were|is)?\s*(?:set\s+at|defined\s+as|of|at)?\b))?\s*"
+                r"\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+[a-zA-Z_-]+\)?|\(?[a-zA-Z_-]+\)?))?\s*([<>]=?|[≤≥])\s*$",
+                window_before,
+                re.IGNORECASE,
+            )
+        )
+        if (
+            has_threshold_kw
+            and not is_direct_p_eq
+            and (not is_p_ineq or is_threshold_def)
+        ):
             return True
 
     # 3. Calendar & Publication years (1900-2035) when preceded by date or journal/citation context
@@ -389,18 +409,22 @@ def _extract_text_tokens(text: str) -> list[TextToken]:
             doc_has_references=doc_has_references,
         )
         p_ineq_match = re.search(
-            r"\bp\s*(?:[-_\s]*value\s*)?([<>]=?|[≤≥])\s*$", window_before, re.IGNORECASE
+            r"(?:((?:[a-zA-Z_-]+(?:\s+(?:ratio\s+)?(?:test|score|statistic))?|[a-zA-Z_-]+))\s*,?\s+)?\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+([a-zA-Z_-]+)\)?|\(?([a-zA-Z_-]+)\)?))?\s*([<>]=?|[≤≥])\s*$",
+            window_before,
+            re.IGNORECASE,
         )
         p_val = val / 100.0 if has_pct else val
         p_inequality: str | None = None
         p_qualifier: str | None = None
         if 0.0 <= p_val <= 1.0 and not is_structural and p_ineq_match:
-            raw_op = p_ineq_match.group(1)
+            qual_raw = (
+                p_ineq_match.group(2) or p_ineq_match.group(3) or p_ineq_match.group(1)
+            )
+            raw_op = p_ineq_match.group(4)
             p_inequality = (
                 "<=" if raw_op == "≤" else (">=" if raw_op == "≥" else raw_op)
             )
-            window_context = f"{window_before} {raw_num} {window_after}"
-            p_qualifier = _detect_p_qualifier(window_context)
+            p_qualifier = _detect_p_qualifier(qual_raw) if qual_raw else None
 
         is_p_floor = bool(p_inequality in ("<", "<="))
         tokens.append(
@@ -482,8 +506,7 @@ def verify_report_integrity(
     # 2. Numerical Traceability
     known_numbers = _flatten_numbers(doc.results_dict)
     qualified_p_values = _extract_qualified_p_values(doc.results_dict)
-    if not qualified_p_values:
-        qualified_p_values = [(None, kn) for kn in known_numbers if 0.0 <= kn <= 1.0]
+    # Require an actual identified p-value in results_dict to support p-value inequalities
     allowed_list = (
         [float(x) for x in allowed_untraced] if allowed_untraced is not None else []
     )

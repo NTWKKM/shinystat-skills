@@ -29,8 +29,10 @@ def fake_repo(tmp_path: Path) -> dict[str, Path]:
     scripts_dir.mkdir()
     shutil.copy(REPO_ROOT / "scripts" / "install-skills.sh", scripts_dir)
     shutil.copy(REPO_ROOT / "scripts" / "package-cloud-skill.sh", scripts_dir)
+    shutil.copy(REPO_ROOT / "scripts" / "sync-skills.sh", scripts_dir)
     (scripts_dir / "install-skills.sh").chmod(0o755)
     (scripts_dir / "package-cloud-skill.sh").chmod(0o755)
+    (scripts_dir / "sync-skills.sh").chmod(0o755)
 
     # 2. Canonical skills structure
     (repo_dir / "skills" / "shinystat" / "references").mkdir(parents=True)

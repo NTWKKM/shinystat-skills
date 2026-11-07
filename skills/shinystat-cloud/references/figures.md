@@ -8,7 +8,7 @@ All figures in `shinystat-cloud` are generated using **standalone `matplotlib` a
 
 Every clinical figure produced in a cloud Python sandbox must satisfy these visual and geometric standards:
 
-1. **Journal House Style Synchronization**: Apply the locked Journal House Style (`NEJM`, `JAMA`, `Lancet`, `BMJ`, or `Clinical`) from [house-styles.md](house-styles.md) before creating axes (`apply_journal_style(style)`).
+1. **Journal House Style Synchronization**: Apply the locked Journal House Style (`NEJM`, `JAMA`, `Lancet`, `BMJ`, or `Clinical`) from [house-styles.md](house-styles.md) before creating axes (`apply_standalone_journal_theme(style)`).
 2. **TrueType Vector Export**: Set `plt.rcParams["pdf.fonttype"] = 42` and `plt.rcParams["ps.fonttype"] = 42` so exported PDFs keep editable text paths.
 3. **Spine Despining**: Hide top and right spines (`ax.spines["top"].set_visible(False)`, `ax.spines["right"].set_visible(False)`).
 4. **Uncertainty & Sample Size**: Include 95% confidence bands or error bars on all point estimates, and display Number-at-Risk tables below survival and cumulative incidence curves.

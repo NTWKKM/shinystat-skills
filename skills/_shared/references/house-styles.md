@@ -115,6 +115,7 @@ def apply_standalone_journal_theme(
         "axes.edgecolor": "#222222",
         "axes.linewidth": spec["spine_lw"],
         "axes.facecolor": bg,
+        "axes.prop_cycle": mpl.cycler(color=spec["palette"]),
         "figure.facecolor": bg,
         "savefig.facecolor": bg,
         "xtick.direction": spec["tick_dir"],
@@ -134,6 +135,9 @@ def apply_standalone_journal_theme(
     return spec
 
 
+apply_journal_style = apply_standalone_journal_theme
+
+
 def style_standalone_axis(ax, journal: str = "NEJM") -> None:
     """Applies L-frame spine, dotted grid (JAMA/CLINICAL), and Lancet mid-dot ticks."""
     j_key = journal.upper() if journal and journal.upper() in JOURNAL_SPECS else "NEJM"
@@ -146,8 +150,16 @@ def style_standalone_axis(ax, journal: str = "NEJM") -> None:
     else:
         ax.grid(False)
     if j_key == "LANCET":
-        ax.xaxis.set_major_formatter(mpl.ticker.FuncFormatter(lambda x, _: f"{x:g}".replace(".", "\u00b7")))
-        ax.yaxis.set_major_formatter(mpl.ticker.FuncFormatter(lambda y, _: f"{y:g}".replace(".", "\u00b7")))
+        # Apply mid-dot replacement strictly to numeric continuous formatters, preserving category and date labels
+        class LancetFormatter(mpl.ticker.ScalarFormatter):
+            def __call__(self, x, pos=None):
+                res = super().__call__(x, pos)
+                return res.replace(".", "\u00b7") if isinstance(res, str) else res
+
+        if isinstance(ax.xaxis.get_major_formatter(), (mpl.ticker.ScalarFormatter, mpl.ticker.NullFormatter)):
+            ax.xaxis.set_major_formatter(LancetFormatter())
+        if isinstance(ax.yaxis.get_major_formatter(), (mpl.ticker.ScalarFormatter, mpl.ticker.NullFormatter)):
+            ax.yaxis.set_major_formatter(LancetFormatter())
 ```
 
 ---
@@ -183,18 +195,46 @@ def format_standalone_p(p: float, journal: str = "NEJM") -> str:
 ## 4. Recipe: Exporting Multi-Format Bundle (PNG, TrueType PDF, SVG, CSV)
 
 ```python
-def save_standalone_bundle(fig, out_path: str, source_df=None, dpi: int = 300) -> dict:
+from pathlib import Path
+import matplotlib as mpl
+import pandas as pd
+
+
+def save_standalone_bundle(
+    fig,
+    out_path: str,
+    source_df=None,
+    dpi: int = 300,
+    include_index: bool | None = None,
+) -> dict:
     """Saves 300/600 DPI PNG, TrueType vector PDF (fonttype=42), SVG, and traceable _source.csv."""
     p = Path(out_path)
     p.parent.mkdir(parents=True, exist_ok=True)
     png_path = p.with_suffix(".png")
     pdf_path = p.with_suffix(".pdf")
     svg_path = p.with_suffix(".svg")
+    mpl.rcParams["pdf.fonttype"] = 42
     fig.savefig(png_path, dpi=dpi, bbox_inches="tight", facecolor=fig.get_facecolor())
     fig.savefig(pdf_path, format="pdf", bbox_inches="tight", facecolor=fig.get_facecolor())
     fig.savefig(svg_path, format="svg", bbox_inches="tight", facecolor=fig.get_facecolor())
-    csv_path = p.with_name(p.stem + "_source.csv")
+
+    csv_str = None
     if source_df is not None:
-        source_df.to_csv(csv_path, index=False)
-    return {"png_path": str(png_path), "vector_path": str(pdf_path), "svg_path": str(svg_path), "csv_path": str(csv_path)}
+        csv_path = p.with_name(p.stem + "_source.csv")
+        # Preserve plotted index coordinates (e.g. survival times or cutpoints) if non-trivial,
+        # or when explicitly requested via include_index. Ensure exported index contains no PHI.
+        if include_index is not None:
+            has_index = bool(include_index)
+        else:
+            is_default_range = (
+                isinstance(source_df.index, pd.RangeIndex)
+                and source_df.index.name is None
+                and source_df.index.start == 0
+                and source_df.index.step == 1
+            )
+            has_index = not is_default_range
+        source_df.to_csv(csv_path, index=has_index)
+        csv_str = str(csv_path)
+
+    return {"png_path": str(png_path), "vector_path": str(pdf_path), "svg_path": str(svg_path), "csv_path": csv_str}
 ```

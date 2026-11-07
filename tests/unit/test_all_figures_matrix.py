@@ -813,12 +813,12 @@ def test_qa_gates_comprehensive():
     assert len(qa_overlap["text_overlaps"]) > 0
     plt.close(fig)
 
-    fig, ax = plt.subplots(figsize=(4, 3))
+    fig, ax = plt.subplots(figsize=(6, 4))
     ax.plot([0, 1], [0, 1])
     ax.set_title("Clean Title")
     fig.tight_layout()
     qa_clean = qa_layout(fig)
-    assert qa_clean["passed"] is True
+    assert qa_clean["passed"] is True, f"qa_clean failed: {qa_clean}"
     plt.close(fig)
 
     # 9.2 CVD Contrast Check

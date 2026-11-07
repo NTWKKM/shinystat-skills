@@ -6,6 +6,7 @@ verification for the shinystat-cloud standalone package and recipes.
 # ruff: noqa: E402
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -30,6 +31,34 @@ from tests.fixtures.integrity_cases import (
 )
 
 CLOUD_DIR = REPO_ROOT / "packaging" / "cloud" / "shinystat-cloud"
+
+
+@pytest.fixture(scope="session")
+def ensure_packaged_cloud_skill():
+    """Ensure packaging/cloud/shinystat-cloud is built and validated before running tests."""
+    pkg_script = REPO_ROOT / "scripts" / "package-cloud-skill.sh"
+    required_files = [
+        CLOUD_DIR / "SKILL.md",
+        CLOUD_DIR / "references" / "report-builder.md",
+        CLOUD_DIR / "references" / "decision-heuristics.md",
+        CLOUD_DIR / "references" / "figures.md",
+        CLOUD_DIR / "references" / "flows.md",
+        CLOUD_DIR / "references" / "subagent-protocol.md",
+    ]
+    if not all(p.exists() for p in required_files) and pkg_script.exists():
+        res = subprocess.run(
+            ["bash", str(pkg_script)],
+            check=False,
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+        )
+        assert res.returncode == 0, (
+            f"package-cloud-skill.sh failed:\n{res.stderr}\n{res.stdout}"
+        )
+    return CLOUD_DIR
+
+
 RECIPES_DIR = REPO_ROOT / "skills" / "shinystat-cloud" / "references" / "recipes"
 
 
@@ -57,7 +86,7 @@ def recipes():
 # -----------------------------------------------------------------------------
 
 
-def test_cloud_skill_metadata_and_frontmatter():
+def test_cloud_skill_metadata_and_frontmatter(ensure_packaged_cloud_skill):
     skill_file = CLOUD_DIR / "SKILL.md"
     assert skill_file.exists(), "packaging/cloud/shinystat-cloud/SKILL.md missing"
     content = skill_file.read_text(encoding="utf-8")
@@ -78,7 +107,9 @@ def test_cloud_skill_metadata_and_frontmatter():
     assert "Competing Risks" in fm["description"]
 
 
-def test_decision_heuristics_has_no_phantom_medstat_modules():
+def test_decision_heuristics_has_no_phantom_medstat_modules(
+    ensure_packaged_cloud_skill,
+):
     heuristics_file = CLOUD_DIR / "references" / "decision-heuristics.md"
     assert heuristics_file.exists()
     content = heuristics_file.read_text(encoding="utf-8")
@@ -1974,7 +2005,9 @@ def test_table_one_column_mapping_and_html_escaping(recipes):
     assert "&lt;b&gt;high&lt;/b&gt;" in html_out
 
 
-def test_cloud_report_builder_docx_fallback_and_integrity(tmp_path):
+def test_cloud_report_builder_docx_fallback_and_integrity(
+    tmp_path, ensure_packaged_cloud_skill
+):
     """Verifies that cloud report builder fallback redirects .docx to .html and tests standalone integrity."""
     rb_path = CLOUD_DIR / "references" / "report-builder.md"
     content = rb_path.read_text(encoding="utf-8")
@@ -2175,7 +2208,7 @@ def test_integrity_parity_fixture_cardinality():
 
 
 @pytest.mark.parametrize("case", INTEGRITY_PARITY_CASES, ids=lambda c: c.id)
-def test_cloud_verify_standalone_integrity_parity(case):
+def test_cloud_verify_standalone_integrity_parity(case, ensure_packaged_cloud_skill):
     """
     Task 2a: Asserts that verify_standalone_integrity (extracted from report-builder.md)
     and verify_report_integrity (via ReportDocument) have exact 100% parity across each test case.
@@ -2213,7 +2246,7 @@ def test_cloud_verify_standalone_integrity_parity(case):
     )
 
 
-def test_cloud_verify_standalone_integrity_mutations():
+def test_cloud_verify_standalone_integrity_mutations(ensure_packaged_cloud_skill):
     """
     Task 2b: Asserts that unmodified BASE_NARRATIVE passes both implementations,
     and all single-token mutations to the 5 statistical values fail both implementations.
@@ -2269,7 +2302,7 @@ def test_cloud_verify_standalone_integrity_mutations():
             )
 
 
-def test_cloud_standalone_plotly_spec_generators(tmp_path):
+def test_cloud_standalone_plotly_spec_generators(tmp_path, ensure_packaged_cloud_skill):
     """Verifies that all 7 standalone Plotly spec generators produce valid, JSON-serializable dictionaries."""
     import json
 
@@ -3709,7 +3742,9 @@ def test_cloud_figures_templates_validation_and_safety(tmp_path):
         plot_love(balance_inf)
 
 
-def test_cloud_standalone_qualified_p_values_and_dict_records_parity():
+def test_cloud_standalone_qualified_p_values_and_dict_records_parity(
+    ensure_packaged_cloud_skill,
+):
     """Verifies that verify_standalone_integrity mirrors verify_report_integrity for qualified p-values and dict records."""
     ns = _extract_report_builder_namespace()
     verify_standalone = ns["verify_standalone_integrity"]
@@ -3795,24 +3830,60 @@ def test_cloud_standalone_qualified_p_values_and_dict_records_parity():
     assert sa_zi["passed"] is True
     assert ir_zi.untraced_numbers == sa_zi["untraced_numbers"] == []
 
+    # 5. Parity cases for p-threshold pattern:
+    # 5a. Result claim after threshold mention
+    res_thresh = {"p_value": 0.23}
+    doc_thresh_claim = ReportDocument(
+        title="Threshold Mention Claim", results_dict=res_thresh
+    )
+    narr_thresh_claim = "The association met the significance threshold, with P < 0.05."
+    doc_thresh_claim.add_paragraph("Methods: Included observational cohort.")
+    doc_thresh_claim.add_paragraph(narr_thresh_claim)
+    ir_tc = verify_report_integrity(doc_thresh_claim)
+    sa_tc = verify_standalone(narr_thresh_claim, results_dict=res_thresh)
+    assert ir_tc.passed is False
+    assert sa_tc["passed"] is False
+    assert ir_tc.untraced_numbers == sa_tc["untraced_numbers"] == [0.05]
 
-def test_cloud_subagent_protocol_and_gate5_alignment():
+    # 5b. Methodological threshold definition
+    doc_thresh_def = ReportDocument(
+        title="Threshold Definition", results_dict=res_thresh
+    )
+    narr_thresh_def = (
+        "Methods: significance threshold P < 0.05. Primary outcome had p = 0.23."
+    )
+    doc_thresh_def.add_paragraph(narr_thresh_def)
+    ir_td = verify_report_integrity(doc_thresh_def)
+    sa_td = verify_standalone(narr_thresh_def, results_dict=res_thresh)
+    assert ir_td.passed is True
+    assert sa_td["passed"] is True
+    assert ir_td.untraced_numbers == sa_td["untraced_numbers"] == []
+
+    # 5c. False trend claim (p_trend=0.50 conflicting with p for trend < 0.05 near interaction text)
+    res_trend_fail = {"p_interaction": 0.01, "p_trend": 0.50}
+    doc_tfail = ReportDocument(title="False Trend Claim", results_dict=res_trend_fail)
+    narr_trend = "Interaction analysis: p for trend < 0.05 across risk tiers."
+    doc_tfail.add_paragraph(narr_trend)
+    ir_tfail = verify_report_integrity(doc_tfail)
+    sa_tfail = verify_standalone(narr_trend, results_dict=res_trend_fail)
+    assert ir_tfail.passed is False
+    assert sa_tfail["passed"] is False
+    assert ir_tfail.untraced_numbers == sa_tfail["untraced_numbers"] == [0.05]
+
+    # 5d. True trend claim (p_trend=0.02 matching p for trend < 0.05 near interaction text)
+    res_trend_pass = {"p_interaction": 0.01, "p_trend": 0.02}
+    doc_tpass = ReportDocument(title="True Trend Claim", results_dict=res_trend_pass)
+    doc_tpass.add_paragraph(narr_trend)
+    ir_tpass = verify_report_integrity(doc_tpass)
+    sa_tpass = verify_standalone(narr_trend, results_dict=res_trend_pass)
+    assert ir_tpass.passed is True
+    assert sa_tpass["passed"] is True
+    assert ir_tpass.untraced_numbers == sa_tpass["untraced_numbers"] == []
+
+
+def test_cloud_subagent_protocol_and_gate5_alignment(ensure_packaged_cloud_skill):
     """Verify packaged cloud skill rewrites subagent-protocol.md links and bundles byte-identical protocol."""
-    import subprocess
-
-    package_script = REPO_ROOT / "scripts" / "package-cloud-skill.sh"
-    if not CLOUD_DIR.exists():
-        if package_script.exists():
-            subprocess.run(
-                ["bash", str(package_script)],
-                check=True,
-                cwd=REPO_ROOT,
-                capture_output=True,
-            )
-        else:
-            pytest.skip(
-                "packaging/cloud/shinystat-cloud not built and package script unavailable"
-            )
+    assert CLOUD_DIR.exists(), "packaging/cloud/shinystat-cloud not found"
 
     skill_md = (CLOUD_DIR / "SKILL.md").read_text(encoding="utf-8")
     assert "(references/subagent-protocol.md)" in skill_md
@@ -3826,3 +3897,142 @@ def test_cloud_subagent_protocol_and_gate5_alignment():
         "packaging/cloud/shinystat-cloud/references/subagent-protocol.md missing"
     )
     assert proto_file.read_bytes() == shared_proto.read_bytes()
+
+
+def test_consort_single_field_derivation_and_superscript_allowlist(
+    ensure_packaged_cloud_skill, monkeypatch, tmp_path
+):
+    """Regression test for CodeRabbit review findings:
+    1. Single-field inputs in CONSORT (allocated=100, received=80, analyzed=80)
+        properly derive missing fields (dnr=20, ex_an=20) and render without omission.
+    2. Missing receipt or analysis partitions (both fields absent) are rejected.
+    3. Narrative superscript restoration allowlists only safe citation/footnote classes,
+        stripping unlisted classes (e.g. 'unexpected') and event attributes (e.g. 'onclick').
+    """
+    flows_md = (CLOUD_DIR / "references" / "flows.md").read_text(encoding="utf-8")
+    blocks = re.findall(r"```python\n(.*?)\n```", flows_md, re.DOTALL)
+    ns_flows = {}
+    for idx, b in enumerate(blocks):
+        block_ns = {}
+        try:
+            exec(b, block_ns)
+            ns_flows.update(block_ns)
+        except Exception as exc:
+            pytest.fail(f"flows.md block {idx} failed to execute: {exc!r}")
+
+    draw_consort = ns_flows["draw_standalone_consort_rct"]
+    out_png = tmp_path / "consort_single_field.png"
+
+    import matplotlib.pyplot as plt
+
+    captured_texts = []
+    orig_subplots = plt.subplots
+
+    def wrap_subplots(*args, **kwargs):
+        fig, ax = orig_subplots(*args, **kwargs)
+        orig_savefig = fig.savefig
+
+        def wrap_savefig(*sargs, **skwargs):
+            for a in fig.axes:
+                captured_texts.extend([t.get_text() for t in a.texts])
+            return orig_savefig(*sargs, **skwargs)
+
+        fig.savefig = wrap_savefig
+        return fig, ax
+
+    monkeypatch.setattr(plt, "subplots", wrap_subplots)
+    res = draw_consort(
+        assessed=220,
+        excluded={"Ineligible": 20},
+        arms=[
+            {"name": "Arm A", "allocated": 100, "received": 80, "analyzed": 80},
+            {
+                "name": "Arm B",
+                "allocated": 100,
+                "did_not_receive": 0,
+                "excluded_from_analysis": 0,
+            },
+        ],
+        out_path=str(out_png),
+    )
+    assert Path(res).exists() and Path(res).stat().st_size > 0
+
+    all_rendered = "\n".join(captured_texts)
+    assert "Did not receive intervention (n = 20)" in all_rendered
+    assert "Excluded from analysis (n = 20)" in all_rendered
+    assert "Lost to follow-up (unknown)" in all_rendered
+    assert "Discontinued intervention (unknown)" in all_rendered
+
+    with pytest.raises(
+        ValueError, match="must specify at least one observed receipt field"
+    ):
+        draw_consort(
+            assessed=220,
+            excluded={"Ineligible": 20},
+            arms=[
+                {"name": "Arm A", "allocated": 100, "analyzed": 80},
+                {
+                    "name": "Arm B",
+                    "allocated": 100,
+                    "received": 100,
+                    "analyzed": 100,
+                },
+            ],
+            out_path=str(tmp_path / "invalid_receipt.png"),
+        )
+
+    with pytest.raises(
+        ValueError, match="must specify at least one observed analysis field"
+    ):
+        draw_consort(
+            assessed=220,
+            excluded={"Ineligible": 20},
+            arms=[
+                {"name": "Arm A", "allocated": 100, "received": 80},
+                {
+                    "name": "Arm B",
+                    "allocated": 100,
+                    "received": 100,
+                    "analyzed": 100,
+                },
+            ],
+            out_path=str(tmp_path / "invalid_analysis.png"),
+        )
+
+    # HTML narrative superscript class allowlist and attribute stripping
+    rb_md = (CLOUD_DIR / "references" / "report-builder.md").read_text(encoding="utf-8")
+    rb_blocks = re.findall(r"```python\n(.*?)\n```", rb_md, re.DOTALL)
+    ns_rb = {}
+    for idx, b in enumerate(rb_blocks):
+        block_ns = {}
+        try:
+            exec(b, block_ns)
+            ns_rb.update(block_ns)
+        except Exception as exc:
+            pytest.fail(f"report-builder.md block {idx} failed to execute: {exc!r}")
+
+    gen_html = ns_rb["generate_html_report"]
+    narr_text = (
+        "Testing superscripts: "
+        '<sup onclick="alert(1)">1</sup>, '
+        '<sup class="unexpected">2</sup>, '
+        '<sup class="citation">3</sup>, '
+        '<sup class="footnote">4</sup>, '
+        "<sup>5</sup>."
+    )
+    html_out = tmp_path / "superscript_test.html"
+    gen_html(
+        title="Superscript Security Test",
+        results={"narrative": narr_text},
+        tables={"T": pd.DataFrame({"X": [1]})},
+        out_path=str(html_out),
+    )
+    html_content = html_out.read_text(encoding="utf-8")
+    assert "Testing superscripts" in html_content
+    assert "onclick" not in html_content
+    assert 'class="unexpected"' not in html_content
+    assert '<sup class="citation">' in html_content
+    assert '<sup class="footnote">' in html_content
+    assert "<sup>1</sup>" in html_content
+    assert "<sup>2</sup>" in html_content
+    assert "<sup>5</sup>" in html_content

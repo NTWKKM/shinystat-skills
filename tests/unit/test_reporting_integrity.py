@@ -634,6 +634,149 @@ def test_integrity_p_floor_and_allowed_untraced_guards():
     assert audit_allow_pass.passed is True
 
 
+def test_integrity_threshold_mention_vs_definition_and_qualifier():
+    """Verifies that:
+    1. A sentence mentioning 'significance threshold' followed by a result claim ('with P < 0.05')
+       is NOT exempted as a threshold definition and is checked against results_dict.
+    2. A genuine methodological threshold definition ('significance threshold P < 0.05')
+       is structurally exempted even when recorded p-value differs.
+    3. Qualifier detection binds to the p-value match itself ('p for trend < 0.05')
+       rather than picking up nearby keywords like 'Interaction' from the surrounding window.
+    """
+    # 1. Result claim following a threshold mention: must fail if conflicting
+    doc_result_claim = ReportDocument(
+        title="Result Claim After Threshold Mention",
+        results_dict={"p_value": 0.23},
+    )
+    doc_result_claim.add_paragraph("Methods: Included observational cohort.")
+    doc_result_claim.add_paragraph(
+        "The association met the significance threshold, with P < 0.05."
+    )
+    audit_claim = verify_report_integrity(doc_result_claim)
+    assert 0.05 in audit_claim.untraced_numbers
+    assert audit_claim.passed is False
+
+    # 2. Genuine methodological definition: must be exempted
+    doc_def = ReportDocument(
+        title="Methodological Threshold Definition",
+        results_dict={"p_value": 0.23},
+    )
+    doc_def.add_paragraph("Methods: significance threshold P < 0.05.")
+    doc_def.add_paragraph("Primary outcome had p = 0.23.")
+    audit_def = verify_report_integrity(doc_def)
+    assert 0.05 not in audit_def.untraced_numbers
+    assert audit_def.passed is True
+
+    # 3. Qualifier binding: 'p for trend < 0.05' near 'Interaction analysis'
+    doc_qual_fail = ReportDocument(
+        title="Qualifier Binding Check (False Trend Claim)",
+        results_dict={"p_interaction": 0.01, "p_trend": 0.50},
+    )
+    doc_qual_fail.add_paragraph("Methods: Included observational cohort.")
+    doc_qual_fail.add_paragraph(
+        "Interaction analysis: p for trend < 0.05 across risk tiers."
+    )
+    audit_qual_fail = verify_report_integrity(doc_qual_fail)
+    assert 0.05 in audit_qual_fail.untraced_numbers
+    assert audit_qual_fail.passed is False
+
+    # 4. Qualifier binding: 'p for trend < 0.05' near 'Interaction analysis' passes when p_trend is valid
+    doc_qual_pass = ReportDocument(
+        title="Qualifier Binding Check (True Trend Claim)",
+        results_dict={"p_interaction": 0.01, "p_trend": 0.02},
+    )
+    doc_qual_pass.add_paragraph("Methods: Included observational cohort.")
+    doc_qual_pass.add_paragraph(
+        "Interaction analysis: p for trend < 0.05 across risk tiers."
+    )
+    audit_qual_pass = verify_report_integrity(doc_qual_pass)
+    assert 0.05 not in audit_qual_pass.untraced_numbers
+    assert audit_qual_pass.passed is True
+
+    # 1b. Prespecified threshold followed by observed result claim: must fail if conflicting
+    doc_prespec_claim = ReportDocument(
+        title="Prespecified Threshold Followed By Observed Result",
+        results_dict={"p_value": 0.23},
+    )
+    doc_prespec_claim.add_paragraph("Methods: Included observational cohort.")
+    doc_prespec_claim.add_paragraph(
+        "The significance threshold was prespecified and the observed result was P < 0.05."
+    )
+    audit_prespec = verify_report_integrity(doc_prespec_claim)
+    assert 0.05 in audit_prespec.untraced_numbers
+    assert audit_prespec.passed is False
+
+    # 1c. Significance threshold p was prespecified, but observed P < 0.05: must fail if conflicting
+    doc_prespec_p_claim = ReportDocument(
+        title="Threshold p Prespecified But Observed Claim",
+        results_dict={"p_value": 0.23},
+    )
+    doc_prespec_p_claim.add_paragraph("Methods: Included observational cohort.")
+    doc_prespec_p_claim.add_paragraph(
+        "The significance threshold p was prespecified, but the observed result was P < 0.05."
+    )
+    audit_prespec_p = verify_report_integrity(doc_prespec_p_claim)
+    assert 0.05 in audit_prespec_p.untraced_numbers
+    assert audit_prespec_p.passed is False
+
+    # 1d. Significance threshold p-value was prespecified and observed P < 0.05: must fail if conflicting
+    doc_prespec_pval_claim = ReportDocument(
+        title="Threshold p-value Prespecified And Observed Result",
+        results_dict={"p_value": 0.23},
+    )
+    doc_prespec_pval_claim.add_paragraph("Methods: Included observational cohort.")
+    doc_prespec_pval_claim.add_paragraph(
+        "The significance threshold p-value was prespecified and the observed P < 0.05."
+    )
+    audit_prespec_pval = verify_report_integrity(doc_prespec_pval_claim)
+    assert 0.05 in audit_prespec_pval.untraced_numbers
+    assert audit_prespec_pval.passed is False
+
+    # 2b. Methodological definition using inclusive inequality (<= / defined as): must be exempted
+    doc_def_incl = ReportDocument(
+        title="Methodological Threshold Definition Inclusive",
+        results_dict={"p_value": 0.23},
+    )
+    doc_def_incl.add_paragraph("Methods: significance threshold defined as P <= 0.05.")
+    doc_def_incl.add_paragraph("Primary outcome had p = 0.23.")
+    audit_def_incl = verify_report_integrity(doc_def_incl)
+    assert 0.05 not in audit_def_incl.untraced_numbers
+    assert audit_def_incl.passed is True
+
+    # 2c. Methodological definition using inclusive upper inequality (>= / defined as) with conflicting recorded p-value 0.02
+    doc_def_gte = ReportDocument(
+        title="Methodological Threshold Definition GTE",
+        results_dict={"p_value": 0.02},
+    )
+    doc_def_gte.add_paragraph("Methods: significance threshold defined as P >= 0.05.")
+    doc_def_gte.add_paragraph("Primary outcome had p = 0.02.")
+    audit_def_gte = verify_report_integrity(doc_def_gte)
+    assert 0.05 not in audit_def_gte.untraced_numbers
+    assert audit_def_gte.passed is True
+
+    # 5. Multiword test label: 'Wald test P < 0.05' binds 'wald' qualifier and must not match generic p=0.01 when p_wald=0.2
+    doc_wald_fail = ReportDocument(
+        title="Wald Test Qualifier Mismatch",
+        results_dict={"p": 0.01, "p_wald": 0.20},
+    )
+    doc_wald_fail.add_paragraph("Methods: Included observational cohort.")
+    doc_wald_fail.add_paragraph("Primary model: Wald test P < 0.05.")
+    audit_wald_fail = verify_report_integrity(doc_wald_fail)
+    assert 0.05 in audit_wald_fail.untraced_numbers
+    assert audit_wald_fail.passed is False
+
+    # Wald test passes when p_wald is significant
+    doc_wald_pass = ReportDocument(
+        title="Wald Test Qualifier Match",
+        results_dict={"p": 0.20, "p_wald": 0.01},
+    )
+    doc_wald_pass.add_paragraph("Methods: Included observational cohort.")
+    doc_wald_pass.add_paragraph("Primary model: Wald test P < 0.05.")
+    audit_wald_pass = verify_report_integrity(doc_wald_pass)
+    assert 0.05 not in audit_wald_pass.untraced_numbers
+    assert audit_wald_pass.passed is True
+
+
 @pytest.mark.parametrize("case", INTEGRITY_PARITY_CASES, ids=lambda c: c.id)
 def test_integrity_gate_tolerance_parity_cases(case):
     """Verifies all Task 2a parity cases through ReportDocument and verify_report_integrity."""

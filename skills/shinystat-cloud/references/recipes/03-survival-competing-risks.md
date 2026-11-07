@@ -8,7 +8,7 @@
 
 ## 11. Survival Analysis: Kaplan-Meier, Log-Rank & Cox Proportional Hazards
 
-Computes Kaplan-Meier survival estimates with median survival times, Log-Rank hypothesis test (supports 2 or more groups), and multivariable Cox Proportional Hazards table with per-variable Grambsch-Therneau Schoenfeld residual tests. When proportional hazards assumptions are violated, consult [decision-heuristics.md §2.E](../../../_shared/references/decision-heuristics.md#e-time-to-event-analysis-under-competing-risks--proportional-hazards-violations) and apply `refit_cox_with_strata` (for nuisance covariates) or `piecewise_hr` (for exposure).
+Computes Kaplan-Meier survival estimates with median survival times, Log-Rank hypothesis test (supports 2 or more groups), and multivariable Cox Proportional Hazards table with per-variable Grambsch-Therneau Schoenfeld residual tests. When proportional hazards assumptions are violated, consult [decision-heuristics.md §2.E](../decision-heuristics.md#e-time-to-event-analysis-under-competing-risks--proportional-hazards-violations) and apply `refit_cox_with_strata` (for nuisance covariates) or `piecewise_hr` (for exposure).
 
 ```python
 from typing import Any
