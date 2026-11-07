@@ -61,13 +61,19 @@ def draw_standalone_consort_rct(
 
     # Arm-level mathematical reconciliation check
     for arm in arms:
-        if arm["allocated"] < 0 or arm.get("analyzed", 0) < 0:
+        if arm["allocated"] < 0:
             raise ValueError("Arm counts must be non-negative integers")
 
-        # Handle reason dicts safely: empty dicts produce 0
-        dnr_dict = arm["did_not_receive"] if isinstance(arm.get("did_not_receive"), dict) else {}
-        dnr = sum(dnr_dict.values()) if isinstance(arm.get("did_not_receive"), dict) else (arm.get("did_not_receive") or 0)
-        rec = arm.get("received", arm["allocated"] - dnr)
+        # Partition 1: Receipt partition (received and/or did_not_receive)
+        has_rec = "received" in arm and arm["received"] is not None
+        has_dnr = "did_not_receive" in arm and arm["did_not_receive"] is not None
+        if not has_rec and not has_dnr:
+            raise ValueError(
+                f"Arm '{arm.get('name', 'unnamed')}' must specify at least one observed receipt field ('received' or 'did_not_receive')"
+            )
+        dnr_val = arm.get("did_not_receive")
+        dnr = sum(dnr_val.values()) if isinstance(dnr_val, dict) else (dnr_val if dnr_val is not None else (arm["allocated"] - arm["received"]))
+        rec = arm["received"] if has_rec else (arm["allocated"] - dnr)
 
         lo_dict = arm["lost"] if isinstance(arm.get("lost"), dict) else {}
         lo = sum(lo_dict.values()) if isinstance(arm.get("lost"), dict) else (arm.get("lost") or 0)
@@ -75,12 +81,24 @@ def draw_standalone_consort_rct(
         di_dict = arm["discontinued"] if isinstance(arm.get("discontinued"), dict) else {}
         di = sum(di_dict.values()) if isinstance(arm.get("discontinued"), dict) else (arm.get("discontinued") or 0)
 
-        ex_an_dict = arm["excluded_from_analysis"] if isinstance(arm.get("excluded_from_analysis"), dict) else {}
-        ex_an = sum(ex_an_dict.values()) if isinstance(arm.get("excluded_from_analysis"), dict) else (arm.get("excluded_from_analysis") or 0)
-        analyzed = arm.get("analyzed", arm["allocated"] - ex_an)
+        # Partition 2: Analysis partition (analyzed and/or excluded_from_analysis)
+        has_analyzed = "analyzed" in arm and arm["analyzed"] is not None
+        has_ex_an = "excluded_from_analysis" in arm and arm["excluded_from_analysis"] is not None
+        if not has_analyzed and not has_ex_an:
+            raise ValueError(
+                f"Arm '{arm.get('name', 'unnamed')}' must specify at least one observed analysis field ('analyzed' or 'excluded_from_analysis')"
+            )
+        ex_an_val = arm.get("excluded_from_analysis")
+        ex_an = sum(ex_an_val.values()) if isinstance(ex_an_val, dict) else (ex_an_val if ex_an_val is not None else (arm["allocated"] - arm["analyzed"]))
+        analyzed = arm["analyzed"] if has_analyzed else (arm["allocated"] - ex_an)
 
         if lo < 0 or di < 0 or ex_an < 0 or dnr < 0 or rec < 0:
             raise ValueError("Follow-up and allocation counts must be non-negative integers")
+
+        if lo > arm["allocated"] or di > arm["allocated"]:
+            raise ValueError(
+                f"Arm '{arm.get('name', 'unnamed')}' follow-up counts (lost: {lo}, discontinued: {di}) cannot exceed allocated ({arm['allocated']})"
+            )
 
         # Partition 1: Allocation partition (received + did_not_receive == allocated)
         if rec + dnr != arm["allocated"]:
@@ -232,6 +250,14 @@ def draw_standalone_strobe_flow(
     """
     Renders an audit-reconciled sequential cohort exclusion flow diagram.
     """
+    if stages and stages[0][2] != 0:
+        raise ValueError(
+            f"Initial stage '{stages[0][0]}' cannot have nonzero exclusions (got {stages[0][2]}). "
+            f"Exclusions must occur during transitions into subsequent stages (or supply an explicit preceding cohort)."
+        )
+    if any(s[1] < 0 or s[2] < 0 for s in stages):
+        raise ValueError("STROBE cohort counts must be non-negative integers")
+
     # Reconcile adjacent stages: previous - excluded == retained
     for idx in range(len(stages) - 1):
         curr_name, curr_retain, _, _ = stages[idx]
@@ -286,8 +312,10 @@ def draw_standalone_strobe_flow(
 ## 4. Recipe: Standalone PRISMA 2020 Systematic Review Flow
 
 ```python
+import numbers
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyBboxPatch
+import numpy as np
 from pathlib import Path
 import textwrap
 
@@ -307,21 +335,25 @@ def draw_standalone_prisma_flow(
     """
     Renders an audit-reconciled PRISMA 2020 systematic review flow diagram.
     """
-    all_counts = [
-        identified_databases,
-        duplicates_removed,
-        screened,
-        screen_excluded,
-        retrieval_sought,
-        not_retrieved,
-        assessed_eligibility,
-        included_studies,
-        *(excluded_eligibility.values()),
-    ]
+    def _normalize_count(val, name: str) -> int:
+        if isinstance(val, bool) or not isinstance(val, (int, numbers.Integral, np.integer)):
+            raise ValueError(f"PRISMA count '{name}' must be an integral scalar (got {type(val).__name__})")
+        int_val = int(val)
+        if int_val < 0:
+            raise ValueError(f"PRISMA count '{name}' must be a non-negative integer (got {int_val})")
+        return int_val
+
+    identified_databases = _normalize_count(identified_databases, "identified_databases")
+    duplicates_removed = _normalize_count(duplicates_removed, "duplicates_removed")
+    screened = _normalize_count(screened, "screened")
+    screen_excluded = _normalize_count(screen_excluded, "screen_excluded")
+    retrieval_sought = _normalize_count(retrieval_sought, "retrieval_sought")
+    not_retrieved = _normalize_count(not_retrieved, "not_retrieved")
+    assessed_eligibility = _normalize_count(assessed_eligibility, "assessed_eligibility")
+    included_studies = _normalize_count(included_studies, "included_studies")
+    excluded_eligibility = {k: _normalize_count(v, f"excluded_eligibility[{k}]") for k, v in excluded_eligibility.items()}
     if included_reports is not None:
-        all_counts.append(included_reports)
-    if any(not isinstance(c, int) or c < 0 for c in all_counts):
-        raise ValueError("PRISMA counts must be non-negative integers")
+        included_reports = _normalize_count(included_reports, "included_reports")
 
     # 1. Identification reconciliation
     if identified_databases - duplicates_removed != screened:
@@ -342,6 +374,10 @@ def draw_standalone_prisma_flow(
             f"!= assessed ({assessed_eligibility})"
         )
     # 4. Eligibility reconciliation
+    if included_reports == 0 and included_studies > 0:
+        raise ValueError(
+            f"PRISMA reconciliation error: cannot have 0 included reports with positive included studies ({included_studies})"
+        )
     n_ex_el = sum(excluded_eligibility.values())
     target_reports = included_reports if included_reports is not None else included_studies
     if assessed_eligibility - n_ex_el != target_reports:

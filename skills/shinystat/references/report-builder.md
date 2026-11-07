@@ -155,8 +155,22 @@ def generate_html_report(
             + "</sup>",
             narr,
         )
-        # Preserve unescaped superscript tags if originally present
-        narr = re.sub(r"&lt;sup(.*?)&gt;(.*?)&lt;/sup&gt;", r"<sup\1>\2</sup>", narr)
+        # Restore permitted citation superscript tags with allowlisted attributes
+        def _restore_sup(match: re.Match) -> str:
+            attrs = match.group(1).strip()
+            content = match.group(2)
+            if not attrs:
+                return f"<sup>{content}</sup>"
+            attrs_clean = html.unescape(attrs).strip()
+            m_cls = re.fullmatch(r'class=(["\'])(.*?)\1', attrs_clean)
+            if m_cls:
+                cls_val = m_cls.group(2)
+                allowed = {"citation", "footnote", "ref"}
+                if all(c in allowed or c.isalnum() or c in "_-" for c in cls_val.split()):
+                    return f'<sup {attrs_clean}>{content}</sup>'
+            return f"<sup>{content}</sup>"
+
+        narr = re.sub(r"&lt;sup(.*?)&gt;(.*?)&lt;/sup&gt;", _restore_sup, narr)
         parts.append(f"<p>{narr}</p>")
 
     # Tables
@@ -682,7 +696,10 @@ def build_plotly_calibration_spec(
         "marker": {"size": 8, "color": "#0284C7", "symbol": "circle"},
     }
 
-    if has_ci and len(ci_low) == len(obs_rate) and any(h is not None and h > o for h, o in zip(ci_high, obs_rate)):
+    if has_ci and len(ci_low) == len(obs_rate) and any(
+        l is not None and h is not None and math.isfinite(l) and math.isfinite(h) and l <= h and (h > o or o > l)
+        for l, h, o in zip(ci_low, ci_high, obs_rate)
+    ):
         error_y_plus = [
             h - o if (h is not None and math.isfinite(h) and h >= o) else 0
             for h, o in zip(ci_high, obs_rate)
@@ -1723,13 +1740,15 @@ def verify_standalone_integrity(
         window = f"{window_before}{raw_str}{window_after}"
 
         p_ineq_match = re.search(
-            r"\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+[a-zA-Z_-]+\)?|\(?[a-zA-Z_-]+\)?))?\s*([<>]=?|[≤≥])\s*$",
+            r"(?:([a-zA-Z_-]+)\s+)?\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+([a-zA-Z_-]+)\)?|\(?([a-zA-Z_-]+)\)?))?\s*([<>]=?|[≤≥])\s*$",
             window_before,
             re.IGNORECASE,
         )
         is_threshold_def = bool(
             re.search(
-                r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff|prespecified|defined\s+as)\b[^.;:]*?\bp(?=[-_\s(\<>=≤≥]).*?([<>]=?|[≤≥])\s*$",
+                r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff|prespecified(?:\s+(?:level|threshold|cutoff))?|defined\s+as)"
+                r"(?:\s*(?:[:=]|\b(?:was|were|is)?\s*(?:set\s+at|defined\s+as|of|at)?\b))?\s*"
+                r"\bp(?=[-_\s(\<>=≤≥]).*?([<>]=?|[≤≥])\s*$",
                 window_before,
                 re.IGNORECASE,
             )
@@ -1750,10 +1769,14 @@ def verify_standalone_integrity(
         p_inequality = None
         p_qualifier = None
         if 0.0 <= p_val <= 1.0 and not is_alpha_cutoff and p_ineq_match:
-            raw_op = p_ineq_match.group(1)
+            qual_raw = (
+                p_ineq_match.group(2)
+                or p_ineq_match.group(3)
+                or p_ineq_match.group(1)
+            )
+            raw_op = p_ineq_match.group(4)
             p_inequality = "<=" if raw_op == "≤" else (">=" if raw_op == "≥" else raw_op)
-            window_context = f"{window_before} {raw_str} {window_after}"
-            p_qualifier = _detect_p_qual(window_context)
+            p_qualifier = _detect_p_qual(qual_raw) if qual_raw else None
         if p_inequality is not None:
             if p_qualifier is not None:
                 candidate_pvals = [

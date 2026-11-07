@@ -634,6 +634,66 @@ def test_integrity_p_floor_and_allowed_untraced_guards():
     assert audit_allow_pass.passed is True
 
 
+def test_integrity_threshold_mention_vs_definition_and_qualifier():
+    """Verifies that:
+    1. A sentence mentioning 'significance threshold' followed by a result claim ('with P < 0.05')
+       is NOT exempted as a threshold definition and is checked against results_dict.
+    2. A genuine methodological threshold definition ('significance threshold P < 0.05')
+       is structurally exempted even when recorded p-value differs.
+    3. Qualifier detection binds to the p-value match itself ('p for trend < 0.05')
+       rather than picking up nearby keywords like 'Interaction' from the surrounding window.
+    """
+    # 1. Result claim following a threshold mention: must fail if conflicting
+    doc_result_claim = ReportDocument(
+        title="Result Claim After Threshold Mention",
+        results_dict={"p_value": 0.23},
+    )
+    doc_result_claim.add_paragraph("Methods: Included observational cohort.")
+    doc_result_claim.add_paragraph(
+        "The association met the significance threshold, with P < 0.05."
+    )
+    audit_claim = verify_report_integrity(doc_result_claim)
+    assert 0.05 in audit_claim.untraced_numbers
+    assert audit_claim.passed is False
+
+    # 2. Genuine methodological definition: must be exempted
+    doc_def = ReportDocument(
+        title="Methodological Threshold Definition",
+        results_dict={"p_value": 0.23},
+    )
+    doc_def.add_paragraph("Methods: significance threshold P < 0.05.")
+    doc_def.add_paragraph("Primary outcome had p = 0.23.")
+    audit_def = verify_report_integrity(doc_def)
+    assert 0.05 not in audit_def.untraced_numbers
+    assert audit_def.passed is True
+
+    # 3. Qualifier binding: 'p for trend < 0.05' near 'Interaction analysis'
+    doc_qual_fail = ReportDocument(
+        title="Qualifier Binding Check (False Trend Claim)",
+        results_dict={"p_interaction": 0.01, "p_trend": 0.50},
+    )
+    doc_qual_fail.add_paragraph("Methods: Included observational cohort.")
+    doc_qual_fail.add_paragraph(
+        "Interaction analysis: p for trend < 0.05 across risk tiers."
+    )
+    audit_qual_fail = verify_report_integrity(doc_qual_fail)
+    assert 0.05 in audit_qual_fail.untraced_numbers
+    assert audit_qual_fail.passed is False
+
+    # 4. Qualifier binding: 'p for trend < 0.05' near 'Interaction analysis' passes when p_trend is valid
+    doc_qual_pass = ReportDocument(
+        title="Qualifier Binding Check (True Trend Claim)",
+        results_dict={"p_interaction": 0.01, "p_trend": 0.02},
+    )
+    doc_qual_pass.add_paragraph("Methods: Included observational cohort.")
+    doc_qual_pass.add_paragraph(
+        "Interaction analysis: p for trend < 0.05 across risk tiers."
+    )
+    audit_qual_pass = verify_report_integrity(doc_qual_pass)
+    assert 0.05 not in audit_qual_pass.untraced_numbers
+    assert audit_qual_pass.passed is True
+
+
 @pytest.mark.parametrize("case", INTEGRITY_PARITY_CASES, ids=lambda c: c.id)
 def test_integrity_gate_tolerance_parity_cases(case):
     """Verifies all Task 2a parity cases through ReportDocument and verify_report_integrity."""

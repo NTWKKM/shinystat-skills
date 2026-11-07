@@ -200,7 +200,13 @@ import matplotlib as mpl
 import pandas as pd
 
 
-def save_standalone_bundle(fig, out_path: str, source_df=None, dpi: int = 300) -> dict:
+def save_standalone_bundle(
+    fig,
+    out_path: str,
+    source_df=None,
+    dpi: int = 300,
+    include_index: bool | None = None,
+) -> dict:
     """Saves 300/600 DPI PNG, TrueType vector PDF (fonttype=42), SVG, and traceable _source.csv."""
     p = Path(out_path)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -215,8 +221,12 @@ def save_standalone_bundle(fig, out_path: str, source_df=None, dpi: int = 300) -
     csv_str = None
     if source_df is not None:
         csv_path = p.with_name(p.stem + "_source.csv")
-        # Preserve plotted index coordinates (e.g. survival times or cutpoints) if non-trivial
-        has_index = source_df.index.name is not None or not isinstance(source_df.index, pd.RangeIndex)
+        # Preserve plotted index coordinates (e.g. survival times or cutpoints) if non-trivial,
+        # or when explicitly requested via include_index. Ensure exported index contains no PHI.
+        if include_index is not None:
+            has_index = bool(include_index)
+        else:
+            has_index = source_df.index.name is not None or not isinstance(source_df.index, pd.RangeIndex)
         source_df.to_csv(csv_path, index=has_index)
         csv_str = str(csv_path)
 

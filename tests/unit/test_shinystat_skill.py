@@ -123,11 +123,15 @@ def _collect_valid_skill_files(root: Path) -> set[Path]:
 
 def _extract_heading_slugs(text: str) -> set[str]:
     """Generates heading anchor slugs following GitHub Markdown specifications."""
-    doc_headings = re.findall(r"^#+\s+(.+)$", text, flags=re.MULTILINE)
+    # Exclude fenced code blocks before extracting headings
+    clean_text = re.sub(r"(?ms)^(`{3,}|~{3,})[^\n]*\n.*?\n\1\s*$", "", text)
+    doc_headings = re.findall(r"^#+\s+(.+)$", clean_text, flags=re.MULTILINE)
     slugs = set()
     seen: dict[str, int] = {}
     for h in doc_headings:
         h_clean = re.sub(r"\s*#+\s*$", "", h).strip()
+        # Normalize Markdown links [text](url) -> text so URLs do not contribute to slug
+        h_clean = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", h_clean)
         base = re.sub(
             r"\s", "-", re.sub(r"[^\w\s-]", "", re.sub(r"[`*]", "", h_clean).lower())
         )
@@ -617,3 +621,30 @@ def test_subagent_protocol_and_gate5_delta_parity():
     )
     if packaged_proto.exists():
         assert packaged_proto.read_bytes() == shared_proto.read_bytes()
+
+
+def test_extract_heading_slugs_code_fences_and_links():
+    """Verify _extract_heading_slugs ignores headings inside code fences and normalizes links."""
+    doc = """# Normal Heading
+Some text.
+```bash
+# This is a bash comment
+cat << 'EOF'
+## Fake Heading
+EOF
+```
+~~~markdown
+# Another fake heading
+~~~
+## [Link Heading](https://example.com/section)
+### Subheading with [Doc Link](docs/guide.md#anchor) and `code`
+"""
+    slugs = _extract_heading_slugs(doc)
+    assert "normal-heading" in slugs
+    assert "link-heading" in slugs
+    assert "subheading-with-doc-link-and-code" in slugs
+    assert "this-is-a-bash-comment" not in slugs
+    assert "fake-heading" not in slugs
+    assert "another-fake-heading" not in slugs
+    assert not any("examplecom" in s for s in slugs)
+    assert not any("guide" in s for s in slugs)
