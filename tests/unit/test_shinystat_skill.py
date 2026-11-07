@@ -305,6 +305,25 @@ def test_src_medstat_and_skills_bundled_medstat_byte_identical():
             )
 
 
+def test_sync_skills_script_execution_and_drift_check():
+    """Verify scripts/sync-skills.sh --check executes cleanly with zero git drift."""
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    sync_script = repo_root / "scripts" / "sync-skills.sh"
+    assert sync_script.exists(), "scripts/sync-skills.sh not found"
+
+    res = subprocess.run(
+        ["bash", str(sync_script), "--check"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert res.returncode == 0, (
+        f"sync-skills.sh --check failed:\n{res.stderr}\n{res.stdout}"
+    )
+    assert "Zero git drift verified in skills/." in res.stdout
+
+
 def test_design_md_adr_numbers_unique_and_sequential():
     """Verify DESIGN.md ADR headings are unique, sequential 1..68, and include ADR 68."""
     repo_root = Path(__file__).resolve().parent.parent.parent
