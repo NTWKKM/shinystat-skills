@@ -1,0 +1,64 @@
+name: CI & Packaging
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify-and-test:
+    name: Verify Sync & Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Verify zero SSOT sync drift in skills/
+        run: |
+          chmod +x ./scripts/sync-skills.sh ./scripts/install-skills.sh ./scripts/package-cloud-skill.sh
+          ./scripts/sync-skills.sh
+          git diff --exit-code skills/
+
+      - name: Run test suite
+        run: uv run pytest
+
+      - name: Build standalone cloud package
+        run: ./scripts/package-cloud-skill.sh
+
+  release:
+    name: Release Distribution
+    needs: [verify-and-test]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Package shinystat-cloud.zip
+        run: |
+          chmod +x ./scripts/sync-skills.sh ./scripts/package-cloud-skill.sh
+          ./scripts/package-cloud-skill.sh
+
+      - name: Create GitHub Release & Upload Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: packaging/cloud/shinystat-cloud.zip
+          generate_release_notes: true

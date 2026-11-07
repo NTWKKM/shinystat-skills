@@ -3,6 +3,9 @@
 [![skills.sh](https://img.shields.io/badge/skills.sh-shinystat-black?logo=vercel&logoColor=white)](https://skills.sh/NTWKKM/shinystat-skills/shinystat)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
+> [!IMPORTANT]
+> **Prerequisites**: Users only need [`uv`](https://docs.astral.sh/uv/) installed. All Python dependencies are automatically resolved on the fly via `uv run --with-requirements` per the pinned stack in `SKILL.md`—no manual virtual environments or system-wide package installations required across macOS, Linux, and Windows.
+
 `medstat-core` is a pure headless Python biostatistical calculation engine and CLI tool paired with the unified `shinystat` and `shinystat-cloud` autonomous decision-making agent skills, decoupled from interactive UI frameworks and licensed under the permissive **Apache-2.0** license.
 
 ---
@@ -182,15 +185,46 @@ skills/
             ├── 01-data-missing-table1.md
             ├── 02-regression-firth-ordinal.md
             ├── 03-survival-competing-risks.md
-            ├── 04-causal-validation-agreement.md
+            ├── 04-causal-iptw-psm.md
             └── 05-diagnostic-meta-power.md
 ```
+
+#### Standalone Cloud Recipe Index (Recipes 1–24)
+
+For the standalone `shinystat-cloud` skill, 24 zero-`medstat` standalone Python recipes are grouped into 5 progressive disclosure modules under `references/recipes/`:
+
+| Recipe # | Recipe Title | Target Recipe File |
+| :--- | :--- | :--- |
+| **Recipe 1** | Table 1 Baseline Characteristics & Standardized Mean Difference (SMD) | `01-data-missing-table1.md` |
+| **Recipe 2** | 2x2 Diagnostic Accuracy with Wilson Score & Log-Scale 95% CIs | `05-diagnostic-meta-power.md` |
+| **Recipe 3** | Empirical ROC, Optimal Cutoff & Single / Paired DeLong 95% CIs | `05-diagnostic-meta-power.md` |
+| **Recipe 4** | Model Calibration & Vickers Decision Curve Analysis (DCA) | `05-diagnostic-meta-power.md` |
+| **Recipe 5** | Observer Agreement: Bland-Altman & Shrout-Fleiss (1979) ICC | `05-diagnostic-meta-power.md` |
+| **Recipe 6** | Propensity Score Matching (PSM) with Pair IDs & Covariate Balance | `04-causal-iptw-psm.md` |
+| **Recipe 7** | Firth's Penalized Likelihood Logistic Regression | `02-regression-firth-ordinal.md` |
+| **Recipe 8** | Little's (1988) MCAR Multivariate Missingness Test | `01-data-missing-table1.md` |
+| **Recipe 9** | VanderWeele & Ding (2017) Sensitivity E-Value | `02-regression-firth-ordinal.md` |
+| **Recipe 10** | Multivariable Binary Logistic Regression Table | `02-regression-firth-ordinal.md` |
+| **Recipe 11** | Survival Analysis: Kaplan-Meier, Log-Rank & Cox Proportional Hazards | `03-survival-competing-risks.md` |
+| **Recipe 12** | Multiple Imputation by Chained Equations (MICE) & Rubin's Rules | `01-data-missing-table1.md` |
+| **Recipe 13** | Publication-Grade HTML Table Renderer (NEJM / JAMA Standards) | `01-data-missing-table1.md` |
+| **Recipe 14** | Inverse Probability of Treatment Weighting (IPTW) & Weighted Balance | `04-causal-iptw-psm.md` |
+| **Recipe 15** | Competing Risks Survival Analysis (Aalen-Johansen CIF & Fine-Gray Model) | `03-survival-competing-risks.md` |
+| **Recipe 16** | Diagnostic Risk Reclassification: Continuous & Categorical NRI and IDI | `05-diagnostic-meta-power.md` |
+| **Recipe 17** | Time-Dependent ROC: Cumulative/Dynamic IPCW Estimator (AUROC(t)) | `05-diagnostic-meta-power.md` |
+| **Recipe 18** | TRIPOD+AI Optimism-Corrected Bootstrap Internal Validation & Uniform Shrinkage | `05-diagnostic-meta-power.md` |
+| **Recipe 19** | Prediction Model Recalibration and Updating (Logistic & Intercept-Only) | `05-diagnostic-meta-power.md` |
+| **Recipe 20** | Sample Size Determination for Clinical Prediction Models (Riley et al. 2020) & Diagnostic AUROC (Obuchowski 1998) | `05-diagnostic-meta-power.md` |
+| **Recipe 21** | Proportional Odds Ordinal Logistic Regression & Brant Test | `02-regression-firth-ordinal.md` |
+| **Recipe 22** | Restricted Cubic Splines (Harrell RCS) for Non-Linear Continuous Predictors | `02-regression-firth-ordinal.md` |
+| **Recipe 23** | Clustered GEE with Robust Sandwich SEs, ICC & Design Effect ($\text{DEFF}$) | `02-regression-firth-ordinal.md` |
+| **Recipe 24** | Fixed-Effects & DerSimonian-Laird Random-Effects Meta-Analysis (PRISMA 2020) | `05-diagnostic-meta-power.md` |
 
 ### Installing Skills for Your AI Coding Agent
 
 #### 1. Instant 1-Line Install via skills.sh (Recommended)
 
-You can install `shinystat` or `shinystat-cloud` directly across all supported AI coding agents (**Claude Code**, **Cursor**, **Windsurf**, **Antigravity**) using the open [skills.sh](https://skills.sh) package manager:
+Both `skills/shinystat/` and `skills/shinystat-cloud/` are fully self-contained physical directories vendored in Git (no dangling symlinks or missing sibling dependencies). You can install either skill directly across all supported AI coding agents (**Claude Code**, **Cursor**, **Windsurf**, **Antigravity**) using the open [skills.sh](https://skills.sh) package manager:
 
 ```bash
 # Interactive selection (pick shinystat, shinystat-cloud, or both)
@@ -206,18 +240,20 @@ npx skills add NTWKKM/shinystat-skills --skill shinystat-cloud --yes
 npx skills add NTWKKM/shinystat-skills -g --yes
 ```
 
-#### 2. Local Repository Installer & Cloud Packager Scripts
+#### 2. Local Repository Installer & Synchronization Scripts
 
-`./scripts/install-skills.sh` maintains Single Source of Truth (SSOT). It syncs canonical `_shared/references/` and `src/medstat/` into `skills/` (using symlinks by default or `--copy`), isolates standalone cloud figures, and safely removes legacy in-workspace mirror directories (`.agent/`, `.agents/`, `.claude/`, `.cursor/`) without touching any user-managed or third-party skills.
+`./scripts/sync-skills.sh` maintains Single Source of Truth (SSOT). It copies canonical shared references (`skills/_shared/references/`) and the `medstat` core engine (`src/medstat/`) into `skills/shinystat/` and `skills/shinystat-cloud/` as committed physical files, ensuring zero git drift and immediate offline usability in hospital network environments.
+
+`./scripts/install-skills.sh` automates local and global agent installations, safely cleans legacy mirror directories (`.agent/`, `.agents/`, `.claude/`, `.cursor/`), and copies standalone skills into your global agent directories without touching user-managed skills:
 
 ```bash
-# Sync canonical _shared/references and src/medstat into skills/ (symlink mode by default)
-./scripts/install-skills.sh
+# Synchronize SSOT into self-contained skill directories
+./scripts/sync-skills.sh
 
-# Preview linking, packaging, and legacy mirror removals without modifying filesystem
-./scripts/install-skills.sh --dry-run
+# Verify skills are synchronized without git drift (used in CI)
+./scripts/sync-skills.sh --check
 
-# Install standalone dereferenced skills globally (Antigravity, Claude Code, Cursor)
+# Install standalone skills globally (Antigravity, Claude Code, Cursor)
 ./scripts/install-skills.sh --global
 ./scripts/install-skills.sh --global --target antigravity
 ./scripts/install-skills.sh --global --target claude
@@ -226,10 +262,6 @@ npx skills add NTWKKM/shinystat-skills -g --yes
 # Package standalone shinystat-cloud.zip for cloud sandboxes (e.g., Claude Web)
 ./scripts/package-cloud-skill.sh
 ```
-
-**Installer Flags**:
-- `--symlink`: Link references and `src/medstat` via relative symlinks (default).
-- `--copy`: Copy references and `src/medstat` physically.
 - `--global`: Install standalone dereferenced skills into global configuration directories.
 - `-s, --scope <workspace|global>`: Installation scope (default: `workspace`). In workspace scope, duplicate harness mirrors are no longer created (SSOT, ADR 49).
 - `-t, --target <all|antigravity|claude|cursor>`: Target AI harness for global installation (default: `all`).

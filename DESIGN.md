@@ -1951,6 +1951,44 @@ When executing multi-model clinical analyses or `Full Publication Polish` workfl
 - **Context Efficiency**: Discloses the subagent orchestration specification behind a 1-line pointer in `SKILL.md`, keeping always-loaded skill instructions minimal.
 - **Known Scope / Testing Boundary**: Automated unit tests (`test_shinystat_skill.py`, `test_shinystat_cloud.py`) deterministically verify ADR sequence uniqueness (`1..68`), Gate `#5` delta parity across both skills, Zero-`medstat` cloud hygiene, and `subagent-protocol.md` synchronization/link resolution. They do not simulate live multi-agent runtime `HALT_FOR_GRILLING_GATE` message passing, which requires end-to-end execution in a host runtime equipped with subagent tools.
 
+---
+
+## ADR 69: Self-Contained Physical Skill Vendoring, Anti-Drift Synchronization, and Release Packaging Automation
+
+### Context
+`shinystat-skills` previously used relative symlinks (`skills/shinystat/references/*.md -> ../../_shared/references/` and `skills/shinystat/scripts/medstat -> ../../../src/medstat`), gitignoring the linked destinations under the assumption that installations would occur strictly within the full repository clone. However:
+1. Standard package managers (such as `npx skills add NTWKKM/shinystat-skills --skill shinystat`) clone the repository and extract only the selected skill subdirectory (`skills/<name>/`). The extracted folder lost its symlink targets, leaving `SKILL.md` with 7 broken reference links and preventing `medstat_cli.py` from importing `medstat`.
+2. In `skills/shinystat-cloud/`, `SKILL.md` linked to `../_shared/references/`, breaking external navigation whenever the cloud skill was installed standalone or outside the repository tree.
+3. In hospital network environments, clinical data machines frequently operate air-gapped or behind firewalls, making runtime `git clone` or network downloads undesirable.
+
+### Decision
+1. **Self-Contained Physical Vendoring (Vendor, Not Link)**:
+   - Preserved `src/medstat/` and `skills/_shared/references/` as canonical Single Source of Truth (SSOT).
+   - Vendored physical copies of canonical files directly into:
+     - `skills/shinystat/references/` (all shared references)
+     - `skills/shinystat/scripts/medstat/` (full canonical `medstat` engine, excluding `__pycache__` and `.DS_Store`, adding ~1.3 MB)
+     - `skills/shinystat-cloud/references/` (shared references, preserving cloud-native `figures.md` and `recipes/`)
+   - Removed the corresponding ignore rules from `.gitignore` so that Git tracks complete, fully functional standalone skills.
+2. **Local Reference Link Uniformity**:
+   - Standardized all reference links across both `skills/shinystat/SKILL.md` and `skills/shinystat-cloud/SKILL.md` to use uniform local `references/...` targets.
+   - In `skills/_shared/references/decision-heuristics.md`, updated recipe links to use `recipes/...`, ensuring clean relative link resolution within `references/`.
+   - Updated `recipes/03-survival-competing-risks.md` to reference `../decision-heuristics.md`.
+3. **Automated Synchronization & Anti-Drift Enforcement (`scripts/sync-skills.sh`)**:
+   - Authored `scripts/sync-skills.sh` to copy canonical files from `src/medstat/` and `skills/_shared/references/` into `skills/`.
+   - Added `--check` flag to verify zero Git drift in `skills/`.
+   - Integrated sync drift verification into GitHub Actions CI (`.github/workflows/ci.yml`) to fail if any developer edits SSOT without committing the synced skills.
+4. **Simplified Packaging & Release Distribution**:
+   - Refactored `scripts/package-cloud-skill.sh` to package `skills/shinystat-cloud` directly into `packaging/cloud/shinystat-cloud.zip` without intermediate link rewriting.
+   - Added automated GitHub Actions release workflow attaching `shinystat-cloud.zip` to versioned releases.
+5. **Recipe Index Mapping Table**:
+   - Added explicit Recipe # -> File mapping table (Recipes 1–24) in `skills/shinystat-cloud/SKILL.md` and `README.md` to provide immediate navigation for AI agents and users.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Offline & Standalone Parity**: Installing `shinystat` via `npx skills add NTWKKM/shinystat-skills --skill shinystat` or unzipping `shinystat-cloud.zip` delivers a 100% self-contained folder with zero broken links and full offline CLI/library execution.
+- **Verification**: Verified via isolated temporary `HOME` test that all 27 links in installed `shinystat` and 61 links in `shinystat-cloud` resolve, and `python scripts/medstat_cli.py --schema` exits with code 0.
+
+
 
 
 

@@ -151,33 +151,34 @@ PY
 }
 
 echo "[1/3] Syncing shared references into shinystat and shinystat-cloud..."
-SHARED_REF_DIR="$REPO_ROOT/skills/_shared/references"
-if [[ -d "$SHARED_REF_DIR" ]]; then
-    for ref_file in "$SHARED_REF_DIR"/*.md; do
-        [[ -e "$ref_file" ]] || continue
-        fname="$(basename "$ref_file")"
-        link_or_copy "$ref_file" "$REPO_ROOT/skills/shinystat/references/$fname"
-        if [[ "$fname" != "figures.md" ]]; then
-            link_or_copy "$ref_file" "$REPO_ROOT/skills/shinystat-cloud/references/$fname"
+if [[ "$DRY_RUN" == true ]]; then
+    echo "[dry-run] sync canonical src/medstat and shared references"
+else
+    if [[ -x "$REPO_ROOT/scripts/sync-skills.sh" || -f "$REPO_ROOT/scripts/sync-skills.sh" ]]; then
+        bash "$REPO_ROOT/scripts/sync-skills.sh" >/dev/null
+    else
+        SHARED_REF_DIR="$REPO_ROOT/skills/_shared/references"
+        if [[ -d "$SHARED_REF_DIR" ]]; then
+            for ref_file in "$SHARED_REF_DIR"/*.md; do
+                [[ -e "$ref_file" ]] || continue
+                fname="$(basename "$ref_file")"
+                link_or_copy "$ref_file" "$REPO_ROOT/skills/shinystat/references/$fname"
+                if [[ "$fname" != "figures.md" ]]; then
+                    link_or_copy "$ref_file" "$REPO_ROOT/skills/shinystat-cloud/references/$fname"
+                fi
+            done
         fi
-    done
+        link_or_copy "$REPO_ROOT/src/medstat" "$REPO_ROOT/skills/shinystat/scripts/medstat"
+    fi
 fi
 
-echo "[2/3] Linking canonical src/medstat into skills/shinystat/scripts/medstat..."
-link_or_copy "$REPO_ROOT/src/medstat" "$REPO_ROOT/skills/shinystat/scripts/medstat"
-
-echo "[3/3] Installing cloud skill into packaging/cloud..."
+echo "[2/3] Installing cloud skill into packaging/cloud..."
 if [[ "$DRY_RUN" != true ]]; then
     mkdir -p "$REPO_ROOT/packaging/cloud"
 fi
 link_or_copy "$REPO_ROOT/skills/shinystat-cloud" "$REPO_ROOT/packaging/cloud/shinystat-cloud"
-if [[ "$DRY_RUN" != true ]]; then
-    if [[ "$MODE" == "--copy" ]]; then
-        link_or_copy "$REPO_ROOT/skills/_shared" "$REPO_ROOT/packaging/cloud/_shared"
-    else
-        rm -rf "$REPO_ROOT/packaging/cloud/_shared"
-    fi
-fi
+
+echo "[3/3] Cleaning up legacy mirror directories..."
 
 # Clean up legacy in-workspace mirror entries to maintain SSOT (ADR 49)
 LEGACY_TARGETS=(
@@ -239,7 +240,7 @@ if [[ "$SCOPE" == "global" ]]; then
         mkdir -p "$gdir"
         rm -rf "$gdir/shinystat" "$gdir/shinystat-cloud"
         cp -RL "$REPO_ROOT/skills/shinystat" "$gdir/shinystat"
-        cp -RL "$REPO_ROOT/packaging/cloud/shinystat-cloud" "$gdir/shinystat-cloud"
+        cp -RL "$REPO_ROOT/skills/shinystat-cloud" "$gdir/shinystat-cloud"
         find "$gdir/shinystat" "$gdir/shinystat-cloud" -name ".DS_Store" -delete 2>/dev/null || true
         find "$gdir/shinystat" "$gdir/shinystat-cloud" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
         echo "  ✓ Installed into $gdir"

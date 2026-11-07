@@ -2,7 +2,6 @@
 tests/unit/test_shinystat_skill.py: Multi-agent mirror parity and schema test for shinystat skill.
 """
 
-import os
 import re
 import subprocess
 from pathlib import Path
@@ -146,10 +145,10 @@ def test_shinystat_cloud_canonical_skill_exists_and_valid():
     # Body checks
     body = parts[2]
     assert "The 5 Decision Pillars" in body
-    assert "_shared/references/decision-heuristics.md" in body
+    assert "references/decision-heuristics.md" in body
     assert "references/figures.md" in body
     assert "references/recipes/01-data-missing-table1.md" in body
-    assert "_shared/references/report-builder.md" in body
+    assert "references/report-builder.md" in body
 
     cloud_figures = canonical_cloud / "references" / "figures.md"
     assert cloud_figures.exists(), (
@@ -159,15 +158,12 @@ def test_shinystat_cloud_canonical_skill_exists_and_valid():
         "Cloud figures.md must not contain any medstat imports"
     )
 
-    # References existence check: verify all shared references linked in body exist under shared_ref_dir
-    shared_ref_dir = repo_root / "skills" / "_shared" / "references"
-    shared_ref_links = set(re.findall(r"_shared/references/([\w.-]+\.md)", body))
-    assert shared_ref_links, (
-        "Expected at least one shared reference linked in SKILL.md body"
-    )
-    for ref_name in sorted(shared_ref_links):
-        assert (shared_ref_dir / ref_name).exists(), (
-            f"Linked shared reference '{ref_name}' missing from {shared_ref_dir}"
+    # References existence check: verify all references linked in body exist under canonical references
+    ref_links = set(re.findall(r"references/([\w.-]+\.md)", body))
+    assert ref_links, "Expected at least one reference linked in SKILL.md body"
+    for ref_name in sorted(ref_links):
+        assert (canonical_cloud / "references" / ref_name).exists(), (
+            f"Linked reference '{ref_name}' missing from {canonical_cloud / 'references'}"
         )
 
     recipes_dir = cloud_skill.parent / "references" / "recipes"
@@ -185,7 +181,7 @@ def test_shinystat_cloud_canonical_skill_exists_and_valid():
         ["bash", str(package_script)], check=True, cwd=repo_root, capture_output=True
     )
 
-    # Full tree and content parity with packaging/cloud/shinystat-cloud
+    # Full tree and byte-identical parity with packaging/cloud/shinystat-cloud
     assert packaging_cloud.exists(), "packaging/cloud/shinystat-cloud not found"
     canonical_files = _collect_valid_skill_files(canonical_cloud)
     packaging_files = _collect_valid_skill_files(packaging_cloud)
@@ -198,27 +194,9 @@ def test_shinystat_cloud_canonical_skill_exists_and_valid():
     for rel_path in canonical_files:
         canon_file = canonical_cloud / rel_path
         pack_file = packaging_cloud / rel_path
-        if pack_file.read_bytes() == canon_file.read_bytes():
-            continue
-        # In packaged standalone distributions, relative links to _shared references
-        # are rewritten to resolve to the packaged copies under references/
-        if rel_path.suffix == ".md":
-            ref_rel = os.path.relpath(packaging_cloud / "references", pack_file.parent)
-            prefix = "" if ref_rel == "." else f"{ref_rel}/"
-            expected = (
-                canon_file.read_text(encoding="utf-8")
-                .replace("../../../_shared/references/", prefix)
-                .replace("../../_shared/references/", prefix)
-                .replace("../_shared/references/", prefix)
-                .replace("(`../_shared/references/`)", f"(`{prefix}`)")
-            )
-            assert pack_file.read_text(encoding="utf-8") == expected, (
-                f"Content mismatch in {rel_path} between skills/shinystat-cloud and packaging/cloud/shinystat-cloud"
-            )
-        else:
-            assert pack_file.read_bytes() == canon_file.read_bytes(), (
-                f"Byte mismatch in {rel_path} between skills/shinystat-cloud and packaging/cloud/shinystat-cloud"
-            )
+        assert pack_file.read_bytes() == canon_file.read_bytes(), (
+            f"Byte mismatch in {rel_path} between skills/shinystat-cloud and packaging/cloud/shinystat-cloud"
+        )
 
     # Independent validation: verify every local relative Markdown link resolves to an
     # existing target strictly within packaging_cloud, without relying on string replacement
@@ -344,7 +322,7 @@ def test_design_md_adr_numbers_unique_and_sequential():
     assert adr_nums == list(range(1, len(adr_nums) + 1)), (
         f"ADR numbers in DESIGN.md are not strictly sequential 1..N: {adr_nums}"
     )
-    assert 68 in adr_nums, "Expected ADR 68 in DESIGN.md"
+    assert 68 in adr_nums and 69 in adr_nums, "Expected ADR 68 and 69 in DESIGN.md"
 
 
 def test_subagent_protocol_and_gate5_delta_parity():
@@ -527,7 +505,7 @@ def test_subagent_protocol_and_gate5_delta_parity():
 
     for skill_path, expected_link in (
         (local_skill, "references/subagent-protocol.md"),
-        (cloud_skill, "../_shared/references/subagent-protocol.md"),
+        (cloud_skill, "references/subagent-protocol.md"),
     ):
         text = skill_path.read_text(encoding="utf-8")
         assert "Execution Context Mode" in text, (
