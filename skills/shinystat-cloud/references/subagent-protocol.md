@@ -16,18 +16,18 @@ Reference protocol for `shinystat` and `shinystat-cloud` when the runtime provid
   2. **Subagent B (*Biostatistical Execution & Report Subagent*)**:
      - Always dispatched in **Subagent Offload** mode.
      - Reads `<output_dir>/sap_handoff.json` and loads only the required statistical references (`decision-heuristics.md`, `figures.md`, `flows.md`, `house-styles.md`, `illustration.md`, `report-builder.md §1–§3`, and target `references/recipes/01-*.md` to `05-*.md` in `shinystat-cloud`).
-     - Executes the statistical models, tracks `SampleFlowTracker` / `retention_audit`, exports 300/600 DPI figure bundles (`.png`, TrueType `.pdf` with `fonttype=42`, `.svg`, `_source.csv` with `qa["passed"] == True`), and writes `<output_dir>/results_dict.json` and `<output_dir>/retention_audit.json`.
+     - Executes the statistical models, tracks `SampleFlowTracker` / `retention_audit`, exports 300/600 DPI figure bundles (`.png`, TrueType `.pdf` with `fonttype=42`, `.svg`, `_source.csv` with `qa["passed"] == True`), and writes `<run_output_dir>/results_dict.json` and `<run_output_dir>/retention_audit.json`.
   3. **Subagent A (*Literature & Citation Verification Subagent*)**:
      - Dispatched **in parallel with Subagent B** when **Full Publication Polish** is selected at Gate `#5` or when user-provided references are supplied for verification (whether online via literature MCPs/web search or offline via authenticated local-source verification in Standard mode).
      - Reads `<output_dir>/sap_handoff.json` and loads `report-builder.md §4` (*Evidence-Base Verification & Superscript Citations Pipeline*).
-     - Queries available literature MCPs or web search tools strictly under the **Zero-PHI Literature Query Boundary** (or verifies local user-provided citations against DOI/PMID/bibliographic metadata offline when literature services are unavailable), verifies source-appropriate metadata and comparable empirical benchmarks (**Anti-Phantom Citation Invariant**), and writes `<output_dir>/citations_verified.json`.
+     - Queries available literature MCPs or web search tools strictly under the **Zero-PHI Literature Query Boundary** (or verifies local user-provided citations against DOI/PMID/bibliographic metadata offline when literature services are unavailable), verifies source-appropriate metadata and comparable empirical benchmarks (**Anti-Phantom Citation Invariant**), and writes `<run_output_dir>/citations_verified.json`.
   4. **Report Assembly & Delivery Gate**:
      - Once active branches (`Subagent B`, and `Subagent A` when engaged) reach `COMPLETED`:
        - **File Deliverable Path**: When an external deliverable is requested (`.html`, `.docx`, `.pptx`, `.pdf`, or `.md`), Subagent B (or the report compilation step) merges `<run_output_dir>/results_dict.json` and figure bundles—plus `<run_output_dir>/citations_verified.json` whenever Subagent A produced citation input (compiling without citation input and not requiring that file when Subagent A was not dispatched or after the user accepts the no-citation fallback for a failed Subagent A)—into the target deliverable, and writes `<run_output_dir>/report_narrative.txt` and `<run_output_dir>/table_dfs.json` (or `<run_output_dir>/table_dfs_<run_id>.json`, with non-rendered cohort indexes dropped via `df.reset_index(drop=True)` so patient identifiers cannot appear) inside `run_output_dir` (`<output_dir>/run_<run_id>/`) from the exact finalized post-merge narrative and tables used to render that deliverable.
        - **In-Chat Summary Path**: When **In-Chat Summary** is selected (with no external file deliverable requested), Subagent B merges `<run_output_dir>/results_dict.json`—plus `<run_output_dir>/citations_verified.json` whenever Subagent A produced citation input (compiling without citation input and not requiring that file when Subagent A was not dispatched or after the user accepts the no-citation fallback for a failed Subagent A)—directly into the markdown summary written to `<run_output_dir>/report_narrative.txt` and writes `<run_output_dir>/table_dfs.json` (or `<run_output_dir>/table_dfs_<run_id>.json`, with dropped indexes); the Main Agent displays and verifies the narrative and tables directly in chat without requiring an unrequested file deliverable, preserving all integrity and citation audits.
        - **Terminal Staging Table Cleanup**: Regardless of whether the external-deliverable or In-Chat Summary path was used, the terminal cleanup steps remove only the run-specific table files (`<run_output_dir>/table_dfs_<run_id>.json` and `<run_output_dir>/table_dfs.json`) belonging strictly to that run's directory on every terminal outcome (successful delivery, verification failure, or unrecoverable halt); never delete unowned or shared staging files (such as `<output_dir>/table_dfs.json`) from outside `run_output_dir` to protect concurrent runs.
      - **Finalized Narrative Citation Verification**: When Subagent A was engaged, citation verification must not be restricted to the initial hand-off state. After report assembly produces the finalized narrative (`report_narrative.txt` / deliverable) and before delivery to the user, the Main Agent (or Subagent A in a post-assembly pass) reruns verification against the finalized Discussion and narrative text to confirm that every in-text superscript citation and empirical benchmark comparison matches verified sources and satisfies the **Anti-Phantom Citation Invariant**; when Subagent A was not engaged, compilation and delivery proceed without citation input or citation audit.
-     - **Post-Assembly Discussion & Results Audit**: When §4 integrity verification is engaged, after the finalized report narrative is produced but before delivery to the user, the Main Agent audits the finalized Discussion and Results against `<output_dir>/results_dict.json` and the study design (verifying point estimates, 95% CIs, p-values, effect directions, and study-archetype causal caveats), and halts delivery immediately if the audit fails.
+     - **Post-Assembly Discussion & Results Audit**: When §4 integrity verification is engaged, after the finalized report narrative is produced but before delivery to the user, the Main Agent audits the finalized Discussion and Results against `<run_output_dir>/results_dict.json` and the study design (verifying point estimates, 95% CIs, p-values, effect directions, and study-archetype causal caveats), and halts delivery immediately if the audit fails.
 
 ---
 
@@ -100,9 +100,9 @@ Because **Gate #3** (monotone separation), **Gate #4** ($> 40\%$ non-primary mis
        "exclusion_criteria": "missing_lactate_dropped"
      },
      "cleaned_data_path": "/abs/path/to/scratch/shinystat_ckpt_<run_id>/cleaned_cohort.parquet",
-     "retention_audit_path": "/abs/path/to/output/retention_audit.json",
-     "partial_results_path": "/abs/path/to/output/results_dict.json",
-     "script_path": "/abs/path/to/output/analysis_script.py"
+     "retention_audit_path": "/abs/path/to/output/run_<run_id>/retention_audit.json",
+     "partial_results_path": "/abs/path/to/output/run_<run_id>/results_dict.json",
+     "script_path": "/abs/path/to/output/run_<run_id>/analysis_script.py"
    }
    ```
 
@@ -133,7 +133,7 @@ The halting subagent writes its payload to disk and returns the exact JSON struc
    - Upon the user's decision, the Main Agent updates `sap_handoff.json["gate_decisions"]["resolved_gates_1_to_4"]`, applies Gate #4 provenance reconciliation (invalidating cached data, cohort-dependent steps, and stale partial results if the missingness strategy changed), and resumes Subagent B from its checkpoint.
 2. **Parallel Sibling Completion & Single-Turn Halt Aggregation**:
    - When Subagent A and Subagent B run in parallel and one branch halts:
-     - **Sibling Continues to Completion**: Let the unaffected sibling subagent run to completion and write its output (`results_dict.json` or `citations_verified.json`) to `<output_dir>` without cancelling or killing it.
+     - **Sibling Continues to Completion**: Let the unaffected sibling subagent run to completion and write its output (`results_dict.json` or `citations_verified.json`) to `<run_output_dir>` without cancelling or killing it.
      - **Wait & Aggregate**: The Main Agent waits until both parallel branches reach a terminal state (`COMPLETED` or `HALT_FOR_GRILLING_GATE`), aggregates all triggered HALT payloads, and presents a **single consolidated question turn** to the user.
      - **Branch Failure Recovery**: If a parallel branch fails (encounters an unhandled error or crashes) while its sibling has halted:
        - If the failure is in an optional literature branch (Subagent A) due to transient network or tool availability, the Main Agent may retry Subagent A once or offer the user to fall back to Standard offline compilation without citations alongside the sibling's Gate halt.
@@ -151,7 +151,7 @@ The halting subagent writes its payload to disk and returns the exact JSON struc
 Before presenting the final deliverable to the user, the Main Agent must independently verify the on-disk artifacts rather than relying on a subagent's conversational claim that `IntegrityReport.passed == True`:
 
 1. **Artifact Existence & Non-Zero Size Check**:
-   - Confirm that the deliverable file (`.html`, `.docx`, `.pptx`, `.pdf`, or `.md`), `<output_dir>/results_dict.json`, and every figure's bundle files (`.png`, TrueType `.pdf`, `.svg`, `_source.csv`) exist on disk with byte size $> 0$.
+   - Confirm that the deliverable file (`.html`, `.docx`, `.pptx`, `.pdf`, or `.md`), `<run_output_dir>/results_dict.json`, and every figure's bundle files (`.png`, TrueType `.pdf`, `.svg`, `_source.csv`) exist on disk with byte size $> 0$.
 2. **Independent Execution of Pillar 5 Integrity Gate & Reconciliation Audit**:
    - **Comprehensive Document Model Coverage**: Both local and cloud verification paths must check the finalized `ReportDocument` or serialize every rendered block—including `HeadingBlock`s, `ParagraphBlock`s, `CalloutBlock`s (note/warning text), `FigureBlock`s (figure caption and alt-text), and `TableBlock`s (table headers, cells, captions, and footnotes)—ensuring all rendered narrative and metadata undergo Zero-PHI and numerical traceability scanning.
    - **In `shinystat` (Local Engine)**:

@@ -423,6 +423,12 @@ def test_subagent_protocol_and_gate5_delta_parity():
     assert "<run_output_dir>/table_dfs.json" in proto_text, (
         "Protocol must use run_output_dir for table_dfs.json"
     )
+    assert "<run_output_dir>/results_dict.json" in proto_text, (
+        "Protocol must use run_output_dir for results_dict.json"
+    )
+    assert "<output_dir>/results_dict.json" not in proto_text, (
+        "Protocol must not use shared output_dir for results_dict.json"
+    )
     assert "never delete unowned or shared staging files" in proto_text, (
         "Protocol must forbid deleting unowned or shared staging files from other runs"
     )
