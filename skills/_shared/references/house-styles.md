@@ -226,7 +226,13 @@ def save_standalone_bundle(
         if include_index is not None:
             has_index = bool(include_index)
         else:
-            has_index = source_df.index.name is not None or not isinstance(source_df.index, pd.RangeIndex)
+            is_default_range = (
+                isinstance(source_df.index, pd.RangeIndex)
+                and source_df.index.name is None
+                and source_df.index.start == 0
+                and source_df.index.step == 1
+            )
+            has_index = not is_default_range
         source_df.to_csv(csv_path, index=has_index)
         csv_str = str(csv_path)
 

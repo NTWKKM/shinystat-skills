@@ -29,6 +29,7 @@ All participant counts must be non-negative integers ($\ge 0$). If any equation 
 ## 2. Recipe: Standalone CONSORT 2025/2010 Flow Diagram
 
 ```python
+import numbers
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyBboxPatch
 import numpy as np
@@ -48,22 +49,31 @@ def draw_standalone_consort_rct(
     """
     if str(version) not in ("2025", "2010"):
         raise ValueError(f"Unsupported CONSORT version '{version}'. Supported: '2025', '2010'")
-    if assessed < 0 or any(v < 0 for v in excluded.values()):
-        raise ValueError("Participant counts must be non-negative integers")
+
+    def _normalize_count(val, name: str) -> int:
+        if isinstance(val, bool) or not isinstance(val, (int, numbers.Integral, np.integer)):
+            raise ValueError(f"CONSORT count '{name}' must be an integral scalar (got {type(val).__name__})")
+        int_val = int(val)
+        if int_val < 0:
+            raise ValueError(f"CONSORT count '{name}' must be a non-negative integer (got {int_val})")
+        return int_val
+
+    assessed = _normalize_count(assessed, "assessed")
+    excluded = {k: _normalize_count(v, f"excluded[{k}]") for k, v in excluded.items()}
     if len(arms) not in (2, 3):
         raise ValueError(f"Only 2-arm and 3-arm trials are currently supported (got {len(arms)})")
 
     n_ex = sum(excluded.values())
     n_rand = assessed - n_ex
-    n_alloc = sum(a["allocated"] for a in arms)
+    normalized_arm_allocations = [_normalize_count(a["allocated"], f"Arm '{a.get('name', 'unnamed')}' allocated") for a in arms]
+    n_alloc = sum(normalized_arm_allocations)
     if n_rand != n_alloc:
         raise ValueError(f"CONSORT reconciliation mismatch: randomized ({n_rand}) != allocated ({n_alloc})")
 
     validated_arms = []
     # Arm-level mathematical reconciliation check
-    for arm in arms:
-        if arm["allocated"] < 0:
-            raise ValueError("Arm counts must be non-negative integers")
+    for idx_arm, arm in enumerate(arms):
+        allocated = normalized_arm_allocations[idx_arm]
 
         # Partition 1: Receipt partition (received and/or did_not_receive)
         has_rec = "received" in arm and arm["received"] is not None
@@ -72,16 +82,42 @@ def draw_standalone_consort_rct(
             raise ValueError(
                 f"Arm '{arm.get('name', 'unnamed')}' must specify at least one observed receipt field ('received' or 'did_not_receive')"
             )
+        rec_val = _normalize_count(arm["received"], f"Arm '{arm.get('name', 'unnamed')}' received") if has_rec else None
+
         dnr_val = arm.get("did_not_receive")
-        dnr = sum(dnr_val.values()) if isinstance(dnr_val, dict) else (dnr_val if dnr_val is not None else (arm["allocated"] - arm["received"]))
-        rec = arm["received"] if has_rec else (arm["allocated"] - dnr)
-        dnr_dict = arm["did_not_receive"] if isinstance(arm.get("did_not_receive"), dict) else {}
+        if isinstance(dnr_val, dict):
+            dnr_dict = {k: _normalize_count(v, f"Arm '{arm.get('name', 'unnamed')}' did_not_receive[{k}]") for k, v in dnr_val.items()}
+            dnr = sum(dnr_dict.values())
+        elif dnr_val is not None:
+            dnr = _normalize_count(dnr_val, f"Arm '{arm.get('name', 'unnamed')}' did_not_receive")
+            dnr_dict = {}
+        else:
+            dnr = allocated - rec_val
+            dnr_dict = {}
 
-        lo_dict = arm["lost"] if isinstance(arm.get("lost"), dict) else {}
-        lo = sum(lo_dict.values()) if isinstance(arm.get("lost"), dict) else (arm.get("lost") or 0)
+        rec = rec_val if has_rec else (allocated - dnr)
 
-        di_dict = arm["discontinued"] if isinstance(arm.get("discontinued"), dict) else {}
-        di = sum(di_dict.values()) if isinstance(arm.get("discontinued"), dict) else (arm.get("discontinued") or 0)
+        lo_val = arm.get("lost")
+        if isinstance(lo_val, dict):
+            lo_dict = {k: _normalize_count(v, f"Arm '{arm.get('name', 'unnamed')}' lost[{k}]") for k, v in lo_val.items()}
+            lo = sum(lo_dict.values())
+        elif lo_val is not None:
+            lo = _normalize_count(lo_val, f"Arm '{arm.get('name', 'unnamed')}' lost")
+            lo_dict = {}
+        else:
+            lo = 0
+            lo_dict = {}
+
+        di_val = arm.get("discontinued")
+        if isinstance(di_val, dict):
+            di_dict = {k: _normalize_count(v, f"Arm '{arm.get('name', 'unnamed')}' discontinued[{k}]") for k, v in di_val.items()}
+            di = sum(di_dict.values())
+        elif di_val is not None:
+            di = _normalize_count(di_val, f"Arm '{arm.get('name', 'unnamed')}' discontinued")
+            di_dict = {}
+        else:
+            di = 0
+            di_dict = {}
 
         # Partition 2: Analysis partition (analyzed and/or excluded_from_analysis)
         has_analyzed = "analyzed" in arm and arm["analyzed"] is not None
@@ -90,41 +126,51 @@ def draw_standalone_consort_rct(
             raise ValueError(
                 f"Arm '{arm.get('name', 'unnamed')}' must specify at least one observed analysis field ('analyzed' or 'excluded_from_analysis')"
             )
+        analyzed_val = _normalize_count(arm["analyzed"], f"Arm '{arm.get('name', 'unnamed')}' analyzed") if has_analyzed else None
+
         ex_an_val = arm.get("excluded_from_analysis")
-        ex_an = sum(ex_an_val.values()) if isinstance(ex_an_val, dict) else (ex_an_val if ex_an_val is not None else (arm["allocated"] - arm["analyzed"]))
-        analyzed = arm["analyzed"] if has_analyzed else (arm["allocated"] - ex_an)
-        ex_an_dict = arm["excluded_from_analysis"] if isinstance(arm.get("excluded_from_analysis"), dict) else {}
+        if isinstance(ex_an_val, dict):
+            ex_an_dict = {k: _normalize_count(v, f"Arm '{arm.get('name', 'unnamed')}' excluded_from_analysis[{k}]") for k, v in ex_an_val.items()}
+            ex_an = sum(ex_an_dict.values())
+        elif ex_an_val is not None:
+            ex_an = _normalize_count(ex_an_val, f"Arm '{arm.get('name', 'unnamed')}' excluded_from_analysis")
+            ex_an_dict = {}
+        else:
+            ex_an = allocated - analyzed_val
+            ex_an_dict = {}
+
+        analyzed = analyzed_val if has_analyzed else (allocated - ex_an)
 
         if lo < 0 or di < 0 or ex_an < 0 or dnr < 0 or rec < 0:
             raise ValueError("Follow-up and allocation counts must be non-negative integers")
 
-        if lo > arm["allocated"] or di > arm["allocated"]:
+        if lo > allocated or di > allocated:
             raise ValueError(
-                f"Arm '{arm.get('name', 'unnamed')}' follow-up counts (lost: {lo}, discontinued: {di}) cannot exceed allocated ({arm['allocated']})"
+                f"Arm '{arm.get('name', 'unnamed')}' follow-up counts (lost: {lo}, discontinued: {di}) cannot exceed allocated ({allocated})"
             )
 
         # Partition 1: Allocation partition (received + did_not_receive == allocated)
-        if rec + dnr != arm["allocated"]:
+        if rec + dnr != allocated:
             raise ValueError(
-                f"Arm '{arm.get('name')}' allocation mismatch: allocated ({arm['allocated']}) "
+                f"Arm '{arm.get('name')}' allocation mismatch: allocated ({allocated}) "
                 f"!= received ({rec}) + did_not_receive ({dnr})"
             )
 
         # Partition 2: Analysis partition (analyzed + excluded_from_analysis == allocated)
         # Note: lost and discontinued describe follow-up events and may overlap with analyzed
-        if analyzed < 0 or analyzed > arm["allocated"]:
+        if analyzed < 0 or analyzed > allocated:
             raise ValueError(
-                f"Arm '{arm.get('name')}' reconciliation error: analyzed ({analyzed}) must be between 0 and allocated ({arm['allocated']})"
+                f"Arm '{arm.get('name')}' reconciliation error: analyzed ({analyzed}) must be between 0 and allocated ({allocated})"
             )
-        if analyzed + ex_an != arm["allocated"]:
+        if analyzed + ex_an != allocated:
             raise ValueError(
-                f"Arm '{arm.get('name')}' analysis partition mismatch: allocated ({arm['allocated']}) "
+                f"Arm '{arm.get('name')}' analysis partition mismatch: allocated ({allocated}) "
                 f"!= analyzed ({analyzed}) + excluded_from_analysis ({ex_an})"
             )
 
         validated_arms.append({
             "name": arm.get("name", "unnamed"),
-            "allocated": arm["allocated"],
+            "allocated": allocated,
             "rec": rec,
             "dnr": dnr,
             "dnr_dict": dnr_dict,

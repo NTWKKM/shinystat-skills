@@ -124,7 +124,11 @@ def _collect_valid_skill_files(root: Path) -> set[Path]:
 def _extract_heading_slugs(text: str) -> set[str]:
     """Generates heading anchor slugs following GitHub Markdown specifications."""
     # Exclude fenced code blocks before extracting headings
-    clean_text = re.sub(r"(?ms)^(`{3,}|~{3,})[^\n]*\n.*?\n\1\s*$", "", text)
+    clean_text = re.sub(
+        r"(?ms)^(`{3,})[^\n]*\n(?:.*?\n)?\1`*[ \t]*$|^(~{3,})[^\n]*\n(?:.*?\n)?\2~*[ \t]*$",
+        "",
+        text,
+    )
     doc_headings = re.findall(r"^#+\s+(.+)$", clean_text, flags=re.MULTILINE)
     slugs = set()
     seen: dict[str, int] = {}
@@ -650,7 +654,7 @@ EOF
     assert not any("guide" in s for s in slugs)
 
 
-def test_consort_flow_rendered_labels_single_field_inputs(tmp_path):
+def test_consort_flow_rendered_labels_single_field_inputs(monkeypatch, tmp_path):
     """Regression test against canonical skills/shinystat/references/flows.md.
 
     Verifies that when single-field inputs are supplied (e.g. allocated=100, received=80,
@@ -667,8 +671,11 @@ def test_consort_flow_rendered_labels_single_field_inputs(tmp_path):
     flows_md = flows_file.read_text(encoding="utf-8")
     blocks = re.findall(r"```python\n(.*?)\n```", flows_md, re.DOTALL)
     ns = {}
-    for b in blocks:
-        exec(b, ns)
+    for idx, b in enumerate(blocks):
+        try:
+            exec(b, ns)
+        except Exception as exc:
+            pytest.fail(f"flows.md python block {idx} failed to execute: {exc!r}")
 
     draw_consort = ns["draw_standalone_consort_rct"]
 
@@ -680,38 +687,36 @@ def test_consort_flow_rendered_labels_single_field_inputs(tmp_path):
         orig_savefig = fig.savefig
 
         def wrap_savefig(*sargs, **skwargs):
-            captured_texts.extend([t.get_text() for t in ax.texts])
+            for a in fig.axes:
+                captured_texts.extend([t.get_text() for t in a.texts])
             return orig_savefig(*sargs, **skwargs)
 
         fig.savefig = wrap_savefig
         return fig, ax
 
-    plt.subplots = wrap_subplots
-    try:
-        out_png = tmp_path / "consort_rendered_labels.png"
-        arms = [
-            {
-                "name": "Intervention",
-                "allocated": 100,
-                "received": 80,
-                "analyzed": 80,
-            },
-            {
-                "name": "Control",
-                "allocated": 100,
-                "did_not_receive": 0,
-                "excluded_from_analysis": 0,
-            },
-        ]
-        res = draw_consort(
-            assessed=220,
-            excluded={"Ineligible": 20},
-            arms=arms,
-            out_path=str(out_png),
-        )
-        assert Path(res).exists()
-    finally:
-        plt.subplots = orig_subplots
+    monkeypatch.setattr(plt, "subplots", wrap_subplots)
+    out_png = tmp_path / "consort_rendered_labels.png"
+    arms = [
+        {
+            "name": "Intervention",
+            "allocated": 100,
+            "received": 80,
+            "analyzed": 80,
+        },
+        {
+            "name": "Control",
+            "allocated": 100,
+            "did_not_receive": 0,
+            "excluded_from_analysis": 0,
+        },
+    ]
+    res = draw_consort(
+        assessed=220,
+        excluded={"Ineligible": 20},
+        arms=arms,
+        out_path=str(out_png),
+    )
+    assert Path(res).exists()
 
     all_rendered = "\n".join(captured_texts)
     assert "Did not receive intervention (n = 20)" in all_rendered, (
@@ -720,3 +725,119 @@ def test_consort_flow_rendered_labels_single_field_inputs(tmp_path):
     assert "Excluded from analysis (n = 20)" in all_rendered, (
         "Derived 'Excluded from analysis (n = 20)' label not found in rendered text"
     )
+
+
+def test_consort_flow_count_normalization_and_unsigned_prevention(tmp_path):
+    """Verifies that draw_standalone_consort_rct normalizes integral scalars to Python int
+    and prevents unsigned arithmetic wrapping (e.g. np.uint64(50) - np.uint64(60)).
+    """
+    import numpy as np
+
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    flows_file = repo_root / "skills" / "shinystat" / "references" / "flows.md"
+    flows_md = flows_file.read_text(encoding="utf-8")
+    blocks = re.findall(r"```python\n(.*?)\n```", flows_md, re.DOTALL)
+    ns = {}
+    for idx, b in enumerate(blocks):
+        try:
+            exec(b, ns)
+        except Exception as exc:
+            pytest.fail(f"flows.md block {idx} failed to execute: {exc!r}")
+
+    draw_consort = ns["draw_standalone_consort_rct"]
+
+    # 1. Unsigned integer subtraction cannot wrap: allocated=50, dnr=60 must raise ValueError
+    with pytest.raises(
+        ValueError, match="Follow-up and allocation counts must be non-negative"
+    ):
+        draw_consort(
+            assessed=np.uint64(100),
+            excluded={"Ineligible": np.uint64(0)},
+            arms=[
+                {
+                    "name": "Arm A",
+                    "allocated": np.uint64(50),
+                    "did_not_receive": np.uint64(60),
+                    "analyzed": np.uint64(50),
+                },
+                {
+                    "name": "Arm B",
+                    "allocated": np.uint64(50),
+                    "received": np.uint64(50),
+                    "analyzed": np.uint64(50),
+                },
+            ],
+            out_path=str(tmp_path / "uint_wrap.png"),
+        )
+
+    # 2. NumPy integer scalars are successfully normalized and accepted
+    out_png = tmp_path / "numpy_scalars.png"
+    res = draw_consort(
+        assessed=np.int64(200),
+        excluded={"Ineligible": np.int64(20)},
+        arms=[
+            {
+                "name": "Arm A",
+                "allocated": np.int64(90),
+                "received": np.int64(90),
+                "analyzed": np.int64(90),
+            },
+            {
+                "name": "Arm B",
+                "allocated": np.int64(90),
+                "received": np.int64(90),
+                "analyzed": np.int64(90),
+            },
+        ],
+        out_path=str(out_png),
+    )
+    assert Path(res).exists()
+
+
+def test_house_styles_range_index_preservation(tmp_path):
+    """Verifies that save_standalone_bundle preserves non-default RangeIndex coordinates
+    in _source.csv while omitting default 0-indexed RangeIndex unless explicitly selected.
+    """
+    import pandas as pd
+
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    hs_file = repo_root / "skills" / "shinystat" / "references" / "house-styles.md"
+    hs_md = hs_file.read_text(encoding="utf-8")
+    blocks = re.findall(r"```python\n(.*?)\n```", hs_md, re.DOTALL)
+    ns = {}
+    for idx, b in enumerate(blocks):
+        try:
+            exec(b, ns)
+        except Exception as exc:
+            pytest.fail(f"house-styles.md block {idx} failed to execute: {exc!r}")
+
+    save_bundle = ns["save_standalone_bundle"]
+
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots()
+    ax.plot([1, 2, 3], [10, 20, 30])
+
+    try:
+        # Non-default unnamed RangeIndex(1, 4): must be included in CSV
+        df_non_default = pd.DataFrame({"y": [10, 20, 30]}, index=pd.RangeIndex(1, 4))
+        res_nd = save_bundle(
+            fig, str(tmp_path / "fig_nd.png"), source_df=df_non_default
+        )
+        csv_nd = Path(res_nd["csv_path"]).read_text(encoding="utf-8")
+        assert "1,10" in csv_nd or ",y\n1,10" in csv_nd
+
+        # Default unnamed RangeIndex(0, 3): must be omitted by default
+        df_default = pd.DataFrame({"y": [10, 20, 30]}, index=pd.RangeIndex(0, 3))
+        res_def = save_bundle(fig, str(tmp_path / "fig_def.png"), source_df=df_default)
+        csv_def = Path(res_def["csv_path"]).read_text(encoding="utf-8")
+        assert csv_def.splitlines()[0].strip() == "y"
+
+        # Default unnamed RangeIndex(0, 3) with include_index=True: must be included
+        res_exp = save_bundle(
+            fig, str(tmp_path / "fig_exp.png"), source_df=df_default, include_index=True
+        )
+        csv_exp = Path(res_exp["csv_path"]).read_text(encoding="utf-8")
+        assert "0,10" in csv_exp or ",y\n0,10" in csv_exp
+    finally:
+        plt.close(fig)

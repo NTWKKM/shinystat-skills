@@ -101,7 +101,7 @@ def _detect_p_qualifier(key_str: str) -> str | None:
         return "nonlinear"
     if "omnibus" in k_lower:
         return "omnibus"
-    if "lrt" in k_lower:
+    if "lrt" in k_lower or "likelihood" in k_lower:
         return "lrt"
     if "wald" in k_lower:
         return "wald"
@@ -263,7 +263,7 @@ def _is_structural_context(
             re.search(
                 r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff|prespecified(?:\s+(?:level|threshold|cutoff))?|defined\s+as)"
                 r"(?:\s*(?:[:=]|\b(?:was|were|is)?\s*(?:set\s+at|defined\s+as|of|at)?\b))?\s*"
-                r"\bp(?=[-_\s(\<>=≤≥]).*?([<>]=?|[≤≥])\s*$",
+                r"\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+[a-zA-Z_-]+\)?|\(?[a-zA-Z_-]+\)?))?\s*([<>]=?|[≤≥])\s*$",
                 window_before,
                 re.IGNORECASE,
             )
@@ -409,7 +409,7 @@ def _extract_text_tokens(text: str) -> list[TextToken]:
             doc_has_references=doc_has_references,
         )
         p_ineq_match = re.search(
-            r"(?:([a-zA-Z_-]+)\s+)?\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+([a-zA-Z_-]+)\)?|\(?([a-zA-Z_-]+)\)?))?\s*([<>]=?|[≤≥])\s*$",
+            r"(?:((?:[a-zA-Z_-]+(?:\s+(?:ratio\s+)?(?:test|score|statistic))?|[a-zA-Z_-]+))\s*,?\s+)?\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+([a-zA-Z_-]+)\)?|\(?([a-zA-Z_-]+)\)?))?\s*([<>]=?|[≤≥])\s*$",
             window_before,
             re.IGNORECASE,
         )

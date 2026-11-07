@@ -42,6 +42,7 @@ def ensure_packaged_cloud_skill():
         CLOUD_DIR / "references" / "report-builder.md",
         CLOUD_DIR / "references" / "decision-heuristics.md",
         CLOUD_DIR / "references" / "figures.md",
+        CLOUD_DIR / "references" / "flows.md",
         CLOUD_DIR / "references" / "subagent-protocol.md",
     ]
     if not all(p.exists() for p in required_files) and pkg_script.exists():
@@ -3829,6 +3830,56 @@ def test_cloud_standalone_qualified_p_values_and_dict_records_parity(
     assert sa_zi["passed"] is True
     assert ir_zi.untraced_numbers == sa_zi["untraced_numbers"] == []
 
+    # 5. Parity cases for p-threshold pattern:
+    # 5a. Result claim after threshold mention
+    res_thresh = {"p_value": 0.23}
+    doc_thresh_claim = ReportDocument(
+        title="Threshold Mention Claim", results_dict=res_thresh
+    )
+    narr_thresh_claim = "The association met the significance threshold, with P < 0.05."
+    doc_thresh_claim.add_paragraph("Methods: Included observational cohort.")
+    doc_thresh_claim.add_paragraph(narr_thresh_claim)
+    ir_tc = verify_report_integrity(doc_thresh_claim)
+    sa_tc = verify_standalone(narr_thresh_claim, results_dict=res_thresh)
+    assert ir_tc.passed is False
+    assert sa_tc["passed"] is False
+    assert ir_tc.untraced_numbers == sa_tc["untraced_numbers"] == [0.05]
+
+    # 5b. Methodological threshold definition
+    doc_thresh_def = ReportDocument(
+        title="Threshold Definition", results_dict=res_thresh
+    )
+    narr_thresh_def = (
+        "Methods: significance threshold P < 0.05. Primary outcome had p = 0.23."
+    )
+    doc_thresh_def.add_paragraph(narr_thresh_def)
+    ir_td = verify_report_integrity(doc_thresh_def)
+    sa_td = verify_standalone(narr_thresh_def, results_dict=res_thresh)
+    assert ir_td.passed is True
+    assert sa_td["passed"] is True
+    assert ir_td.untraced_numbers == sa_td["untraced_numbers"] == []
+
+    # 5c. False trend claim (p_trend=0.50 conflicting with p for trend < 0.05 near interaction text)
+    res_trend_fail = {"p_interaction": 0.01, "p_trend": 0.50}
+    doc_tfail = ReportDocument(title="False Trend Claim", results_dict=res_trend_fail)
+    narr_trend = "Interaction analysis: p for trend < 0.05 across risk tiers."
+    doc_tfail.add_paragraph(narr_trend)
+    ir_tfail = verify_report_integrity(doc_tfail)
+    sa_tfail = verify_standalone(narr_trend, results_dict=res_trend_fail)
+    assert ir_tfail.passed is False
+    assert sa_tfail["passed"] is False
+    assert ir_tfail.untraced_numbers == sa_tfail["untraced_numbers"] == [0.05]
+
+    # 5d. True trend claim (p_trend=0.02 matching p for trend < 0.05 near interaction text)
+    res_trend_pass = {"p_interaction": 0.01, "p_trend": 0.02}
+    doc_tpass = ReportDocument(title="True Trend Claim", results_dict=res_trend_pass)
+    doc_tpass.add_paragraph(narr_trend)
+    ir_tpass = verify_report_integrity(doc_tpass)
+    sa_tpass = verify_standalone(narr_trend, results_dict=res_trend_pass)
+    assert ir_tpass.passed is True
+    assert sa_tpass["passed"] is True
+    assert ir_tpass.untraced_numbers == sa_tpass["untraced_numbers"] == []
+
 
 def test_cloud_subagent_protocol_and_gate5_alignment(ensure_packaged_cloud_skill):
     """Verify packaged cloud skill rewrites subagent-protocol.md links and bundles byte-identical protocol."""
@@ -3848,19 +3899,24 @@ def test_cloud_subagent_protocol_and_gate5_alignment(ensure_packaged_cloud_skill
     assert proto_file.read_bytes() == shared_proto.read_bytes()
 
 
-def test_consort_single_field_derivation_and_superscript_allowlist(tmp_path):
+def test_consort_single_field_derivation_and_superscript_allowlist(
+    ensure_packaged_cloud_skill, monkeypatch, tmp_path
+):
     """Regression test for CodeRabbit review findings:
     1. Single-field inputs in CONSORT (allocated=100, received=80, analyzed=80)
-       properly derive missing fields (dnr=20, ex_an=20) and render without omission.
+        properly derive missing fields (dnr=20, ex_an=20) and render without omission.
     2. Missing receipt or analysis partitions (both fields absent) are rejected.
     3. Narrative superscript restoration allowlists only safe citation/footnote classes,
-       stripping unlisted classes (e.g. 'unexpected') and event attributes (e.g. 'onclick').
+        stripping unlisted classes (e.g. 'unexpected') and event attributes (e.g. 'onclick').
     """
     flows_md = (CLOUD_DIR / "references" / "flows.md").read_text(encoding="utf-8")
     blocks = re.findall(r"```python\n(.*?)\n```", flows_md, re.DOTALL)
     ns_flows = {}
-    for b in blocks:
-        exec(b, ns_flows)
+    for idx, b in enumerate(blocks):
+        try:
+            exec(b, ns_flows)
+        except Exception as exc:
+            pytest.fail(f"flows.md block {idx} failed to execute: {exc!r}")
 
     draw_consort = ns_flows["draw_standalone_consort_rct"]
     out_png = tmp_path / "consort_single_field.png"
@@ -3875,31 +3931,29 @@ def test_consort_single_field_derivation_and_superscript_allowlist(tmp_path):
         orig_savefig = fig.savefig
 
         def wrap_savefig(*sargs, **skwargs):
-            captured_texts.extend([t.get_text() for t in ax.texts])
+            for a in fig.axes:
+                captured_texts.extend([t.get_text() for t in a.texts])
             return orig_savefig(*sargs, **skwargs)
 
         fig.savefig = wrap_savefig
         return fig, ax
 
-    plt.subplots = wrap_subplots
-    try:
-        res = draw_consort(
-            assessed=220,
-            excluded={"Ineligible": 20},
-            arms=[
-                {"name": "Arm A", "allocated": 100, "received": 80, "analyzed": 80},
-                {
-                    "name": "Arm B",
-                    "allocated": 100,
-                    "did_not_receive": 0,
-                    "excluded_from_analysis": 0,
-                },
-            ],
-            out_path=str(out_png),
-        )
-        assert Path(res).exists() and Path(res).stat().st_size > 0
-    finally:
-        plt.subplots = orig_subplots
+    monkeypatch.setattr(plt, "subplots", wrap_subplots)
+    res = draw_consort(
+        assessed=220,
+        excluded={"Ineligible": 20},
+        arms=[
+            {"name": "Arm A", "allocated": 100, "received": 80, "analyzed": 80},
+            {
+                "name": "Arm B",
+                "allocated": 100,
+                "did_not_receive": 0,
+                "excluded_from_analysis": 0,
+            },
+        ],
+        out_path=str(out_png),
+    )
+    assert Path(res).exists() and Path(res).stat().st_size > 0
 
     all_rendered = "\n".join(captured_texts)
     assert "Did not receive intervention (n = 20)" in all_rendered
@@ -3945,8 +3999,11 @@ def test_consort_single_field_derivation_and_superscript_allowlist(tmp_path):
     rb_md = (CLOUD_DIR / "references" / "report-builder.md").read_text(encoding="utf-8")
     rb_blocks = re.findall(r"```python\n(.*?)\n```", rb_md, re.DOTALL)
     ns_rb = {}
-    for b in rb_blocks:
-        exec(b, ns_rb)
+    for idx, b in enumerate(rb_blocks):
+        try:
+            exec(b, ns_rb)
+        except Exception as exc:
+            pytest.fail(f"report-builder.md block {idx} failed to execute: {exc!r}")
 
     gen_html = ns_rb["generate_html_report"]
     narr_text = (
@@ -3965,6 +4022,7 @@ def test_consort_single_field_derivation_and_superscript_allowlist(tmp_path):
         out_path=str(html_out),
     )
     html_content = html_out.read_text(encoding="utf-8")
+    assert "Testing superscripts" in html_content
     assert "onclick" not in html_content
     assert 'class="unexpected"' not in html_content
     assert '<sup class="citation">' in html_content
