@@ -672,8 +672,10 @@ def test_consort_flow_rendered_labels_single_field_inputs(monkeypatch, tmp_path)
     blocks = re.findall(r"```python\n(.*?)\n```", flows_md, re.DOTALL)
     ns = {}
     for idx, b in enumerate(blocks):
+        block_ns = {}
         try:
-            exec(b, ns)
+            exec(b, block_ns)
+            ns.update(block_ns)
         except Exception as exc:
             pytest.fail(f"flows.md python block {idx} failed to execute: {exc!r}")
 
@@ -739,8 +741,10 @@ def test_consort_flow_count_normalization_and_unsigned_prevention(tmp_path):
     blocks = re.findall(r"```python\n(.*?)\n```", flows_md, re.DOTALL)
     ns = {}
     for idx, b in enumerate(blocks):
+        block_ns = {}
         try:
-            exec(b, ns)
+            exec(b, block_ns)
+            ns.update(block_ns)
         except Exception as exc:
             pytest.fail(f"flows.md block {idx} failed to execute: {exc!r}")
 
@@ -806,8 +810,10 @@ def test_house_styles_range_index_preservation(tmp_path):
     blocks = re.findall(r"```python\n(.*?)\n```", hs_md, re.DOTALL)
     ns = {}
     for idx, b in enumerate(blocks):
+        block_ns = {}
         try:
-            exec(b, ns)
+            exec(b, block_ns)
+            ns.update(block_ns)
         except Exception as exc:
             pytest.fail(f"house-styles.md block {idx} failed to execute: {exc!r}")
 

@@ -3913,8 +3913,10 @@ def test_consort_single_field_derivation_and_superscript_allowlist(
     blocks = re.findall(r"```python\n(.*?)\n```", flows_md, re.DOTALL)
     ns_flows = {}
     for idx, b in enumerate(blocks):
+        block_ns = {}
         try:
-            exec(b, ns_flows)
+            exec(b, block_ns)
+            ns_flows.update(block_ns)
         except Exception as exc:
             pytest.fail(f"flows.md block {idx} failed to execute: {exc!r}")
 
@@ -4000,8 +4002,10 @@ def test_consort_single_field_derivation_and_superscript_allowlist(
     rb_blocks = re.findall(r"```python\n(.*?)\n```", rb_md, re.DOTALL)
     ns_rb = {}
     for idx, b in enumerate(rb_blocks):
+        block_ns = {}
         try:
-            exec(b, ns_rb)
+            exec(b, block_ns)
+            ns_rb.update(block_ns)
         except Exception as exc:
             pytest.fail(f"report-builder.md block {idx} failed to execute: {exc!r}")
 

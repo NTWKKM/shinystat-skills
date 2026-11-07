@@ -719,6 +719,19 @@ def test_integrity_threshold_mention_vs_definition_and_qualifier():
     assert 0.05 in audit_prespec_p.untraced_numbers
     assert audit_prespec_p.passed is False
 
+    # 1d. Significance threshold p-value was prespecified and observed P < 0.05: must fail if conflicting
+    doc_prespec_pval_claim = ReportDocument(
+        title="Threshold p-value Prespecified And Observed Result",
+        results_dict={"p_value": 0.23},
+    )
+    doc_prespec_pval_claim.add_paragraph("Methods: Included observational cohort.")
+    doc_prespec_pval_claim.add_paragraph(
+        "The significance threshold p-value was prespecified and the observed P < 0.05."
+    )
+    audit_prespec_pval = verify_report_integrity(doc_prespec_pval_claim)
+    assert 0.05 in audit_prespec_pval.untraced_numbers
+    assert audit_prespec_pval.passed is False
+
     # 2b. Methodological definition using inclusive inequality (<= / defined as): must be exempted
     doc_def_incl = ReportDocument(
         title="Methodological Threshold Definition Inclusive",
@@ -729,6 +742,17 @@ def test_integrity_threshold_mention_vs_definition_and_qualifier():
     audit_def_incl = verify_report_integrity(doc_def_incl)
     assert 0.05 not in audit_def_incl.untraced_numbers
     assert audit_def_incl.passed is True
+
+    # 2c. Methodological definition using inclusive upper inequality (>= / defined as) with conflicting recorded p-value 0.02
+    doc_def_gte = ReportDocument(
+        title="Methodological Threshold Definition GTE",
+        results_dict={"p_value": 0.02},
+    )
+    doc_def_gte.add_paragraph("Methods: significance threshold defined as P >= 0.05.")
+    doc_def_gte.add_paragraph("Primary outcome had p = 0.02.")
+    audit_def_gte = verify_report_integrity(doc_def_gte)
+    assert 0.05 not in audit_def_gte.untraced_numbers
+    assert audit_def_gte.passed is True
 
     # 5. Multiword test label: 'Wald test P < 0.05' binds 'wald' qualifier and must not match generic p=0.01 when p_wald=0.2
     doc_wald_fail = ReportDocument(
