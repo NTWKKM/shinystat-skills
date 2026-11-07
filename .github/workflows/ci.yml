@@ -57,6 +57,8 @@ jobs:
         run: ./scripts/package-cloud-skill.sh
 
       - name: Run test suite
+        env:
+          MPLBACKEND: Agg
         run: uv run --extra dev pytest
 
   release:
