@@ -11,15 +11,15 @@ Reference protocol for `shinystat` and `shinystat-cloud` when the runtime provid
   1. **Main Agent (*Orchestrator & Clinical Gatekeeper*)**:
      - Runs **Pillar 1** pre-flight data inspection (`df.info()`, `df.describe()`, missingness %, numeric `0/1` coding check) and **Pillar 2** archetype triangulation.
      - Conducts the **single consolidated pre-flight inquiry** with the user for any triggered `#1`, `#2`, `#4` (when pre-flight confirms $> 40\%$ non-primary missingness or clinically plausible MNAR without sensitivity analysis), and `#5` items; computes **pre-flight** $\text{EPV}_{\text{binary}}$ / $\text{EPV}_{\text{Cox}}$ (during Pillar 1 when outcome/event coding is unambiguous, or immediately after resolving Gate `#1`/`#2` in the consolidated turn before model fitting).
-     - Writes `<output_dir>/sap_handoff.json` and dispatches Subagent(s).
+     - Writes `<run_output_dir>/sap_handoff.json` and dispatches Subagent(s).
      - Performs **independent on-disk integrity verification** (§4) before delivering final outputs to the user.
   2. **Subagent B (*Biostatistical Execution & Report Subagent*)**:
      - Always dispatched in **Subagent Offload** mode.
-     - Reads `<output_dir>/sap_handoff.json` and loads only the required statistical references (`decision-heuristics.md`, `figures.md`, `flows.md`, `house-styles.md`, `illustration.md`, `report-builder.md §1–§3`, and target `references/recipes/01-*.md` to `05-*.md` in `shinystat-cloud`).
+     - Reads `<run_output_dir>/sap_handoff.json` and loads only the required statistical references (`decision-heuristics.md`, `figures.md`, `flows.md`, `house-styles.md`, `illustration.md`, `report-builder.md §1–§3`, and target `references/recipes/01-*.md` to `05-*.md` in `shinystat-cloud`).
      - Executes the statistical models, tracks `SampleFlowTracker` / `retention_audit`, exports 300/600 DPI figure bundles (`.png`, TrueType `.pdf` with `fonttype=42`, `.svg`, `_source.csv` with `qa["passed"] == True`), and writes `<run_output_dir>/results_dict.json` and `<run_output_dir>/retention_audit.json`.
   3. **Subagent A (*Literature & Citation Verification Subagent*)**:
      - Dispatched **in parallel with Subagent B** when **Full Publication Polish** is selected at Gate `#5` or when user-provided references are supplied for verification (whether online via literature MCPs/web search or offline via authenticated local-source verification in Standard mode).
-     - Reads `<output_dir>/sap_handoff.json` and loads `report-builder.md §4` (*Evidence-Base Verification & Superscript Citations Pipeline*).
+     - Reads `<run_output_dir>/sap_handoff.json` and loads `report-builder.md §4` (*Evidence-Base Verification & Superscript Citations Pipeline*).
      - Queries available literature MCPs or web search tools strictly under the **Zero-PHI Literature Query Boundary** (or verifies local user-provided citations against DOI/PMID/bibliographic metadata offline when literature services are unavailable), verifies source-appropriate metadata and comparable empirical benchmarks (**Anti-Phantom Citation Invariant**), and writes `<run_output_dir>/citations_verified.json`.
   4. **Report Assembly & Delivery Gate**:
      - Once active branches (`Subagent B`, and `Subagent A` when engaged) reach `COMPLETED`:
@@ -31,9 +31,9 @@ Reference protocol for `shinystat` and `shinystat-cloud` when the runtime provid
 
 ---
 
-## 2. SAP Hand-Off Brief Schema (`<output_dir>/sap_handoff.json`)
+## 2. SAP Hand-Off Brief Schema (`<run_output_dir>/sap_handoff.json`)
 
-The Main Agent writes `<output_dir>/sap_handoff.json` to disk before spawning any subagent.
+The Main Agent writes `<run_output_dir>/sap_handoff.json` to disk before spawning any subagent.
 
 - **Zero-PHI Hand-Off Invariant**: Never embed raw patient rows, free-text clinical notes, or patient identifiers (HN, National ID, name, DOB, phone) inside `sap_handoff.json` or subagent prompt strings. Pass only file paths, column names, and aggregate pre-flight statistics.
 - **Concurrent Run Namespace & Ownership Invariant**: To prevent concurrent runs from overwriting, corrupting, or prematurely deleting each other's state, every run must assign a unique `run_id` (e.g. timestamp or UUID suffix) and establish a distinct per-run output directory `run_output_dir` (`<output_dir>/run_<run_id>/`) for ALL artifacts—including `sap_handoff.json`, scripts, figures, `results_dict.json`, `retention_audit.json`, checkpoints (`.scratch_checkpoint_<run_id>/`), deliverables, and staging tables (`table_dfs.json` / `table_dfs_<run_id>.json`). Do not rely on checkpoint-only namespacing within a shared output folder. Orchestrators must verify `run_id` ownership before reading or cleaning state, and enforce that cleanup unlinks only artifacts belonging strictly to that specific run's directory.
@@ -86,9 +86,9 @@ The Main Agent writes `<output_dir>/sap_handoff.json` to disk before spawning an
 Because **Gate #3** (monotone separation), **Gate #4** ($> 40\%$ non-primary missingness or plausible MNAR without sensitivity analysis), and **Gate #6** (unverified, retracted, or contradictory citation) are detected *during* model fitting or literature verification inside a subagent—while only the Main Agent communicates with the user—subagents must follow this deterministic checkpoint-and-halt protocol:
 
 ### A. On-Disk Checkpointing & Row-Level Data Isolation
-1. Create an isolated control directory `<output_dir>/.scratch_checkpoint_<run_id>/` for non-PHI checkpoint metadata, and create a restricted workspace directory **outside** the user-facing `<output_dir>` using `tempfile.mkdtemp(prefix=f"shinystat_ckpt_{run_id}_", dir=scratch_dir)` for any row-level cohort checkpoints. Store the exact returned directory path (`row_level_checkpoint_dir`).
-2. If Subagent B has cleaned or recoded the cohort before halting, save the intermediate cohort inside the restricted external workspace `<row_level_checkpoint_dir>/cleaned_cohort.parquet` (or `.csv`) outside `<output_dir>`, record this exact path in `cleaned_data_path`, while keeping the executable script at `<output_dir>/analysis_script.py`.
-3. Write a role-specific checkpoint-state file `<output_dir>/.scratch_checkpoint_<run_id>/checkpoint_state_<role>.json` (e.g., `checkpoint_state_biostat_execution.json` or `checkpoint_state_literature_verifier.json`):
+1. Create an isolated control directory `<run_output_dir>/.scratch_checkpoint_<run_id>/` for non-PHI checkpoint metadata, and create a restricted workspace directory **outside** the user-facing `<run_output_dir>` using `tempfile.mkdtemp(prefix=f"shinystat_ckpt_{run_id}_", dir=scratch_dir)` for any row-level cohort checkpoints. Store the exact returned directory path (`row_level_checkpoint_dir`).
+2. If Subagent B has cleaned or recoded the cohort before halting, save the intermediate cohort inside the restricted external workspace `<row_level_checkpoint_dir>/cleaned_cohort.parquet` (or `.csv`) outside `<run_output_dir>`, record this exact path in `cleaned_data_path`, while keeping the executable script at `<run_output_dir>/analysis_script.py`.
+3. Write a role-specific checkpoint-state file `<run_output_dir>/.scratch_checkpoint_<run_id>/checkpoint_state_<role>.json` (e.g., `checkpoint_state_biostat_execution.json` or `checkpoint_state_literature_verifier.json`):
    ```json
    {
      "run_id": "run_20261101_181027",
@@ -106,7 +106,7 @@ Because **Gate #3** (monotone separation), **Gate #4** ($> 40\%$ non-primary mis
    }
    ```
 
-### B. Structured HALT Payload (`<output_dir>/.scratch_checkpoint_<run_id>/halt_payload_<role>.json`)
+### B. Structured HALT Payload (`<run_output_dir>/.scratch_checkpoint_<run_id>/halt_payload_<role>.json`)
 The halting subagent writes its payload to disk and returns the exact JSON structure to the Main Agent:
 ```json
 {
@@ -119,8 +119,8 @@ The halting subagent writes its payload to disk and returns the exact JSON struc
     "A: Apply Firth penalized likelihood logistic regression with profile likelihood 95% CIs",
     "B: Remove or collapse 'mechanical_ventilation' from the multivariable model"
   ],
-  "checkpoint_path": "/abs/path/to/output/.scratch_checkpoint_<run_id>/checkpoint_state_biostat_execution.json",
-  "script_path": "/abs/path/to/output/analysis_script.py"
+  "checkpoint_path": "/abs/path/to/output/run_<run_id>/.scratch_checkpoint_<run_id>/checkpoint_state_biostat_execution.json",
+  "script_path": "/abs/path/to/output/run_<run_id>/analysis_script.py"
 }
 ```
 
@@ -128,7 +128,7 @@ The halting subagent writes its payload to disk and returns the exact JSON struc
 
 1. **Single-Branch Execution Halt**:
    - When only Subagent B is dispatched (no Subagent A) and it halts for Gate #3 (monotone separation) or Gate #4 (missingness / MNAR):
-   - Subagent B writes `<output_dir>/.scratch_checkpoint_<run_id>/halt_payload_biostat_execution.json` and halts.
+   - Subagent B writes `<run_output_dir>/.scratch_checkpoint_<run_id>/halt_payload_biostat_execution.json` and halts.
    - The Main Agent immediately presents the gate question to the user.
    - Upon the user's decision, the Main Agent updates `sap_handoff.json["gate_decisions"]["resolved_gates_1_to_4"]`, applies Gate #4 provenance reconciliation (invalidating cached data, cohort-dependent steps, and stale partial results if the missingness strategy changed), and resumes Subagent B from its checkpoint.
 2. **Parallel Sibling Completion & Single-Turn Halt Aggregation**:
@@ -141,7 +141,7 @@ The halting subagent writes its payload to disk and returns the exact JSON struc
 3. **Selective Resume & Preprocessing Provenance Invalidation**:
    - **Gate #1–#4 Decision & Provenance Reconciliation**: After the user responds, the Main Agent updates `sap_handoff.json["gate_decisions"]["resolved_gates_1_to_4"]`. If a Gate #4 decision modifies the missing-data handling strategy or conflicts with the recorded `preprocessing_provenance` in `checkpoint_state_biostat_execution.json` (e.g. switching from complete-case listwise deletion to MICE, or altering MNAR sensitivity parameters): the Main Agent and Subagent B must NOT reuse incompatible data at `cleaned_data_path`. Invalidate `cleaned_data_path`, rerun cohort cleaning and sample retention tracking (`SampleFlowTracker` / `retention_audit`), purge cohort-dependent steps from `completed_steps` (e.g. remove `"table1"`, `"retention_tracker"`, and downstream model steps), purge stale cohort-dependent entries from `partial_results` / `results_dict` (such as baseline demographics and unadjusted counts, preserving complete-case sensitivity results only when explicitly labeled as sensitivity analysis) from raw data under the new missingness strategy, update `retention_audit.json` and `cleaned_data_path`, and only then resume Subagent B's model fitting. When Gate #4 decisions or Gate #3 separation resolutions remain compatible with existing preprocessing, preserve the selective-resume behavior and load `cleaned_data_path` directly without repeating data cleaning.
    - **Gate #6 Citation Decision Contract**: When resuming Subagent A following a Gate #6 halt, the Main Agent increments `sap_handoff.json["gate_decisions"]["citation_instructions"]["version"]`, sets `gate_6_decision` (e.g., `"omit"`, `"replace_with_user_source"`, or `"re_verify"`), and records user guidance. Subagent A is required to read and apply `citation_instructions` when resuming the citation branch so it deterministically follows the user's latest Gate #6 decision.
-   - **Targeted Branch Execution**: Resume **only** the halted subagent branch(es) from its role-specific `<output_dir>/.scratch_checkpoint_<run_id>/checkpoint_state_<role>.json` without re-running the already-completed sibling branch.
+   - **Targeted Branch Execution**: Resume **only** the halted subagent branch(es) from its role-specific `<run_output_dir>/.scratch_checkpoint_<run_id>/checkpoint_state_<role>.json` without re-running the already-completed sibling branch.
 4. **Deferred Compilation**: Final report compilation runs only after all active branches return `COMPLETED`.
 
 ---

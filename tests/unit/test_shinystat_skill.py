@@ -429,6 +429,18 @@ def test_subagent_protocol_and_gate5_delta_parity():
     assert "<output_dir>/results_dict.json" not in proto_text, (
         "Protocol must not use shared output_dir for results_dict.json"
     )
+    assert "<run_output_dir>/sap_handoff.json" in proto_text, (
+        "Protocol must use run_output_dir for sap_handoff.json"
+    )
+    assert "<output_dir>/sap_handoff.json" not in proto_text, (
+        "Protocol must not use shared output_dir for sap_handoff.json"
+    )
+    assert "<run_output_dir>/.scratch_checkpoint_<run_id>/" in proto_text, (
+        "Protocol must place checkpoints under run_output_dir"
+    )
+    assert "<output_dir>/.scratch_checkpoint_<run_id>/" not in proto_text, (
+        "Protocol must not place checkpoints directly under shared output_dir"
+    )
     assert "never delete unowned or shared staging files" in proto_text, (
         "Protocol must forbid deleting unowned or shared staging files from other runs"
     )
