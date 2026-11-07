@@ -54,7 +54,7 @@ jobs:
           fi
 
       - name: Run test suite
-        run: uv run pytest
+        run: uv run --extra dev pytest
 
       - name: Build standalone cloud package
         run: ./scripts/package-cloud-skill.sh
