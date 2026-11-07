@@ -61,16 +61,44 @@ def draw_standalone_consort_rct(
 
     # Arm-level mathematical reconciliation check
     for arm in arms:
-        if arm["allocated"] < 0 or arm["analyzed"] < 0:
+        if arm["allocated"] < 0 or arm.get("analyzed", 0) < 0:
             raise ValueError("Arm counts must be non-negative integers")
-        lo = sum(arm.get("lost", {}).values()) if isinstance(arm.get("lost"), dict) else arm.get("lost", 0)
-        di = sum(arm.get("discontinued", {}).values()) if isinstance(arm.get("discontinued"), dict) else arm.get("discontinued", 0)
-        ex_an = sum(arm.get("excluded_from_analysis", {}).values()) if isinstance(arm.get("excluded_from_analysis"), dict) else arm.get("excluded_from_analysis", 0)
-        expected_alloc = arm["analyzed"] + lo + di + ex_an
-        if arm["allocated"] != expected_alloc:
+
+        # Handle reason dicts safely: empty dicts produce 0
+        dnr_dict = arm["did_not_receive"] if isinstance(arm.get("did_not_receive"), dict) else {}
+        dnr = sum(dnr_dict.values()) if isinstance(arm.get("did_not_receive"), dict) else (arm.get("did_not_receive") or 0)
+        rec = arm.get("received", arm["allocated"] - dnr)
+
+        lo_dict = arm["lost"] if isinstance(arm.get("lost"), dict) else {}
+        lo = sum(lo_dict.values()) if isinstance(arm.get("lost"), dict) else (arm.get("lost") or 0)
+
+        di_dict = arm["discontinued"] if isinstance(arm.get("discontinued"), dict) else {}
+        di = sum(di_dict.values()) if isinstance(arm.get("discontinued"), dict) else (arm.get("discontinued") or 0)
+
+        ex_an_dict = arm["excluded_from_analysis"] if isinstance(arm.get("excluded_from_analysis"), dict) else {}
+        ex_an = sum(ex_an_dict.values()) if isinstance(arm.get("excluded_from_analysis"), dict) else (arm.get("excluded_from_analysis") or 0)
+        analyzed = arm.get("analyzed", arm["allocated"] - ex_an)
+
+        if lo < 0 or di < 0 or ex_an < 0 or dnr < 0 or rec < 0:
+            raise ValueError("Follow-up and allocation counts must be non-negative integers")
+
+        # Partition 1: Allocation partition (received + did_not_receive == allocated)
+        if rec + dnr != arm["allocated"]:
             raise ValueError(
-                f"Arm '{arm.get('name')}' reconciliation mismatch: allocated ({arm['allocated']}) "
-                f"!= analyzed ({arm['analyzed']}) + lost ({lo}) + discontinued ({di}) + excluded_from_analysis ({ex_an})"
+                f"Arm '{arm.get('name')}' allocation mismatch: allocated ({arm['allocated']}) "
+                f"!= received ({rec}) + did_not_receive ({dnr})"
+            )
+
+        # Partition 2: Analysis partition (analyzed + excluded_from_analysis == allocated)
+        # Note: lost and discontinued describe follow-up events and may overlap with analyzed
+        if analyzed < 0 or analyzed > arm["allocated"]:
+            raise ValueError(
+                f"Arm '{arm.get('name')}' reconciliation error: analyzed ({analyzed}) must be between 0 and allocated ({arm['allocated']})"
+            )
+        if analyzed + ex_an != arm["allocated"]:
+            raise ValueError(
+                f"Arm '{arm.get('name')}' analysis partition mismatch: allocated ({arm['allocated']}) "
+                f"!= analyzed ({analyzed}) + excluded_from_analysis ({ex_an})"
             )
 
     journal_colors = {
@@ -127,16 +155,34 @@ def draw_standalone_consort_rct(
         arm_w = 38 if len(arms) == 2 else 28
 
         for arm, cx in zip(arms, cx_coords):
-            arrow(45, 74, cx, 66)
-            box(cx, 63, arm_w, 6, f"Allocated to {arm['name']}", f"(n = {arm['allocated']:,})")
-            arrow(cx, 60, cx, 49)
+            dnr_dict = arm["did_not_receive"] if isinstance(arm.get("did_not_receive"), dict) else {}
+            dnr = sum(dnr_dict.values()) if isinstance(arm.get("did_not_receive"), dict) else (arm.get("did_not_receive") or 0)
+            rec = arm.get("received", arm["allocated"] - dnr)
+
+            lo_dict = arm["lost"] if isinstance(arm.get("lost"), dict) else {}
+            lo = sum(lo_dict.values()) if isinstance(arm.get("lost"), dict) else (arm.get("lost") or 0)
+
+            di_dict = arm["discontinued"] if isinstance(arm.get("discontinued"), dict) else {}
+            di = sum(di_dict.values()) if isinstance(arm.get("discontinued"), dict) else (arm.get("discontinued") or 0)
+
+            ex_an_dict = arm["excluded_from_analysis"] if isinstance(arm.get("excluded_from_analysis"), dict) else {}
+            ex_an = sum(ex_an_dict.values()) if isinstance(arm.get("excluded_from_analysis"), dict) else (arm.get("excluded_from_analysis") or 0)
+            analyzed = arm.get("analyzed", arm["allocated"] - ex_an)
+
+            # Allocation box with intervention receipt details (CONSORT 2025/2010)
+            alloc_lines = [f"(n = {arm['allocated']:,})"]
+            alloc_lines.append(f"\u2022 Received allocated intervention (n = {rec:,})")
+            if dnr > 0 or dnr_dict:
+                alloc_lines.append(f"\u2022 Did not receive intervention (n = {dnr:,})")
+                for r_k, r_v in dnr_dict.items():
+                    alloc_lines.append(f"   - {r_k} (n = {r_v})")
+            alloc_text = "\n".join(alloc_lines)
+            h_alloc = max(6.5, 2.5 + len(alloc_lines) * 1.5)
+
+            arrow(45, 74, cx, 63 + h_alloc / 2)
+            box(cx, 63, arm_w, h_alloc, f"Allocated to {arm['name']}", alloc_text)
 
             # Detailed follow-up reasons
-            lo_dict = arm.get("lost") if isinstance(arm.get("lost"), dict) else {}
-            di_dict = arm.get("discontinued") if isinstance(arm.get("discontinued"), dict) else {}
-            lo = sum(lo_dict.values()) if lo_dict else arm.get("lost", 0)
-            di = sum(di_dict.values()) if di_dict else arm.get("discontinued", 0)
-
             fu_lines = [f"\u2022 Lost to follow-up (n = {lo})"]
             for r_k, r_v in lo_dict.items():
                 fu_lines.append(f"   - {r_k} (n = {r_v})")
@@ -145,20 +191,21 @@ def draw_standalone_consort_rct(
                 fu_lines.append(f"   - {r_k} (n = {r_v})")
 
             fu_text = "\n".join(fu_lines)
-            h_fu = max(7, 3.0 + len(fu_lines) * 1.8)
+            h_fu = max(7, 3.0 + len(fu_lines) * 1.6)
+
+            arrow(cx, 63 - h_alloc / 2, cx, 44 + h_fu / 2)
             box(cx, 44, arm_w, h_fu, "Follow-Up", fu_text)
-            arrow(cx, 44 - h_fu / 2, cx, 28)
 
             # Analysis
             po = " for primary outcome" if version == "2025" else ""
-            ex_an_dict = arm.get("excluded_from_analysis") if isinstance(arm.get("excluded_from_analysis"), dict) else {}
-            ex_an = sum(ex_an_dict.values()) if ex_an_dict else arm.get("excluded_from_analysis", 0)
-            an_lines = [f"(n = {arm['analyzed']:,})"]
-            if ex_an > 0:
+            an_lines = [f"(n = {analyzed:,})"]
+            if ex_an > 0 or ex_an_dict:
                 an_lines.append(f"\u2022 Excluded from analysis (n = {ex_an})")
                 for r_k, r_v in ex_an_dict.items():
                     an_lines.append(f"   - {r_k} (n = {r_v})")
-            box(cx, 24, arm_w, max(7, 3.0 + len(an_lines) * 1.8), f"Analysed{po}", "\n".join(an_lines))
+            h_an = max(6.5, 2.8 + len(an_lines) * 1.6)
+            arrow(cx, 44 - h_fu / 2, cx, 24 + h_an / 2)
+            box(cx, 24, arm_w, h_an, f"Analysed{po}", "\n".join(an_lines))
 
         p = Path(out_path)
         p.parent.mkdir(parents=True, exist_ok=True)

@@ -78,11 +78,11 @@ Identify Clinical Biomarker Mechanism
 ```
 Evaluate Treatment Assignment & Causal Target
 ├── Target Population
-│   ├── Target = Treated Population (ATT) ──▶ IPTW (estimand='ATT', Recipe 14) OR 1:1 Nearest-Neighbor PSM with caliper 0.2 SD (Recipe 6; if caliper drops unmatched treated units, report unmatched-treated count and label estimand as matched-population effect, distinguishing from full ATT)
+│   ├── Target = Treated Population (ATT) ──▶ IPTW (estimand='ATT', Recipe 14; if propensity-score trimming removes treated units, report excluded treated count and revise estimand to retained treated population, distinguishing from full ATT) OR 1:1 Nearest-Neighbor PSM with caliper 0.2 SD (Recipe 6; if caliper drops unmatched treated units, report unmatched-treated count and label estimand as matched-population effect, distinguishing from full ATT)
 │   ├── Target = Whole Target Population (ATE) ──▶ IPTW (estimand='ATE') with stabilized weights (Recipe 14)
 │   └── Significant Propensity Truncation / Lack of Overlap ──▶ Overlap Weights (estimand='ATO', Li et al. 2018, Recipe 14)
 ├── Weight Stability & Positivity Audit
-│   ├── Positivity Alert (PS < 0.05 or > 0.95) ──▶ Trim extreme tails OR switch to Overlap Weights (ATO)
+│   ├── Positivity Alert (PS < 0.05 or > 0.95) ──▶ Trim extreme tails (if trimming removes treated patients under ATT, report excluded treated count and revised estimand) OR switch to Overlap Weights (ATO)
 │   ├── Extreme Weights (> 10.0) ──▶ Quantile Truncation (0.01, 0.99) OR Overlap Weights
 │   └── Kish's Effective Sample Size (Neff < 0.5 * N) ──▶ Warning for variance inflation; use robust SE (HC1)
 └── Balance Diagnostics: Austin (2009) Love Plot (absolute SMD < 0.10)
