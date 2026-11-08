@@ -230,6 +230,89 @@ def test_integrity_causal_claims_in_regression_require_caveat():
     assert any("unmeasured confounding" in w.lower() for w in audit.warnings)
 
 
+def test_integrity_iptw_and_ate_keys_require_causal_caveat():
+    """Verifies that IPTW and ATE result keys require unmeasured confounding caveats when causal wording is absent."""
+    # 1. IPTW result key without caveat
+    doc_iptw = ReportDocument(
+        title="Weighting Analysis",
+        results_dict={"iptw_weights": 1.2, "sample_size": 300},
+    )
+    doc_iptw.add_paragraph(
+        "Methods: Inverse probability weighting was applied across 300 patients with mean weight 1.2."
+    )
+    audit_iptw = verify_report_integrity(doc_iptw)
+    assert audit_iptw.has_causal_caveat is False
+    assert any("unmeasured confounding" in w.lower() for w in audit_iptw.warnings)
+
+    # Adding confounding caveat resolves it
+    doc_iptw.add_paragraph(
+        "We evaluated the sensitivity to unmeasured confounding via E-values."
+    )
+    assert verify_report_integrity(doc_iptw).has_causal_caveat is True
+
+    # 2. ATE result key without caveat
+    doc_ate = ReportDocument(
+        title="Treatment Effect Estimation",
+        results_dict={"ate": 0.45, "sample_size": 200},
+    )
+    doc_ate.add_paragraph(
+        "Methods: Analysis of 200 patients yielded an estimate of 0.45."
+    )
+    audit_ate = verify_report_integrity(doc_ate)
+    assert audit_ate.has_causal_caveat is False
+    assert any("unmeasured confounding" in w.lower() for w in audit_ate.warnings)
+
+
+def test_integrity_negated_causal_claims_not_treated_as_affirmative():
+    """Verifies that negated causal wording such as 'non-causal' does not count as an affirmative causal claim, but separate affirmative claims do."""
+    # Negated wording 'non-causal' does not disqualify prediction exemption
+    doc_neg = ReportDocument(
+        title="Non-causal Prediction Model",
+        results_dict={"odds_ratio": 1.45, "sample_size": 150},
+    )
+    doc_neg.add_paragraph(
+        "This is a non-causal prediction model evaluated with TRIPOD guidelines. "
+        "The multivariable logistic regression showed an odds ratio of 1.45 in 150 patients."
+    )
+    audit_neg = verify_report_integrity(doc_neg)
+    assert audit_neg.has_causal_caveat is True
+    assert not any("unmeasured confounding" in w.lower() for w in audit_neg.warnings)
+
+    # Separate affirmative causal wording in the same report triggers requirement
+    doc_aff = ReportDocument(
+        title="Non-causal Prediction Model",
+        results_dict={"odds_ratio": 1.45, "sample_size": 150},
+    )
+    doc_aff.add_paragraph(
+        "This is a non-causal prediction model evaluated with TRIPOD guidelines. "
+        "However, medication exposure causes decreased mortality with odds ratio 1.45 in 150 patients."
+    )
+    audit_aff = verify_report_integrity(doc_aff)
+    assert audit_aff.has_causal_caveat is False
+    assert any("unmeasured confounding" in w.lower() for w in audit_aff.warnings)
+
+
+def test_integrity_prediction_with_treatment_reduces_mortality_requires_caveat():
+    """Verifies that prediction reports asserting that treatment reduces mortality require a confounding caveat."""
+    doc_treat = ReportDocument(
+        title="Prediction Model with Treatment Assertion",
+        results_dict={"odds_ratio": 0.72, "sample_size": 400},
+    )
+    doc_treat.add_paragraph(
+        "We developed a risk prediction score with excellent discrimination. "
+        "Furthermore, our findings demonstrate that treatment reduces mortality (odds ratio 0.72 in 400 patients)."
+    )
+    audit_treat = verify_report_integrity(doc_treat)
+    assert audit_treat.has_causal_caveat is False
+    assert any("unmeasured confounding" in w.lower() for w in audit_treat.warnings)
+
+    # Adding E-value caveat passes
+    doc_treat.add_paragraph(
+        "Because this is an observational study, residual confounding cannot be ruled out."
+    )
+    assert verify_report_integrity(doc_treat).has_causal_caveat is True
+
+
 def test_integrity_displayed_precision_sub_one():
     """Verifies that values <= 1 use displayed precision instead of 0.02 absolute tolerance."""
     # results_dict has p_value = 0.02 (2-digit precision)

@@ -1615,6 +1615,8 @@ def verify_standalone_integrity(
             "psm",
             "propensity",
             "love_plot",
+            "iptw",
+            "ate",
         ]
     )
     has_regression_key = any(
@@ -1630,7 +1632,11 @@ def verify_standalone_integrity(
     )
     has_causal_claims = bool(
         re.search(
-            r"\b(?:causal|causes?|causation|effect of|impact of|etiolog\w*)\b",
+            r"(?<!non-)(?<!non )(?<!not )(?<!no )\b(?:causal|causes?|causation|effect of|impact of|etiolog\w*)\b",
+            text_lower,
+        )
+        or re.search(
+            r"\b(?:(?:treatment|intervention|therapy|drug|exposure|medication)\s+(?:reduces?|increases?|decreases?|lowers?|prevents?|improves?)|(?:reduces?|decreases?|lowers?|prevents?)\s+(?:all-cause\s+)?(?:mortality|death|morbidity))\b",
             text_lower,
         )
     )

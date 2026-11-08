@@ -985,6 +985,7 @@ def test_skill_process_audit_f1_to_f7_and_q3():
         run_seq_text = run_seq_match.group(1)
 
         step_names = ["Inspect", "Ask", "Plan", "Execute", "Render", "Audit"]
+        last_step_pos = -1
         for idx, step_name in enumerate(step_names, 1):
             step_pattern = (
                 rf"(?:^|\n){idx}\.\s+\*\*{step_name}\*\*(.*?)(?=\n\d+\.\s+\*\*|\Z)"
@@ -993,6 +994,10 @@ def test_skill_process_audit_f1_to_f7_and_q3():
             assert step_match, (
                 f"Missing step {idx}. **{step_name}** in {label} Run Sequence"
             )
+            assert step_match.start() > last_step_pos, (
+                f"Step {idx}. **{step_name}** in {label} Run Sequence is out of order"
+            )
+            last_step_pos = step_match.start()
             step_body = step_match.group(1)
             assert "*Done when*" in step_body, (
                 f"Step {idx}. **{step_name}** in {label} must contain its own '*Done when*' criterion"

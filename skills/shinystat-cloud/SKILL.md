@@ -141,7 +141,7 @@ After **Pillar 1** pre-flight inspection, ask all triggered pre-flight questions
 ## 3. Completion Criteria
 
 The biostatistical task is complete when every item below is verified against an artifact or tool output:
-- [ ] **Pre-Flight Data Audit**: Every model variable's dtype, missingness, summary, numeric `0/1` (`0/1/2+`) coding, and **pre-flight** $\text{EPV}_{\text{binary}}$ or $\text{EPV}_{\text{Cox}}$ (or explicit "N/A" for agreement, diagnostic 2×2, or meta-analysis-only) are in sandbox output.
+- [ ] **Pre-Flight Data Audit**: Every model variable's dtype, missingness, summary, numeric `0/1` (`0/1/2+`) coding, and **pre-flight** $\text{EPV}_{\text{binary}}$ or $\text{EPV}_{\text{Cox}}$ (or explicit "N/A" for non-regression tasks) are in sandbox output.
 - [ ] **Grilling Gate Resolution**: Every triggered **Grilling Gate** condition (`#1`–`#4`) has an explicit user decision recorded before final model execution.
 - [ ] **Deliverable Format, House Style & Polish Mode Aligned**: Target format, figure **house style**, polish mode, and execution context mode (when subagent tools exist) are each confirmed via prompt or their own Gate `#5` axis question; when **Subagent Offload** is used, independent Main-Agent on-disk verification and external row-level / `.scratch_checkpoint/` cleanup per [subagent-protocol.md](references/subagent-protocol.md) are completed.
 - [ ] **Evidence & Reference Grounding**: Every cited reference satisfies the verification, provenance, comparability, and superscript citation rules in [evidence-pipeline.md](references/evidence-pipeline.md) (`Gate #6`).
