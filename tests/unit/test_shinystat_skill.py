@@ -984,20 +984,20 @@ def test_skill_process_audit_f1_to_f7_and_q3():
         assert run_seq_match, f"Failed to extract Run Sequence section in {label}"
         run_seq_text = run_seq_match.group(1)
 
-        steps = [
-            ("Inspect", r"1\.\s+\*\*Inspect\*\*.*?\*Done when\*(.*?)(?=\n\d+\.|\Z)"),
-            ("Ask", r"2\.\s+\*\*Ask\*\*.*?\*Done when\*(.*?)(?=\n\d+\.|\Z)"),
-            ("Plan", r"3\.\s+\*\*Plan\*\*.*?\*Done when\*(.*?)(?=\n\d+\.|\Z)"),
-            ("Execute", r"4\.\s+\*\*Execute\*\*.*?\*Done when\*(.*?)(?=\n\d+\.|\Z)"),
-            ("Render", r"5\.\s+\*\*Render\*\*.*?\*Done when\*(.*?)(?=\n\d+\.|\Z)"),
-            ("Audit", r"6\.\s+\*\*Audit\*\*.*?\*Done when\*(.*?)(?=\n\d+\.|\Z)"),
-        ]
-        for step_name, pattern in steps:
-            match = re.search(pattern, run_seq_text, re.DOTALL)
-            assert match, (
-                f"Missing step '{step_name}' with '*Done when*' criterion in {label} Run Sequence"
+        step_names = ["Inspect", "Ask", "Plan", "Execute", "Render", "Audit"]
+        for idx, step_name in enumerate(step_names, 1):
+            step_pattern = (
+                rf"(?:^|\n){idx}\.\s+\*\*{step_name}\*\*(.*?)(?=\n\d+\.\s+\*\*|\Z)"
             )
-            criterion = match.group(1).strip()
+            step_match = re.search(step_pattern, run_seq_text, re.DOTALL)
+            assert step_match, (
+                f"Missing step {idx}. **{step_name}** in {label} Run Sequence"
+            )
+            step_body = step_match.group(1)
+            assert "*Done when*" in step_body, (
+                f"Step {idx}. **{step_name}** in {label} must contain its own '*Done when*' criterion"
+            )
+            criterion = step_body.split("*Done when*", 1)[1].strip()
             assert len(criterion) > 0, (
                 f"Empty '*Done when*' criterion for {step_name} in {label}"
             )

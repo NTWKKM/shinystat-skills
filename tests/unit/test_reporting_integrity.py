@@ -200,16 +200,17 @@ def test_integrity_causal_caveat_warning():
 
 
 def test_integrity_non_causal_prediction_exempt_from_causal_caveat():
-    """Verifies that a logistic or Cox key in results_dict alone does not require a caveat for non-causal prediction reports."""
+    """Verifies that a logistic, Cox, odds_ratio, or hazard_ratio key alone does not require a caveat for non-causal prediction reports, and 'because' is not treated as a causal claim."""
     doc = ReportDocument(
         title="Clinical Prediction Model",
-        results_dict={"logistic_model": 0.82, "sample_size": 250},
+        results_dict={"odds_ratio": 1.45, "hazard_ratio": 1.25, "sample_size": 250},
     )
     doc.add_paragraph(
         "A clinical risk prediction model was developed following TRIPOD guidelines. "
-        "The multivariable logistic model achieved a C-statistic of 0.82 in 250 patients."
+        "We retained the predictors because the multivariable logistic model achieved a C-statistic of 0.82 in 250 patients, "
+        "with odds ratio 1.45 and hazard ratio 1.25."
     )
-    audit = verify_report_integrity(doc)
+    audit = verify_report_integrity(doc, allowed_untraced=[0.82])
     assert audit.has_causal_caveat is True
     assert not any("unmeasured confounding" in w.lower() for w in audit.warnings)
 

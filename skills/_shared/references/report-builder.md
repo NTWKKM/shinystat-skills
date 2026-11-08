@@ -1615,38 +1615,34 @@ def verify_standalone_integrity(
             "psm",
             "propensity",
             "love_plot",
+        ]
+    )
+    has_regression_key = any(
+        k in keys_str
+        for k in [
+            "cox",
+            "logistic",
+            "regression",
             "hazard_ratio",
             "or_table",
             "odds_ratio",
         ]
     )
-    has_regression_key = any(
-        k in keys_str for k in ["cox", "logistic", "regression"]
+    has_causal_claims = bool(
+        re.search(
+            r"\b(?:causal|causes?|causation|effect of|impact of|etiolog\w*)\b",
+            text_lower,
+        )
     )
-    has_causal_claims = any(
-        phrase in text_lower
-        for phrase in [
-            "causal",
-            "cause",
-            "effect of",
-            "impact of",
-            "etiolog",
-        ]
+    is_non_causal_prediction = (
+        bool(
+            re.search(
+                r"\b(?:prediction|predictive|tripod|risk score|discrimination|calibration|c-statistic|c-index|auroc)\b",
+                text_lower,
+            )
+        )
+        and not has_causal_claims
     )
-    is_non_causal_prediction = any(
-        phrase in text_lower
-        for phrase in [
-            "prediction",
-            "predictive",
-            "tripod",
-            "risk score",
-            "discrimination",
-            "calibration",
-            "c-statistic",
-            "c-index",
-            "auroc",
-        ]
-    ) and not has_causal_claims
 
     is_causal = (
         has_causal_key
