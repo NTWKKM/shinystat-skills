@@ -1124,14 +1124,14 @@ def test_integrity_camel_case_estimand_keys_and_retention_exemption():
 
     # 4. average_treatment_effect / averageTreatmentEffect requires caveat
     doc4a = ReportDocument(
-        title="Average Treatment Effect Report",
+        title="Cohort Analysis Report",
         results_dict={"average_treatment_effect": 0.45, "sample_size": 200},
     )
     doc4a.add_paragraph("Methods: Analysis of 200 patients yielded 0.45.")
     assert verify_report_integrity(doc4a).has_causal_caveat is False
 
     doc4b = ReportDocument(
-        title="Average Treatment Effect CamelCase",
+        title="Cohort Analysis Report",
         results_dict={"averageTreatmentEffect": 0.45, "sample_size": 200},
     )
     doc4b.add_paragraph("Methods: Analysis of 200 patients yielded 0.45.")
@@ -1332,3 +1332,150 @@ def test_integrity_study_design_observational_with_hazard_ratio():
         verify_report_integrity(doc2, study_design="prediction").has_causal_caveat
         is True
     )
+
+
+def test_integrity_space_and_hyphen_estimand_keys():
+    """Verifies that space-separated and hyphenated estimand keys (e.g. 'ATE estimate', 'ATE-estimate') trigger causal classification."""
+    doc_space = ReportDocument(
+        title="Cohort Analysis Report",
+        results_dict={"ATE estimate": 0.42, "sample_size": 250},
+    )
+    doc_space.add_paragraph("Methods: Analysis of 250 patients yielded 0.42.")
+    assert verify_report_integrity(doc_space).has_causal_caveat is False
+
+    doc_hyphen = ReportDocument(
+        title="Cohort Analysis Report",
+        results_dict={"ATE-estimate": 0.42, "sample_size": 250},
+    )
+    doc_hyphen.add_paragraph("Methods: Analysis of 250 patients yielded 0.42.")
+    assert verify_report_integrity(doc_hyphen).has_causal_caveat is False
+
+
+def test_integrity_subgroup_dropped_estimates_vs_counts():
+    """Verifies that dropped-count fields (e.g. att_n_dropped) are exempt from causal classification, while estimates such as ate_dropped_group trigger it."""
+    doc_count = ReportDocument(
+        title="Cohort Retention Report",
+        results_dict={"att_n_dropped": 15, "sample_size": 200},
+    )
+    doc_count.add_paragraph(
+        "Methods: Analysis of 200 patients yielded att_n_dropped 15."
+    )
+    assert verify_report_integrity(doc_count).has_causal_caveat is True
+
+    doc_est = ReportDocument(
+        title="Subgroup Analysis Report",
+        results_dict={"ate_dropped_group": 0.38, "sample_size": 200},
+    )
+    doc_est.add_paragraph("Methods: Analysis of 200 patients yielded 0.38.")
+    assert verify_report_integrity(doc_est).has_causal_caveat is False
+
+
+def test_integrity_effect_of_treatment_disclaimer_preserves_prediction_exemption():
+    """Verifies that 'No effect of treatment claims are made' preserves prediction exemption without triggering the 'effect of' detector."""
+    doc = ReportDocument(
+        title="Prediction Model with Disclaimer",
+        results_dict={"odds_ratio": 1.45, "sample_size": 250},
+    )
+    doc.add_paragraph(
+        "A clinical risk prediction model was developed following TRIPOD guidelines. "
+        "No effect of treatment claims are made in this assessment. "
+        "The multivariable logistic model achieved an odds ratio of 1.45 in 250 patients."
+    )
+    audit = verify_report_integrity(doc)
+    assert audit.has_causal_caveat is True
+    assert not any("unmeasured confounding" in w.lower() for w in audit.warnings)
+
+
+def test_integrity_prediction_interval_width_and_treatment_effect_preservation():
+    """
+    Verifies that 'effect of sample size on prediction interval width' does not trigger causal claims,
+    while separate treatment-effect claims in the same sentence are preserved.
+    """
+    # 1. Prediction interval width alone does not trigger causal claim
+    doc_pi = ReportDocument(
+        title="Prediction Model Interval Study",
+        results_dict={"odds_ratio": 1.35, "sample_size": 400},
+    )
+    doc_pi.add_paragraph(
+        "A clinical risk prediction model was developed following TRIPOD guidelines. "
+        "We examined the effect of sample size on prediction interval width, with odds ratio 1.35 in 400 patients."
+    )
+    assert verify_report_integrity(doc_pi).has_causal_caveat is True
+
+    # 2. Sentence containing both treatment effect and model metric preserves the treatment effect
+    doc_both = ReportDocument(
+        title="Risk Model with Treatment Investigation",
+        results_dict={"odds_ratio": 1.35, "sample_size": 400},
+    )
+    doc_both.add_paragraph(
+        "We examined the effect of treatment on mortality and the effect of sample size on model discrimination, "
+        "with odds ratio 1.35 in 400 patients."
+    )
+    audit_both = verify_report_integrity(doc_both)
+    assert audit_both.has_causal_caveat is False
+    assert any("unmeasured confounding" in w.lower() for w in audit_both.warnings)
+
+
+def test_integrity_named_interventions_and_prognostic_descriptions():
+    """
+    Verifies that efficacy claims naming an intervention (e.g. aspirin, statin) trigger caveat,
+    while prognostic descriptions (e.g. 'patients with reduced survival') do not.
+    """
+    # 1. Named intervention: Aspirin reduced stroke -> requires caveat
+    doc_asp = ReportDocument(
+        title="Cardiovascular Risk Prediction",
+        results_dict={"odds_ratio": 0.75, "sample_size": 500},
+    )
+    doc_asp.add_paragraph(
+        "A prediction risk score was developed following TRIPOD. "
+        "Aspirin reduced stroke in this cohort with odds ratio 0.75 in 500 patients."
+    )
+    audit_asp = verify_report_integrity(doc_asp)
+    assert audit_asp.has_causal_caveat is False
+
+    # 2. Prognostic description: 'patients with reduced survival' -> does NOT trigger causal claim
+    doc_prog = ReportDocument(
+        title="Prognostic Risk Prediction",
+        results_dict={"odds_ratio": 1.45, "sample_size": 500},
+    )
+    doc_prog.add_paragraph(
+        "A clinical risk prediction model was developed following TRIPOD guidelines. "
+        "In patients with reduced survival, the model achieved an odds ratio of 1.45 in 500 patients."
+    )
+    audit_prog = verify_report_integrity(doc_prog)
+    assert audit_prog.has_causal_caveat is True
+
+
+def test_integrity_null_treatment_effect_endpoints():
+    """Verifies that null treatment-effect assertions across endpoints like blood pressure require caveat."""
+    doc_bp = ReportDocument(
+        title="Clinical Assessment",
+        results_dict={"odds_ratio": 1.0, "sample_size": 300},
+    )
+    doc_bp.add_paragraph(
+        "A prediction risk score was developed under TRIPOD. "
+        "Treatment has no effect on blood pressure with odds ratio 1.0 in 300 patients."
+    )
+    assert verify_report_integrity(doc_bp).has_causal_caveat is False
+
+
+def test_integrity_case_control_study_design_requires_caveat():
+    """
+    Verifies that case-control designs (with separators 'case-control', 'case control', 'case_control')
+    cannot bypass the confounding caveat requirement through prediction language exemptions.
+    """
+    for design in ["case-control", "case control", "case_control"]:
+        doc = ReportDocument(
+            title="Etiologic Case-Control Investigation",
+            results_dict={"odds_ratio": 1.85, "sample_size": 350},
+            study_design=design,
+        )
+        doc.add_paragraph(
+            "In this investigation, model calibration and discrimination were examined. "
+            "The odds ratio was 1.85 across 350 patients."
+        )
+        audit = verify_report_integrity(doc)
+        assert audit.has_causal_caveat is False, (
+            f"Design '{design}' must require caveat"
+        )
+        assert any("unmeasured confounding" in w.lower() for w in audit.warnings)

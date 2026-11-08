@@ -2246,6 +2246,59 @@ def test_cloud_verify_standalone_integrity_parity(case, ensure_packaged_cloud_sk
     )
 
 
+def test_cloud_standalone_cate_key_neutral_narrative_caveat_check(
+    ensure_packaged_cloud_skill,
+):
+    """
+    Verifies that verify_standalone_integrity (extracted from report-builder.md)
+    detects a 'cate' result key with neutral narrative text, requiring a confounding caveat
+    when absent (passed=False, has_causal_caveat=False) and passing when present (passed=True, has_causal_caveat=True).
+    """
+    ns = _extract_report_builder_namespace()
+    verify_standalone = ns["verify_standalone_integrity"]
+
+    # 1. Without confounding caveat -> must fail
+    res_without = verify_standalone(
+        narrative_text="Methods: Analysis of 200 patients yielded conditional average treatment effect 0.35.",
+        results_dict={"cate": 0.35, "sample_size": 200},
+    )
+    assert res_without["has_causal_caveat"] is False
+    assert res_without["passed"] is False
+
+    # 2. With confounding caveat -> must pass
+    res_with = verify_standalone(
+        narrative_text=(
+            "Methods: Analysis of 200 patients yielded conditional average treatment effect 0.35. "
+            "Residual confounding cannot be ruled out in this observational assessment."
+        ),
+        results_dict={"cate": 0.35, "sample_size": 200},
+    )
+    assert res_with["has_causal_caveat"] is True
+    assert res_with["passed"] is True
+
+
+def test_cloud_standalone_case_control_study_design_requires_caveat(
+    ensure_packaged_cloud_skill,
+):
+    """
+    Verifies that verify_standalone_integrity requires a confounding caveat for case-control
+    study designs even when prediction/calibration wording is present.
+    """
+    ns = _extract_report_builder_namespace()
+    verify_standalone = ns["verify_standalone_integrity"]
+
+    for design in ["case-control", "case control", "case_control"]:
+        res = verify_standalone(
+            narrative_text="In this analysis, calibration and discrimination were evaluated; odds ratio 1.75 across 300 patients.",
+            results_dict={"odds_ratio": 1.75, "sample_size": 300},
+            study_design=design,
+        )
+        assert res["has_causal_caveat"] is False, (
+            f"Standalone check for design '{design}' must require caveat"
+        )
+        assert res["passed"] is False
+
+
 def test_cloud_verify_standalone_integrity_mutations(ensure_packaged_cloud_skill):
     """
     Task 2b: Asserts that unmodified BASE_NARRATIVE passes both implementations,

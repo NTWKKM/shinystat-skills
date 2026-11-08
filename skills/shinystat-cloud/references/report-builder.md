@@ -1614,8 +1614,9 @@ def verify_standalone_integrity(
     )
 
     def _normalize_key(k) -> str:
-        s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", str(k))
-        return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s).lower()
+        s = re.sub(r"[\s\-]+", "_", str(k))
+        s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", s)
+        return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s).lower().strip("_")
 
     results_keys_normalized = [_normalize_key(k) for k in results_dict]
     results_keys_str = " ".join(results_keys_normalized)
@@ -1633,7 +1634,7 @@ def verify_standalone_integrity(
         )
         or any(
             bool(re.search(r"(?:^|_)(?:ate|att|cate)(?:_|$)", k))
-            and not re.search(r"(?:^|_)(?:n_dropped|dropped)(?:_|$)", k)
+            and not re.search(r"(?:^|_)(?:n_dropped|dropped_n|dropped_count|count_dropped)(?:_|$)", k)
             for k in results_keys_normalized
         )
     )
@@ -1655,24 +1656,25 @@ def verify_standalone_integrity(
     )
     text_clean_claims = re.sub(r"\bnon[- ]?causal\b", " ", text_clean_claims)
     text_clean_claims = re.sub(
-        r"\b(?:no|without(?:\s+making)?|makes?\s+no)\s+(?:any\s+)?(?:treatment[- ]effects?|treatment\s+effects?)\s+claims?(?:\s+(?:are|is)\s+made)?\b",
+        r"\b(?:no|without(?:\s+making)?|makes?\s+no)\s+(?:any\s+)?(?:effect\s+of\s+treatment|treatment[- ]effects?|treatment\s+effects?)\s+claims?(?:\s+(?:are|is|were|was)\s+made)?\b",
         " ",
         text_clean_claims,
     )
     text_clean_claims = re.sub(
-        r"\bno\s+claims?\s+(?:of|regarding)\s+(?:treatment[- ]effects?|treatment\s+effects?)(?:\s+(?:are|is)\s+made)?\b",
+        r"\bno\s+claims?\s+(?:of|regarding)\s+(?:effect\s+of\s+treatment|treatment[- ]effects?|treatment\s+effects?)(?:\s+(?:are|is|were|was)\s+made)?\b",
         " ",
         text_clean_claims,
     )
     text_clean_claims = re.sub(
-        r"\bno\s+(?:treatment[- ]effects?|treatment\s+effects?)\s+(?:is|are|was|were)\s+(?:made|claimed)\b",
+        r"\bno\s+(?:effect\s+of\s+treatment|treatment[- ]effects?|treatment\s+effects?)\s+(?:is|are|was|were)\s+(?:made|claimed)\b",
         " ",
         text_clean_claims,
     )
-    # Model-performance statements (e.g. effect of sample size on model discrimination)
+    # Model-performance statements (e.g. effect of sample size on model discrimination or prediction interval width)
     # are descriptive of model evaluation, not clinical treatment-effect claims.
+    # The negative lookahead preserves preceding treatment-effect claims in the same sentence.
     text_clean_claims = re.sub(
-        r"\b(?:effect|impact)\s+of\s+[^.;\n]+?\s+on\s+(?:model\s+)?(?:discrimination|calibration|performance|accuracy|c[- ]statistic|c[- ]index|auroc|roc|brier|fit)\b",
+        r"\b(?:effect|impact)\s+of\s+(?:(?!\b(?:effect|impact)\s+of\b)[^.;\n])+?\s+on\s+(?:model\s+)?(?:discrimination|calibration|performance|accuracy|c[- ]statistic|c[- ]index|auroc|roc|brier|fit|prediction\s+intervals?(?:\s+width)?|interval\s+width)\b",
         " ",
         text_clean_claims,
     )
@@ -1686,13 +1688,13 @@ def verify_standalone_integrity(
         )
         or bool(
             re.search(
-                r"\b(?:(?:treatment|intervention|therapy|drug|exposure|medication)\s+(?:(?:does|did|do|is|was|were)\s+not\s+|(?:not|failed\s+to)\s+)?(?:reduces?|reduced|reducing|increases?|increased|increasing|decreases?|decreased|decreasing|lowers?|lowered|lowering|prevents?|prevented|preventing|improves?|improved|improving|cuts?|cut|cutting|slashes?|slashed|slashing|halves?|halved|halving|doubles?|doubled|doubling)|(?:(?:does|did|do|is|was|were)\s+not\s+|(?:not|failed\s+to)\s+)?(?:reduces?|reduced|reducing|decreases?|decreased|decreasing|lowers?|lowered|lowering|prevents?|prevented|preventing|cuts?|cut|cutting|slashes?|slashed|slashing|halves?|halved|halving|doubles?|doubled|doubling)\s+(?:all-cause\s+)?(?:mortality|death|morbidity|survival))\b",
+                r"\b(?:(?:treatment|intervention|therapy|drug|exposure|medication|agent|aspirin|statin|metformin)(?:\s+[a-zA-Z_-]+){0,3}\s+(?:(?:does|did|do|is|was|were)\s+not\s+|(?:not|failed\s+to)\s+)?(?:reduces?|reduced|reducing|increases?|increased|increasing|decreases?|decreased|decreasing|lowers?|lowered|lowering|prevents?|prevented|preventing|improves?|improved|improving|cuts?|cut|cutting|slashes?|slashed|slashing|halves?|halved|halving|doubles?|doubled|doubling)|(?<!\bwith\s)(?:(?:does|did|do|is|was|were)\s+not\s+|(?:not|failed\s+to)\s+)?(?:reduces?|reduced|reducing|decreases?|decreased|decreasing|lowers?|lowered|lowering|prevents?|prevented|preventing|cuts?|cut|cutting|slashes?|slashed|slashing|halves?|halved|halving|doubles?|doubled|doubling)\s+(?:all-cause\s+)?(?:mortality|death|morbidity|survival|stroke|infarction|mi\b|bleeding|recurrence|blood\s+pressure|bp\b|glucose|hba1c))\b",
                 text_clean_claims,
             )
         )
         or bool(
             re.search(
-                r"\b(?:(?:treatment|intervention|therapy|drug|exposure|medication)\s+(?:(?:has|had|have|shows?|showed|demonstrates?|demonstrated)\s+)?no\s+(?:statistically\s+significant\s+)?(?:treatment\s+)?effect\s+on\s+(?:all-cause\s+)?(?:mortality|death|morbidity|survival|outcome))\b",
+                r"\b(?:(?:treatment|intervention|therapy|drug|exposure|medication|agent|aspirin|statin|metformin)(?:\s+[a-zA-Z_-]+){0,3}\s+(?:(?:has|had|have|shows?|showed|demonstrates?|demonstrated)\s+)?no\s+(?:statistically\s+significant\s+)?(?:treatment\s+)?effect\s+on\s+(?:all-cause\s+)?(?:mortality|death|morbidity|survival|outcome|stroke|infarction|mi\b|bleeding|recurrence|blood\s+pressure|bp\b|glucose|hba1c))\b",
                 text_clean_claims,
             )
         )
@@ -1703,15 +1705,53 @@ def verify_standalone_integrity(
             )
         )
     )
+    clean_design = (
+        re.sub(r"[\s\-]+", "_", str(resolved_design).lower())
+        if resolved_design
+        else ""
+    )
     is_observational = bool(
-        resolved_design
+        clean_design
         and any(
-            obs_type in str(resolved_design).lower()
-            for obs_type in ["observational", "cohort", "case_control", "cross_sectional"]
+            obs_type in clean_design
+            for obs_type in [
+                "observational",
+                "cohort",
+                "case_control",
+                "cross_sectional",
+                "retrospective",
+                "prospective",
+            ]
+        )
+    )
+    is_confirmed_prediction = bool(
+        (
+            clean_design
+            and any(
+                pred_type in clean_design
+                for pred_type in [
+                    "prediction",
+                    "predictive",
+                    "prognostic",
+                    "diagnostic",
+                    "validation",
+                    "tripod",
+                ]
+            )
+        )
+        or (
+            not clean_design
+            and bool(
+                re.search(
+                    r"\b(?:clinical\s+risk\s+prediction\s+model|prediction\s+model|tripod(?:\s+guidelines|\s+statement)?)\b",
+                    text_lower,
+                )
+            )
         )
     )
     is_non_causal_prediction = (
-        bool(
+        is_confirmed_prediction
+        and bool(
             re.search(
                 r"\b(?:prediction|predictive|tripod|risk score|discrimination|calibration|c-statistic|c-index|auroc)\b",
                 text_lower,
@@ -1722,7 +1762,8 @@ def verify_standalone_integrity(
     )
 
     is_causal = (
-        has_causal_key
+        is_observational
+        or has_causal_key
         or (has_regression_key and not is_non_causal_prediction)
         or has_causal_claims
     )
