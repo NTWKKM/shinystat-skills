@@ -449,6 +449,7 @@ def _extract_text_numbers(text: str) -> list[float]:
 def verify_report_integrity(
     doc: ReportDocument,
     allowed_untraced: set[float] | list[float] | tuple[float, ...] | None = None,
+    study_design: str | None = None,
 ) -> IntegrityReport:
     """
     Audits a ReportDocument and returns an IntegrityReport:
@@ -601,7 +602,22 @@ def verify_report_integrity(
                 untraced.append(tn)
 
     # 3. Observational Causal Inference & E-value Check
-    results_keys_str = " ".join(doc.results_dict.keys()).lower()
+    resolved_design = (
+        study_design
+        or getattr(doc, "study_design", None)
+        or (
+            doc.results_dict.get("study_design")
+            if isinstance(doc.results_dict, dict)
+            else None
+        )
+    )
+
+    def _normalize_key(k: Any) -> str:
+        s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", str(k))
+        return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s).lower()
+
+    results_keys_normalized = [_normalize_key(k) for k in doc.results_dict]
+    results_keys_str = " ".join(results_keys_normalized)
     text_lower = all_text.lower()
     has_causal_key = any(
         k in results_keys_str
@@ -610,10 +626,12 @@ def verify_report_integrity(
             "propensity",
             "love_plot",
             "iptw",
+            "average_treatment_effect",
         ]
     ) or any(
-        bool(re.search(r"(?:^|_|\b)(?:ate|att|cate)(?:$|_|\b)", k.lower()))
-        for k in doc.results_dict.keys()
+        bool(re.search(r"(?:^|_)(?:ate|att|cate)(?:_|$)", k))
+        and not re.search(r"(?:^|_)(?:n_dropped|dropped)(?:_|$)", k)
+        for k in results_keys_normalized
     )
     has_regression_key = any(
         k in results_keys_str
@@ -638,19 +656,59 @@ def verify_report_integrity(
         text_clean_claims,
     )
     text_clean_claims = re.sub(
-        r"\bno\s+(?:claims?\s+(?:of|regarding)\s+)?(?:treatment[- ]effects?|treatment\s+effects?)\s+(?:is|are)?\s*(?:made|claimed)?\b",
+        r"\bno\s+claims?\s+(?:of|regarding)\s+(?:treatment[- ]effects?|treatment\s+effects?)(?:\s+(?:are|is)\s+made)?\b",
+        " ",
+        text_clean_claims,
+    )
+    text_clean_claims = re.sub(
+        r"\bno\s+(?:treatment[- ]effects?|treatment\s+effects?)\s+(?:is|are|was|were)\s+(?:made|claimed)\b",
+        " ",
+        text_clean_claims,
+    )
+    # Model-performance statements (e.g. effect of sample size on model discrimination)
+    # are descriptive of model evaluation, not clinical treatment-effect claims.
+    text_clean_claims = re.sub(
+        r"\b(?:effect|impact)\s+of\s+[^.;\n]+?\s+on\s+(?:model\s+)?(?:discrimination|calibration|performance|accuracy|c[- ]statistic|c[- ]index|auroc|roc|brier|fit)\b",
         " ",
         text_clean_claims,
     )
 
-    has_causal_claims = bool(
-        re.search(
-            r"\b(?:causal|causes?|causation|treatment[- ]effects?|treatment\s+effects?|effect of|impact of|etiolog\w*)\b",
-            text_clean_claims,
+    has_causal_claims = (
+        bool(
+            re.search(
+                r"\b(?:causal|causes?|causation|treatment[- ]effects?|treatment\s+effects?|effect of|impact of|etiolog\w*)\b",
+                text_clean_claims,
+            )
         )
-        or re.search(
-            r"\b(?:(?:treatment|intervention|therapy|drug|exposure|medication)\s+(?:(?:does|did|do|is|was|were)\s+not\s+|(?:not|failed\s+to)\s+)?(?:reduces?|reduced|reducing|increases?|increased|increasing|decreases?|decreased|decreasing|lowers?|lowered|lowering|prevents?|prevented|preventing|improves?|improved|improving)|(?:(?:does|did|do|is|was|were)\s+not\s+|(?:not|failed\s+to)\s+)?(?:reduces?|reduced|reducing|decreases?|decreased|decreasing|lowers?|lowered|lowering|prevents?|prevented|preventing)\s+(?:all-cause\s+)?(?:mortality|death|morbidity))\b",
-            text_clean_claims,
+        or bool(
+            re.search(
+                r"\b(?:(?:treatment|intervention|therapy|drug|exposure|medication)\s+(?:(?:does|did|do|is|was|were)\s+not\s+|(?:not|failed\s+to)\s+)?(?:reduces?|reduced|reducing|increases?|increased|increasing|decreases?|decreased|decreasing|lowers?|lowered|lowering|prevents?|prevented|preventing|improves?|improved|improving|cuts?|cut|cutting|slashes?|slashed|slashing|halves?|halved|halving|doubles?|doubled|doubling)|(?:(?:does|did|do|is|was|were)\s+not\s+|(?:not|failed\s+to)\s+)?(?:reduces?|reduced|reducing|decreases?|decreased|decreasing|lowers?|lowered|lowering|prevents?|prevented|preventing|cuts?|cut|cutting|slashes?|slashed|slashing|halves?|halved|halving|doubles?|doubled|doubling)\s+(?:all-cause\s+)?(?:mortality|death|morbidity|survival))\b",
+                text_clean_claims,
+            )
+        )
+        or bool(
+            re.search(
+                r"\b(?:(?:treatment|intervention|therapy|drug|exposure|medication)\s+(?:(?:has|had|have|shows?|showed|demonstrates?|demonstrated)\s+)?no\s+(?:statistically\s+significant\s+)?(?:treatment\s+)?effect\s+on\s+(?:all-cause\s+)?(?:mortality|death|morbidity|survival|outcome))\b",
+                text_clean_claims,
+            )
+        )
+        or bool(
+            re.search(
+                r"\bno\s+treatment[- ]effect\s+(?:on\s+[^.;\n]+?\s+)?(?:was|is|were)\s+observed\b",
+                text_clean_claims,
+            )
+        )
+    )
+    is_observational = bool(
+        resolved_design
+        and any(
+            obs_type in str(resolved_design).lower()
+            for obs_type in [
+                "observational",
+                "cohort",
+                "case_control",
+                "cross_sectional",
+            ]
         )
     )
     is_non_causal_prediction = (
@@ -661,6 +719,7 @@ def verify_report_integrity(
             )
         )
         and not has_causal_claims
+        and not is_observational
     )
 
     is_causal = (

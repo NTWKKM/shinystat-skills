@@ -1088,3 +1088,247 @@ def test_integrity_qualified_p_value_association_and_record_recursion():
     audit_zero_incl = verify_report_integrity(doc_zero_incl)
     assert audit_zero_incl.passed is True
     assert len(audit_zero_incl.untraced_numbers) == 0
+
+
+def test_integrity_camel_case_estimand_keys_and_retention_exemption():
+    """
+    Verifies that camelCase estimand keys (treatmentATE, ateEstimate, cateEstimate, averageTreatmentEffect)
+    trigger causal classification even without causal text, while eventRate, event_rate, and descriptive
+    att_n_dropped do not.
+    """
+    # 1. treatmentATE requires caveat
+    doc1 = ReportDocument(
+        title="ATE Report",
+        results_dict={"treatmentATE": 0.45, "sample_size": 200},
+    )
+    doc1.add_paragraph("Methods: Analysis of 200 patients yielded 0.45.")
+    audit1 = verify_report_integrity(doc1)
+    assert audit1.has_causal_caveat is False
+    assert any("unmeasured confounding" in w.lower() for w in audit1.warnings)
+
+    # 2. ateEstimate requires caveat
+    doc2 = ReportDocument(
+        title="ATE Estimate Report",
+        results_dict={"ateEstimate": 0.45, "sample_size": 200},
+    )
+    doc2.add_paragraph("Methods: Analysis of 200 patients yielded 0.45.")
+    assert verify_report_integrity(doc2).has_causal_caveat is False
+
+    # 3. cateEstimate requires caveat
+    doc3 = ReportDocument(
+        title="CATE Estimate Report",
+        results_dict={"cateEstimate": 0.35, "sample_size": 200},
+    )
+    doc3.add_paragraph("Methods: Analysis of 200 patients yielded 0.35.")
+    assert verify_report_integrity(doc3).has_causal_caveat is False
+
+    # 4. average_treatment_effect / averageTreatmentEffect requires caveat
+    doc4a = ReportDocument(
+        title="Average Treatment Effect Report",
+        results_dict={"average_treatment_effect": 0.45, "sample_size": 200},
+    )
+    doc4a.add_paragraph("Methods: Analysis of 200 patients yielded 0.45.")
+    assert verify_report_integrity(doc4a).has_causal_caveat is False
+
+    doc4b = ReportDocument(
+        title="Average Treatment Effect CamelCase",
+        results_dict={"averageTreatmentEffect": 0.45, "sample_size": 200},
+    )
+    doc4b.add_paragraph("Methods: Analysis of 200 patients yielded 0.45.")
+    assert verify_report_integrity(doc4b).has_causal_caveat is False
+
+    # 5. eventRate and event_rate do NOT trigger causal classification
+    doc5a = ReportDocument(
+        title="Event Rate Report",
+        results_dict={"eventRate": 0.05, "sample_size": 200},
+    )
+    doc5a.add_paragraph("Methods: Analysis of 200 patients yielded eventRate 0.05.")
+    assert verify_report_integrity(doc5a).has_causal_caveat is True
+
+    doc5b = ReportDocument(
+        title="Event Rate Report",
+        results_dict={"event_rate": 0.05, "sample_size": 200},
+    )
+    doc5b.add_paragraph("Methods: Analysis of 200 patients yielded event_rate 0.05.")
+    assert verify_report_integrity(doc5b).has_causal_caveat is True
+
+    # 6. att_n_dropped is a descriptive retention count and does NOT trigger causal classification
+    doc6 = ReportDocument(
+        title="Descriptive Attendance Report",
+        results_dict={"att_n_dropped": 15, "total_n": 300},
+    )
+    doc6.add_paragraph("Methods: In 300 patients, att_n_dropped was 15.")
+    audit6 = verify_report_integrity(doc6)
+    assert audit6.has_causal_caveat is True
+    assert not any("unmeasured confounding" in w.lower() for w in audit6.warnings)
+
+
+def test_integrity_null_treatment_effect_assertions_require_caveat():
+    """
+    Verifies that explicit null treatment-effect assertions (e.g. 'No treatment effect on mortality was observed',
+    'treatment has no effect on mortality') require a confounding caveat, while explicit disclaimers
+    ('no treatment-effect claims are made') do not.
+    """
+    # 1. 'No treatment effect on mortality was observed.' in prediction report requires caveat
+    doc1 = ReportDocument(
+        title="Prediction Report with Null Effect Finding",
+        results_dict={"odds_ratio": 1.0, "sample_size": 300},
+    )
+    doc1.add_paragraph(
+        "A risk score was evaluated with high discrimination. "
+        "No treatment effect on mortality was observed with odds ratio 1.0 in 300 patients."
+    )
+    audit1 = verify_report_integrity(doc1)
+    assert audit1.has_causal_caveat is False
+    assert any("unmeasured confounding" in w.lower() for w in audit1.warnings)
+
+    # Adding E-value caveat passes
+    doc1.add_paragraph(
+        "Sensitivity to unmeasured confounding was confirmed with E-values."
+    )
+    assert verify_report_integrity(doc1).has_causal_caveat is True
+
+    # 2. 'treatment has no effect on mortality' requires caveat
+    doc2 = ReportDocument(
+        title="Prediction Report with Null Statement",
+        results_dict={"odds_ratio": 1.02, "sample_size": 300},
+    )
+    doc2.add_paragraph(
+        "Model calibration and c-index were calculated under TRIPOD. "
+        "The analysis indicated that treatment has no effect on mortality (odds ratio 1.02 in 300 patients)."
+    )
+    assert verify_report_integrity(doc2).has_causal_caveat is False
+
+    # 3. 'therapy had no effect on survival' requires caveat
+    doc3 = ReportDocument(
+        title="Prediction Report with Null Statement",
+        results_dict={"odds_ratio": 0.99, "sample_size": 300},
+    )
+    doc3.add_paragraph(
+        "Model calibration was excellent under TRIPOD. "
+        "Secondary analysis indicated therapy had no effect on survival with odds ratio 0.99 in 300 patients."
+    )
+    assert verify_report_integrity(doc3).has_causal_caveat is False
+
+    # 4. Disclaimer 'No treatment-effect claims are made' preserves prediction exemption
+    doc4 = ReportDocument(
+        title="Prediction Report with Disclaimer",
+        results_dict={"odds_ratio": 1.45, "sample_size": 250},
+    )
+    doc4.add_paragraph(
+        "A prediction risk score was developed following TRIPOD with c-statistic and calibration. "
+        "No treatment-effect claims are made in this observational assessment; odds ratio was 1.45 in 250 patients."
+    )
+    assert verify_report_integrity(doc4).has_causal_caveat is True
+
+
+def test_integrity_model_performance_effects_distinguished_from_causal_claims():
+    """
+    Verifies that model-performance statements (e.g. 'the effect of sample size on model discrimination')
+    do not trigger causal claims in prediction-only reports, while clinical treatment-effect claims do.
+    """
+    # 1. Pure model performance statement in prediction report -> exempt
+    doc1 = ReportDocument(
+        title="Prediction Model Sample Size Study",
+        results_dict={"odds_ratio": 1.35, "sample_size": 400},
+    )
+    doc1.add_paragraph(
+        "We developed a prediction model following TRIPOD guidelines. "
+        "We examined the effect of sample size on model discrimination and calibration, "
+        "with an odds ratio of 1.35 in 400 patients."
+    )
+    audit1 = verify_report_integrity(doc1)
+    assert audit1.has_causal_caveat is True
+    assert not any("unmeasured confounding" in w.lower() for w in audit1.warnings)
+
+    # 2. Impact on c-statistic -> exempt
+    doc2 = ReportDocument(
+        title="Prediction Model Feature Study",
+        results_dict={"odds_ratio": 1.25, "sample_size": 400},
+    )
+    doc2.add_paragraph(
+        "Prediction modeling was conducted with AUROC and calibration. "
+        "The impact of missing data on c-statistic was evaluated, yielding odds ratio 1.25 in 400 patients."
+    )
+    assert verify_report_integrity(doc2).has_causal_caveat is True
+
+    # 3. Model performance statement COMBINED with treatment effect claim -> requires caveat
+    doc3 = ReportDocument(
+        title="Prediction Model with Treatment Assertion",
+        results_dict={"odds_ratio": 0.70, "sample_size": 400},
+    )
+    doc3.add_paragraph(
+        "We evaluated the effect of sample size on model discrimination. "
+        "Furthermore, treatment cut mortality with odds ratio 0.70 across 400 patients."
+    )
+    assert verify_report_integrity(doc3).has_causal_caveat is False
+
+
+def test_integrity_efficacy_claims_cut_mortality_with_calibration():
+    """
+    Verifies that efficacy claims using 'cut', 'slashed', or 'halved' mortality
+    trigger the causal caveat requirement even when calibration/prediction is mentioned.
+    """
+    doc = ReportDocument(
+        title="Efficacy in Risk Prediction",
+        results_dict={"odds_ratio": 0.65, "sample_size": 500},
+    )
+    doc.add_paragraph(
+        "A prediction risk model was evaluated with calibration and c-index. "
+        "Statin therapy cut mortality in this cohort with odds ratio 0.65 in 500 patients."
+    )
+    audit = verify_report_integrity(doc)
+    assert audit.has_causal_caveat is False
+    assert any("unmeasured confounding" in w.lower() for w in audit.warnings)
+
+    # Adding caveat passes
+    doc.add_paragraph("Residual confounding was addressed using E-values.")
+    assert verify_report_integrity(doc).has_causal_caveat is True
+
+
+def test_integrity_study_design_observational_with_hazard_ratio():
+    """
+    Verifies that for observational reports (study_design='observational'),
+    the presence of a hazard ratio requires a confounding caveat even when
+    prediction/calibration wording is present.
+    """
+    # 1. Observational study design: caveat required despite prediction/calibration wording
+    doc1 = ReportDocument(
+        title="Observational Survival Study",
+        results_dict={"hazard_ratio": 1.25, "sample_size": 450},
+    )
+    doc1.add_paragraph(
+        "In this observational cohort, model calibration and discrimination were examined. "
+        "The hazard ratio was 1.25 across 450 patients."
+    )
+    audit1 = verify_report_integrity(doc1, study_design="observational")
+    assert audit1.has_causal_caveat is False
+    assert any("unmeasured confounding" in w.lower() for w in audit1.warnings)
+
+    # Via results_dict study_design
+    doc1_dict = ReportDocument(
+        title="Observational Survival Study",
+        results_dict={
+            "hazard_ratio": 1.25,
+            "sample_size": 450,
+            "study_design": "retrospective_cohort",
+        },
+    )
+    doc1_dict.add_paragraph(
+        "Model calibration was evaluated in this retrospective cohort; hazard ratio 1.25 in 450 patients."
+    )
+    assert verify_report_integrity(doc1_dict).has_causal_caveat is False
+
+    # 2. Pure prediction study design: caveat NOT required if no causal claims
+    doc2 = ReportDocument(
+        title="Prediction Model Study",
+        results_dict={"hazard_ratio": 1.25, "sample_size": 450},
+    )
+    doc2.add_paragraph(
+        "In this TRIPOD prediction model, calibration and discrimination were examined. "
+        "The hazard ratio was 1.25 across 450 patients."
+    )
+    assert (
+        verify_report_integrity(doc2, study_design="prediction").has_causal_caveat
+        is True
+    )
