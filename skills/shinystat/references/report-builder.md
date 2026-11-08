@@ -1618,7 +1618,7 @@ def verify_standalone_integrity(
             "iptw",
         ]
     ) or any(
-        bool(re.search(r"(?:^|_|\b)ate(?:$|_|\b)", k.lower()))
+        bool(re.search(r"(?:^|_|\b)(?:ate|att|cate)(?:$|_|\b)", k.lower()))
         for k in results_dict.keys()
     )
     has_regression_key = any(
@@ -1638,14 +1638,24 @@ def verify_standalone_integrity(
         text_lower,
     )
     text_clean_claims = re.sub(r"\bnon[- ]?causal\b", " ", text_clean_claims)
+    text_clean_claims = re.sub(
+        r"\b(?:no|without(?:\s+making)?|makes?\s+no)\s+(?:any\s+)?(?:treatment[- ]effects?|treatment\s+effects?)\s+claims?(?:\s+(?:are|is)\s+made)?\b",
+        " ",
+        text_clean_claims,
+    )
+    text_clean_claims = re.sub(
+        r"\bno\s+(?:claims?\s+(?:of|regarding)\s+)?(?:treatment[- ]effects?|treatment\s+effects?)\s+(?:is|are)?\s*(?:made|claimed)?\b",
+        " ",
+        text_clean_claims,
+    )
 
     has_causal_claims = bool(
         re.search(
-            r"\b(?:causal|causes?|causation|effect of|impact of|etiolog\w*)\b",
+            r"\b(?:causal|causes?|causation|treatment[- ]effects?|treatment\s+effects?|effect of|impact of|etiolog\w*)\b",
             text_clean_claims,
         )
         or re.search(
-            r"\b(?:(?:treatment|intervention|therapy|drug|exposure|medication)\s+(?:reduces?|reduced|increases?|increased|decreases?|decreased|lowers?|lowered|prevents?|prevented|improves?|improved)|(?:reduces?|reduced|decreases?|decreased|lowers?|lowered|prevents?|prevented)\s+(?:all-cause\s+)?(?:mortality|death|morbidity))\b",
+            r"\b(?:(?:treatment|intervention|therapy|drug|exposure|medication)\s+(?:(?:does|did|do|is|was|were)\s+not\s+|(?:not|failed\s+to)\s+)?(?:reduces?|reduced|reducing|increases?|increased|increasing|decreases?|decreased|decreasing|lowers?|lowered|lowering|prevents?|prevented|preventing|improves?|improved|improving)|(?:(?:does|did|do|is|was|were)\s+not\s+|(?:not|failed\s+to)\s+)?(?:reduces?|reduced|reducing|decreases?|decreased|decreasing|lowers?|lowered|lowering|prevents?|prevented|preventing)\s+(?:all-cause\s+)?(?:mortality|death|morbidity))\b",
             text_clean_claims,
         )
     )

@@ -231,7 +231,7 @@ def test_integrity_causal_claims_in_regression_require_caveat():
 
 
 def test_integrity_iptw_and_ate_keys_require_causal_caveat():
-    """Verifies that IPTW and ATE result keys require unmeasured confounding caveats when causal wording is absent."""
+    """Verifies that IPTW, ATE, ATT, and CATE result keys require unmeasured confounding caveats when causal wording is absent."""
     # 1. IPTW result key without caveat
     doc_iptw = ReportDocument(
         title="Weighting Analysis",
@@ -262,7 +262,37 @@ def test_integrity_iptw_and_ate_keys_require_causal_caveat():
     assert audit_ate.has_causal_caveat is False
     assert any("unmeasured confounding" in w.lower() for w in audit_ate.warnings)
 
-    # 3. Non-ATE keys containing substring 'ate' (e.g. 'event_rate') must NOT trigger causal classification
+    # 3. ATT result key without caveat
+    doc_att = ReportDocument(
+        title="ATT Estimation",
+        results_dict={"att": 0.38, "sample_size": 200},
+    )
+    doc_att.add_paragraph(
+        "Methods: Analysis of 200 patients yielded an ATT estimate of 0.38."
+    )
+    audit_att = verify_report_integrity(doc_att)
+    assert audit_att.has_causal_caveat is False
+    assert any("unmeasured confounding" in w.lower() for w in audit_att.warnings)
+
+    # 4. CATE result key without caveat
+    doc_cate = ReportDocument(
+        title="CATE Estimation",
+        results_dict={"cate": 0.25, "sample_size": 200},
+    )
+    doc_cate.add_paragraph(
+        "Methods: Analysis of 200 patients yielded an estimate of 0.25."
+    )
+    audit_cate = verify_report_integrity(doc_cate)
+    assert audit_cate.has_causal_caveat is False
+    assert any("unmeasured confounding" in w.lower() for w in audit_cate.warnings)
+
+    # Adding confounding caveat resolves CATE
+    doc_cate.add_paragraph(
+        "Sensitivity to residual confounding was verified using E-values."
+    )
+    assert verify_report_integrity(doc_cate).has_causal_caveat is True
+
+    # 5. Non-causal keys containing substring 'ate' (e.g. 'event_rate') must NOT trigger causal classification
     doc_non_ate = ReportDocument(
         title="Event Rate Report",
         results_dict={"event_rate": 0.05, "sample_size": 200},
@@ -293,6 +323,22 @@ def test_integrity_negated_causal_claims_not_treated_as_affirmative():
     assert audit_neg.has_causal_caveat is True
     assert not any("unmeasured confounding" in w.lower() for w in audit_neg.warnings)
 
+    # Explicit disclaimer that no treatment-effect claims are made preserves prediction exemption
+    doc_disclaim = ReportDocument(
+        title="Prediction Model with Disclaimer",
+        results_dict={"odds_ratio": 1.45, "sample_size": 150},
+    )
+    doc_disclaim.add_paragraph(
+        "This is a prediction risk score evaluated under TRIPOD guidelines. "
+        "No treatment-effect claims are made; this model makes no treatment-effect claims. "
+        "Multivariable odds ratio was 1.45."
+    )
+    audit_disclaim = verify_report_integrity(doc_disclaim)
+    assert audit_disclaim.has_causal_caveat is True
+    assert not any(
+        "unmeasured confounding" in w.lower() for w in audit_disclaim.warnings
+    )
+
     # Separate affirmative causal wording in the same report triggers requirement
     doc_aff = ReportDocument(
         title="Non-causal Prediction Model",
@@ -308,7 +354,7 @@ def test_integrity_negated_causal_claims_not_treated_as_affirmative():
 
 
 def test_integrity_prediction_with_treatment_reduces_mortality_requires_caveat():
-    """Verifies that prediction reports asserting that treatment reduces or lowered mortality require a confounding caveat."""
+    """Verifies that prediction reports asserting that treatment reduces, lowered, or did not reduce mortality require a confounding caveat."""
     doc_treat = ReportDocument(
         title="Prediction Model with Treatment Assertion",
         results_dict={"odds_ratio": 0.72, "sample_size": 400},
@@ -326,6 +372,32 @@ def test_integrity_prediction_with_treatment_reduces_mortality_requires_caveat()
         "Because this is an observational study, residual confounding cannot be ruled out."
     )
     assert verify_report_integrity(doc_treat).has_causal_caveat is True
+
+    # Negated claim: treatment not reducing mortality requires caveat
+    doc_neg_treat = ReportDocument(
+        title="Prediction Model with Negated Treatment Assertion",
+        results_dict={"odds_ratio": 1.05, "sample_size": 400},
+    )
+    doc_neg_treat.add_paragraph(
+        "We developed a risk prediction score with c-index 0.82. "
+        "Multivariable analysis indicated treatment not reducing mortality in secondary analyses."
+    )
+    audit_neg_treat = verify_report_integrity(doc_neg_treat)
+    assert audit_neg_treat.has_causal_caveat is False
+    assert any("unmeasured confounding" in w.lower() for w in audit_neg_treat.warnings)
+
+    # Assertion that treatment has zero causal effect requires caveat
+    doc_zero_treat = ReportDocument(
+        title="Prediction Model with Zero Causal Effect Assertion",
+        results_dict={"odds_ratio": 1.0, "sample_size": 350},
+    )
+    doc_zero_treat.add_paragraph(
+        "Prediction model discrimination was c-statistic 0.78. "
+        "The observational analysis indicated that treatment has zero causal effect on mortality."
+    )
+    audit_zero_treat = verify_report_integrity(doc_zero_treat)
+    assert audit_zero_treat.has_causal_caveat is False
+    assert any("unmeasured confounding" in w.lower() for w in audit_zero_treat.warnings)
 
 
 def test_integrity_displayed_precision_sub_one():
