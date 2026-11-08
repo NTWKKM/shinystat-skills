@@ -186,9 +186,9 @@ Polish Grilling Gate #6 Activation & Routing
 
 ### K. Ordinal Regression, Restricted Cubic Splines, Clustered GEE & Meta-Analysis
 
-- **Ordinal Outcomes ($\ge 3$ ordered levels)**: Fit Cumulative Logit Proportional Odds models (`fit_ordinal_logistic` / `Recipe 21`) and verify parallel slopes via the Brant test (`brant_test`); fall back to multinomial logistic regression (`fit_multinomial_logistic`) when $P < 0.05$.
-- **Non-Linear Continuous Predictors**: Fit Harrell Restricted Cubic Splines (`fit_rcs_logistic`, `fit_rcs_cox` / `Recipe 22`) and report both `p_overall` and `p_nonlinearity`.
-- **Clustered / Multi-Center Cohorts**: Compute cluster intraclass correlation ($\text{ICC}_{\text{cluster}}$) and Design Effect ($\text{DEFF} = 1 + (\bar{m} - 1)\text{ICC}$); fit GEE with robust sandwich standard errors or mixed-effects models (`fit_clustered_gee` / `Recipe 23`).
+- **Ordinal Outcomes ($\ge 3$ ordered levels)**: Fit Cumulative Logit Proportional Odds models (`fit_ordinal_logistic` [local API] / `fit_proportional_odds` in Recipe 21 [cloud]) and verify parallel slopes via the Brant test (`brant_test` / omnibus Brant test in Recipe 21); compare the omnibus $P$-value with the prespecified diagnostic $\alpha$ (using $0.05$ when unspecified), and fall back to multinomial logistic regression (`fit_multinomial_logistic`) when the omnibus $P$-value is below that $\alpha$ ($P < \alpha$).
+- **Non-Linear Continuous Predictors**: Fit Harrell Restricted Cubic Splines (local API: `fit_rcs_logistic`, `fit_rcs_cox`; cloud recipe: `fit_rcs_spline_model` in Recipe 22) and report both `p_overall` and `p_nonlinearity`.
+- **Clustered / Multi-Center Cohorts**: Compute cluster intraclass correlation ($\text{ICC}_{\text{cluster}}$) and Design Effect ($\text{DEFF} = 1 + (\bar{m} - 1)\text{ICC}$); fit GEE with robust sandwich standard errors or mixed-effects models (local API: `fit_clustered_gee`; cloud recipe: `fit_gee` in Recipe 23).
 - **Systematic Synthesis & Meta-Analysis**: Run inverse-variance Fixed-Effects and DerSimonian-Laird Random-Effects meta-analysis (`run_meta_analysis` / `Recipe 24`), reporting Cochran's $Q$, Higgins' $I^2$, $\hat{\tau}^2$, and the 95% prediction interval.
 
 ---

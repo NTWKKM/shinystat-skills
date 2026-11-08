@@ -1608,24 +1608,55 @@ def verify_standalone_integrity(
 
     # 2. Observational Causal / E-value Caveat Check
     keys_str = " ".join(results_dict.keys()).lower()
-    is_causal = any(
+    text_lower = narrative_text.lower()
+    has_causal_key = any(
         k in keys_str
         for k in [
             "psm",
             "propensity",
             "love_plot",
-            "cox",
             "hazard_ratio",
             "or_table",
             "odds_ratio",
-            "logistic",
-            "regression",
         ]
+    )
+    has_regression_key = any(
+        k in keys_str for k in ["cox", "logistic", "regression"]
+    )
+    has_causal_claims = any(
+        phrase in text_lower
+        for phrase in [
+            "causal",
+            "cause",
+            "effect of",
+            "impact of",
+            "etiolog",
+        ]
+    )
+    is_non_causal_prediction = any(
+        phrase in text_lower
+        for phrase in [
+            "prediction",
+            "predictive",
+            "tripod",
+            "risk score",
+            "discrimination",
+            "calibration",
+            "c-statistic",
+            "c-index",
+            "auroc",
+        ]
+    ) and not has_causal_claims
+
+    is_causal = (
+        has_causal_key
+        or (has_regression_key and not is_non_causal_prediction)
+        or has_causal_claims
     )
     has_caveat = True
     if is_causal:
         has_caveat = any(
-            phrase in narrative_text.lower()
+            phrase in text_lower
             for phrase in [
                 "unmeasured confounding",
                 "residual confounding",

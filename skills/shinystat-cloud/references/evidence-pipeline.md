@@ -10,7 +10,7 @@ When the **Polish Grilling Gate (#6)** is engaged (via explicit prompt request e
 
 - Cross-audit every narrative statement in Discussion and Results against `results_dict` and study design.
 - Base permitted causal language on the prespecified estimand, study design, confounder control, and identification assumptions (do not treat weighting alone as sufficient or unweighted observational data as automatically prohibiting causal claims; report associative framing where identification is unverified, and require E-values only where defined and appropriate for the supported effect measure and sensitivity question).
-- Derive the significance threshold ($\alpha$) and confidence-interval level ($1-\alpha$) from analysis metadata rather than assuming fixed $0.05$ and $95\%$; verify that non-significant results in superiority or null-hypothesis tests ($P > \alpha$) are strictly stated as "insufficient evidence to reject the null hypothesis" rather than claiming equivalence or "no effect", while preserving separate margin- and CI-based interpretation for prespecified non-inferiority or equivalence analyses.
+- Derive the significance threshold ($\alpha$) and confidence-interval level ($1-\alpha$) from analysis metadata rather than assuming fixed $0.05$ and $95\%$; evaluate the unrounded $P$-value using the prespecified comparison, including exact equality when the rule is $P < \alpha$ (results with unrounded $P \ge \alpha$ do not satisfy $P < \alpha$; do not exclude exact equality from the audit, and treat displayed rounded values such as $P = 0.050$ as insufficient to determine the comparison without inspecting the unrounded value); verify that non-significant results in superiority or null-hypothesis tests ($P \ge \alpha$) are strictly stated as "insufficient evidence to reject the null hypothesis" rather than claiming equivalence or "no effect", while preserving separate margin- and CI-based interpretation for prespecified non-inferiority or equivalence analyses.
 - Compare normalized point estimates, confidence intervals, and $P$-values against tabular outputs using the half-unit decimal precision tolerance rule (`abs(val - kn) <= 0.5 * 10**(-d) + 1e-9`, where `d` is the number of decimal digits displayed in the narrative text; $d=0$ for integers), strictly permitting percentage-scale matching (`kn * 100.0`) only when the token explicitly carries a `%` sign, and enforcing the same half-unit precision tolerance on `allowed_untraced` constants.
 
 ---
@@ -54,7 +54,7 @@ When the **Polish Grilling Gate (#6)** is engaged (via explicit prompt request e
 
 ## Step 4: Bibliographic Reference List Assembly by Journal House Style
 
-Format the concluding **References** section strictly in the locked Journal House Style:
+Format the concluding **References** section strictly in the locked Journal House Style (when `OKABE_ITO` is selected at Gate #5b for CVD-safe figure styling, reuse the **NEJM** citation and reference list format by default, or **Clinical** if specified, so citations maintain a consistent format while keeping the selected figure palette unchanged):
 
 | Journal Style | In-Text Citation | Reference List Format Example |
 | :--- | :--- | :--- |
@@ -63,3 +63,4 @@ Format the concluding **References** section strictly in the locked Journal Hous
 | **Lancet** | `...guidelines<sup>1</sup>` | `1 Singer M, Deutschman CS, Seymour CW, et al. The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA 2016; 315: 801–10.` |
 | **BMJ** | `...guidelines.<sup>1</sup>` | `1 Singer M, Deutschman CS, Seymour CW, et al. The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA 2016;315:801-10. doi:10.1001/jama.2016.0287` |
 | **Clinical** | `...guidelines<sup>1</sup>` | `1. Singer, M. et al. The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA 315, 801–810 (2016).` |
+| **OKABE_ITO** *(CVD-Safe Palette)* | `...guidelines.<sup>1</sup>` (reuses NEJM style) | `1. Singer M, Deutschman CS, Seymour CW, et al. The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA 2016;315:801-10.` *(reuses NEJM format)* |

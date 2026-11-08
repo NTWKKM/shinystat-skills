@@ -975,21 +975,37 @@ def test_skill_process_audit_f1_to_f7_and_q3():
     local_text = local_skill_path.read_text(encoding="utf-8")
     cloud_text = cloud_skill_path.read_text(encoding="utf-8")
 
-    # F1: Explicit Run Sequence with 6 steps and 'Done when' completion criteria
+    # F1: Explicit Run Sequence with 6 steps and step-specific 'Done when' completion criteria
     for text, label in ((local_text, "local"), (cloud_text, "cloud")):
         assert "## 0. Run Sequence" in text, f"Missing Run Sequence in {label}"
-        for step in (
-            "1. **Inspect**",
-            "2. **Ask**",
-            "3. **Plan**",
-            "4. **Execute**",
-            "5. **Render**",
-            "6. **Audit**",
-        ):
-            assert step in text, f"Missing step {step} in {label} Run Sequence"
-        assert text.count("*Done when*") >= 6, (
-            f"Expected >= 6 '*Done when*' criteria in {label}"
+        run_seq_match = re.search(
+            r"## 0\. Run Sequence\n\n(.*?)(?=\n---\n|\n## |\Z)", text, re.DOTALL
         )
+        assert run_seq_match, f"Failed to extract Run Sequence section in {label}"
+        run_seq_text = run_seq_match.group(1)
+
+        steps = [
+            ("Inspect", r"1\.\s+\*\*Inspect\*\*.*?\*Done when\*(.*?)(?=\n\d+\.|\Z)"),
+            ("Ask", r"2\.\s+\*\*Ask\*\*.*?\*Done when\*(.*?)(?=\n\d+\.|\Z)"),
+            ("Plan", r"3\.\s+\*\*Plan\*\*.*?\*Done when\*(.*?)(?=\n\d+\.|\Z)"),
+            ("Execute", r"4\.\s+\*\*Execute\*\*.*?\*Done when\*(.*?)(?=\n\d+\.|\Z)"),
+            ("Render", r"5\.\s+\*\*Render\*\*.*?\*Done when\*(.*?)(?=\n\d+\.|\Z)"),
+            ("Audit", r"6\.\s+\*\*Audit\*\*.*?\*Done when\*(.*?)(?=\n\d+\.|\Z)"),
+        ]
+        for step_name, pattern in steps:
+            match = re.search(pattern, run_seq_text, re.DOTALL)
+            assert match, (
+                f"Missing step '{step_name}' with '*Done when*' criterion in {label} Run Sequence"
+            )
+            criterion = match.group(1).strip()
+            assert len(criterion) > 0, (
+                f"Empty '*Done when*' criterion for {step_name} in {label}"
+            )
+            if step_name == "Execute":
+                crit_lower = criterion.lower()
+                assert "converge" in crit_lower and "diagnostic" in crit_lower, (
+                    f"Execute step in {label} must retain convergence and diagnostics requirement, got: {criterion}"
+                )
 
     # F2: Disclosed Autonomous Upgrades into decision-heuristics.md (reduced SKILL.md size)
     assert len(local_text.encode("utf-8")) <= 16500, (
@@ -1018,6 +1034,13 @@ def test_skill_process_audit_f1_to_f7_and_q3():
     # F6: Multiple-choice tool instruction at Gate #2 / Gate #5
     for text, label in ((local_text, "local"), (cloud_text, "cloud")):
         assert "ask_question" in text, f"Missing ask_question guidance in {label}"
+        assert re.search(
+            r"when your tools include `?ask_question`?, send the consolidated turn through it",
+            text,
+            re.IGNORECASE,
+        ), (
+            f"Missing directive to route consolidated inquiry through ask_question in {label}"
+        )
 
     # F7 & Q3: Dedicated evidence-pipeline.md & local medstat.reporting renderers
     shared_ep = repo_root / "skills" / "_shared" / "references" / "evidence-pipeline.md"

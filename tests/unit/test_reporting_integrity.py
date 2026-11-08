@@ -199,6 +199,36 @@ def test_integrity_causal_caveat_warning():
     assert any("unmeasured confounding" in w.lower() for w in audit.warnings)
 
 
+def test_integrity_non_causal_prediction_exempt_from_causal_caveat():
+    """Verifies that a logistic or Cox key in results_dict alone does not require a caveat for non-causal prediction reports."""
+    doc = ReportDocument(
+        title="Clinical Prediction Model",
+        results_dict={"logistic_model": 0.82, "sample_size": 250},
+    )
+    doc.add_paragraph(
+        "A clinical risk prediction model was developed following TRIPOD guidelines. "
+        "The multivariable logistic model achieved a C-statistic of 0.82 in 250 patients."
+    )
+    audit = verify_report_integrity(doc)
+    assert audit.has_causal_caveat is True
+    assert not any("unmeasured confounding" in w.lower() for w in audit.warnings)
+
+
+def test_integrity_causal_claims_in_regression_require_caveat():
+    """Verifies that regression models with explicit causal claims require unmeasured confounding / E-value caveat."""
+    doc = ReportDocument(
+        title="Treatment Effect Study",
+        results_dict={"logistic_model": 0.82, "sample_size": 250},
+    )
+    doc.add_paragraph(
+        "We evaluated the causal effect of the intervention using multivariable logistic regression. "
+        "The model showed an effect estimate of 0.82 across 250 patients."
+    )
+    audit = verify_report_integrity(doc)
+    assert audit.has_causal_caveat is False
+    assert any("unmeasured confounding" in w.lower() for w in audit.warnings)
+
+
 def test_integrity_displayed_precision_sub_one():
     """Verifies that values <= 1 use displayed precision instead of 0.02 absolute tolerance."""
     # results_dict has p_value = 0.02 (2-digit precision)

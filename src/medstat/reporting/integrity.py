@@ -602,25 +602,58 @@ def verify_report_integrity(
 
     # 3. Observational Causal Inference & E-value Check
     results_keys_str = " ".join(doc.results_dict.keys()).lower()
-    is_causal = any(
+    text_lower = all_text.lower()
+    has_causal_key = any(
         k in results_keys_str
         for k in [
             "psm",
             "propensity",
             "love_plot",
             "hazard_ratio",
-            "cox",
             "or_table",
             "odds_ratio",
-            "logistic",
-            "regression",
         ]
+    )
+    has_regression_key = any(
+        k in results_keys_str for k in ["cox", "logistic", "regression"]
+    )
+    has_causal_claims = any(
+        phrase in text_lower
+        for phrase in [
+            "causal",
+            "cause",
+            "effect of",
+            "impact of",
+            "etiolog",
+        ]
+    )
+    is_non_causal_prediction = (
+        any(
+            phrase in text_lower
+            for phrase in [
+                "prediction",
+                "predictive",
+                "tripod",
+                "risk score",
+                "discrimination",
+                "calibration",
+                "c-statistic",
+                "c-index",
+                "auroc",
+            ]
+        )
+        and not has_causal_claims
+    )
+
+    is_causal = (
+        has_causal_key
+        or (has_regression_key and not is_non_causal_prediction)
+        or has_causal_claims
     )
 
     has_causal_caveat = True
     warnings: list[str] = []
     if is_causal:
-        text_lower = all_text.lower()
         has_caveat = any(
             phrase in text_lower
             for phrase in [
