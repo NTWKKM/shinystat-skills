@@ -965,3 +965,67 @@ def test_gate5_asks_each_output_axis_separately():
         assert "`CLINICAL` / `OKABE_ITO`" not in text, skill_path
         # Execution context is asked whenever a subagent tool exists, independent of other axes
         assert "even when every other axis is specified" in text, skill_path
+
+
+def test_skill_process_audit_f1_to_f7_and_q3():
+    """Verify F1-F7 process improvements and Q3 local/cloud report-builder separation."""
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    local_skill_path = repo_root / "skills" / "shinystat" / "SKILL.md"
+    cloud_skill_path = repo_root / "skills" / "shinystat-cloud" / "SKILL.md"
+    local_text = local_skill_path.read_text(encoding="utf-8")
+    cloud_text = cloud_skill_path.read_text(encoding="utf-8")
+
+    # F1: Explicit Run Sequence with 6 steps and 'Done when' completion criteria
+    for text, label in ((local_text, "local"), (cloud_text, "cloud")):
+        assert "## 0. Run Sequence" in text, f"Missing Run Sequence in {label}"
+        for step in (
+            "1. **Inspect**",
+            "2. **Ask**",
+            "3. **Plan**",
+            "4. **Execute**",
+            "5. **Render**",
+            "6. **Audit**",
+        ):
+            assert step in text, f"Missing step {step} in {label} Run Sequence"
+        assert text.count("*Done when*") >= 6, (
+            f"Expected >= 6 '*Done when*' criteria in {label}"
+        )
+
+    # F2: Disclosed Autonomous Upgrades into decision-heuristics.md (reduced SKILL.md size)
+    assert len(local_text.encode("utf-8")) <= 16500, (
+        f"Local SKILL.md still too large: {len(local_text.encode('utf-8'))} bytes"
+    )
+    assert len(cloud_text.encode("utf-8")) <= 22000, (
+        f"Cloud SKILL.md still too large: {len(cloud_text.encode('utf-8'))} bytes"
+    )
+
+    # F3: Distinct front-loaded descriptions for local vs cloud
+    local_fm = yaml.safe_load(local_text.split("---", 2)[1])
+    cloud_fm = yaml.safe_load(cloud_text.split("---", 2)[1])
+    assert local_fm["description"].startswith("Local clinical biostatistics"), local_fm[
+        "description"
+    ]
+    assert cloud_fm["description"].startswith("Cloud-sandbox clinical biostatistics"), (
+        cloud_fm["description"]
+    )
+
+    # F5: README deduplicates the 24-row Recipe Index table
+    readme_text = (repo_root / "README.md").read_text(encoding="utf-8")
+    assert "| **Recipe 18** |" not in readme_text, (
+        "Duplicate 24-row recipe table should be linked from README.md, not duplicated"
+    )
+
+    # F6: Multiple-choice tool instruction at Gate #2 / Gate #5
+    for text, label in ((local_text, "local"), (cloud_text, "cloud")):
+        assert "ask_question" in text, f"Missing ask_question guidance in {label}"
+
+    # F7 & Q3: Dedicated evidence-pipeline.md & local medstat.reporting renderers
+    shared_ep = repo_root / "skills" / "_shared" / "references" / "evidence-pipeline.md"
+    assert shared_ep.exists(), "Missing skills/_shared/references/evidence-pipeline.md"
+    assert "Step 1: Clinical Claims vs Analyzed Data Audit" in shared_ep.read_text(
+        encoding="utf-8"
+    )
+    assert "references/evidence-pipeline.md" in local_text
+    assert "references/evidence-pipeline.md" in cloud_text
+    assert "medstat.reporting.renderers" in local_text
+    assert "render_html" in local_text and "render_docx" in local_text

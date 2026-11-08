@@ -191,34 +191,7 @@ skills/
 
 #### Standalone Cloud Recipe Index (Recipes 1–24)
 
-For the standalone `shinystat-cloud` skill, 24 zero-`medstat` standalone Python recipes are grouped into 5 progressive disclosure modules under `references/recipes/`:
-
-| Recipe # | Recipe Title | Target Recipe File |
-| :--- | :--- | :--- |
-| **Recipe 1** | Table 1 Baseline Characteristics & Standardized Mean Difference (SMD) | `01-data-missing-table1.md` |
-| **Recipe 2** | 2x2 Diagnostic Accuracy with Wilson Score & Log-Scale 95% CIs | `05-diagnostic-meta-power.md` |
-| **Recipe 3** | Empirical ROC, Optimal Cutoff & Single / Paired DeLong 95% CIs | `05-diagnostic-meta-power.md` |
-| **Recipe 4** | Model Calibration & Vickers Decision Curve Analysis (DCA) | `05-diagnostic-meta-power.md` |
-| **Recipe 5** | Observer Agreement: Bland-Altman & Shrout-Fleiss (1979) ICC | `05-diagnostic-meta-power.md` |
-| **Recipe 6** | Propensity Score Matching (PSM) with Pair IDs & Covariate Balance | `04-causal-iptw-psm.md` |
-| **Recipe 7** | Firth's Penalized Likelihood Logistic Regression | `02-regression-firth-ordinal.md` |
-| **Recipe 8** | Little's (1988) MCAR Multivariate Missingness Test | `01-data-missing-table1.md` |
-| **Recipe 9** | VanderWeele & Ding (2017) Sensitivity E-Value | `02-regression-firth-ordinal.md` |
-| **Recipe 10** | Multivariable Binary Logistic Regression Table | `02-regression-firth-ordinal.md` |
-| **Recipe 11** | Survival Analysis: Kaplan-Meier, Log-Rank & Cox Proportional Hazards | `03-survival-competing-risks.md` |
-| **Recipe 12** | Multiple Imputation by Chained Equations (MICE) & Rubin's Rules | `01-data-missing-table1.md` |
-| **Recipe 13** | Publication-Grade HTML Table Renderer (NEJM / JAMA Standards) | `01-data-missing-table1.md` |
-| **Recipe 14** | Inverse Probability of Treatment Weighting (IPTW) & Weighted Balance | `04-causal-iptw-psm.md` |
-| **Recipe 15** | Competing Risks Survival Analysis (Aalen-Johansen CIF & Fine-Gray Model) | `03-survival-competing-risks.md` |
-| **Recipe 16** | Diagnostic Risk Reclassification: Continuous & Categorical NRI and IDI | `05-diagnostic-meta-power.md` |
-| **Recipe 17** | Time-Dependent ROC: Cumulative/Dynamic IPCW Estimator (AUROC(t)) | `05-diagnostic-meta-power.md` |
-| **Recipe 18** | TRIPOD+AI Optimism-Corrected Bootstrap Internal Validation & Uniform Shrinkage | `05-diagnostic-meta-power.md` |
-| **Recipe 19** | Prediction Model Recalibration and Updating (Logistic & Intercept-Only) | `05-diagnostic-meta-power.md` |
-| **Recipe 20** | Sample Size Determination for Clinical Prediction Models (Riley et al. 2020) & Diagnostic AUROC (Obuchowski 1998) | `05-diagnostic-meta-power.md` |
-| **Recipe 21** | Proportional Odds Ordinal Logistic Regression & Brant Test | `02-regression-firth-ordinal.md` |
-| **Recipe 22** | Restricted Cubic Splines (Harrell RCS) for Non-Linear Continuous Predictors | `02-regression-firth-ordinal.md` |
-| **Recipe 23** | Clustered GEE with Robust Sandwich SEs, ICC & Design Effect ($\text{DEFF}$) | `02-regression-firth-ordinal.md` |
-| **Recipe 24** | Fixed-Effects & DerSimonian-Laird Random-Effects Meta-Analysis (PRISMA 2020) | `05-diagnostic-meta-power.md` |
+For the standalone `shinystat-cloud` skill, 24 zero-`medstat` standalone Python recipes (`Recipe 1` through `Recipe 24`: Table 1, 2x2/ROC/tdROC/NRI/IDI diagnostics, calibration/DCA/recalibration, TRIPOD+AI bootstrap validation, Riley/Obuchowski sample size, logistic/Firth/ordinal/RCS/GEE regression, KM/Cox/competing-risks CIF & Fine-Gray, PSM/IPTW/E-values, MICE, Bland-Altman/ICC, and meta-analysis) are grouped into 5 progressive disclosure modules (`01-data-missing-table1.md` to `05-diagnostic-meta-power.md`). See the canonical mapping table in [`skills/shinystat-cloud/SKILL.md`](skills/shinystat-cloud/SKILL.md#recipe-index--file-mapping-recipes-124).
 
 ### Installing Skills for Your AI Coding Agent
 

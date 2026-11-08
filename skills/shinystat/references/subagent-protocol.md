@@ -9,8 +9,7 @@ Reference protocol for `shinystat` and `shinystat-cloud` when the runtime provid
 - **Activation Condition**: Engage this protocol only when the active agent runtime exposes a tool for spawning subagents and the user selects **Subagent Offload** at **Grilling Gate #5**. When no subagent tool exists or the user omits a preference, default to **Direct in Main Agent**.
 - **Role Division**:
   1. **Main Agent (*Orchestrator & Clinical Gatekeeper*)**:
-     - Runs **Pillar 1** pre-flight data inspection (`df.info()`, `df.describe()`, missingness %, numeric `0/1` coding check) and **Pillar 2** archetype triangulation.
-     - Conducts the **single consolidated pre-flight inquiry** with the user for any triggered `#1`, `#2`, `#4` (when pre-flight confirms $> 40\%$ non-primary missingness or clinically plausible MNAR without sensitivity analysis), and `#5` items; computes **pre-flight** $\text{EPV}_{\text{binary}}$ / $\text{EPV}_{\text{Cox}}$ (during Pillar 1 when outcome/event coding is unambiguous, or immediately after resolving Gate `#1`/`#2` in the consolidated turn before model fitting).
+     - Executes **Run Sequence steps 1–3** (`SKILL.md §0`): runs **Pillar 1** pre-flight inspection, conducts the **single consolidated pre-flight inquiry** (`SKILL.md §2`) for any triggered `#1`, `#2`, `#4` and `#5a`–`#5d` items, and computes **pre-flight** $\text{EPV}_{\text{binary}}$ / $\text{EPV}_{\text{Cox}}$ before model fitting.
      - Writes `<run_output_dir>/sap_handoff.json` and dispatches Subagent(s).
      - Performs **independent on-disk integrity verification** (§4) before delivering final outputs to the user.
   2. **Subagent B (*Biostatistical Execution & Report Subagent*)**:
@@ -18,8 +17,8 @@ Reference protocol for `shinystat` and `shinystat-cloud` when the runtime provid
      - Reads `<run_output_dir>/sap_handoff.json` and loads only the required statistical references (`decision-heuristics.md`, `figures.md`, `flows.md`, `house-styles.md`, `illustration.md`, `report-builder.md §1–§3`, and target `references/recipes/01-*.md` to `05-*.md` in `shinystat-cloud`).
      - Executes the statistical models, tracks `SampleFlowTracker` / `retention_audit`, exports 300/600 DPI figure bundles (`.png`, TrueType `.pdf` with `fonttype=42`, `.svg`, `_source.csv` with `qa["passed"] == True`), and writes `<run_output_dir>/results_dict.json` and `<run_output_dir>/retention_audit.json`.
   3. **Subagent A (*Literature & Citation Verification Subagent*)**:
-     - Dispatched **in parallel with Subagent B** when **Full Publication Polish** is selected at Gate `#5` or when user-provided references are supplied for verification (whether online via literature MCPs/web search or offline via authenticated local-source verification in Standard mode).
-     - Reads `<run_output_dir>/sap_handoff.json` and loads `report-builder.md §4` (*Evidence-Base Verification & Superscript Citations Pipeline*).
+     - Dispatched **in parallel with Subagent B** when **Full Publication Polish** is selected at Gate `#5c` or when user-provided references are supplied for verification (whether online via literature MCPs/web search or offline via authenticated local-source verification in Standard mode).
+     - Reads `<run_output_dir>/sap_handoff.json` and loads `evidence-pipeline.md` (*Evidence-Base Verification & Superscript Citations Pipeline*).
      - Queries available literature MCPs or web search tools strictly under the **Zero-PHI Literature Query Boundary** (or verifies local user-provided citations against DOI/PMID/bibliographic metadata offline when literature services are unavailable), verifies source-appropriate metadata and comparable empirical benchmarks (**Anti-Phantom Citation Invariant**), and writes `<run_output_dir>/citations_verified.json`.
   4. **Report Assembly & Delivery Gate**:
      - Once active branches (`Subagent B`, and `Subagent A` when engaged) reach `COMPLETED`:
