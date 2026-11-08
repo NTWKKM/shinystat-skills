@@ -262,16 +262,31 @@ def test_integrity_iptw_and_ate_keys_require_causal_caveat():
     assert audit_ate.has_causal_caveat is False
     assert any("unmeasured confounding" in w.lower() for w in audit_ate.warnings)
 
+    # 3. Non-ATE keys containing substring 'ate' (e.g. 'event_rate') must NOT trigger causal classification
+    doc_non_ate = ReportDocument(
+        title="Event Rate Report",
+        results_dict={"event_rate": 0.05, "sample_size": 200},
+    )
+    doc_non_ate.add_paragraph(
+        "Methods: Analysis of 200 patients yielded an event_rate of 0.05."
+    )
+    audit_non_ate = verify_report_integrity(doc_non_ate)
+    assert audit_non_ate.has_causal_caveat is True
+    assert not any(
+        "unmeasured confounding" in w.lower() for w in audit_non_ate.warnings
+    )
+
 
 def test_integrity_negated_causal_claims_not_treated_as_affirmative():
-    """Verifies that negated causal wording such as 'non-causal' does not count as an affirmative causal claim, but separate affirmative claims do."""
-    # Negated wording 'non-causal' does not disqualify prediction exemption
+    """Verifies that negated causal wording such as 'non-causal' or 'does not imply causation' does not count as an affirmative causal claim, but separate affirmative claims do."""
+    # Negated wording 'non-causal' and 'does not imply causation' do not disqualify prediction exemption
     doc_neg = ReportDocument(
         title="Non-causal Prediction Model",
         results_dict={"odds_ratio": 1.45, "sample_size": 150},
     )
     doc_neg.add_paragraph(
         "This is a non-causal prediction model evaluated with TRIPOD guidelines. "
+        "Correlation does not imply causation. "
         "The multivariable logistic regression showed an odds ratio of 1.45 in 150 patients."
     )
     audit_neg = verify_report_integrity(doc_neg)
@@ -285,7 +300,7 @@ def test_integrity_negated_causal_claims_not_treated_as_affirmative():
     )
     doc_aff.add_paragraph(
         "This is a non-causal prediction model evaluated with TRIPOD guidelines. "
-        "However, medication exposure causes decreased mortality with odds ratio 1.45 in 150 patients."
+        "Correlation does not imply causation, however treatment lowered mortality with odds ratio 1.45 in 150 patients."
     )
     audit_aff = verify_report_integrity(doc_aff)
     assert audit_aff.has_causal_caveat is False
@@ -293,14 +308,14 @@ def test_integrity_negated_causal_claims_not_treated_as_affirmative():
 
 
 def test_integrity_prediction_with_treatment_reduces_mortality_requires_caveat():
-    """Verifies that prediction reports asserting that treatment reduces mortality require a confounding caveat."""
+    """Verifies that prediction reports asserting that treatment reduces or lowered mortality require a confounding caveat."""
     doc_treat = ReportDocument(
         title="Prediction Model with Treatment Assertion",
         results_dict={"odds_ratio": 0.72, "sample_size": 400},
     )
     doc_treat.add_paragraph(
         "We developed a risk prediction score with excellent discrimination. "
-        "Furthermore, our findings demonstrate that treatment reduces mortality (odds ratio 0.72 in 400 patients)."
+        "Furthermore, our findings demonstrate that treatment lowered mortality (odds ratio 0.72 in 400 patients)."
     )
     audit_treat = verify_report_integrity(doc_treat)
     assert audit_treat.has_causal_caveat is False
@@ -455,6 +470,8 @@ def test_integrity_years_context_and_structural_counters():
     audit_numpy = verify_report_integrity(doc_numpy)
     assert 0.725 not in audit_numpy.untraced_numbers
     assert 0.835 not in audit_numpy.untraced_numbers
+    assert audit_numpy.has_causal_caveat is True
+    assert not any("unmeasured confounding" in w.lower() for w in audit_numpy.warnings)
 
     # 5. Cohort count with 'in' elsewhere in sentence must remain reportable
     doc_events = ReportDocument(

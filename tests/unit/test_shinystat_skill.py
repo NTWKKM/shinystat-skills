@@ -985,6 +985,13 @@ def test_skill_process_audit_f1_to_f7_and_q3():
         run_seq_text = run_seq_match.group(1)
 
         step_names = ["Inspect", "Ask", "Plan", "Execute", "Render", "Audit"]
+        extracted_steps = re.findall(
+            r"(?:^|\n)\d+\.\s+\*\*([A-Za-z]+)\*\*", run_seq_text
+        )
+        assert extracted_steps == step_names, (
+            f"Run Sequence in {label} must match exact ordered steps without duplicates or extra steps: expected {step_names}, got {extracted_steps}"
+        )
+
         last_step_pos = -1
         for idx, step_name in enumerate(step_names, 1):
             step_pattern = (

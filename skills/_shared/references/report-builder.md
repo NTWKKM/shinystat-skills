@@ -1616,8 +1616,10 @@ def verify_standalone_integrity(
             "propensity",
             "love_plot",
             "iptw",
-            "ate",
         ]
+    ) or any(
+        bool(re.search(r"(?:^|_|\b)ate(?:$|_|\b)", k.lower()))
+        for k in results_dict.keys()
     )
     has_regression_key = any(
         k in keys_str
@@ -1630,14 +1632,21 @@ def verify_standalone_integrity(
             "odds_ratio",
         ]
     )
+    text_clean_claims = re.sub(
+        r"\b(?:does not|do not|did not|cannot|could not|not|no|without)\s+(?:necessarily\s+)?(?:imply|mean|prove|establish|infer|show|indicate|be|have)?\s*(?:causal\w*|causes?|causation)\b",
+        " ",
+        text_lower,
+    )
+    text_clean_claims = re.sub(r"\bnon[- ]?causal\b", " ", text_clean_claims)
+
     has_causal_claims = bool(
         re.search(
-            r"(?<!non-)(?<!non )(?<!not )(?<!no )\b(?:causal|causes?|causation|effect of|impact of|etiolog\w*)\b",
-            text_lower,
+            r"\b(?:causal|causes?|causation|effect of|impact of|etiolog\w*)\b",
+            text_clean_claims,
         )
         or re.search(
-            r"\b(?:(?:treatment|intervention|therapy|drug|exposure|medication)\s+(?:reduces?|increases?|decreases?|lowers?|prevents?|improves?)|(?:reduces?|decreases?|lowers?|prevents?)\s+(?:all-cause\s+)?(?:mortality|death|morbidity))\b",
-            text_lower,
+            r"\b(?:(?:treatment|intervention|therapy|drug|exposure|medication)\s+(?:reduces?|reduced|increases?|increased|decreases?|decreased|lowers?|lowered|prevents?|prevented|improves?|improved)|(?:reduces?|reduced|decreases?|decreased|lowers?|lowered|prevents?|prevented)\s+(?:all-cause\s+)?(?:mortality|death|morbidity))\b",
+            text_clean_claims,
         )
     )
     is_non_causal_prediction = (
