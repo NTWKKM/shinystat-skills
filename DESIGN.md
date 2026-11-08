@@ -1988,12 +1988,17 @@ When executing multi-model clinical analyses or `Full Publication Polish` workfl
 - **Offline & Standalone Parity**: Installing `shinystat` via `npx skills add NTWKKM/shinystat-skills --skill shinystat` or unzipping `shinystat-cloud.zip` delivers a 100% self-contained folder with zero broken links and full offline CLI/library execution.
 - **Verification**: Verified via isolated temporary `HOME` test that all 27 links in installed `shinystat` and 61 links in `shinystat-cloud` resolve, and `python scripts/medstat_cli.py --schema` exits with code 0.
 
+## ADR 70: Gate #5 Split into Four Independently Asked Axes (`/writing-for-agents`)
 
+### Context
+Field use showed two Gate #5 defects: (1) agents bundled deliverable format and **house style** into one combined question (e.g. "HTML + NEJM?"), hiding the full option list for each; (2) the Execution Context Mode question was skipped, because it sat as a buried fourth sub-bullet behind a weak conditional and the gate trigger listed only format, house style, and polish.
 
+### Decision
+- Renamed the gate to the canonical glossary term **Output Alignment Gate** and declared four independent **axes** (`5a` Deliverable Format, `5b` Figure House Style, `5c` Manuscript Polish Mode, `5d` Execution Context Mode), asked as **one separate question per axis**, each listing every option.
+- Listed `CLINICAL` and `OKABE_ITO` as distinct house-style options.
+- `5d` is asked whenever the tool list includes a subagent-spawning tool (e.g. `invoke_subagent`, `Task`), even when every other axis is specified.
+- Pinned via `test_gate5_asks_each_output_axis_separately`.
 
-
-
-
-
-
-
+### Consequences
+- **Status**: Accepted.
+- One consolidated pre-flight turn now contains more, smaller questions; the user sees every format and house-style option side by side.

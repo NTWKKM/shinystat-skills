@@ -942,3 +942,26 @@ def test_house_styles_range_index_preservation(tmp_path):
         assert "0,10" in csv_exp or ",y\n0,10" in csv_exp
     finally:
         plt.close(fig)
+
+
+def test_gate5_asks_each_output_axis_separately():
+    """Gate #5 asks format, house style, polish, and execution context as separate questions."""
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    for skill_path in (
+        repo_root / "skills" / "shinystat" / "SKILL.md",
+        repo_root / "skills" / "shinystat-cloud" / "SKILL.md",
+    ):
+        text = skill_path.read_text(encoding="utf-8")
+        assert "**Output Alignment Gate**" in text, skill_path
+        assert "one separate question per axis" in text, skill_path
+        for axis in (
+            "5a. Deliverable Format",
+            "5b. Figure House Style",
+            "5c. Manuscript Polish Mode",
+            "5d. Execution Context Mode",
+        ):
+            assert axis in text, f"Missing Gate #5 axis '{axis}' in {skill_path}"
+        # Every house style is its own option (no merged `CLINICAL` / `OKABE_ITO`)
+        assert "`CLINICAL` / `OKABE_ITO`" not in text, skill_path
+        # Execution context is asked whenever a subagent tool exists, independent of other axes
+        assert "even when every other axis is specified" in text, skill_path
