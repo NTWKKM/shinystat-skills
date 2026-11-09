@@ -267,3 +267,156 @@ STAT_MUTATIONS: list[tuple[str, list[str]]] = [
     # 5. n 412 (d=0, unit=1, plus n+-3)
     ("412", ["413", "411", "415", "409", "4120", "41200", "4.12"]),
 ]
+
+
+@dataclass(frozen=True)
+class StudyDesignIntegrityCase:
+    id: str
+    study_design: str
+    narrative: str
+    results_dict: dict[str, Any]
+    expected_caveat: bool
+    allowed_untraced: set[float] | None = None
+    expected_passed: bool | None = None
+
+
+STUDY_DESIGN_INTEGRITY_CASES: list[StudyDesignIntegrityCase] = [
+    StudyDesignIntegrityCase(
+        id="non_randomized_diagnostic_test_requires_caveat",
+        study_design="non-randomized diagnostic test",
+        narrative="Methods: Non-randomized diagnostic test was conducted across 400 patients; adjusted odds ratio was 1.45.",
+        results_dict={"sample_size": 400, "odds_ratio": 1.45},
+        expected_caveat=False,
+        expected_passed=False,
+    ),
+    StudyDesignIntegrityCase(
+        id="non_randomized_diagnostic_test_with_caveat_passes",
+        study_design="non-randomized diagnostic test",
+        narrative="Methods: Cohort retention flow was analyzed. Non-randomized diagnostic test across 400 patients; adjusted odds ratio was 1.45. Residual confounding cannot be excluded.",
+        results_dict={"sample_size": 400, "odds_ratio": 1.45},
+        expected_caveat=True,
+        expected_passed=True,
+    ),
+    StudyDesignIntegrityCase(
+        id="etiologic_research_claim_smoking",
+        study_design="risk prediction model",
+        narrative="Methods: Clinical risk prediction model. An etiologic investigation of smoking as a lung-cancer risk factor was evaluated across 500 patients; odds ratio was 1.25.",
+        results_dict={"sample_size": 500, "odds_ratio": 1.25},
+        expected_caveat=False,
+        expected_passed=False,
+    ),
+    StudyDesignIntegrityCase(
+        id="etiology_workup_narrative_diagnostic",
+        study_design="diagnostic accuracy",
+        narrative="Methods: Cohort retention flow was evaluated. Etiology workup of acute abdominal pain across 300 patients; odds ratio was 1.25.",
+        results_dict={"sample_size": 300, "odds_ratio": 1.25},
+        expected_caveat=True,
+        expected_passed=True,
+    ),
+    StudyDesignIntegrityCase(
+        id="type_2_etiology_workup",
+        study_design="type 2 etiology workup",
+        narrative="Methods: Type 2 etiology workup was performed across 500 patients; odds ratio was 1.35.",
+        results_dict={"sample_size": 500, "odds_ratio": 1.35},
+        expected_caveat=False,
+        expected_passed=False,
+    ),
+    StudyDesignIntegrityCase(
+        id="type_2_etiologic_workup",
+        study_design="type 2 etiologic workup",
+        narrative="Methods: Type 2 etiologic workup was performed across 500 patients; odds ratio was 1.35.",
+        results_dict={"sample_size": 500, "odds_ratio": 1.35},
+        expected_caveat=False,
+        expected_passed=False,
+    ),
+    StudyDesignIntegrityCase(
+        id="etiologic_workup_type_2_diabetes",
+        study_design="etiologic workup of type 2 diabetes",
+        narrative="Methods: Cohort retention flow was analyzed. Diagnostic evaluation of etiologic workup of type 2 diabetes in 450 patients; odds ratio was 1.20.",
+        results_dict={"sample_size": 450, "odds_ratio": 1.20},
+        expected_caveat=True,
+        allowed_untraced={2},
+        expected_passed=True,
+    ),
+    StudyDesignIntegrityCase(
+        id="diagnostic_accuracy_type_2_workup",
+        study_design="diagnostic accuracy of type 2 etiologic work-up",
+        narrative="Methods: Cohort retention flow was analyzed. Diagnostic accuracy of type 2 etiologic work-up across 350 patients; odds ratio was 1.25.",
+        results_dict={"sample_size": 350, "odds_ratio": 1.25},
+        expected_caveat=True,
+        allowed_untraced={2},
+        expected_passed=True,
+    ),
+    StudyDesignIntegrityCase(
+        id="prediction_etiologic_stroke_subtype",
+        study_design="prediction model for etiologic stroke subtype",
+        narrative="Methods: Cohort retention flow was analyzed. A clinical risk prediction model for etiologic stroke subtype following TRIPOD guidelines in 600 patients; odds ratio was 1.30.",
+        results_dict={"sample_size": 600, "odds_ratio": 1.30},
+        expected_caveat=True,
+        expected_passed=True,
+    ),
+    StudyDesignIntegrityCase(
+        id="non_observational_prediction_simulation",
+        study_design="non-observational prediction simulation",
+        narrative="Methods: Cohort retention flow was analyzed. Non-observational prediction simulation study of 1000 synthetic patient cohorts; odds ratio was 1.15.",
+        results_dict={"sample_size": 1000, "odds_ratio": 1.15},
+        expected_caveat=True,
+        expected_passed=True,
+    ),
+    StudyDesignIntegrityCase(
+        id="disease_risk_score_matched_study",
+        study_design="disease risk score matched study",
+        narrative="Methods: Disease risk score matched study evaluating treatment across 800 patients; odds ratio was 1.40.",
+        results_dict={"sample_size": 800, "odds_ratio": 1.40},
+        expected_caveat=False,
+        expected_passed=False,
+    ),
+    StudyDesignIntegrityCase(
+        id="framingham_risk_score_validation",
+        study_design="framingham risk score validation",
+        narrative="Methods: Cohort retention flow was analyzed. Framingham risk score validation study following TRIPOD guidelines across 800 patients; odds ratio was 1.40.",
+        results_dict={"sample_size": 800, "odds_ratio": 1.40},
+        expected_caveat=True,
+        expected_passed=True,
+    ),
+    StudyDesignIntegrityCase(
+        id="matched_pair_randomized_trial",
+        study_design="matched-pair randomized trial",
+        narrative="Methods: Cohort retention flow was analyzed. A matched-pair randomized trial was conducted across 200 patients; mean difference was 4.2.",
+        results_dict={"sample_size": 200, "mean_diff": 4.2},
+        expected_caveat=True,
+        expected_passed=True,
+    ),
+    StudyDesignIntegrityCase(
+        id="etiologic_study_predictive_risk_factors",
+        study_design="etiologic study of predictive risk factors",
+        narrative="Methods: Etiologic study of predictive risk factors across 500 patients; odds ratio was 1.35.",
+        results_dict={"sample_size": 500, "odds_ratio": 1.35},
+        expected_caveat=False,
+        expected_passed=False,
+    ),
+    StudyDesignIntegrityCase(
+        id="natural_experiment",
+        study_design="natural experiment",
+        narrative="Methods: Natural experiment evaluating policy change across 600 patients; sample size 600.",
+        results_dict={"sample_size": 600},
+        expected_caveat=False,
+        expected_passed=False,
+    ),
+    StudyDesignIntegrityCase(
+        id="non_experimental_study",
+        study_design="non-experimental study",
+        narrative="Methods: Non-experimental study evaluating outcome across 500 patients; sample size 500.",
+        results_dict={"sample_size": 500},
+        expected_caveat=False,
+        expected_passed=False,
+    ),
+    StudyDesignIntegrityCase(
+        id="single_arm_study",
+        study_design="single-arm study",
+        narrative="Methods: Single-arm study of treatment across 300 patients; sample size 300.",
+        results_dict={"sample_size": 300},
+        expected_caveat=False,
+        expected_passed=False,
+    ),
+]

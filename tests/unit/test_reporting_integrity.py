@@ -25,6 +25,7 @@ from tests.fixtures.integrity_cases import (
     BASE_RESULTS_DICT,
     INTEGRITY_PARITY_CASES,
     STAT_MUTATIONS,
+    STUDY_DESIGN_INTEGRITY_CASES,
 )
 
 
@@ -2057,166 +2058,30 @@ def test_integrity_diagnostic_accuracy_of_etiologic_workup_exempt():
         assert any("unmeasured confounding" in w.lower() for w in audit_causal.warnings)
 
 
-def test_integrity_coderabbit_round_10_regression_suite():
+@pytest.mark.parametrize("case", STUDY_DESIGN_INTEGRITY_CASES, ids=lambda c: c.id)
+def test_integrity_study_design_regression_suite(case):
     """
-    Comprehensive regression suite for CodeRabbit round 10 review findings:
-    1. Etiologic research claims retain recognized causal term (Thread 1)
-    2. Type 2 etiology workup and etiologic workup require caveat (Thread 2)
-    3. Etiologic workup of type 2 diabetes is exempt when non-causal (Thread 2 prompt)
-    4. Negated observational labels (e.g. non-observational) do not trigger caveat (Thread 3)
-    5. Non-randomized diagnostic test requires caveat with adjusted odds ratio (Thread 4)
-    6. Disease risk score matched study requires caveat while prediction is exempt (Thread 5)
-    7. Etiology workup in narrative recognized as diagnostic workup (Thread 6)
-    8. Diagnostic accuracy of type 2 etiologic workup retains exemption (Thread 7)
-    9. Prediction model for etiologic stroke subtype is exempt when non-causal (Thread 8)
+    Parametrized regression suite for study design classification and reporting integrity.
+    Validates causal caveat requirements, observational classification, and diagnostic/prediction exemptions.
     """
-    # 1. Thread 4: Non-randomized diagnostic test requires caveat even with neutral narrative & adjusted odds ratio
-    doc_nrd = ReportDocument(
-        title="Non-Randomized Diagnostic Test",
-        results_dict={"sample_size": 400, "odds_ratio": 1.45},
-        study_design="non-randomized diagnostic test",
+    doc = ReportDocument(
+        title=f"Study Design Test: {case.study_design}",
+        results_dict=case.results_dict,
+        study_design=case.study_design,
     )
-    doc_nrd.add_paragraph(
-        "Methods: Non-randomized diagnostic test was conducted across 400 patients; adjusted odds ratio was 1.45."
-    )
-    audit_nrd = verify_report_integrity(doc_nrd)
-    assert audit_nrd.has_causal_caveat is False
-    assert audit_nrd.passed is False
-    assert any("unmeasured confounding" in w.lower() for w in audit_nrd.warnings)
+    doc.add_paragraph(case.narrative)
+    audit = verify_report_integrity(doc, allowed_untraced=case.allowed_untraced)
 
-    # 1b. Non-randomized diagnostic test passes when caveat is included
-    doc_nrd_caveat = ReportDocument(
-        title="Non-Randomized Diagnostic Test",
-        results_dict={"sample_size": 400, "odds_ratio": 1.45},
-        study_design="non-randomized diagnostic test",
+    assert audit.has_causal_caveat is case.expected_caveat, (
+        f"Case '{case.id}' ({case.study_design}) expected has_causal_caveat={case.expected_caveat}, got {audit.has_causal_caveat}"
     )
-    doc_nrd_caveat.add_paragraph(
-        "Methods: Non-randomized diagnostic test across 400 patients; adjusted odds ratio was 1.45. "
-        "Residual confounding cannot be excluded."
-    )
-    audit_nrd_caveat = verify_report_integrity(doc_nrd_caveat)
-    assert audit_nrd_caveat.has_causal_caveat is True
-    assert audit_nrd_caveat.passed is True
 
-    # 2. Thread 1: Etiologic research claims retain recognized causal term
-    doc_et_claim = ReportDocument(
-        title="Risk Prediction Study",
-        results_dict={"sample_size": 500, "odds_ratio": 1.25},
-        study_design="risk prediction model",
-    )
-    doc_et_claim.add_paragraph(
-        "Methods: Clinical risk prediction model. An etiologic investigation of smoking as a lung-cancer risk factor was evaluated across 500 patients; odds ratio was 1.25."
-    )
-    audit_et_claim = verify_report_integrity(doc_et_claim)
-    assert audit_et_claim.has_causal_caveat is False, (
-        "Etiologic investigation research claim must trigger causal caveat check"
-    )
-    assert audit_et_claim.passed is False
-
-    # 3. Thread 6: Etiology workup in narrative is diagnostic target, not causal
-    doc_et_diag = ReportDocument(
-        title="Diagnostic Study",
-        results_dict={"sample_size": 300, "odds_ratio": 1.25},
-        study_design="diagnostic accuracy",
-    )
-    doc_et_diag.add_paragraph(
-        "Methods: Cohort retention flow was evaluated. Etiology workup of acute abdominal pain across 300 patients; odds ratio was 1.25."
-    )
-    audit_et_diag = verify_report_integrity(doc_et_diag)
-    assert audit_et_diag.has_causal_caveat is True
-    assert audit_et_diag.passed is True
-
-    # 4. Thread 2: Both type 2 etiology workup and type 2 etiologic workup require caveat
-    for t2_design in ["type 2 etiology workup", "type 2 etiologic workup"]:
-        doc_t2 = ReportDocument(
-            title="Type 2 Etiology Workup",
-            results_dict={"sample_size": 500, "odds_ratio": 1.35},
-            study_design=t2_design,
+    if not case.expected_caveat:
+        assert any("unmeasured confounding" in w.lower() for w in audit.warnings), (
+            f"Case '{case.id}' expected missing confounding caveat warning, got {audit.warnings}"
         )
-        doc_t2.add_paragraph(
-            f"Methods: {t2_design.capitalize()} was performed across 500 patients; odds ratio was 1.35."
+
+    if case.expected_passed is not None:
+        assert audit.passed is case.expected_passed, (
+            f"Case '{case.id}' expected passed={case.expected_passed}, got {audit.passed} (warnings={audit.warnings}, untraced={audit.untraced_numbers})"
         )
-        audit_t2 = verify_report_integrity(doc_t2)
-        assert audit_t2.has_causal_caveat is False, (
-            f"Design '{t2_design}' must require confounding caveat"
-        )
-        assert audit_t2.passed is False
-
-    # 5. Thread 2 prompt: Etiologic workup of type 2 diabetes is exempt when non-causal
-    doc_t2d = ReportDocument(
-        title="Etiologic Workup of Type 2 Diabetes",
-        results_dict={"sample_size": 450, "odds_ratio": 1.20},
-        study_design="etiologic workup of type 2 diabetes",
-    )
-    doc_t2d.add_paragraph(
-        "Methods: Cohort retention flow was analyzed. Diagnostic evaluation of etiologic workup of type 2 diabetes in 450 patients; odds ratio was 1.20."
-    )
-    audit_t2d = verify_report_integrity(doc_t2d, allowed_untraced={2})
-    assert audit_t2d.has_causal_caveat is True
-    assert audit_t2d.passed is True
-
-    # 6. Thread 7: Diagnostic accuracy of type 2 etiologic workup is exempt when non-causal
-    doc_t2_diag = ReportDocument(
-        title="Diagnostic Accuracy of Type 2 Etiologic Workup",
-        results_dict={"sample_size": 350, "odds_ratio": 1.25},
-        study_design="diagnostic accuracy of type 2 etiologic work-up",
-    )
-    doc_t2_diag.add_paragraph(
-        "Methods: Cohort retention flow was analyzed. Diagnostic accuracy of type 2 etiologic work-up across 350 patients; odds ratio was 1.25."
-    )
-    audit_t2_diag = verify_report_integrity(doc_t2_diag, allowed_untraced={2})
-    assert audit_t2_diag.has_causal_caveat is True
-    assert audit_t2_diag.passed is True
-
-    # 7. Thread 8: Prediction model for etiologic stroke subtype is exempt when non-causal
-    doc_et_pred = ReportDocument(
-        title="Prediction Model for Etiologic Stroke Subtype",
-        results_dict={"sample_size": 600, "odds_ratio": 1.30},
-        study_design="prediction model for etiologic stroke subtype",
-    )
-    doc_et_pred.add_paragraph(
-        "Methods: A clinical risk prediction model for etiologic stroke subtype following TRIPOD guidelines in 600 patients; odds ratio was 1.30."
-    )
-    audit_et_pred = verify_report_integrity(doc_et_pred)
-    assert audit_et_pred.has_causal_caveat is True
-    assert audit_et_pred.passed is True
-
-    # 8. Thread 3: Non-observational prediction simulation is exempt when non-causal
-    doc_non_obs = ReportDocument(
-        title="Non-Observational Prediction Simulation",
-        results_dict={"sample_size": 1000, "odds_ratio": 1.15},
-        study_design="non-observational prediction simulation",
-    )
-    doc_non_obs.add_paragraph(
-        "Methods: Non-observational prediction simulation study of 1000 synthetic patient cohorts; odds ratio was 1.15."
-    )
-    audit_non_obs = verify_report_integrity(doc_non_obs)
-    assert audit_non_obs.has_causal_caveat is True
-    assert audit_non_obs.passed is True
-
-    # 9. Thread 5: Risk-score matched study requires caveat, genuine risk score prediction is exempt
-    doc_drs_match = ReportDocument(
-        title="Disease Risk Score Matched Study",
-        results_dict={"sample_size": 800, "odds_ratio": 1.40},
-        study_design="disease risk score matched study",
-    )
-    doc_drs_match.add_paragraph(
-        "Methods: Disease risk score matched study evaluating treatment across 800 patients; odds ratio was 1.40."
-    )
-    audit_drs_match = verify_report_integrity(doc_drs_match)
-    assert audit_drs_match.has_causal_caveat is False, (
-        "Disease risk score matched study must require confounding caveat"
-    )
-    assert audit_drs_match.passed is False
-
-    doc_drs_pred = ReportDocument(
-        title="Framingham Risk Score Validation",
-        results_dict={"sample_size": 800, "odds_ratio": 1.40},
-        study_design="framingham risk score validation",
-    )
-    doc_drs_pred.add_paragraph(
-        "Methods: Framingham risk score validation study following TRIPOD guidelines across 800 patients; odds ratio was 1.40."
-    )
-    audit_drs_pred = verify_report_integrity(doc_drs_pred)
-    assert audit_drs_pred.has_causal_caveat is True
-    assert audit_drs_pred.passed is True

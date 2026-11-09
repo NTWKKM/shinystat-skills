@@ -1777,13 +1777,21 @@ def verify_standalone_integrity(
     )
     # Explicit observational keywords in clean_design
     # Negated observational labels (e.g. "non_observational", "nonobservational") do not trigger confounding caveats.
+    # Distinguish matched randomized trials from observational matching.
     is_negated_observational = bool(
         re.search(r"(?:^|_)non_?observational(?:_|$)", clean_design)
+    )
+    is_matched_observational = bool(
+        ("matched" in clean_design or "matching" in clean_design)
+        and not any(
+            t in clean_design for t in ["randomized", "randomised", "rct"]
+        )
     )
     has_explicit_observational = bool(
         clean_design
         and (
             ("observational" in clean_design and not is_negated_observational)
+            or is_matched_observational
             or any(
                 obs in clean_design
                 for obs in [
@@ -1799,11 +1807,13 @@ def verify_standalone_integrity(
                     "quasiexperimental",
                     "quasi_experiment",
                     "quasiexperiment",
+                    "non_experimental",
+                    "nonexperimental",
+                    "natural_experiment",
+                    "single_arm",
                     "target_trial",
                     "trial_emulation",
                     "emulated_trial",
-                    "matched",
-                    "matching",
                 ]
             )
         )
@@ -1861,6 +1871,8 @@ def verify_standalone_integrity(
 
     # Etiologic prediction targets (e.g. "prediction model for etiologic stroke subtype")
     # predict an etiologic category/subtype rather than evaluating etiologic effects.
+    # Restrict to designs predicting an etiologic category or subtype; do not exempt
+    # etiologic studies merely because they mention predictive risk factors.
     is_etiologic_prediction_target = bool(
         clean_design
         and any(et in clean_design for et in ["etiologic", "etiological", "etiology"])
@@ -1873,6 +1885,17 @@ def verify_standalone_integrity(
                 "risk_model",
                 "risk_prediction",
                 "tripod",
+            ]
+        )
+        and any(
+            target in clean_design
+            for target in [
+                "subtype",
+                "subtypes",
+                "classification",
+                "category",
+                "categories",
+                "diagnosis",
             ]
         )
         and not has_explicit_observational
