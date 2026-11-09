@@ -1647,11 +1647,18 @@ def test_integrity_explicit_prognostic_design_metadata():
 def test_integrity_observational_cohort_of_trial_participants_requires_caveat():
     """
     Verifies that explicitly observational designs containing trial keywords
-    (such as 'observational_cohort_of_trial_participants') trigger the confounding caveat requirement,
+    (such as 'observational_cohort_of_trial_participants', 'cohort_from_trial', 'trial_cohort',
+    or ambiguous labels like 'randomized_trial_cohort') trigger the confounding caveat requirement,
     while genuine randomized trials remain exempt.
     """
-    # Explicit observational trial cohorts must trigger caveat even with descriptive results
+    # Non-randomized cohorts drawn from trials and ambiguous labels must trigger caveat even with descriptive results
     for design in [
+        "cohort_from_trial",
+        "trial_cohort",
+        "cohort_of_trial_participants",
+        "cohort_from_randomized_trial",
+        "randomized_trial_cohort",
+        "non_randomized_trial",
         "observational_cohort_of_trial_participants",
         "observational_study_of_trial_data",
         "observational_trial_followup",
@@ -1662,27 +1669,33 @@ def test_integrity_observational_cohort_of_trial_participants_requires_caveat():
             study_design=design,
         )
         doc_obs.add_paragraph(
-            "Methods: Secondary observational follow-up of 400 participants."
+            "Methods: Follow-up evaluation of 400 participants in cohort."
         )
         audit_obs = verify_report_integrity(doc_obs)
         assert audit_obs.has_causal_caveat is False, (
-            f"Explicit observational trial design '{design}' must require confounding caveat"
+            f"Cohort-from-trial design '{design}' must require confounding caveat"
         )
         assert any("unmeasured confounding" in w.lower() for w in audit_obs.warnings)
 
     # Genuine randomized trials with descriptive results remain exempt
-    doc_rct = ReportDocument(
-        title="Randomized Trial Evaluation",
-        results_dict={"sample_size": 400},
-        study_design="prospective_randomized_trial",
-    )
-    doc_rct.add_paragraph(
-        "Methods: Baseline evaluation of 400 randomized participants."
-    )
-    audit_rct = verify_report_integrity(doc_rct)
-    assert audit_rct.has_causal_caveat is True, (
-        "Genuine randomized trial must remain exempt from observational confounding caveat"
-    )
+    for rct_design in [
+        "prospective_randomized_trial",
+        "randomized_controlled_trial",
+        "prospective_rct",
+        "clinical_trial",
+    ]:
+        doc_rct = ReportDocument(
+            title="Randomized Trial Evaluation",
+            results_dict={"sample_size": 400},
+            study_design=rct_design,
+        )
+        doc_rct.add_paragraph(
+            "Methods: Baseline evaluation of 400 randomized participants."
+        )
+        audit_rct = verify_report_integrity(doc_rct)
+        assert audit_rct.has_causal_caveat is True, (
+            f"Genuine randomized trial '{rct_design}' must remain exempt from observational confounding caveat"
+        )
 
 
 def test_integrity_efficacy_claims_outside_fixed_outcome_list():

@@ -760,27 +760,27 @@ def verify_report_integrity(
     clean_design = (
         re.sub(r"[\s\-]+", "_", str(resolved_design).lower()) if resolved_design else ""
     )
-    is_explicit_observational = bool(
+    has_observational_keyword = bool(
         clean_design
         and any(
-            obs_type in clean_design
-            for obs_type in [
+            obs in clean_design
+            for obs in [
                 "observational",
+                "cohort",
                 "case_control",
                 "cross_sectional",
                 "case_referent",
+                "non_randomized",
+                "nonrandomized",
             ]
         )
     )
     is_trial = bool(
         clean_design
         and any(t in clean_design for t in ["randomized", "rct", "trial", "experiment"])
-        and not is_explicit_observational
+        and not has_observational_keyword
     )
-    is_observational = bool(
-        clean_design
-        and (is_explicit_observational or (not is_trial and "cohort" in clean_design))
-    )
+    is_observational = bool(clean_design and has_observational_keyword and not is_trial)
     is_confirmed_prediction = bool(
         clean_design
         and any(
