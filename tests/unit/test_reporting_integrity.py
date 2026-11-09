@@ -1642,3 +1642,91 @@ def test_integrity_explicit_prognostic_design_metadata():
     audit = verify_report_integrity(doc)
     assert audit.has_causal_caveat is True
     assert not any("unmeasured confounding" in w.lower() for w in audit.warnings)
+
+
+def test_integrity_observational_cohort_of_trial_participants_requires_caveat():
+    """
+    Verifies that explicitly observational designs containing trial keywords
+    (such as 'observational_cohort_of_trial_participants') trigger the confounding caveat requirement,
+    while genuine randomized trials remain exempt.
+    """
+    # Explicit observational trial cohorts must trigger caveat even with descriptive results
+    for design in [
+        "observational_cohort_of_trial_participants",
+        "observational_study_of_trial_data",
+        "observational_trial_followup",
+    ]:
+        doc_obs = ReportDocument(
+            title="Trial Follow-Up Cohort Analysis",
+            results_dict={"sample_size": 400},
+            study_design=design,
+        )
+        doc_obs.add_paragraph(
+            "Methods: Secondary observational follow-up of 400 participants."
+        )
+        audit_obs = verify_report_integrity(doc_obs)
+        assert audit_obs.has_causal_caveat is False, (
+            f"Explicit observational trial design '{design}' must require confounding caveat"
+        )
+        assert any("unmeasured confounding" in w.lower() for w in audit_obs.warnings)
+
+    # Genuine randomized trials with descriptive results remain exempt
+    doc_rct = ReportDocument(
+        title="Randomized Trial Evaluation",
+        results_dict={"sample_size": 400},
+        study_design="prospective_randomized_trial",
+    )
+    doc_rct.add_paragraph(
+        "Methods: Baseline evaluation of 400 randomized participants."
+    )
+    audit_rct = verify_report_integrity(doc_rct)
+    assert audit_rct.has_causal_caveat is True, (
+        "Genuine randomized trial must remain exempt from observational confounding caveat"
+    )
+
+
+def test_integrity_efficacy_claims_outside_fixed_outcome_list():
+    """
+    Verifies that efficacy claims specifying outcomes outside the fixed clinical outcomes list
+    (e.g. 'Statin lowered LDL', 'Drug X reduced hospitalization') trigger the confounding caveat,
+    while model-performance statements (e.g. 'AUROC increased from 0.71 to 0.75') remain exempt.
+    """
+    # 1. Efficacy claims with unlisted outcomes in prediction reports
+    unlisted_claims = [
+        "Statin lowered LDL in secondary analysis with odds ratio 1.25 in 500 patients.",
+        "Drug X reduced hospitalization in this cohort with odds ratio 1.25 in 500 patients.",
+        "Apixaban had no effect on hospitalization in this cohort with odds ratio 1.0 in 500 patients.",
+        "Statin had no effect on LDL in this cohort with odds ratio 1.0 in 500 patients.",
+    ]
+    for claim in unlisted_claims:
+        doc_claim = ReportDocument(
+            title="Cardiovascular Risk Prediction",
+            results_dict={"odds_ratio": 1.25, "sample_size": 500},
+        )
+        doc_claim.add_paragraph(
+            f"A clinical prediction risk score was developed under TRIPOD. {claim}"
+        )
+        audit_claim = verify_report_integrity(doc_claim, study_design="prediction")
+        assert audit_claim.has_causal_caveat is False, (
+            f"Claim '{claim}' must trigger causal check and require caveat"
+        )
+        assert any("unmeasured confounding" in w.lower() for w in audit_claim.warnings)
+
+    # 2. Model performance statements with metrics should remain exempt
+    model_perf_statements = [
+        "The c-statistic increased from 0.71 to 0.75 across 500 patients.",
+        "Brier score decreased from 0.15 to 0.12 across 500 patients.",
+        "AUROC increased by 0.04 after inclusion of the clinical predictor.",
+    ]
+    for stmt in model_perf_statements:
+        doc_perf = ReportDocument(
+            title="Model Metric Validation",
+            results_dict={"odds_ratio": 1.25, "sample_size": 500},
+        )
+        doc_perf.add_paragraph(
+            f"A clinical risk prediction model was developed following TRIPOD guidelines. {stmt}"
+        )
+        audit_perf = verify_report_integrity(doc_perf, study_design="prediction")
+        assert audit_perf.has_causal_caveat is True, (
+            f"Statement '{stmt}' must not trigger causal claim detection"
+        )

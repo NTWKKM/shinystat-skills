@@ -710,9 +710,20 @@ def verify_report_integrity(
         r"patients?|participants?|subjects?|individuals?|persons?|"
         r"cohort|group|subgroup|population|those|men|women|children|adults?"
     )
-    _non_interventions = (
-        rf"{_patient_terms}|with|experiencing|showing|having|exhibiting"
+    _model_terms = (
+        r"model|score|index|statistic|c[- ]statistic|c[- ]index|auroc|roc|brier|fit|"
+        r"variable|predictor|covariate|feature|sample|parameter|estimate|ratio|"
+        r"coefficient|prevalence|incidence|rate|frequency|proportion"
     )
+    _non_interventions = (
+        rf"{_patient_terms}|{_model_terms}|with|experiencing|showing|having|exhibiting"
+    )
+    _model_performance_terms = (
+        r"model|discrimination|calibration|performance|accuracy|c[- ]statistic|"
+        r"c[- ]index|auroc|roc|brier|fit|prediction\s+intervals?|interval\s+width|"
+        r"loss|residuals?|overfitting|concordance|sample\s+size|predicted\s+probability"
+    )
+    _prepositions = r"from|by|to|with|in|at|for|on|during|between|into|through|over|under|after|before"
 
     has_causal_claims = (
         bool(
@@ -723,15 +734,19 @@ def verify_report_integrity(
         )
         or bool(
             re.search(
-                rf"\b(?!(?:{_non_interventions})\b)([a-zA-Z_-]+(?:\s+[a-zA-Z_-]+)?)\s+{_aux}{_verbs}\s+{_clinical_outcomes}\b",
+                rf"\b(?!(?:{_non_interventions})\b)([a-zA-Z_-]+(?:\s+[a-zA-Z_-]+)?)\s+{_aux}{_verbs}\s+"
+                rf"(?:(?:the|a|an)\s+)?(?:(?:risk|rate|incidence|odds|hazard|probability)\s+of\s+)?"
+                rf"(?!(?:{_model_performance_terms}|{_prepositions})\b)[a-zA-Z0-9_-]+",
                 text_clean_claims,
             )
         )
         or bool(
             re.search(
-                rf"\b(?!(?:model|score|index|statistic|variable|predictor|sample)\b)([a-zA-Z_-]+(?:\s+[a-zA-Z_-]+)?)\s+"
+                rf"\b(?!(?:{_non_interventions})\b)([a-zA-Z_-]+(?:\s+[a-zA-Z_-]+)?)\s+"
                 rf"(?:(?:has|had|have|shows?|showed|demonstrates?|demonstrated)\s+)?"
-                rf"no\s+(?:statistically\s+significant\s+)?(?:treatment\s+)?effect\s+on\s+{_clinical_outcomes}\b",
+                rf"no\s+(?:statistically\s+significant\s+)?(?:treatment\s+)?effect\s+on\s+"
+                rf"(?:(?:the|a|an)\s+)?(?:(?:risk|rate|incidence|odds|hazard|probability)\s+of\s+)?"
+                rf"(?!(?:{_model_performance_terms}|{_prepositions})\b)[a-zA-Z0-9_-]+",
                 text_clean_claims,
             )
         )
@@ -745,23 +760,26 @@ def verify_report_integrity(
     clean_design = (
         re.sub(r"[\s\-]+", "_", str(resolved_design).lower()) if resolved_design else ""
     )
-    is_trial = bool(
+    is_explicit_observational = bool(
         clean_design
-        and any(t in clean_design for t in ["randomized", "rct", "trial", "experiment"])
-    )
-    is_observational = bool(
-        clean_design
-        and not is_trial
         and any(
             obs_type in clean_design
             for obs_type in [
                 "observational",
-                "cohort",
                 "case_control",
                 "cross_sectional",
                 "case_referent",
             ]
         )
+    )
+    is_trial = bool(
+        clean_design
+        and any(t in clean_design for t in ["randomized", "rct", "trial", "experiment"])
+        and not is_explicit_observational
+    )
+    is_observational = bool(
+        clean_design
+        and (is_explicit_observational or (not is_trial and "cohort" in clean_design))
     )
     is_confirmed_prediction = bool(
         clean_design
