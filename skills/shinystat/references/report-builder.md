@@ -1674,9 +1674,10 @@ def verify_standalone_integrity(
         " ",
         text_clean_claims,
     )
-    # Diagnostic targets / etiologic work-up descriptions are diagnostic evaluation targets, not causal claims.
+    # Diagnostic / prediction targets (e.g. etiologic work-up, etiologic stroke subtype) are evaluation targets, not causal claims.
+    # Restrict substitution to diagnostic work-up and subtype classification targets; retain etiologic research / risk-factor investigations.
     text_clean_claims = re.sub(
-        r"\betiologic(?:al)?\s+(?:work[- ]?up|workup|evaluation|testing|tests?|investigation)\b",
+        r"\betiolog(?:ic(?:al)?|y)\s+(?:work[- ]?up|workup|evaluation|testing|tests?|(?:[a-zA-Z_-]+\s+)?subtypes?|classification|categories|category|diagnosis)\b",
         "diagnostic workup",
         text_clean_claims,
     )
@@ -1774,49 +1775,18 @@ def verify_standalone_integrity(
         if resolved_design
         else ""
     )
-    is_etiologic_diagnostic_target = bool(
+    # Explicit observational keywords in clean_design
+    # Negated observational labels (e.g. "non_observational", "nonobservational") do not trigger confounding caveats.
+    is_negated_observational = bool(
+        re.search(r"(?:^|_)non_?observational(?:_|$)", clean_design)
+    )
+    has_explicit_observational = bool(
         clean_design
         and (
-            any(term in clean_design for term in ["work_up", "workup"])
-            or any(
-                diag in clean_design
-                for diag in [
-                    "diagnostic_accuracy",
-                    "diagnostic_performance",
-                    "diagnostic_evaluation",
-                    "diagnostic_study",
-                    "diagnostic_test",
-                ]
-            )
-        )
-        and not any(
-            obs in clean_design
-            for obs in [
-                "cohort",
-                "case_control",
-                "cross_sectional",
-                "case_referent",
-            ]
-        )
-        and not ("type_2" in clean_design and "etiologic" in clean_design)
-    )
-    is_type_2_etiologic = bool(
-        clean_design
-        and "type_2" in clean_design
-        and any(et in clean_design for et in ["etiologic", "etiological", "etiology"])
-    )
-    has_observational_keyword = bool(
-        clean_design
-        and (
-            is_type_2_etiologic
-            or (
-                any(et in clean_design for et in ["etiologic", "etiological", "etiology"])
-                and not is_etiologic_diagnostic_target
-            )
+            ("observational" in clean_design and not is_negated_observational)
             or any(
                 obs in clean_design
                 for obs in [
-                    "observational",
                     "cohort",
                     "case_control",
                     "cross_sectional",
@@ -1832,8 +1802,95 @@ def verify_standalone_integrity(
                     "target_trial",
                     "trial_emulation",
                     "emulated_trial",
+                    "matched",
+                    "matching",
                 ]
             )
+        )
+    )
+
+    # Type 2 study archetype matching:
+    # Exclude disease entities (e.g. "type 2 diabetes", "type 2 MI") and diagnostic accuracy / evaluation targets
+    # from the Type 2 etiologic effect path, preserving genuine Type 2 etiologic studies.
+    is_type_2_archetype = bool(
+        clean_design
+        and "type_2" in clean_design
+        and not bool(
+            re.search(
+                r"(?:^|_)type_2_(?:diabetes|dm|diabetic|myocardial|mi|bipolar)(?:_|$)",
+                clean_design,
+            )
+        )
+    )
+    is_type_2_etiologic = bool(
+        is_type_2_archetype
+        and any(et in clean_design for et in ["etiologic", "etiological", "etiology"])
+        and not any(
+            diag in clean_design
+            for diag in [
+                "diagnostic_accuracy",
+                "diagnostic_performance",
+                "diagnostic_evaluation",
+                "diagnostic_study",
+                "diagnostic_test",
+            ]
+        )
+    )
+
+    # Diagnostic target / workup exemption:
+    # Explicit observational keywords take precedence over the exemption (e.g. "non-randomized diagnostic test").
+    # Type 2 etiology workups consistently require confounding caveats.
+    is_etiologic_diagnostic_target = bool(
+        clean_design
+        and (
+            any(term in clean_design for term in ["work_up", "workup"])
+            or any(
+                diag in clean_design
+                for diag in [
+                    "diagnostic_accuracy",
+                    "diagnostic_performance",
+                    "diagnostic_evaluation",
+                    "diagnostic_study",
+                    "diagnostic_test",
+                ]
+            )
+        )
+        and not has_explicit_observational
+        and not is_type_2_etiologic
+    )
+
+    # Etiologic prediction targets (e.g. "prediction model for etiologic stroke subtype")
+    # predict an etiologic category/subtype rather than evaluating etiologic effects.
+    is_etiologic_prediction_target = bool(
+        clean_design
+        and any(et in clean_design for et in ["etiologic", "etiological", "etiology"])
+        and any(
+            pred in clean_design
+            for pred in [
+                "prediction",
+                "predictive",
+                "prognostic",
+                "risk_model",
+                "risk_prediction",
+                "tripod",
+            ]
+        )
+        and not has_explicit_observational
+    )
+
+    has_observational_keyword = bool(
+        clean_design
+        and (
+            is_type_2_etiologic
+            or (
+                any(
+                    et in clean_design
+                    for et in ["etiologic", "etiological", "etiology"]
+                )
+                and not is_etiologic_diagnostic_target
+                and not is_etiologic_prediction_target
+            )
+            or has_explicit_observational
         )
     )
     is_trial = bool(
@@ -1867,6 +1924,10 @@ def verify_standalone_integrity(
                 "work_up",
                 "workup",
             ]
+        )
+        and not (
+            "risk_score" in clean_design
+            and any(m in clean_design for m in ["match", "matched", "matching"])
         )
     ) or (
         not clean_design

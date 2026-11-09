@@ -2477,6 +2477,101 @@ def test_cloud_standalone_type_2_diabetes_and_diagnostic_workup_exempt(
         assert res_causal["passed"] is False
 
 
+def test_cloud_standalone_coderabbit_round_10_regression_suite(
+    ensure_packaged_cloud_skill,
+):
+    """
+    Verifies that verify_standalone_integrity matches verify_report_integrity
+    across all CodeRabbit round 10 review findings.
+    """
+    ns = _extract_report_builder_namespace()
+    verify_standalone = ns["verify_standalone_integrity"]
+
+    # 1. Non-randomized diagnostic test requires caveat even with neutral narrative & adjusted odds ratio
+    res_nrd = verify_standalone(
+        narrative_text="Methods: Non-randomized diagnostic test across 400 patients; adjusted odds ratio was 1.45.",
+        results_dict={"sample_size": 400, "odds_ratio": 1.45},
+        study_design="non-randomized diagnostic test",
+    )
+    assert res_nrd["has_causal_caveat"] is False
+    assert res_nrd["passed"] is False
+
+    # 2. Etiologic investigation research claim triggers causal caveat check
+    res_et_claim = verify_standalone(
+        narrative_text="Methods: Clinical risk prediction model. An etiologic investigation of smoking as a lung-cancer risk factor was evaluated across 500 patients; odds ratio was 1.25.",
+        results_dict={"sample_size": 500, "odds_ratio": 1.25},
+        study_design="risk prediction model",
+    )
+    assert res_et_claim["has_causal_caveat"] is False
+    assert res_et_claim["passed"] is False
+
+    # 3. Both type 2 etiology workup and type 2 etiologic workup require caveat
+    for t2_design in ["type 2 etiology workup", "type 2 etiologic workup"]:
+        res_t2 = verify_standalone(
+            narrative_text=f"Methods: {t2_design.capitalize()} was performed across 500 patients; odds ratio was 1.35.",
+            results_dict={"sample_size": 500, "odds_ratio": 1.35},
+            study_design=t2_design,
+        )
+        assert res_t2["has_causal_caveat"] is False, (
+            f"Standalone '{t2_design}' must require caveat"
+        )
+        assert res_t2["passed"] is False
+
+    # 4. Etiologic workup of type 2 diabetes is exempt when non-causal
+    res_t2d = verify_standalone(
+        narrative_text="Methods: Diagnostic evaluation of etiologic workup of type 2 diabetes in 450 patients; odds ratio was 1.20.",
+        results_dict={"sample_size": 450, "odds_ratio": 1.20},
+        study_design="etiologic workup of type 2 diabetes",
+        allowed_untraced={2},
+    )
+    assert res_t2d["has_causal_caveat"] is True
+    assert res_t2d["passed"] is True
+
+    # 5. Diagnostic accuracy of type 2 etiologic workup is exempt when non-causal
+    res_t2_diag = verify_standalone(
+        narrative_text="Methods: Diagnostic accuracy of type 2 etiologic work-up across 350 patients; odds ratio was 1.25.",
+        results_dict={"sample_size": 350, "odds_ratio": 1.25},
+        study_design="diagnostic accuracy of type 2 etiologic work-up",
+        allowed_untraced={2},
+    )
+    assert res_t2_diag["has_causal_caveat"] is True
+    assert res_t2_diag["passed"] is True
+
+    # 6. Prediction model for etiologic stroke subtype is exempt when non-causal
+    res_et_pred = verify_standalone(
+        narrative_text="Methods: A clinical risk prediction model for etiologic stroke subtype following TRIPOD guidelines in 600 patients; odds ratio was 1.30.",
+        results_dict={"sample_size": 600, "odds_ratio": 1.30},
+        study_design="prediction model for etiologic stroke subtype",
+    )
+    assert res_et_pred["has_causal_caveat"] is True
+    assert res_et_pred["passed"] is True
+
+    # 7. Non-observational prediction simulation is exempt when non-causal
+    res_non_obs = verify_standalone(
+        narrative_text="Methods: Non-observational prediction simulation study of 1000 synthetic patient cohorts; odds ratio was 1.15.",
+        results_dict={"sample_size": 1000, "odds_ratio": 1.15},
+        study_design="non-observational prediction simulation",
+    )
+    assert res_non_obs["has_causal_caveat"] is True
+    assert res_non_obs["passed"] is True
+
+    # 8. Risk-score matched study requires caveat, genuine risk score prediction is exempt
+    res_drs_match = verify_standalone(
+        narrative_text="Methods: Disease risk score matched study evaluating treatment across 800 patients; odds ratio was 1.40.",
+        results_dict={"sample_size": 800, "odds_ratio": 1.40},
+        study_design="disease risk score matched study",
+    )
+    assert res_drs_match["has_causal_caveat"] is False
+
+    res_drs_pred = verify_standalone(
+        narrative_text="Methods: Framingham risk score validation study following TRIPOD guidelines across 800 patients; odds ratio was 1.40.",
+        results_dict={"sample_size": 800, "odds_ratio": 1.40},
+        study_design="framingham risk score validation",
+    )
+    assert res_drs_pred["has_causal_caveat"] is True
+    assert res_drs_pred["passed"] is True
+
+
 def test_cloud_verify_standalone_integrity_mutations(ensure_packaged_cloud_skill):
     """
     Task 2b: Asserts that unmodified BASE_NARRATIVE passes both implementations,
