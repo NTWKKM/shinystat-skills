@@ -2295,6 +2295,9 @@ def test_cloud_standalone_case_control_study_design_requires_caveat(
         "case\u2013control",  # en-dash
         "case\u2014control",  # em-dash
         "case\u2013control predictive",
+        "case/control",
+        "case/control predictive study",
+        "case/control study",
     ]:
         res = verify_standalone(
             narrative_text="In this analysis, calibration and discrimination were evaluated; odds ratio 1.75 across 300 patients.",
@@ -2379,6 +2382,50 @@ def test_cloud_standalone_british_spelling_and_quasi_experimental_require_caveat
         )
         assert rct_res["has_causal_caveat"] is True
         assert rct_res["passed"] is True
+
+
+def test_cloud_standalone_target_trial_and_type_2_etiologic_require_caveat(
+    ensure_packaged_cloud_skill,
+):
+    """
+    Verifies that verify_standalone_integrity classifies target trial emulation and
+    Type 2: Etiologic Multivariable designs as observational, requiring a confounding
+    caveat even with neutral results and narrative.
+    """
+    ns = _extract_report_builder_namespace()
+    verify_standalone = ns["verify_standalone_integrity"]
+
+    for design in [
+        "target trial emulation",
+        "target-trial emulation",
+        "target trial",
+        "Type 2: Etiologic Multivariable",
+        "type_2:_etiologic_multivariable",
+        "Type 2: Etiologic",
+        "etiologic multivariable",
+    ]:
+        # 1. Neutral inputs without caveat -> must fail
+        neutral_fail = verify_standalone(
+            narrative_text="Methods: Evaluation across 300 participants.",
+            results_dict={"sample_size": 300},
+            study_design=design,
+        )
+        assert neutral_fail["has_causal_caveat"] is False, (
+            f"Standalone check for design '{design}' must require caveat"
+        )
+        assert neutral_fail["passed"] is False
+
+        # 2. With caveat -> must pass
+        neutral_pass = verify_standalone(
+            narrative_text=(
+                "Methods: Evaluation across 300 participants. "
+                "Residual confounding cannot be ruled out in this observational assessment."
+            ),
+            results_dict={"sample_size": 300},
+            study_design=design,
+        )
+        assert neutral_pass["has_causal_caveat"] is True
+        assert neutral_pass["passed"] is True
 
 
 def test_cloud_verify_standalone_integrity_mutations(ensure_packaged_cloud_skill):

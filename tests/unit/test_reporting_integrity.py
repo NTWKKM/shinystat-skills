@@ -1858,3 +1858,125 @@ def test_integrity_quasi_experimental_design_requires_caveat():
         audit_rct = verify_report_integrity(doc_rct)
         assert audit_rct.has_causal_caveat is True
         assert audit_rct.passed is True
+
+
+def test_integrity_slash_in_study_design_labels():
+    """
+    Verifies that slashes in study-design labels (e.g. 'case/control', 'case/control predictive study')
+    are normalized to underscores, recognizing them as observational even with neutral narrative/results,
+    flagging missing confounding caveats.
+    """
+    for design in [
+        "case/control",
+        "case/control predictive study",
+        "case/control study",
+    ]:
+        # 1. Neutral narrative and results without caveat -> must fail
+        doc = ReportDocument(
+            title="Case/Control Analysis",
+            results_dict={"sample_size": 250},
+            study_design=design,
+        )
+        doc.add_paragraph("Methods: Analysis across 250 patients.")
+        audit = verify_report_integrity(doc)
+        assert audit.has_causal_caveat is False, (
+            f"Slash-normalized design '{design}' must require confounding caveat"
+        )
+        assert audit.passed is False
+        assert any("unmeasured confounding" in w.lower() for w in audit.warnings)
+
+        # 2. With caveat -> must pass
+        doc_with = ReportDocument(
+            title="Case/Control Analysis",
+            results_dict={"sample_size": 250},
+            study_design=design,
+        )
+        doc_with.add_paragraph(
+            "Methods: Analysis across 250 patients. "
+            "Residual confounding cannot be ruled out in this observational assessment."
+        )
+        audit_with = verify_report_integrity(doc_with)
+        assert audit_with.has_causal_caveat is True
+        assert audit_with.passed is True
+
+
+def test_integrity_target_trial_emulation_requires_caveat():
+    """
+    Verifies that target trial emulation designs are classified as observational rather than trials,
+    requiring a confounding caveat even when results and narrative contain no causal signals.
+    """
+    for design in [
+        "target trial emulation",
+        "target-trial emulation",
+        "target trial",
+        "trial emulation",
+        "emulated_trial",
+    ]:
+        # 1. Neutral narrative and results without caveat -> must fail
+        doc = ReportDocument(
+            title="Target Trial Emulation Study",
+            results_dict={"sample_size": 300},
+            study_design=design,
+        )
+        doc.add_paragraph("Methods: Baseline evaluation across 300 participants.")
+        audit = verify_report_integrity(doc)
+        assert audit.has_causal_caveat is False, (
+            f"Target trial emulation design '{design}' must require confounding caveat"
+        )
+        assert audit.passed is False
+        assert any("unmeasured confounding" in w.lower() for w in audit.warnings)
+
+        # 2. With caveat -> must pass
+        doc_with = ReportDocument(
+            title="Target Trial Emulation Study",
+            results_dict={"sample_size": 300},
+            study_design=design,
+        )
+        doc_with.add_paragraph(
+            "Methods: Baseline evaluation across 300 participants. "
+            "Residual confounding cannot be ruled out in this observational assessment."
+        )
+        audit_with = verify_report_integrity(doc_with)
+        assert audit_with.has_causal_caveat is True
+        assert audit_with.passed is True
+
+
+def test_integrity_type_2_etiologic_multivariable_requires_caveat():
+    """
+    Verifies that Type 2: Etiologic Multivariable study archetype is recognized as observational,
+    requiring a confounding caveat even when narrative and results have no causal signals.
+    """
+    for design in [
+        "Type 2: Etiologic Multivariable",
+        "type_2:_etiologic_multivariable",
+        "Type 2: Etiologic",
+        "etiologic multivariable",
+        "etiologic",
+    ]:
+        # 1. Neutral input without caveat -> must fail
+        doc = ReportDocument(
+            title="Etiologic Multivariable Analysis",
+            results_dict={"sample_size": 200},
+            study_design=design,
+        )
+        doc.add_paragraph("Methods: Multivariable evaluation across 200 participants.")
+        audit = verify_report_integrity(doc)
+        assert audit.has_causal_caveat is False, (
+            f"Etiologic design '{design}' must require confounding caveat"
+        )
+        assert audit.passed is False
+        assert any("unmeasured confounding" in w.lower() for w in audit.warnings)
+
+        # 2. With caveat -> must pass
+        doc_with = ReportDocument(
+            title="Etiologic Multivariable Analysis",
+            results_dict={"sample_size": 200},
+            study_design=design,
+        )
+        doc_with.add_paragraph(
+            "Methods: Multivariable evaluation across 200 participants. "
+            "Residual confounding cannot be ruled out in this observational assessment."
+        )
+        audit_with = verify_report_integrity(doc_with)
+        assert audit_with.has_causal_caveat is True
+        assert audit_with.passed is True

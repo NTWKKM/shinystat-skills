@@ -1764,7 +1764,7 @@ def verify_standalone_integrity(
         )
     )
     clean_design = (
-        re.sub(r"[\s\-\u2010-\u2015\u2212]+", "_", str(resolved_design).lower())
+        re.sub(r"[\s\/\-\u2010-\u2015\u2212]+", "_", str(resolved_design).lower())
         if resolved_design
         else ""
     )
@@ -1786,6 +1786,13 @@ def verify_standalone_integrity(
                 "quasiexperimental",
                 "quasi_experiment",
                 "quasiexperiment",
+                "target_trial",
+                "trial_emulation",
+                "emulated_trial",
+                "etiologic",
+                "etiological",
+                "etiology",
+                "type_2",
             ]
         )
     )
@@ -1797,7 +1804,10 @@ def verify_standalone_integrity(
         )
         and not has_observational_keyword
     )
-    is_observational = bool(clean_design and has_observational_keyword and not is_trial)
+    is_observational = bool(
+        clean_design == "type_2:_etiologic_multivariable"
+        or (clean_design and has_observational_keyword and not is_trial)
+    )
     is_confirmed_prediction = bool(
         clean_design
         and any(
