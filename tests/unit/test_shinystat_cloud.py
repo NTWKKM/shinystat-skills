@@ -2428,6 +2428,55 @@ def test_cloud_standalone_target_trial_and_type_2_etiologic_require_caveat(
         assert neutral_pass["passed"] is True
 
 
+def test_cloud_standalone_type_2_diabetes_and_diagnostic_workup_exempt(
+    ensure_packaged_cloud_skill,
+):
+    """
+    Verifies that verify_standalone_integrity exempts 'prediction model for type 2 diabetes'
+    and diagnostic accuracy of etiologic work-up from observational confounding caveats when non-causal.
+    """
+    ns = _extract_report_builder_namespace()
+    verify_standalone = ns["verify_standalone_integrity"]
+
+    # 1. Type 2 diabetes prediction model -> must pass without caveat
+    res_t2d = verify_standalone(
+        narrative_text="A clinical risk prediction model for type 2 diabetes was developed following TRIPOD guidelines. Analysis evaluated 500 patients; odds ratio was 1.25.",
+        results_dict={"odds_ratio": 1.25, "sample_size": 500},
+        study_design="prediction model for type 2 diabetes",
+        allowed_untraced={2},
+    )
+    assert res_t2d["has_causal_caveat"] is True
+    assert res_t2d["passed"] is True
+
+    # 2. Diagnostic accuracy study of etiologic work-up -> must pass without caveat when non-causal
+    for diag_design in [
+        "diagnostic accuracy study of etiologic work-up",
+        "diagnostic accuracy of etiologic workup",
+        "etiologic work-up",
+        "etiologic workup",
+    ]:
+        res_diag = verify_standalone(
+            narrative_text="Methods: Diagnostic accuracy study of etiologic work-up across 300 patients; odds ratio was 1.25.",
+            results_dict={"sample_size": 300, "odds_ratio": 1.25},
+            study_design=diag_design,
+        )
+        assert res_diag["has_causal_caveat"] is True, (
+            f"Standalone diagnostic design '{diag_design}' must pass without caveat when non-causal"
+        )
+        assert res_diag["passed"] is True
+
+        # When causal claims are present -> must require caveat
+        res_causal = verify_standalone(
+            narrative_text="Methods: Diagnostic accuracy study of etiologic work-up across 300 patients; odds ratio was 1.25. Etiologic work-up reduced mortality in secondary analysis.",
+            results_dict={"sample_size": 300, "odds_ratio": 1.25},
+            study_design=diag_design,
+        )
+        assert res_causal["has_causal_caveat"] is False, (
+            f"Standalone causal claim in '{diag_design}' must require caveat"
+        )
+        assert res_causal["passed"] is False
+
+
 def test_cloud_verify_standalone_integrity_mutations(ensure_packaged_cloud_skill):
     """
     Task 2b: Asserts that unmodified BASE_NARRATIVE passes both implementations,

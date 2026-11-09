@@ -1980,3 +1980,78 @@ def test_integrity_type_2_etiologic_multivariable_requires_caveat():
         audit_with = verify_report_integrity(doc_with)
         assert audit_with.has_causal_caveat is True
         assert audit_with.passed is True
+
+
+def test_integrity_prediction_model_for_type_2_diabetes_exempt():
+    """
+    Verifies that clinical descriptions containing 'type 2' such as 'prediction model for type 2 diabetes'
+    are not falsely classified as etiologic Type 2 designs, remaining exempt under prediction rules.
+    """
+    for design in [
+        "prediction model for type 2 diabetes",
+        "risk model for type 2 diabetes mellitus",
+        "prediction model for type 2 myocardial infarction",
+    ]:
+        doc = ReportDocument(
+            title="Type 2 Diabetes Prediction Model",
+            results_dict={"odds_ratio": 1.25, "sample_size": 500},
+            study_design=design,
+        )
+        doc.add_paragraph(
+            f"Methods: A clinical risk prediction model was developed following TRIPOD guidelines. {design.capitalize()} was evaluated across 500 patients; odds ratio was 1.25."
+        )
+        audit = verify_report_integrity(doc, allowed_untraced={2})
+        assert audit.has_causal_caveat is True, (
+            f"Design '{design}' must be exempt from confounding caveat as non-causal prediction"
+        )
+        assert audit.passed is True
+        assert not any("unmeasured confounding" in w.lower() for w in audit.warnings)
+
+
+def test_integrity_diagnostic_accuracy_of_etiologic_workup_exempt():
+    """
+    Verifies that diagnostic accuracy or etiologic work-up labels (e.g. 'diagnostic accuracy study of etiologic work-up',
+    'etiologic work-up') are treated as diagnostic targets, not causal study designs, passing without caveat
+    when non-causal, but requiring a caveat when causal claims are present.
+    """
+    diagnostic_designs = [
+        "diagnostic accuracy study of etiologic work-up",
+        "diagnostic accuracy of etiologic workup",
+        "etiologic work-up",
+        "etiologic workup",
+        "diagnostic performance of etiologic work-up",
+    ]
+
+    for design in diagnostic_designs:
+        # 1. Non-causal diagnostic evaluation -> must pass without caveat
+        doc = ReportDocument(
+            title="Etiologic Work-Up Diagnostic Evaluation",
+            results_dict={"sample_size": 300, "odds_ratio": 1.25},
+            study_design=design,
+        )
+        doc.add_paragraph(
+            "Methods: Diagnostic accuracy study of etiologic work-up across 300 patients; odds ratio was 1.25."
+        )
+        audit = verify_report_integrity(doc)
+        assert audit.has_causal_caveat is True, (
+            f"Diagnostic design '{design}' must pass without caveat when non-causal"
+        )
+        assert audit.passed is True
+        assert not any("unmeasured confounding" in w.lower() for w in audit.warnings)
+
+        # 2. Causal claims present -> must require caveat
+        doc_causal = ReportDocument(
+            title="Etiologic Work-Up Evaluation",
+            results_dict={"sample_size": 300, "odds_ratio": 1.25},
+            study_design=design,
+        )
+        doc_causal.add_paragraph(
+            "Methods: Etiologic work-up was evaluated across 300 patients; odds ratio was 1.25. "
+            "Etiologic work-up reduced mortality in secondary analysis."
+        )
+        audit_causal = verify_report_integrity(doc_causal)
+        assert audit_causal.has_causal_caveat is False, (
+            f"Causal claims in design '{design}' must require confounding caveat"
+        )
+        assert audit_causal.passed is False
+        assert any("unmeasured confounding" in w.lower() for w in audit_causal.warnings)

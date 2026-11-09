@@ -1674,6 +1674,12 @@ def verify_standalone_integrity(
         " ",
         text_clean_claims,
     )
+    # Diagnostic targets / etiologic work-up descriptions are diagnostic evaluation targets, not causal claims.
+    text_clean_claims = re.sub(
+        r"\betiologic(?:al)?\s+(?:work[- ]?up|workup|evaluation|testing|tests?|investigation)\b",
+        "diagnostic workup",
+        text_clean_claims,
+    )
     # Model-performance statements (e.g. effect of sample size on model discrimination or prediction interval width)
     # are descriptive of model evaluation, not clinical treatment-effect claims.
     # The negative lookahead prevents consuming clinical claims (such as aspirin on mortality) earlier in the sentence.
@@ -1768,32 +1774,66 @@ def verify_standalone_integrity(
         if resolved_design
         else ""
     )
-    has_observational_keyword = bool(
+    is_etiologic_diagnostic_target = bool(
         clean_design
-        and any(
+        and (
+            any(term in clean_design for term in ["work_up", "workup"])
+            or any(
+                diag in clean_design
+                for diag in [
+                    "diagnostic_accuracy",
+                    "diagnostic_performance",
+                    "diagnostic_evaluation",
+                    "diagnostic_study",
+                    "diagnostic_test",
+                ]
+            )
+        )
+        and not any(
             obs in clean_design
             for obs in [
-                "observational",
                 "cohort",
                 "case_control",
                 "cross_sectional",
                 "case_referent",
-                "non_randomized",
-                "nonrandomized",
-                "non_randomised",
-                "nonrandomised",
-                "quasi_experimental",
-                "quasiexperimental",
-                "quasi_experiment",
-                "quasiexperiment",
-                "target_trial",
-                "trial_emulation",
-                "emulated_trial",
-                "etiologic",
-                "etiological",
-                "etiology",
-                "type_2",
             ]
+        )
+        and not ("type_2" in clean_design and "etiologic" in clean_design)
+    )
+    is_type_2_etiologic = bool(
+        clean_design
+        and "type_2" in clean_design
+        and any(et in clean_design for et in ["etiologic", "etiological", "etiology"])
+    )
+    has_observational_keyword = bool(
+        clean_design
+        and (
+            is_type_2_etiologic
+            or (
+                any(et in clean_design for et in ["etiologic", "etiological", "etiology"])
+                and not is_etiologic_diagnostic_target
+            )
+            or any(
+                obs in clean_design
+                for obs in [
+                    "observational",
+                    "cohort",
+                    "case_control",
+                    "cross_sectional",
+                    "case_referent",
+                    "non_randomized",
+                    "nonrandomized",
+                    "non_randomised",
+                    "nonrandomised",
+                    "quasi_experimental",
+                    "quasiexperimental",
+                    "quasi_experiment",
+                    "quasiexperiment",
+                    "target_trial",
+                    "trial_emulation",
+                    "emulated_trial",
+                ]
+            )
         )
     )
     is_trial = bool(
@@ -1805,8 +1845,10 @@ def verify_standalone_integrity(
         and not has_observational_keyword
     )
     is_observational = bool(
-        clean_design == "type_2:_etiologic_multivariable"
-        or (clean_design and has_observational_keyword and not is_trial)
+        clean_design
+        and has_observational_keyword
+        and not is_trial
+        and not is_etiologic_diagnostic_target
     )
     is_confirmed_prediction = bool(
         clean_design
@@ -1819,6 +1861,11 @@ def verify_standalone_integrity(
                 "diagnostic",
                 "validation",
                 "tripod",
+                "risk_model",
+                "risk_prediction",
+                "risk_score",
+                "work_up",
+                "workup",
             ]
         )
     ) or (
