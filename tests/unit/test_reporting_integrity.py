@@ -1743,3 +1743,118 @@ def test_integrity_efficacy_claims_outside_fixed_outcome_list():
         assert audit_perf.has_causal_caveat is True, (
             f"Statement '{stmt}' must not trigger causal claim detection"
         )
+
+
+def test_integrity_non_randomised_predictive_trial_requires_caveat():
+    """
+    Verifies that British spellings ('non-randomised', 'nonrandomised') of non-randomized
+    designs are recognized as observational, requiring a confounding caveat even when
+    prediction wording is present and a treatment hazard ratio is reported.
+    """
+    for design in [
+        "non-randomised predictive trial",
+        "nonrandomised_predictive_trial",
+        "non-randomised",
+        "nonrandomised",
+    ]:
+        doc = ReportDocument(
+            title="Predictive Trial Evaluation",
+            results_dict={"hazard_ratio": 1.35, "sample_size": 350},
+            study_design=design,
+        )
+        doc.add_paragraph(
+            "A clinical risk prediction model was developed. Across 350 patients, hazard ratio was 1.35."
+        )
+        audit = verify_report_integrity(doc)
+        assert audit.has_causal_caveat is False, (
+            f"Non-randomised design '{design}' must require confounding caveat"
+        )
+        assert any("unmeasured confounding" in w.lower() for w in audit.warnings)
+
+
+def test_integrity_typographic_dashes_in_study_design():
+    """
+    Verifies that typographic dashes (en-dash, em-dash) in study design labels
+    (e.g. 'case–control predictive', 'case—control') normalize properly and
+    trigger the confounding caveat when reporting treatment odds ratio.
+    """
+    for design in [
+        "case\u2013control predictive",  # en-dash
+        "case\u2014control predictive",  # em-dash
+        "case\u2013control",
+        "case\u2014control",
+    ]:
+        doc = ReportDocument(
+            title="Case-Control Risk Assessment",
+            results_dict={"odds_ratio": 1.45, "sample_size": 300},
+            study_design=design,
+        )
+        doc.add_paragraph(
+            "Methods: In this analysis, calibration and discrimination were evaluated; odds ratio 1.45 across 300 patients."
+        )
+        audit = verify_report_integrity(doc)
+        assert audit.has_causal_caveat is False, (
+            f"Typographic dash design '{design}' must require confounding caveat"
+        )
+        assert any("unmeasured confounding" in w.lower() for w in audit.warnings)
+
+
+def test_integrity_quasi_experimental_design_requires_caveat():
+    """
+    Verifies that quasi-experimental designs are recognized as non-randomized observational designs,
+    requiring a confounding caveat even when no recognized causal/regression keys or causal claims
+    are present (neutral results), while genuine randomized trials remain exempt.
+    """
+    # 1. Quasi-experimental designs without caveat -> must fail
+    for design in [
+        "quasi_experimental",
+        "quasi-experimental",
+        "quasi experimental",
+        "quasiexperimental",
+        "quasi\u2013experimental",
+        "quasi_experiment",
+        "quasi-experiment",
+    ]:
+        doc = ReportDocument(
+            title="Policy Intervention Evaluation",
+            results_dict={"sample_size": 250},
+            study_design=design,
+        )
+        doc.add_paragraph(
+            "Methods: Evaluation of 250 participants before and after policy change."
+        )
+        audit = verify_report_integrity(doc)
+        assert audit.has_causal_caveat is False, (
+            f"Quasi-experimental design '{design}' must require confounding caveat"
+        )
+        assert any("unmeasured confounding" in w.lower() for w in audit.warnings)
+
+        # With caveat -> must pass
+        doc_with = ReportDocument(
+            title="Policy Intervention Evaluation",
+            results_dict={"sample_size": 250},
+            study_design=design,
+        )
+        doc_with.add_paragraph(
+            "Methods: Evaluation of 250 participants before and after policy change. "
+            "Residual confounding cannot be ruled out in this observational assessment."
+        )
+        audit_with = verify_report_integrity(doc_with)
+        assert audit_with.has_causal_caveat is True
+        assert audit_with.passed is True
+
+    # 2. Genuine randomized trials with neutral results remain exempt (including British spelling)
+    for rct_design in [
+        "randomized_controlled_trial",
+        "randomised_controlled_trial",
+        "clinical_trial",
+    ]:
+        doc_rct = ReportDocument(
+            title="Trial Evaluation",
+            results_dict={"sample_size": 250},
+            study_design=rct_design,
+        )
+        doc_rct.add_paragraph("Methods: Evaluation of 250 participants in trial.")
+        audit_rct = verify_report_integrity(doc_rct)
+        assert audit_rct.has_causal_caveat is True
+        assert audit_rct.passed is True

@@ -758,7 +758,9 @@ def verify_report_integrity(
         )
     )
     clean_design = (
-        re.sub(r"[\s\-]+", "_", str(resolved_design).lower()) if resolved_design else ""
+        re.sub(r"[\s\-\u2010-\u2015\u2212]+", "_", str(resolved_design).lower())
+        if resolved_design
+        else ""
     )
     has_observational_keyword = bool(
         clean_design
@@ -772,12 +774,21 @@ def verify_report_integrity(
                 "case_referent",
                 "non_randomized",
                 "nonrandomized",
+                "non_randomised",
+                "nonrandomised",
+                "quasi_experimental",
+                "quasiexperimental",
+                "quasi_experiment",
+                "quasiexperiment",
             ]
         )
     )
     is_trial = bool(
         clean_design
-        and any(t in clean_design for t in ["randomized", "rct", "trial", "experiment"])
+        and any(
+            t in clean_design
+            for t in ["randomized", "randomised", "rct", "trial", "experiment"]
+        )
         and not has_observational_keyword
     )
     is_observational = bool(clean_design and has_observational_keyword and not is_trial)

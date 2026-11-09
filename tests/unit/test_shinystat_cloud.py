@@ -2282,12 +2282,20 @@ def test_cloud_standalone_case_control_study_design_requires_caveat(
 ):
     """
     Verifies that verify_standalone_integrity requires a confounding caveat for case-control
-    study designs even when prediction/calibration wording is present.
+    study designs (including typographic dashes) even when prediction/calibration wording is present,
+    and also in neutral narrative/results cases without odds_ratio.
     """
     ns = _extract_report_builder_namespace()
     verify_standalone = ns["verify_standalone_integrity"]
 
-    for design in ["case-control", "case control", "case_control"]:
+    for design in [
+        "case-control",
+        "case control",
+        "case_control",
+        "case\u2013control",  # en-dash
+        "case\u2014control",  # em-dash
+        "case\u2013control predictive",
+    ]:
         res = verify_standalone(
             narrative_text="In this analysis, calibration and discrimination were evaluated; odds ratio 1.75 across 300 patients.",
             results_dict={"odds_ratio": 1.75, "sample_size": 300},
@@ -2297,6 +2305,80 @@ def test_cloud_standalone_case_control_study_design_requires_caveat(
             f"Standalone check for design '{design}' must require caveat"
         )
         assert res["passed"] is False
+
+        # Neutral case: isolate study-design detection without odds_ratio or causal wording
+        neutral_res = verify_standalone(
+            narrative_text="Methods: Analysis of the sample.",
+            results_dict={"sample_size": 300},
+            study_design=design,
+        )
+        assert neutral_res["has_causal_caveat"] is False, (
+            f"Standalone neutral check for design '{design}' must require caveat"
+        )
+        assert neutral_res["passed"] is False
+
+
+def test_cloud_standalone_british_spelling_and_quasi_experimental_require_caveat(
+    ensure_packaged_cloud_skill,
+):
+    """
+    Verifies that verify_standalone_integrity recognizes British spellings ('non-randomised')
+    and quasi-experimental designs as observational, requiring a confounding caveat even in
+    neutral cases (no odds_ratio) and non-randomised predictive trials reporting a hazard ratio.
+    """
+    ns = _extract_report_builder_namespace()
+    verify_standalone = ns["verify_standalone_integrity"]
+
+    # 1. Non-randomised predictive trial reporting hazard ratio
+    for hr_design in [
+        "non-randomised predictive trial",
+        "nonrandomised_predictive_trial",
+    ]:
+        res_hr = verify_standalone(
+            narrative_text="A clinical risk prediction model was developed; hazard ratio was 1.35 across 350 patients.",
+            results_dict={"hazard_ratio": 1.35, "sample_size": 350},
+            study_design=hr_design,
+        )
+        assert res_hr["has_causal_caveat"] is False, (
+            f"Standalone check for design '{hr_design}' must require caveat"
+        )
+        assert res_hr["passed"] is False
+
+    # 2. Neutral cases: isolated study-design detection without odds_ratio or causal wording
+    for design in [
+        "non-randomised",
+        "nonrandomised",
+        "quasi_experimental",
+        "quasi-experimental",
+        "quasi experimental",
+        "quasiexperimental",
+        "quasi\u2013experimental",
+        "quasi_experiment",
+        "quasi-experiment",
+    ]:
+        neutral_res = verify_standalone(
+            narrative_text="Methods: Analysis of the sample.",
+            results_dict={"sample_size": 300},
+            study_design=design,
+        )
+        assert neutral_res["has_causal_caveat"] is False, (
+            f"Standalone neutral check for design '{design}' must require caveat"
+        )
+        assert neutral_res["passed"] is False
+
+    # 3. Genuine randomized trials with neutral results remain exempt (including British spelling)
+    for rct_design in [
+        "randomized_controlled_trial",
+        "randomised_controlled_trial",
+        "clinical_trial",
+    ]:
+        rct_res = verify_standalone(
+            narrative_text="Methods: Analysis of the trial sample.",
+            results_dict={"sample_size": 300},
+            study_design=rct_design,
+        )
+        assert rct_res["has_causal_caveat"] is True
+        assert rct_res["passed"] is True
 
 
 def test_cloud_verify_standalone_integrity_mutations(ensure_packaged_cloud_skill):

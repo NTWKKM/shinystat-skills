@@ -1764,7 +1764,7 @@ def verify_standalone_integrity(
         )
     )
     clean_design = (
-        re.sub(r"[\s\-]+", "_", str(resolved_design).lower())
+        re.sub(r"[\s\-\u2010-\u2015\u2212]+", "_", str(resolved_design).lower())
         if resolved_design
         else ""
     )
@@ -1780,6 +1780,12 @@ def verify_standalone_integrity(
                 "case_referent",
                 "non_randomized",
                 "nonrandomized",
+                "non_randomised",
+                "nonrandomised",
+                "quasi_experimental",
+                "quasiexperimental",
+                "quasi_experiment",
+                "quasiexperiment",
             ]
         )
     )
@@ -1787,7 +1793,7 @@ def verify_standalone_integrity(
         clean_design
         and any(
             t in clean_design
-            for t in ["randomized", "rct", "trial", "experiment"]
+            for t in ["randomized", "randomised", "rct", "trial", "experiment"]
         )
         and not has_observational_keyword
     )
