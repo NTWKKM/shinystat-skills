@@ -615,6 +615,8 @@ def verify_report_integrity(
     def _normalize_key(k: Any) -> str:
         s = re.sub(r"[\s\-]+", "_", str(k))
         s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", s)
+        s = re.sub(r"([a-zA-Z])([0-9])", r"\1_\2", s)
+        s = re.sub(r"([0-9])([a-zA-Z])", r"\1_\2", s)
         return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s).lower().strip("_")
 
     results_keys_normalized = [_normalize_key(k) for k in doc.results_dict]
@@ -670,11 +672,46 @@ def verify_report_integrity(
     )
     # Model-performance statements (e.g. effect of sample size on model discrimination or prediction interval width)
     # are descriptive of model evaluation, not clinical treatment-effect claims.
-    # The negative lookahead preserves preceding treatment-effect claims in the same sentence.
+    # The negative lookahead prevents consuming clinical claims (such as aspirin on mortality) earlier in the sentence.
     text_clean_claims = re.sub(
-        r"\b(?:effect|impact)\s+of\s+(?:(?!\b(?:effect|impact)\s+of\b)[^.;\n])+?\s+on\s+(?:model\s+)?(?:discrimination|calibration|performance|accuracy|c[- ]statistic|c[- ]index|auroc|roc|brier|fit|prediction\s+intervals?(?:\s+width)?|interval\s+width)\b",
+        r"\b(?:effect|impact)\s+of\s+"
+        r"(?:(?!\b(?:on|mortality|death|morbidity|survival|stroke|infarction|mi\b|bleeding|recurrence|blood\s+pressure|bp\b|glucose|hba1c)\b)[^.;\n])+?\s+on\s+"
+        r"(?:model\s+)?(?:discrimination|calibration|performance|accuracy|c[- ]statistic|c[- ]index|auroc|roc|brier|fit|prediction\s+intervals?(?:\s+width)?|interval\s+width)\b",
         " ",
         text_clean_claims,
+    )
+    # Coordinated model-performance clauses (e.g. "and on model discrimination was negligible")
+    text_clean_claims = re.sub(
+        r"\b(?:and\s+)?(?:also\s+)?on\s+(?:model\s+)?(?:discrimination|calibration|performance|accuracy|c[- ]statistic|c[- ]index|auroc|roc|brier|fit)\s+(?:was|is|were)\s+[^.;\n]+",
+        " ",
+        text_clean_claims,
+    )
+    # Statements about improving model performance (e.g. "aspirin use improves model discrimination")
+    text_clean_claims = re.sub(
+        r"\b[a-zA-Z_-]+(?:\s+[a-zA-Z_-]+){0,2}\s+(?:(?:does|did|do|is|was|were)\s+not\s+|(?:not|failed\s+to)\s+)?(?:improves?|improved|improving|enhances?|enhanced|enhancing)\s+(?:model\s+)?(?:discrimination|calibration|performance|accuracy|c[- ]statistic|c[- ]index|auroc|roc|brier|fit)\b",
+        " ",
+        text_clean_claims,
+    )
+
+    _clinical_outcomes = (
+        r"(?:all-cause\s+)?"
+        r"(?:mortality|death|morbidity|survival|outcome|stroke|infarction|mi\b|"
+        r"bleeding|recurrence|blood\s+pressure|bp\b|glucose|hba1c)"
+    )
+    _verbs = (
+        r"(?:reduces?|reduced|reducing|increases?|increased|increasing|"
+        r"decreases?|decreased|decreasing|lowers?|lowered|lowering|"
+        r"prevents?|prevented|preventing|improves?|improved|improving|"
+        r"cuts?|cut|cutting|slashes?|slashed|slashing|"
+        r"halves?|halved|halving|doubles?|doubled|doubling)"
+    )
+    _aux = r"(?:(?:does|did|do|is|was|were)\s+not\s+|(?:not|failed\s+to)\s+)?"
+    _patient_terms = (
+        r"patients?|participants?|subjects?|individuals?|persons?|"
+        r"cohort|group|subgroup|population|those|men|women|children|adults?"
+    )
+    _non_interventions = (
+        rf"{_patient_terms}|with|experiencing|showing|having|exhibiting"
     )
 
     has_causal_claims = (
@@ -686,13 +723,15 @@ def verify_report_integrity(
         )
         or bool(
             re.search(
-                r"\b(?:(?:treatment|intervention|therapy|drug|exposure|medication|agent|aspirin|statin|metformin)(?:\s+[a-zA-Z_-]+){0,3}\s+(?:(?:does|did|do|is|was|were)\s+not\s+|(?:not|failed\s+to)\s+)?(?:reduces?|reduced|reducing|increases?|increased|increasing|decreases?|decreased|decreasing|lowers?|lowered|lowering|prevents?|prevented|preventing|improves?|improved|improving|cuts?|cut|cutting|slashes?|slashed|slashing|halves?|halved|halving|doubles?|doubled|doubling)|(?<!\bwith\s)(?:(?:does|did|do|is|was|were)\s+not\s+|(?:not|failed\s+to)\s+)?(?:reduces?|reduced|reducing|decreases?|decreased|decreasing|lowers?|lowered|lowering|prevents?|prevented|preventing|cuts?|cut|cutting|slashes?|slashed|slashing|halves?|halved|halving|doubles?|doubled|doubling)\s+(?:all-cause\s+)?(?:mortality|death|morbidity|survival|stroke|infarction|mi\b|bleeding|recurrence|blood\s+pressure|bp\b|glucose|hba1c))\b",
+                rf"\b(?!(?:{_non_interventions})\b)([a-zA-Z_-]+(?:\s+[a-zA-Z_-]+)?)\s+{_aux}{_verbs}\s+{_clinical_outcomes}\b",
                 text_clean_claims,
             )
         )
         or bool(
             re.search(
-                r"\b(?:(?:treatment|intervention|therapy|drug|exposure|medication|agent|aspirin|statin|metformin)(?:\s+[a-zA-Z_-]+){0,3}\s+(?:(?:has|had|have|shows?|showed|demonstrates?|demonstrated)\s+)?no\s+(?:statistically\s+significant\s+)?(?:treatment\s+)?effect\s+on\s+(?:all-cause\s+)?(?:mortality|death|morbidity|survival|outcome|stroke|infarction|mi\b|bleeding|recurrence|blood\s+pressure|bp\b|glucose|hba1c))\b",
+                rf"\b(?!(?:model|score|index|statistic|variable|predictor|sample)\b)([a-zA-Z_-]+(?:\s+[a-zA-Z_-]+)?)\s+"
+                rf"(?:(?:has|had|have|shows?|showed|demonstrates?|demonstrated)\s+)?"
+                rf"no\s+(?:statistically\s+significant\s+)?(?:treatment\s+)?effect\s+on\s+{_clinical_outcomes}\b",
                 text_clean_claims,
             )
         )
@@ -706,8 +745,13 @@ def verify_report_integrity(
     clean_design = (
         re.sub(r"[\s\-]+", "_", str(resolved_design).lower()) if resolved_design else ""
     )
+    is_trial = bool(
+        clean_design
+        and any(t in clean_design for t in ["randomized", "rct", "trial", "experiment"])
+    )
     is_observational = bool(
         clean_design
+        and not is_trial
         and any(
             obs_type in clean_design
             for obs_type in [
@@ -715,46 +759,34 @@ def verify_report_integrity(
                 "cohort",
                 "case_control",
                 "cross_sectional",
-                "retrospective",
-                "prospective",
+                "case_referent",
             ]
         )
     )
     is_confirmed_prediction = bool(
-        (
-            clean_design
-            and any(
-                pred_type in clean_design
-                for pred_type in [
-                    "prediction",
-                    "predictive",
-                    "prognostic",
-                    "diagnostic",
-                    "validation",
-                    "tripod",
-                ]
-            )
+        clean_design
+        and any(
+            pred_type in clean_design
+            for pred_type in [
+                "prediction",
+                "predictive",
+                "prognostic",
+                "diagnostic",
+                "validation",
+                "tripod",
+            ]
         )
-        or (
-            not clean_design
-            and bool(
-                re.search(
-                    r"\b(?:clinical\s+risk\s+prediction\s+model|prediction\s+model|tripod(?:\s+guidelines|\s+statement)?)\b",
-                    text_lower,
-                )
+    ) or (
+        not clean_design
+        and bool(
+            re.search(
+                r"\b(?:clinical\s+risk\s+prediction\s+model|prediction\s+model|tripod(?:\s+guidelines|\s+statement)?)\b",
+                text_lower,
             )
         )
     )
     is_non_causal_prediction = (
-        is_confirmed_prediction
-        and bool(
-            re.search(
-                r"\b(?:prediction|predictive|tripod|risk score|discrimination|calibration|c-statistic|c-index|auroc)\b",
-                text_lower,
-            )
-        )
-        and not has_causal_claims
-        and not is_observational
+        is_confirmed_prediction and not has_causal_claims and not is_observational
     )
 
     is_causal = (

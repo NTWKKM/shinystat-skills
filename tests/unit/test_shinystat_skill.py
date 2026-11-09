@@ -986,7 +986,7 @@ def test_skill_process_audit_f1_to_f7_and_q3():
 
         step_names = ["Inspect", "Ask", "Plan", "Execute", "Render", "Audit"]
         raw_steps = re.findall(
-            r"(?:^|\n)\d+\.\s+(?:\*\*([^\n*]+)\*\*|([^\n:.]+?)(?::|\.|\s*\n|$))",
+            r"(?:^|\n)\d+\.[ \t]+(?:\*\*([^\n*]+)\*\*|([^\n:.]+?)(?::|\.|\s*\n|$))",
             run_seq_text,
         )
         extracted_steps = [(m[0] or m[1]).strip() for m in raw_steps]
@@ -996,9 +996,7 @@ def test_skill_process_audit_f1_to_f7_and_q3():
 
         last_step_pos = -1
         for idx, step_name in enumerate(step_names, 1):
-            step_pattern = (
-                rf"(?:^|\n){idx}\.\s+\*\*{step_name}\*\*(.*?)(?=\n\d+\.\s+\*\*|\Z)"
-            )
+            step_pattern = rf"(?:^|\n){idx}\.[ \t]+\*\*{step_name}\*\*(.*?)(?=\n\d+\.[ \t]+\*\*|\Z)"
             step_match = re.search(step_pattern, run_seq_text, re.DOTALL)
             assert step_match, (
                 f"Missing step {idx}. **{step_name}** in {label} Run Sequence"

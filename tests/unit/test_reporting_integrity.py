@@ -1411,39 +1411,93 @@ def test_integrity_prediction_interval_width_and_treatment_effect_preservation()
         "We examined the effect of treatment on mortality and the effect of sample size on model discrimination, "
         "with odds ratio 1.35 in 400 patients."
     )
-    audit_both = verify_report_integrity(doc_both)
+    audit_both = verify_report_integrity(doc_both, study_design="prediction")
     assert audit_both.has_causal_caveat is False
     assert any("unmeasured confounding" in w.lower() for w in audit_both.warnings)
 
 
 def test_integrity_named_interventions_and_prognostic_descriptions():
     """
-    Verifies that efficacy claims naming an intervention (e.g. aspirin, statin) trigger caveat,
-    while prognostic descriptions (e.g. 'patients with reduced survival') do not.
+    Verifies that efficacy claims naming an intervention (e.g. aspirin, statin, metformin, apixaban)
+    trigger caveat, while prognostic descriptions (e.g. 'patients experiencing reduced survival') do not.
     """
-    # 1. Named intervention: Aspirin reduced stroke -> requires caveat
-    doc_asp = ReportDocument(
-        title="Cardiovascular Risk Prediction",
-        results_dict={"odds_ratio": 0.75, "sample_size": 500},
-    )
-    doc_asp.add_paragraph(
-        "A prediction risk score was developed following TRIPOD. "
-        "Aspirin reduced stroke in this cohort with odds ratio 0.75 in 500 patients."
-    )
-    audit_asp = verify_report_integrity(doc_asp)
-    assert audit_asp.has_causal_caveat is False
+    # 1. Named interventions with increased bleeding (Aspirin, Statin, Metformin)
+    for drug in ["Aspirin", "Statin", "Metformin"]:
+        doc_drug = ReportDocument(
+            title="Cardiovascular Risk Prediction",
+            results_dict={"odds_ratio": 1.25, "sample_size": 500},
+        )
+        doc_drug.add_paragraph(
+            f"A prediction risk score was developed following TRIPOD. "
+            f"{drug} increased bleeding in this cohort with odds ratio 1.25 in 500 patients."
+        )
+        audit_drug = verify_report_integrity(doc_drug, study_design="prediction")
+        assert audit_drug.has_causal_caveat is False, (
+            f"{drug} claim must require caveat"
+        )
 
-    # 2. Prognostic description: 'patients with reduced survival' -> does NOT trigger causal claim
-    doc_prog = ReportDocument(
-        title="Prognostic Risk Prediction",
+    # 2. Non-whitelisted drug (Apixaban): increased bleeding and no effect on stroke
+    doc_apix_eff = ReportDocument(
+        title="Anticoagulation Study",
+        results_dict={"odds_ratio": 1.30, "sample_size": 600},
+    )
+    doc_apix_eff.add_paragraph(
+        "A prediction risk score was developed following TRIPOD. "
+        "Apixaban increased bleeding in secondary analysis with odds ratio 1.30 in 600 patients."
+    )
+    assert (
+        verify_report_integrity(
+            doc_apix_eff, study_design="prediction"
+        ).has_causal_caveat
+        is False
+    )
+
+    doc_apix_null = ReportDocument(
+        title="Anticoagulation Stroke Study",
+        results_dict={"odds_ratio": 1.0, "sample_size": 600},
+    )
+    doc_apix_null.add_paragraph(
+        "A prediction risk score was developed following TRIPOD. "
+        "Apixaban has no effect on stroke in this cohort with odds ratio 1.0 in 600 patients."
+    )
+    assert (
+        verify_report_integrity(
+            doc_apix_null, study_design="prediction"
+        ).has_causal_caveat
+        is False
+    )
+
+    # 3. Prognostic descriptions: 'patients experiencing reduced survival' and 'patients with reduced survival'
+    for phrase in [
+        "patients experiencing reduced survival",
+        "patients with reduced survival",
+    ]:
+        doc_prog = ReportDocument(
+            title="Prognostic Risk Prediction",
+            results_dict={"odds_ratio": 1.45, "sample_size": 500},
+        )
+        doc_prog.add_paragraph(
+            f"A clinical risk prediction model was developed following TRIPOD guidelines. "
+            f"In {phrase}, the model achieved an odds ratio of 1.45 in 500 patients."
+        )
+        audit_prog = verify_report_integrity(doc_prog, study_design="prediction")
+        assert audit_prog.has_causal_caveat is True, (
+            f"'{phrase}' must not count as causal claim"
+        )
+
+    # 4. Model performance statement with intervention term: 'Aspirin use improves model discrimination'
+    doc_perf = ReportDocument(
+        title="Prediction Improvement Study",
         results_dict={"odds_ratio": 1.45, "sample_size": 500},
     )
-    doc_prog.add_paragraph(
+    doc_perf.add_paragraph(
         "A clinical risk prediction model was developed following TRIPOD guidelines. "
-        "In patients with reduced survival, the model achieved an odds ratio of 1.45 in 500 patients."
+        "Aspirin use improves model discrimination; odds ratio 1.45 in 500 patients."
     )
-    audit_prog = verify_report_integrity(doc_prog)
-    assert audit_prog.has_causal_caveat is True
+    audit_perf = verify_report_integrity(doc_perf, study_design="prediction")
+    assert audit_perf.has_causal_caveat is True, (
+        "Statement improving model discrimination must not trigger causal claim"
+    )
 
 
 def test_integrity_null_treatment_effect_endpoints():
@@ -1456,26 +1510,135 @@ def test_integrity_null_treatment_effect_endpoints():
         "A prediction risk score was developed under TRIPOD. "
         "Treatment has no effect on blood pressure with odds ratio 1.0 in 300 patients."
     )
-    assert verify_report_integrity(doc_bp).has_causal_caveat is False
+    assert (
+        verify_report_integrity(doc_bp, study_design="prediction").has_causal_caveat
+        is False
+    )
 
 
 def test_integrity_case_control_study_design_requires_caveat():
     """
     Verifies that case-control designs (with separators 'case-control', 'case control', 'case_control')
-    cannot bypass the confounding caveat requirement through prediction language exemptions.
+    strictly follow the study design gate and require caveats, isolated from title or result keys.
     """
+    # 1. Isolated case-control designs without odds_ratio key or causal wording
     for design in ["case-control", "case control", "case_control"]:
         doc = ReportDocument(
-            title="Etiologic Case-Control Investigation",
-            results_dict={"odds_ratio": 1.85, "sample_size": 350},
+            title="Clinical Analysis Report",
+            results_dict={"sample_size": 350},
             study_design=design,
         )
         doc.add_paragraph(
-            "In this investigation, model calibration and discrimination were examined. "
-            "The odds ratio was 1.85 across 350 patients."
+            "Methods: Descriptive analysis was conducted in 350 patients."
         )
         audit = verify_report_integrity(doc)
         assert audit.has_causal_caveat is False, (
             f"Design '{design}' must require caveat"
         )
         assert any("unmeasured confounding" in w.lower() for w in audit.warnings)
+
+    # 2. Non-observational design (RCT) with neutral results does not require observational caveat
+    doc_rct = ReportDocument(
+        title="Clinical Analysis Report",
+        results_dict={"sample_size": 350},
+        study_design="rct",
+    )
+    doc_rct.add_paragraph(
+        "Methods: Descriptive analysis was conducted in 350 patients."
+    )
+    assert verify_report_integrity(doc_rct).has_causal_caveat is True
+
+
+def test_integrity_numeric_suffix_estimand_keys():
+    """Verifies that estimand keys with numeric suffixes (e.g. ATE95CI, treatmentATE95CI) trigger causal classification while eventRate95CI does not."""
+    doc_ate = ReportDocument(
+        title="Clinical Analysis Report",
+        results_dict={"ATE95CI": 0.35, "sample_size": 300},
+    )
+    doc_ate.add_paragraph("Methods: Analysis of 300 patients yielded 0.35.")
+    assert verify_report_integrity(doc_ate).has_causal_caveat is False
+
+    doc_t_ate = ReportDocument(
+        title="Clinical Analysis Report",
+        results_dict={"treatmentATE95CI": 0.35, "sample_size": 300},
+    )
+    doc_t_ate.add_paragraph("Methods: Analysis of 300 patients yielded 0.35.")
+    assert verify_report_integrity(doc_t_ate).has_causal_caveat is False
+
+    doc_rate = ReportDocument(
+        title="Clinical Analysis Report",
+        results_dict={"eventRate95CI": 0.05, "sample_size": 300},
+    )
+    doc_rate.add_paragraph("Methods: Analysis of 300 patients yielded eventRate 0.05.")
+    assert verify_report_integrity(doc_rate).has_causal_caveat is True
+
+
+def test_integrity_model_performance_cleanup_preserves_aspirin_mortality():
+    """
+    Verifies that in 'The effect of aspirin on mortality was beneficial and on model discrimination was negligible',
+    the clinical claim is preserved and requires a caveat, while removing the clinical claim allows the report to pass.
+    """
+    # 1. With clinical claim -> must require caveat
+    doc_clin = ReportDocument(
+        title="Prediction Model Report",
+        results_dict={"odds_ratio": 1.25, "sample_size": 400},
+        study_design="prediction",
+    )
+    doc_clin.add_paragraph(
+        "A prediction model was developed. "
+        "The effect of aspirin on mortality was beneficial and on model discrimination was negligible; "
+        "odds ratio was 1.25 in 400 patients."
+    )
+    assert verify_report_integrity(doc_clin).has_causal_caveat is False
+
+    # 2. When the clinical claim is removed (only model performance remains) -> passes
+    doc_perf_only = ReportDocument(
+        title="Prediction Model Report",
+        results_dict={"odds_ratio": 1.25, "sample_size": 400},
+        study_design="prediction",
+    )
+    doc_perf_only.add_paragraph(
+        "A prediction model was developed. "
+        "The effect of sample size on model discrimination was negligible; "
+        "odds ratio was 1.25 in 400 patients."
+    )
+    assert verify_report_integrity(doc_perf_only).has_causal_caveat is True
+
+
+def test_integrity_prospective_randomized_trial_exempt_from_observational_warning():
+    """Verifies that prospective randomized trials with descriptive results do not receive observational confounding warnings."""
+    for design in [
+        "prospective_randomized_trial",
+        "randomized_controlled_trial",
+        "prospective rct",
+    ]:
+        doc = ReportDocument(
+            title="Trial Analysis Report",
+            results_dict={"sample_size": 500},
+            study_design=design,
+        )
+        doc.add_paragraph(
+            "Methods: Descriptive baseline evaluation of 500 enrolled trial participants."
+        )
+        audit = verify_report_integrity(doc)
+        assert audit.has_causal_caveat is True, (
+            f"Trial design '{design}' must not receive observational caveat warning"
+        )
+
+
+def test_integrity_explicit_prognostic_design_metadata():
+    """
+    Verifies that explicit study_design='prognostic' metadata is sufficient to classify a non-causal
+    Cox report as prognostic without requiring prediction keywords in its text.
+    """
+    doc = ReportDocument(
+        title="Survival Evaluation",
+        results_dict={"hazard_ratio": 1.25, "sample_size": 350},
+        study_design="prognostic",
+    )
+    doc.add_paragraph(
+        "Methods: Cox proportional hazards regression was performed across 350 patients; hazard ratio was 1.25."
+    )
+    audit = verify_report_integrity(doc)
+    assert audit.has_causal_caveat is True
+    assert not any("unmeasured confounding" in w.lower() for w in audit.warnings)

@@ -2259,7 +2259,7 @@ def test_cloud_standalone_cate_key_neutral_narrative_caveat_check(
 
     # 1. Without confounding caveat -> must fail
     res_without = verify_standalone(
-        narrative_text="Methods: Analysis of 200 patients yielded conditional average treatment effect 0.35.",
+        narrative_text="Methods: Analysis of 200 patients yielded an estimate of 0.35.",
         results_dict={"cate": 0.35, "sample_size": 200},
     )
     assert res_without["has_causal_caveat"] is False
@@ -2268,7 +2268,7 @@ def test_cloud_standalone_cate_key_neutral_narrative_caveat_check(
     # 2. With confounding caveat -> must pass
     res_with = verify_standalone(
         narrative_text=(
-            "Methods: Analysis of 200 patients yielded conditional average treatment effect 0.35. "
+            "Methods: Analysis of 200 patients yielded an estimate of 0.35. "
             "Residual confounding cannot be ruled out in this observational assessment."
         ),
         results_dict={"cate": 0.35, "sample_size": 200},
