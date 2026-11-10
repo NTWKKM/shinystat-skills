@@ -507,4 +507,12 @@ STUDY_DESIGN_INTEGRITY_CASES: list[StudyDesignIntegrityCase] = [
         expected_caveat=True,
         expected_passed=True,
     ),
+    StudyDesignIntegrityCase(
+        id="pre_experimental_one_group_pretest_posttest_design",
+        study_design="pre-experimental one-group pretest-posttest design",
+        narrative="Methods: Pre-experimental one-group pretest-posttest design evaluating intervention across 250 patients; sample size 250.",
+        results_dict={"sample_size": 250},
+        expected_caveat=False,
+        expected_passed=False,
+    ),
 ]

@@ -1810,7 +1810,7 @@ def verify_standalone_integrity(
         and not is_true_randomized
         and bool(
             re.search(
-                r"(?:^|_)pre_?experiment(?:al)?(?:$|_(?:study|design|trial|evaluation|investigation|research)(?:_|$))",
+                r"(?:^|_)pre_?experiment(?:al)?(?:$|(?!_(?:period|phase|stage|epoch|interval|baseline|measure|data|time|washout|run_in)(?:_|$))(?:_[a-z0-9]+)*?_(?:study|design|trial|evaluation|investigation|research)(?:_|$))",
                 clean_design,
             )
         )
