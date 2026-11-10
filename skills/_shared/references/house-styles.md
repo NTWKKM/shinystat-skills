@@ -1,6 +1,6 @@
 # Journal House Styles & Artwork Reference (Cloud Sandbox Edition)
 
-Reached from `SKILL.md` Pillar 5 and **Output Format & House Style Alignment Gate** (#5). Provides self-contained Python recipes for applying journal **house styles** (`NEJM`, `JAMA`, `LANCET`, `BMJ`, `CLINICAL`, `OKABE_ITO`) in cloud sandboxes (`matplotlib`, `numpy`, and `pandas` only; zero `medstat` imports).
+Reached from `SKILL.md` Pillar 5 and **Output Alignment Gate** (#5b). Provides self-contained Python recipes for applying journal **house styles** (`NEJM`, `JAMA`, `LANCET`, `BMJ`, `CLINICAL`, `OKABE_ITO`) in cloud sandboxes (`matplotlib`, `numpy`, and `pandas` only; zero `medstat` imports).
 
 > **Provenance**: The color palettes follow the widely used `ggsci` journal-inspired sets (plus Okabe-Ito for universal color-vision-deficiency accessibility), not official publisher color mandates. Journals specify resolution, vector typography, column widths, and file formats rather than fixed hex palettes; check the target journal's current author artwork guidelines before submission.
 

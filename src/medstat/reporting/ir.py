@@ -65,6 +65,7 @@ class ReportDocument:
     blocks: list[Block] = field(default_factory=list)
     results_dict: dict[str, Any] = field(default_factory=dict)
     institution: str = "Biostatistics & Clinical Research Unit"
+    study_design: str | None = None
 
     def add_heading(self, text: str, level: int = 1) -> ReportDocument:
         self.blocks.append(HeadingBlock(text=text, level=level))

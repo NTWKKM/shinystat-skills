@@ -1988,12 +1988,41 @@ When executing multi-model clinical analyses or `Full Publication Polish` workfl
 - **Offline & Standalone Parity**: Installing `shinystat` via `npx skills add NTWKKM/shinystat-skills --skill shinystat` or unzipping `shinystat-cloud.zip` delivers a 100% self-contained folder with zero broken links and full offline CLI/library execution.
 - **Verification**: Verified via isolated temporary `HOME` test that all 27 links in installed `shinystat` and 61 links in `shinystat-cloud` resolve, and `python scripts/medstat_cli.py --schema` exits with code 0.
 
+## ADR 70: Gate #5 Split into Four Independently Asked Axes (`/writing-for-agents`)
 
+### Context
+Field use showed two Gate #5 defects: (1) agents bundled deliverable format and **house style** into one combined question (e.g. "HTML + NEJM?"), hiding the full option list for each; (2) the Execution Context Mode question was skipped, because it sat as a buried fourth sub-bullet behind a weak conditional and the gate trigger listed only format, house style, and polish.
 
+### Decision
+- Renamed the gate to the canonical glossary term **Output Alignment Gate** and declared four independent **axes** (`5a` Deliverable Format, `5b` Figure House Style, `5c` Manuscript Polish Mode, `5d` Execution Context Mode), asked as **one separate question per axis**, each listing every option.
+- Listed `CLINICAL` and `OKABE_ITO` as distinct house-style options.
+- `5d` is asked whenever the tool list includes a subagent-spawning tool (e.g. `invoke_subagent`, `Task`), even when every other axis is specified.
+- Pinned via `test_gate5_asks_each_output_axis_separately`.
 
+### Consequences
+- **Status**: Accepted.
+- One consolidated pre-flight turn now contains more, smaller questions; the user sees every format and house-style option side by side.
 
+## ADR 71: Skill Process Audit — Run Sequence Spine, Progressive Disclosure & Renderer Separation (`/writing-for-agents`)
 
+### Context
+An end-to-end audit of `shinystat` and `shinystat-cloud` against the `/writing-for-agents` levers identified seven process bottlenecks and one local/cloud renderer mismatch:
+1. **F1 (Missing Step Spine)**: Ordered execution steps were scattered across Pillars 1–5 and Gate §2, forcing agents to reconstruct the run order on every invocation.
+2. **F2 (Pillar 3 Reference Sprawl)**: Pillar 3's "Autonomous Upgrades & Diagnostics" inlined ~3.5 KB of branch-specific reference already covered by `decision-heuristics.md`.
+3. **F3 (Near-Identical Skill Pointers)**: Both skill frontmatter descriptions opened with identical wording, creating invocation ambiguity when both skills were installed.
+4. **F4 (Duplicated Gate Triggers)**: Gate #1, #3, and #4 triggers were restated across Pillars 3–4, §2, and `subagent-protocol.md`.
+5. **F5 (Duplicate Recipe Index)**: The 24-row standalone recipe mapping table was duplicated verbatim between `skills/shinystat-cloud/SKILL.md` and `README.md`.
+6. **F6 (Unstructured Gate Questions)**: §2 did not explicitly instruct agents to route consolidated pre-flight questions through the runtime's structured multiple-choice tool (`ask_question`).
+7. **F7 & Q3 (Citation Branch Sprawl & Local/Cloud Renderer Mismatch)**: Gate #6 citation rules lived at the bottom of the 1,988-line `report-builder.md` (`§4`), and local `shinystat` Pillar 5 pointed to cloud-oriented `report-builder.md` instead of `medstat.reporting.renderers`.
 
+### Decision
+- Added `## 0. Run Sequence` (`1. Inspect`, `2. Ask`, `3. Plan`, `4. Execute`, `5. Render`, `6. Audit`) with explicit `*Done when*` completion criteria to both `SKILL.md` files (F1).
+- Disclosed Pillar 3's branch-specific upgrade catalogs into `decision-heuristics.md §2.D–§2.K` and pruned redundant prose, reducing `skills/shinystat/SKILL.md` to $\le 16.5\text{ KB}$ and `skills/shinystat-cloud/SKILL.md` to $\le 22.0\text{ KB}$ (F2, F4).
+- Front-loaded distinct execution-environment branches in both frontmatter `description` fields (`Local clinical biostatistics...` vs `Cloud-sandbox clinical biostatistics...`) (F3).
+- Kept the 24-row Recipe Index table in `skills/shinystat-cloud/SKILL.md` and replaced the duplicate copy in `README.md` with a pointer (F5).
+- Directed §2 to present consolidated pre-flight turns via `ask_question` when available (F6).
+- Extracted Gate #6 citation verification into `skills/_shared/references/evidence-pipeline.md` and updated local `shinystat` Pillar 5 to compile deliverables via `medstat.reporting.renderers` (`render_html`, `render_docx`, `render_pptx`, `render_markdown`, `render_pdf`) with `report-builder.md` reserved as a standalone fallback (F7, Q3).
 
-
-
+### Consequences
+- **Status**: Accepted & Verified (`test_skill_process_audit_f1_to_f7_and_q3`).
+- Lower always-loaded context footprint, deterministic 6-step execution order, and clean separation between local `medstat.reporting.renderers`, cloud `report-builder.md`, and shared `evidence-pipeline.md`.

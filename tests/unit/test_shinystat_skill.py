@@ -942,3 +942,125 @@ def test_house_styles_range_index_preservation(tmp_path):
         assert "0,10" in csv_exp or ",y\n0,10" in csv_exp
     finally:
         plt.close(fig)
+
+
+def test_gate5_asks_each_output_axis_separately():
+    """Gate #5 asks format, house style, polish, and execution context as separate questions."""
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    for skill_path in (
+        repo_root / "skills" / "shinystat" / "SKILL.md",
+        repo_root / "skills" / "shinystat-cloud" / "SKILL.md",
+    ):
+        text = skill_path.read_text(encoding="utf-8")
+        assert "**Output Alignment Gate**" in text, skill_path
+        assert "one separate question per axis" in text, skill_path
+        for axis in (
+            "5a. Deliverable Format",
+            "5b. Figure House Style",
+            "5c. Manuscript Polish Mode",
+            "5d. Execution Context Mode",
+        ):
+            assert axis in text, f"Missing Gate #5 axis '{axis}' in {skill_path}"
+        # Every house style is its own option (no merged `CLINICAL` / `OKABE_ITO`)
+        assert "`CLINICAL` / `OKABE_ITO`" not in text, skill_path
+        # Execution context is asked whenever a subagent tool exists, independent of other axes
+        assert "even when every other axis is specified" in text, skill_path
+
+
+def test_skill_process_audit_f1_to_f7_and_q3():
+    """Verify F1-F7 process improvements and Q3 local/cloud report-builder separation."""
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    local_skill_path = repo_root / "skills" / "shinystat" / "SKILL.md"
+    cloud_skill_path = repo_root / "skills" / "shinystat-cloud" / "SKILL.md"
+    local_text = local_skill_path.read_text(encoding="utf-8")
+    cloud_text = cloud_skill_path.read_text(encoding="utf-8")
+
+    # F1: Explicit Run Sequence with 6 steps and step-specific 'Done when' completion criteria
+    for text, label in ((local_text, "local"), (cloud_text, "cloud")):
+        assert "## 0. Run Sequence" in text, f"Missing Run Sequence in {label}"
+        run_seq_match = re.search(
+            r"## 0\. Run Sequence\n\n(.*?)(?=\n---\n|\n## |\Z)", text, re.DOTALL
+        )
+        assert run_seq_match, f"Failed to extract Run Sequence section in {label}"
+        run_seq_text = run_seq_match.group(1)
+
+        step_names = ["Inspect", "Ask", "Plan", "Execute", "Render", "Audit"]
+        raw_steps = re.findall(
+            r"(?:^|\n)\d+\.[ \t]+(?:\*\*([^\n*]+)\*\*|([^\n:.]+?)(?::|\.|\s*\n|$))",
+            run_seq_text,
+        )
+        extracted_steps = [(m[0] or m[1]).strip() for m in raw_steps]
+        assert extracted_steps == step_names, (
+            f"Run Sequence in {label} must match exact ordered steps without duplicates or extra steps: expected {step_names}, got {extracted_steps}"
+        )
+
+        last_step_pos = -1
+        for idx, step_name in enumerate(step_names, 1):
+            step_pattern = rf"(?:^|\n){idx}\.[ \t]+\*\*{step_name}\*\*(.*?)(?=\n\d+\.[ \t]+\*\*|\Z)"
+            step_match = re.search(step_pattern, run_seq_text, re.DOTALL)
+            assert step_match, (
+                f"Missing step {idx}. **{step_name}** in {label} Run Sequence"
+            )
+            assert step_match.start() > last_step_pos, (
+                f"Step {idx}. **{step_name}** in {label} Run Sequence is out of order"
+            )
+            last_step_pos = step_match.start()
+            step_body = step_match.group(1)
+            assert "*Done when*" in step_body, (
+                f"Step {idx}. **{step_name}** in {label} must contain its own '*Done when*' criterion"
+            )
+            criterion = step_body.split("*Done when*", 1)[1].strip()
+            assert len(criterion) > 0, (
+                f"Empty '*Done when*' criterion for {step_name} in {label}"
+            )
+            if step_name == "Execute":
+                crit_lower = criterion.lower()
+                assert "converge" in crit_lower and "diagnostic" in crit_lower, (
+                    f"Execute step in {label} must retain convergence and diagnostics requirement, got: {criterion}"
+                )
+
+    # F2: Disclosed Autonomous Upgrades into decision-heuristics.md (reduced SKILL.md size)
+    assert len(local_text.encode("utf-8")) <= 16500, (
+        f"Local SKILL.md still too large: {len(local_text.encode('utf-8'))} bytes"
+    )
+    assert len(cloud_text.encode("utf-8")) <= 22000, (
+        f"Cloud SKILL.md still too large: {len(cloud_text.encode('utf-8'))} bytes"
+    )
+
+    # F3: Distinct front-loaded descriptions for local vs cloud
+    local_fm = yaml.safe_load(local_text.split("---", 2)[1])
+    cloud_fm = yaml.safe_load(cloud_text.split("---", 2)[1])
+    assert local_fm["description"].startswith("Local clinical biostatistics"), local_fm[
+        "description"
+    ]
+    assert cloud_fm["description"].startswith("Cloud-sandbox clinical biostatistics"), (
+        cloud_fm["description"]
+    )
+
+    # F5: README deduplicates the 24-row Recipe Index table
+    readme_text = (repo_root / "README.md").read_text(encoding="utf-8")
+    assert "| **Recipe 18** |" not in readme_text, (
+        "Duplicate 24-row recipe table should be linked from README.md, not duplicated"
+    )
+
+    # F6: Multiple-choice tool instruction at Gate #2 / Gate #5
+    for text, label in ((local_text, "local"), (cloud_text, "cloud")):
+        assert "ask_question" in text, f"Missing ask_question guidance in {label}"
+        assert re.search(
+            r"when your tools include `?ask_question`?, send the consolidated turn through it",
+            text,
+            re.IGNORECASE,
+        ), (
+            f"Missing directive to route consolidated inquiry through ask_question in {label}"
+        )
+
+    # F7 & Q3: Dedicated evidence-pipeline.md & local medstat.reporting renderers
+    shared_ep = repo_root / "skills" / "_shared" / "references" / "evidence-pipeline.md"
+    assert shared_ep.exists(), "Missing skills/_shared/references/evidence-pipeline.md"
+    assert "Step 1: Clinical Claims vs Analyzed Data Audit" in shared_ep.read_text(
+        encoding="utf-8"
+    )
+    assert "references/evidence-pipeline.md" in local_text
+    assert "references/evidence-pipeline.md" in cloud_text
+    assert "medstat.reporting.renderers" in local_text
+    assert "render_html" in local_text and "render_docx" in local_text

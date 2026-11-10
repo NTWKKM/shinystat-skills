@@ -28,6 +28,7 @@ from tests.fixtures.integrity_cases import (
     BASE_RESULTS_DICT,
     INTEGRITY_PARITY_CASES,
     STAT_MUTATIONS,
+    STUDY_DESIGN_INTEGRITY_CASES,
 )
 
 CLOUD_DIR = REPO_ROOT / "packaging" / "cloud" / "shinystat-cloud"
@@ -2244,6 +2245,277 @@ def test_cloud_verify_standalone_integrity_parity(case, ensure_packaged_cloud_sk
     ), (
         f"Case {case.id} parity divergence in untraced: standalone={standalone_res['untraced_numbers']}, ir={ir_res.untraced_numbers}"
     )
+
+
+def test_cloud_standalone_cate_key_neutral_narrative_caveat_check(
+    ensure_packaged_cloud_skill,
+):
+    """
+    Verifies that verify_standalone_integrity (extracted from report-builder.md)
+    detects a 'cate' result key with neutral narrative text, requiring a confounding caveat
+    when absent (passed=False, has_causal_caveat=False) and passing when present (passed=True, has_causal_caveat=True).
+    """
+    ns = _extract_report_builder_namespace()
+    verify_standalone = ns["verify_standalone_integrity"]
+
+    # 1. Without confounding caveat -> must fail
+    res_without = verify_standalone(
+        narrative_text="Methods: Analysis of 200 patients yielded an estimate of 0.35.",
+        results_dict={"cate": 0.35, "sample_size": 200},
+    )
+    assert res_without["has_causal_caveat"] is False
+    assert res_without["passed"] is False
+
+    # 2. With confounding caveat -> must pass
+    res_with = verify_standalone(
+        narrative_text=(
+            "Methods: Analysis of 200 patients yielded an estimate of 0.35. "
+            "Residual confounding cannot be ruled out in this observational assessment."
+        ),
+        results_dict={"cate": 0.35, "sample_size": 200},
+    )
+    assert res_with["has_causal_caveat"] is True
+    assert res_with["passed"] is True
+
+
+def test_cloud_standalone_case_control_study_design_requires_caveat(
+    ensure_packaged_cloud_skill,
+):
+    """
+    Verifies that verify_standalone_integrity requires a confounding caveat for case-control
+    study designs (including typographic dashes) even when prediction/calibration wording is present,
+    and also in neutral narrative/results cases without odds_ratio.
+    """
+    ns = _extract_report_builder_namespace()
+    verify_standalone = ns["verify_standalone_integrity"]
+
+    for design in [
+        "case-control",
+        "case control",
+        "case_control",
+        "case\u2013control",  # en-dash
+        "case\u2014control",  # em-dash
+        "case\u2013control predictive",
+        "case/control",
+        "case/control predictive study",
+        "case/control study",
+    ]:
+        res = verify_standalone(
+            narrative_text="In this analysis, calibration and discrimination were evaluated; odds ratio 1.75 across 300 patients.",
+            results_dict={"odds_ratio": 1.75, "sample_size": 300},
+            study_design=design,
+        )
+        assert res["has_causal_caveat"] is False, (
+            f"Standalone check for design '{design}' must require caveat"
+        )
+        assert res["passed"] is False
+
+        # Neutral case: isolate study-design detection without odds_ratio or causal wording
+        neutral_res = verify_standalone(
+            narrative_text="Methods: Analysis of the sample.",
+            results_dict={"sample_size": 300},
+            study_design=design,
+        )
+        assert neutral_res["has_causal_caveat"] is False, (
+            f"Standalone neutral check for design '{design}' must require caveat"
+        )
+        assert neutral_res["passed"] is False
+
+
+def test_cloud_standalone_british_spelling_and_quasi_experimental_require_caveat(
+    ensure_packaged_cloud_skill,
+):
+    """
+    Verifies that verify_standalone_integrity recognizes British spellings ('non-randomised')
+    and quasi-experimental designs as observational, requiring a confounding caveat even in
+    neutral cases (no odds_ratio) and non-randomised predictive trials reporting a hazard ratio.
+    """
+    ns = _extract_report_builder_namespace()
+    verify_standalone = ns["verify_standalone_integrity"]
+
+    # 1. Non-randomised predictive trial reporting hazard ratio
+    for hr_design in [
+        "non-randomised predictive trial",
+        "nonrandomised_predictive_trial",
+    ]:
+        res_hr = verify_standalone(
+            narrative_text="A clinical risk prediction model was developed; hazard ratio was 1.35 across 350 patients.",
+            results_dict={"hazard_ratio": 1.35, "sample_size": 350},
+            study_design=hr_design,
+        )
+        assert res_hr["has_causal_caveat"] is False, (
+            f"Standalone check for design '{hr_design}' must require caveat"
+        )
+        assert res_hr["passed"] is False
+
+    # 2. Neutral cases: isolated study-design detection without odds_ratio or causal wording
+    for design in [
+        "non-randomised",
+        "nonrandomised",
+        "quasi_experimental",
+        "quasi-experimental",
+        "quasi experimental",
+        "quasiexperimental",
+        "quasi\u2013experimental",
+        "quasi_experiment",
+        "quasi-experiment",
+    ]:
+        neutral_res = verify_standalone(
+            narrative_text="Methods: Analysis of the sample.",
+            results_dict={"sample_size": 300},
+            study_design=design,
+        )
+        assert neutral_res["has_causal_caveat"] is False, (
+            f"Standalone neutral check for design '{design}' must require caveat"
+        )
+        assert neutral_res["passed"] is False
+
+    # 3. Genuine randomized trials with neutral results remain exempt (including British spelling)
+    for rct_design in [
+        "randomized_controlled_trial",
+        "randomised_controlled_trial",
+        "clinical_trial",
+    ]:
+        rct_res = verify_standalone(
+            narrative_text="Methods: Analysis of the trial sample.",
+            results_dict={"sample_size": 300},
+            study_design=rct_design,
+        )
+        assert rct_res["has_causal_caveat"] is True
+        assert rct_res["passed"] is True
+
+
+def test_cloud_standalone_target_trial_and_type_2_etiologic_require_caveat(
+    ensure_packaged_cloud_skill,
+):
+    """
+    Verifies that verify_standalone_integrity classifies target trial emulation and
+    Type 2: Etiologic Multivariable designs as observational, requiring a confounding
+    caveat even with neutral results and narrative.
+    """
+    ns = _extract_report_builder_namespace()
+    verify_standalone = ns["verify_standalone_integrity"]
+
+    for design in [
+        "target trial emulation",
+        "target-trial emulation",
+        "target trial",
+        "Type 2: Etiologic Multivariable",
+        "type_2:_etiologic_multivariable",
+        "Type 2: Etiologic",
+        "etiologic multivariable",
+    ]:
+        # 1. Neutral inputs without caveat -> must fail
+        neutral_fail = verify_standalone(
+            narrative_text="Methods: Evaluation across 300 participants.",
+            results_dict={"sample_size": 300},
+            study_design=design,
+        )
+        assert neutral_fail["has_causal_caveat"] is False, (
+            f"Standalone check for design '{design}' must require caveat"
+        )
+        assert neutral_fail["passed"] is False
+
+        # 2. With caveat -> must pass
+        neutral_pass = verify_standalone(
+            narrative_text=(
+                "Methods: Evaluation across 300 participants. "
+                "Residual confounding cannot be ruled out in this observational assessment."
+            ),
+            results_dict={"sample_size": 300},
+            study_design=design,
+        )
+        assert neutral_pass["has_causal_caveat"] is True
+        assert neutral_pass["passed"] is True
+
+
+def test_cloud_standalone_type_2_diabetes_and_diagnostic_workup_exempt(
+    ensure_packaged_cloud_skill,
+):
+    """
+    Verifies that verify_standalone_integrity exempts 'prediction model for type 2 diabetes'
+    and diagnostic accuracy of etiologic work-up from observational confounding caveats when non-causal.
+    """
+    ns = _extract_report_builder_namespace()
+    verify_standalone = ns["verify_standalone_integrity"]
+
+    # 1. Type 2 diabetes prediction model -> must pass without caveat
+    res_t2d = verify_standalone(
+        narrative_text="A clinical risk prediction model for type 2 diabetes was developed following TRIPOD guidelines. Analysis evaluated 500 patients; odds ratio was 1.25.",
+        results_dict={"odds_ratio": 1.25, "sample_size": 500},
+        study_design="prediction model for type 2 diabetes",
+        allowed_untraced={2},
+    )
+    assert res_t2d["has_causal_caveat"] is True
+    assert res_t2d["passed"] is True
+
+    # 2. Diagnostic accuracy study of etiologic work-up -> must pass without caveat when non-causal
+    for diag_design in [
+        "diagnostic accuracy study of etiologic work-up",
+        "diagnostic accuracy of etiologic workup",
+        "etiologic work-up",
+        "etiologic workup",
+    ]:
+        res_diag = verify_standalone(
+            narrative_text="Methods: Diagnostic accuracy study of etiologic work-up across 300 patients; odds ratio was 1.25.",
+            results_dict={"sample_size": 300, "odds_ratio": 1.25},
+            study_design=diag_design,
+        )
+        assert res_diag["has_causal_caveat"] is True, (
+            f"Standalone diagnostic design '{diag_design}' must pass without caveat when non-causal"
+        )
+        assert res_diag["passed"] is True
+
+        # When causal claims are present -> must require caveat
+        res_causal = verify_standalone(
+            narrative_text="Methods: Diagnostic accuracy study of etiologic work-up across 300 patients; odds ratio was 1.25. Etiologic work-up reduced mortality in secondary analysis.",
+            results_dict={"sample_size": 300, "odds_ratio": 1.25},
+            study_design=diag_design,
+        )
+        assert res_causal["has_causal_caveat"] is False, (
+            f"Standalone causal claim in '{diag_design}' must require caveat"
+        )
+        assert res_causal["passed"] is False
+
+
+@pytest.mark.parametrize("case", STUDY_DESIGN_INTEGRITY_CASES, ids=lambda c: c.id)
+def test_cloud_verify_standalone_study_design_parity(case, ensure_packaged_cloud_skill):
+    """
+    Verifies that verify_standalone_integrity matches verify_report_integrity
+    across all study design classification rules and exemptions.
+    """
+    ns = _extract_report_builder_namespace()
+    verify_standalone = ns["verify_standalone_integrity"]
+
+    res_sa = verify_standalone(
+        narrative_text=case.narrative,
+        results_dict=case.results_dict,
+        study_design=case.study_design,
+        allowed_untraced=case.allowed_untraced,
+    )
+
+    doc = ReportDocument(
+        title="Parity Test",
+        results_dict=case.results_dict,
+        study_design=case.study_design,
+    )
+    doc.add_paragraph(case.narrative)
+    ir_res = verify_report_integrity(doc, allowed_untraced=case.allowed_untraced)
+
+    assert (
+        res_sa["has_causal_caveat"] == ir_res.has_causal_caveat == case.expected_caveat
+    ), (
+        f"Case '{case.id}' ({case.study_design}) caveat mismatch: "
+        f"SA={res_sa['has_causal_caveat']}, IR={ir_res.has_causal_caveat}, Expected={case.expected_caveat}"
+    )
+    assert res_sa["passed"] == ir_res.passed, (
+        f"Case '{case.id}' passed mismatch: SA={res_sa['passed']}, IR={ir_res.passed}"
+    )
+
+    if case.expected_passed is not None:
+        assert res_sa["passed"] is case.expected_passed, (
+            f"Case '{case.id}' expected passed={case.expected_passed}, got SA={res_sa['passed']}"
+        )
 
 
 def test_cloud_verify_standalone_integrity_mutations(ensure_packaged_cloud_skill):

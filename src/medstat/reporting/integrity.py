@@ -449,6 +449,7 @@ def _extract_text_numbers(text: str) -> list[float]:
 def verify_report_integrity(
     doc: ReportDocument,
     allowed_untraced: set[float] | list[float] | tuple[float, ...] | None = None,
+    study_design: str | None = None,
 ) -> IntegrityReport:
     """
     Audits a ReportDocument and returns an IntegrityReport:
@@ -601,26 +602,414 @@ def verify_report_integrity(
                 untraced.append(tn)
 
     # 3. Observational Causal Inference & E-value Check
-    results_keys_str = " ".join(doc.results_dict.keys()).lower()
-    is_causal = any(
+    resolved_design = (
+        study_design
+        or getattr(doc, "study_design", None)
+        or (
+            doc.results_dict.get("study_design")
+            if isinstance(doc.results_dict, dict)
+            else None
+        )
+    )
+
+    def _normalize_key(k: Any) -> str:
+        s = re.sub(r"[\s\-]+", "_", str(k))
+        s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", s)
+        s = re.sub(r"([a-zA-Z])([0-9])", r"\1_\2", s)
+        s = re.sub(r"([0-9])([a-zA-Z])", r"\1_\2", s)
+        return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s).lower().strip("_")
+
+    results_keys_normalized = [_normalize_key(k) for k in doc.results_dict]
+    results_keys_str = " ".join(results_keys_normalized)
+    text_lower = all_text.lower()
+    has_causal_key = any(
         k in results_keys_str
         for k in [
             "psm",
             "propensity",
             "love_plot",
-            "hazard_ratio",
+            "iptw",
+            "average_treatment_effect",
+        ]
+    ) or any(
+        bool(re.search(r"(?:^|_)(?:ate|att|cate)(?:_|$)", k))
+        and not re.search(
+            r"(?:^|_)(?:n_dropped|dropped_n|dropped_count|count_dropped)(?:_|$)", k
+        )
+        for k in results_keys_normalized
+    )
+    has_regression_key = any(
+        k in results_keys_str
+        for k in [
             "cox",
-            "or_table",
-            "odds_ratio",
             "logistic",
             "regression",
+            "hazard_ratio",
+            "or_table",
+            "odds_ratio",
         ]
+    )
+    text_clean_claims = re.sub(
+        r"\b(?:does not|do not|did not|cannot|could not|not|no|without)\s+(?:necessarily\s+)?(?:imply|mean|prove|establish|infer|show|indicate|be|have)?\s*(?:causal\w*|causes?|causation)\b",
+        " ",
+        text_lower,
+    )
+    text_clean_claims = re.sub(r"\bnon[- ]?causal\b", " ", text_clean_claims)
+    text_clean_claims = re.sub(
+        r"\b(?:no|without(?:\s+making)?|makes?\s+no)\s+(?:any\s+)?(?:effect\s+of\s+treatment|treatment[- ]effects?|treatment\s+effects?)\s+claims?(?:\s+(?:are|is|were|was)\s+made)?\b",
+        " ",
+        text_clean_claims,
+    )
+    text_clean_claims = re.sub(
+        r"\bno\s+claims?\s+(?:of|regarding)\s+(?:effect\s+of\s+treatment|treatment[- ]effects?|treatment\s+effects?)(?:\s+(?:are|is|were|was)\s+made)?\b",
+        " ",
+        text_clean_claims,
+    )
+    text_clean_claims = re.sub(
+        r"\bno\s+(?:effect\s+of\s+treatment|treatment[- ]effects?|treatment\s+effects?)\s+(?:is|are|was|were)\s+(?:made|claimed)\b",
+        " ",
+        text_clean_claims,
+    )
+    # Diagnostic / prediction targets (e.g. etiologic work-up, etiologic stroke subtype) are evaluation targets, not causal claims.
+    # Restrict substitution to diagnostic work-up and subtype classification targets; retain etiologic research / risk-factor investigations.
+    text_clean_claims = re.sub(
+        r"\betiolog(?:ic(?:al)?|y)\s+(?:work[- ]?up|workup|evaluation|testing|tests?|(?:[a-zA-Z_-]+\s+)?subtypes?|classification|categories|category|diagnosis)\b",
+        "diagnostic workup",
+        text_clean_claims,
+    )
+    # Model-performance statements (e.g. effect of sample size on model discrimination or prediction interval width)
+    # are descriptive of model evaluation, not clinical treatment-effect claims.
+    # The negative lookahead prevents consuming clinical claims (such as aspirin on mortality) earlier in the sentence.
+    text_clean_claims = re.sub(
+        r"\b(?:effect|impact)\s+of\s+"
+        r"(?:(?!\b(?:on|mortality|death|morbidity|survival|stroke|infarction|mi\b|bleeding|recurrence|blood\s+pressure|bp\b|glucose|hba1c)\b)[^.;\n])+?\s+on\s+"
+        r"(?:model\s+)?(?:discrimination|calibration|performance|accuracy|c[- ]statistic|c[- ]index|auroc|roc|brier|fit|prediction\s+intervals?(?:\s+width)?|interval\s+width)\b",
+        " ",
+        text_clean_claims,
+    )
+    # Coordinated model-performance clauses (e.g. "and on model discrimination was negligible")
+    text_clean_claims = re.sub(
+        r"\b(?:and\s+)?(?:also\s+)?on\s+(?:model\s+)?(?:discrimination|calibration|performance|accuracy|c[- ]statistic|c[- ]index|auroc|roc|brier|fit)\s+(?:was|is|were)\s+[^.;\n]+",
+        " ",
+        text_clean_claims,
+    )
+    # Statements about improving model performance (e.g. "aspirin use improves model discrimination")
+    text_clean_claims = re.sub(
+        r"\b[a-zA-Z_-]+(?:\s+[a-zA-Z_-]+){0,2}\s+(?:(?:does|did|do|is|was|were)\s+not\s+|(?:not|failed\s+to)\s+)?(?:improves?|improved|improving|enhances?|enhanced|enhancing)\s+(?:model\s+)?(?:discrimination|calibration|performance|accuracy|c[- ]statistic|c[- ]index|auroc|roc|brier|fit)\b",
+        " ",
+        text_clean_claims,
+    )
+
+    _clinical_outcomes = (
+        r"(?:all-cause\s+)?"
+        r"(?:mortality|death|morbidity|survival|outcome|stroke|infarction|mi\b|"
+        r"bleeding|recurrence|blood\s+pressure|bp\b|glucose|hba1c)"
+    )
+    _verbs = (
+        r"(?:reduces?|reduced|reducing|increases?|increased|increasing|"
+        r"decreases?|decreased|decreasing|lowers?|lowered|lowering|"
+        r"prevents?|prevented|preventing|improves?|improved|improving|"
+        r"cuts?|cut|cutting|slashes?|slashed|slashing|"
+        r"halves?|halved|halving|doubles?|doubled|doubling)"
+    )
+    _aux = r"(?:(?:does|did|do|is|was|were)\s+not\s+|(?:not|failed\s+to)\s+)?"
+    _patient_terms = (
+        r"patients?|participants?|subjects?|individuals?|persons?|"
+        r"cohort|group|subgroup|population|those|men|women|children|adults?"
+    )
+    _model_terms = (
+        r"model|score|index|statistic|c[- ]statistic|c[- ]index|auroc|roc|brier|fit|"
+        r"variable|predictor|covariate|feature|sample|parameter|estimate|ratio|"
+        r"coefficient|prevalence|incidence|rate|frequency|proportion"
+    )
+    _non_interventions = (
+        rf"{_patient_terms}|{_model_terms}|with|experiencing|showing|having|exhibiting"
+    )
+    _model_performance_terms = (
+        r"model|discrimination|calibration|performance|accuracy|c[- ]statistic|"
+        r"c[- ]index|auroc|roc|brier|fit|prediction\s+intervals?|interval\s+width|"
+        r"loss|residuals?|overfitting|concordance|sample\s+size|predicted\s+probability"
+    )
+    _prepositions = r"from|by|to|with|in|at|for|on|during|between|into|through|over|under|after|before"
+
+    has_causal_claims = (
+        bool(
+            re.search(
+                r"\b(?:causal|causes?|causation|treatment[- ]effects?|treatment\s+effects?|effect of|impact of|etiolog\w*)\b",
+                text_clean_claims,
+            )
+        )
+        or bool(
+            re.search(
+                rf"\b(?!(?:{_non_interventions})\b)([a-zA-Z_-]+(?:\s+[a-zA-Z_-]+)?)\s+{_aux}{_verbs}\s+"
+                rf"(?:(?:the|a|an)\s+)?(?:(?:risk|rate|incidence|odds|hazard|probability)\s+of\s+)?"
+                rf"(?!(?:{_model_performance_terms}|{_prepositions})\b)[a-zA-Z0-9_-]+",
+                text_clean_claims,
+            )
+        )
+        or bool(
+            re.search(
+                rf"\b(?!(?:{_non_interventions})\b)([a-zA-Z_-]+(?:\s+[a-zA-Z_-]+)?)\s+"
+                rf"(?:(?:has|had|have|shows?|showed|demonstrates?|demonstrated)\s+)?"
+                rf"no\s+(?:statistically\s+significant\s+)?(?:treatment\s+)?effect\s+on\s+"
+                rf"(?:(?:the|a|an)\s+)?(?:(?:risk|rate|incidence|odds|hazard|probability)\s+of\s+)?"
+                rf"(?!(?:{_model_performance_terms}|{_prepositions})\b)[a-zA-Z0-9_-]+",
+                text_clean_claims,
+            )
+        )
+        or bool(
+            re.search(
+                r"\bno\s+treatment[- ]effect\s+(?:on\s+[^.;\n]+?\s+)?(?:was|is|were)\s+observed\b",
+                text_clean_claims,
+            )
+        )
+    )
+    clean_design = (
+        re.sub(r"[\s\/\-\u2010-\u2015\u2212]+", "_", str(resolved_design).lower())
+        if resolved_design
+        else ""
+    )
+    # Explicit observational keywords in clean_design
+    # Negated observational labels (e.g. "non_observational", "nonobservational") do not trigger confounding caveats.
+    # Distinguish matched randomized trials from observational matching.
+    # Token-bounded true randomization test excludes quasi/pseudo/unrandomized/not-randomized/Mendelian-randomization designs and avoids matching "rct" in words like "infarction".
+    is_negated_observational = bool(
+        re.search(r"(?:^|_)non_?observational(?:_|$)", clean_design)
+    )
+    is_true_randomized = bool(
+        clean_design
+        and (
+            bool(re.search(r"(?:^|_)rct(?:_|$)", clean_design))
+            or bool(
+                re.search(
+                    r"(?:^|_)(?:randomi[zs]ed|randomi[zs]ation)(?:_|$)",
+                    clean_design,
+                )
+            )
+        )
+        and not bool(
+            re.search(
+                r"(?:^|_)(?:quasi|pseudo|un|non|not)_?(?:randomi|rct)",
+                clean_design,
+            )
+        )
+        and not bool(re.search(r"mendelian_?randomi", clean_design))
+    )
+    is_matched_observational = bool(
+        ("matched" in clean_design or "matching" in clean_design)
+        and not is_true_randomized
+    )
+    is_pre_experimental = bool(
+        clean_design
+        and not is_true_randomized
+        and bool(
+            re.search(
+                r"(?:^|_)pre_?experiment(?:al)?(?:$|(?!_(?:period|phase|stage|epoch|interval|baseline|measure|data|time|washout|run_in)(?:_|$))(?:_[a-z0-9]+)*?_(?:study|design|trial|evaluation|investigation|research)(?:_|$))",
+                clean_design,
+            )
+        )
+    )
+    has_explicit_observational = bool(
+        clean_design
+        and (
+            ("observational" in clean_design and not is_negated_observational)
+            or is_matched_observational
+            or is_pre_experimental
+            or any(
+                obs in clean_design
+                for obs in [
+                    "cohort",
+                    "case_control",
+                    "cross_sectional",
+                    "case_referent",
+                    "non_randomized",
+                    "nonrandomized",
+                    "non_randomised",
+                    "nonrandomised",
+                    "not_randomi",
+                    "notrandomi",
+                    "quasi_randomi",
+                    "quasirandomi",
+                    "pseudo_randomi",
+                    "pseudorandomi",
+                    "un_randomi",
+                    "unrandomi",
+                    "quasi_rct",
+                    "quasirct",
+                    "quasi_experimental",
+                    "quasiexperimental",
+                    "quasi_experiment",
+                    "quasiexperiment",
+                    "non_experimental",
+                    "nonexperimental",
+                    "natural_experiment",
+                    "single_arm",
+                    "target_trial",
+                    "trial_emulation",
+                    "emulated_trial",
+                    "mendelian_randomi",
+                    "mendelianrandomi",
+                ]
+            )
+        )
+    )
+
+    # Type 2 study archetype matching:
+    # Exclude disease entities (e.g. "type 2 diabetes", "type 2 MI") and diagnostic accuracy / evaluation targets
+    # from the Type 2 etiologic effect path, preserving genuine Type 2 etiologic studies.
+    is_type_2_archetype = bool(
+        clean_design
+        and "type_2" in clean_design
+        and not bool(
+            re.search(
+                r"(?:^|_)type_2_(?:diabetes|dm|diabetic|myocardial|mi|bipolar)(?:_|$)",
+                clean_design,
+            )
+        )
+    )
+    is_type_2_etiologic = bool(
+        is_type_2_archetype
+        and any(et in clean_design for et in ["etiologic", "etiological", "etiology"])
+        and not any(
+            diag in clean_design
+            for diag in [
+                "diagnostic_accuracy",
+                "diagnostic_performance",
+                "diagnostic_evaluation",
+                "diagnostic_study",
+                "diagnostic_test",
+            ]
+        )
+    )
+
+    # Diagnostic target / workup exemption:
+    # Explicit observational keywords take precedence over the exemption (e.g. "non-randomized diagnostic test").
+    # Type 2 etiology workups consistently require confounding caveats.
+    is_etiologic_diagnostic_target = bool(
+        clean_design
+        and (
+            any(term in clean_design for term in ["work_up", "workup"])
+            or any(
+                diag in clean_design
+                for diag in [
+                    "diagnostic_accuracy",
+                    "diagnostic_performance",
+                    "diagnostic_evaluation",
+                    "diagnostic_study",
+                    "diagnostic_test",
+                ]
+            )
+        )
+        and not has_explicit_observational
+        and not is_type_2_etiologic
+    )
+
+    # Etiologic prediction targets (e.g. "prediction model for etiologic stroke subtype")
+    # predict an etiologic category/subtype rather than evaluating etiologic effects.
+    # Restrict to designs predicting an etiologic category or subtype; do not exempt
+    # etiologic studies merely because they mention predictive risk factors.
+    is_etiologic_prediction_target = bool(
+        clean_design
+        and any(et in clean_design for et in ["etiologic", "etiological", "etiology"])
+        and any(
+            pred in clean_design
+            for pred in [
+                "prediction",
+                "predictive",
+                "prognostic",
+                "risk_model",
+                "risk_prediction",
+                "tripod",
+            ]
+        )
+        and any(
+            target in clean_design
+            for target in [
+                "subtype",
+                "subtypes",
+                "classification",
+                "category",
+                "categories",
+                "diagnosis",
+            ]
+        )
+        and not has_explicit_observational
+    )
+
+    has_observational_keyword = bool(
+        clean_design
+        and (
+            is_type_2_etiologic
+            or (
+                any(
+                    et in clean_design
+                    for et in ["etiologic", "etiological", "etiology"]
+                )
+                and not is_etiologic_diagnostic_target
+                and not is_etiologic_prediction_target
+            )
+            or has_explicit_observational
+        )
+    )
+    is_trial = bool(
+        clean_design
+        and (
+            is_true_randomized
+            or any(t in clean_design for t in ["trial", "experiment"])
+        )
+        and not has_observational_keyword
+    )
+    is_observational = bool(
+        clean_design
+        and has_observational_keyword
+        and not is_trial
+        and not is_etiologic_diagnostic_target
+    )
+    is_confirmed_prediction = bool(
+        clean_design
+        and any(
+            pred_type in clean_design
+            for pred_type in [
+                "prediction",
+                "predictive",
+                "prognostic",
+                "diagnostic",
+                "validation",
+                "tripod",
+                "risk_model",
+                "risk_prediction",
+                "risk_score",
+                "work_up",
+                "workup",
+            ]
+        )
+        and not (
+            "risk_score" in clean_design
+            and any(m in clean_design for m in ["match", "matched", "matching"])
+        )
+    ) or (
+        not clean_design
+        and bool(
+            re.search(
+                r"\b(?:clinical\s+risk\s+prediction\s+model|prediction\s+model|tripod(?:\s+guidelines|\s+statement)?)\b",
+                text_lower,
+            )
+        )
+    )
+    is_non_causal_prediction = (
+        is_confirmed_prediction and not has_causal_claims and not is_observational
+    )
+
+    is_causal = (
+        is_observational
+        or has_causal_key
+        or (has_regression_key and not is_non_causal_prediction)
+        or has_causal_claims
     )
 
     has_causal_caveat = True
     warnings: list[str] = []
     if is_causal:
-        text_lower = all_text.lower()
         has_caveat = any(
             phrase in text_lower
             for phrase in [

@@ -173,16 +173,23 @@ Determining Required Sample Size for Multivariable Prediction Model Development
 
 ### J. Polish Grilling Gate & Evidence Grounding Decision Tree
 
-For full verification rules, source-appropriate metadata requirements, provenance signals, and superscript citation formatting, read the single source of truth at [report-builder.md §4](report-builder.md#4-evidence-base-verification--superscript-citations-pipeline):
+For full verification rules, source-appropriate metadata requirements, provenance signals, and superscript citation formatting, read the single source of truth at [evidence-pipeline.md](evidence-pipeline.md):
 
 ```
 Polish Grilling Gate #6 Activation & Routing
 ├── User prompt explicitly requests literature evidence (e.g. "หาหลักฐานมาประกอบ", "find evidence")
-│   └── Auto-activate Gate #6 Full Polish (report-builder.md §4 Steps 1–4, including Step 2B exploratory enrichment)
-└── Polish preference omitted in prompt ──▶ Gate #5 Alignment Inquiry:
-    ├── (Standard) Skip Polish (User-Scoped References) ──▶ Verify only user-provided sources via report-builder.md §4 Step 2A (omit References section if none provided)
-    └── (Optional) Full Publication Polish ──▶ Execute full report-builder.md §4 Steps 1–4 including Step 2B exploratory literature enrichment
+│   └── Auto-activate Gate #6 Full Polish (evidence-pipeline.md Steps 1–4, including Step 2B exploratory enrichment)
+└── Polish preference omitted in prompt ──▶ Gate #5c Alignment Inquiry:
+    ├── (Standard) Skip Polish (User-Scoped References) ──▶ Verify only user-provided sources via evidence-pipeline.md Step 2A (omit References section if none provided)
+    └── (Optional) Full Publication Polish ──▶ Execute full evidence-pipeline.md Steps 1–4 including Step 2B exploratory literature enrichment
 ```
+
+### K. Ordinal Regression, Restricted Cubic Splines, Clustered GEE & Meta-Analysis
+
+- **Ordinal Outcomes ($\ge 3$ ordered levels)**: Fit Cumulative Logit Proportional Odds models (`fit_ordinal_logistic` [local API] / `fit_proportional_odds` in Recipe 21 [cloud]) and verify parallel slopes via the Brant test (`brant_test` / omnibus Brant test in Recipe 21); compare the omnibus $P$-value with the prespecified diagnostic $\alpha$ (using $0.05$ when unspecified), and fall back to multinomial logistic regression (`fit_multinomial_logistic`) when the omnibus $P$-value is below that $\alpha$ ($P < \alpha$).
+- **Non-Linear Continuous Predictors**: Fit Harrell Restricted Cubic Splines (local API: `fit_rcs_logistic`, `fit_rcs_cox`; cloud recipe: `fit_rcs_spline_model` in Recipe 22) and report both `p_overall` and `p_nonlinearity`.
+- **Clustered / Multi-Center Cohorts**: Compute cluster intraclass correlation ($\text{ICC}_{\text{cluster}}$) and Design Effect ($\text{DEFF} = 1 + (\bar{m} - 1)\text{ICC}$); fit GEE with robust sandwich standard errors or mixed-effects models (local API: `fit_clustered_gee`; cloud recipe: `fit_gee` in Recipe 23).
+- **Systematic Synthesis & Meta-Analysis**: Run inverse-variance Fixed-Effects and DerSimonian-Laird Random-Effects meta-analysis (`run_meta_analysis` / `Recipe 24`), reporting Cochran's $Q$, Higgins' $I^2$, $\hat{\tau}^2$, and the 95% prediction interval.
 
 ---
 

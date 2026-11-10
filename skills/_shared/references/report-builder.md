@@ -1551,6 +1551,7 @@ def verify_standalone_integrity(
     results_dict: dict,
     table_dfs: list[pd.DataFrame] = None,
     allowed_untraced: list[float] | set[float] | tuple[float, ...] = None,
+    study_design: str = None,
 ) -> dict:
     """Verifies numerical traceability (len(untraced_numbers) == 0) and screens for PHI without importing medstat."""
     violations = []
@@ -1607,25 +1608,416 @@ def verify_standalone_integrity(
                                 violations.append(f"{label}: '{m}'")
 
     # 2. Observational Causal / E-value Caveat Check
-    keys_str = " ".join(results_dict.keys()).lower()
-    is_causal = any(
-        k in keys_str
+    resolved_design = (
+        study_design
+        or (results_dict.get("study_design") if isinstance(results_dict, dict) else None)
+    )
+
+    def _normalize_key(k) -> str:
+        s = re.sub(r"[\s\-]+", "_", str(k))
+        s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", s)
+        s = re.sub(r"([a-zA-Z])([0-9])", r"\1_\2", s)
+        s = re.sub(r"([0-9])([a-zA-Z])", r"\1_\2", s)
+        return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s).lower().strip("_")
+
+    results_keys_normalized = [_normalize_key(k) for k in results_dict]
+    results_keys_str = " ".join(results_keys_normalized)
+    text_lower = narrative_text.lower()
+    has_causal_key = (
+        any(
+            k in results_keys_str
+            for k in [
+                "psm",
+                "propensity",
+                "love_plot",
+                "iptw",
+                "average_treatment_effect",
+            ]
+        )
+        or any(
+            bool(re.search(r"(?:^|_)(?:ate|att|cate)(?:_|$)", k))
+            and not re.search(
+                r"(?:^|_)(?:n_dropped|dropped_n|dropped_count|count_dropped)(?:_|$)", k
+            )
+            for k in results_keys_normalized
+        )
+    )
+    has_regression_key = any(
+        k in results_keys_str
         for k in [
-            "psm",
-            "propensity",
-            "love_plot",
             "cox",
+            "logistic",
+            "regression",
             "hazard_ratio",
             "or_table",
             "odds_ratio",
-            "logistic",
-            "regression",
         ]
+    )
+    text_clean_claims = re.sub(
+        r"\b(?:does not|do not|did not|cannot|could not|not|no|without)\s+(?:necessarily\s+)?(?:imply|mean|prove|establish|infer|show|indicate|be|have)?\s*(?:causal\w*|causes?|causation)\b",
+        " ",
+        text_lower,
+    )
+    text_clean_claims = re.sub(r"\bnon[- ]?causal\b", " ", text_clean_claims)
+    text_clean_claims = re.sub(
+        r"\b(?:no|without(?:\s+making)?|makes?\s+no)\s+(?:any\s+)?(?:effect\s+of\s+treatment|treatment[- ]effects?|treatment\s+effects?)\s+claims?(?:\s+(?:are|is|were|was)\s+made)?\b",
+        " ",
+        text_clean_claims,
+    )
+    text_clean_claims = re.sub(
+        r"\bno\s+claims?\s+(?:of|regarding)\s+(?:effect\s+of\s+treatment|treatment[- ]effects?|treatment\s+effects?)(?:\s+(?:are|is|were|was)\s+made)?\b",
+        " ",
+        text_clean_claims,
+    )
+    text_clean_claims = re.sub(
+        r"\bno\s+(?:effect\s+of\s+treatment|treatment[- ]effects?|treatment\s+effects?)\s+(?:is|are|was|were)\s+(?:made|claimed)\b",
+        " ",
+        text_clean_claims,
+    )
+    # Diagnostic / prediction targets (e.g. etiologic work-up, etiologic stroke subtype) are evaluation targets, not causal claims.
+    # Restrict substitution to diagnostic work-up and subtype classification targets; retain etiologic research / risk-factor investigations.
+    text_clean_claims = re.sub(
+        r"\betiolog(?:ic(?:al)?|y)\s+(?:work[- ]?up|workup|evaluation|testing|tests?|(?:[a-zA-Z_-]+\s+)?subtypes?|classification|categories|category|diagnosis)\b",
+        "diagnostic workup",
+        text_clean_claims,
+    )
+    # Model-performance statements (e.g. effect of sample size on model discrimination or prediction interval width)
+    # are descriptive of model evaluation, not clinical treatment-effect claims.
+    # The negative lookahead prevents consuming clinical claims (such as aspirin on mortality) earlier in the sentence.
+    text_clean_claims = re.sub(
+        r"\b(?:effect|impact)\s+of\s+"
+        r"(?:(?!\b(?:on|mortality|death|morbidity|survival|stroke|infarction|mi\b|bleeding|recurrence|blood\s+pressure|bp\b|glucose|hba1c)\b)[^.;\n])+?\s+on\s+"
+        r"(?:model\s+)?(?:discrimination|calibration|performance|accuracy|c[- ]statistic|c[- ]index|auroc|roc|brier|fit|prediction\s+intervals?(?:\s+width)?|interval\s+width)\b",
+        " ",
+        text_clean_claims,
+    )
+    # Coordinated model-performance clauses (e.g. "and on model discrimination was negligible")
+    text_clean_claims = re.sub(
+        r"\b(?:and\s+)?(?:also\s+)?on\s+(?:model\s+)?(?:discrimination|calibration|performance|accuracy|c[- ]statistic|c[- ]index|auroc|roc|brier|fit)\s+(?:was|is|were)\s+[^.;\n]+",
+        " ",
+        text_clean_claims,
+    )
+    # Statements about improving model performance (e.g. "aspirin use improves model discrimination")
+    text_clean_claims = re.sub(
+        r"\b[a-zA-Z_-]+(?:\s+[a-zA-Z_-]+){0,2}\s+(?:(?:does|did|do|is|was|were)\s+not\s+|(?:not|failed\s+to)\s+)?(?:improves?|improved|improving|enhances?|enhanced|enhancing)\s+(?:model\s+)?(?:discrimination|calibration|performance|accuracy|c[- ]statistic|c[- ]index|auroc|roc|brier|fit)\b",
+        " ",
+        text_clean_claims,
+    )
+
+    _clinical_outcomes = (
+        r"(?:all-cause\s+)?"
+        r"(?:mortality|death|morbidity|survival|outcome|stroke|infarction|mi\b|"
+        r"bleeding|recurrence|blood\s+pressure|bp\b|glucose|hba1c)"
+    )
+    _verbs = (
+        r"(?:reduces?|reduced|reducing|increases?|increased|increasing|"
+        r"decreases?|decreased|decreasing|lowers?|lowered|lowering|"
+        r"prevents?|prevented|preventing|improves?|improved|improving|"
+        r"cuts?|cut|cutting|slashes?|slashed|slashing|"
+        r"halves?|halved|halving|doubles?|doubled|doubling)"
+    )
+    _aux = r"(?:(?:does|did|do|is|was|were)\s+not\s+|(?:not|failed\s+to)\s+)?"
+    _patient_terms = (
+        r"patients?|participants?|subjects?|individuals?|persons?|"
+        r"cohort|group|subgroup|population|those|men|women|children|adults?"
+    )
+    _model_terms = (
+        r"model|score|index|statistic|c[- ]statistic|c[- ]index|auroc|roc|brier|fit|"
+        r"variable|predictor|covariate|feature|sample|parameter|estimate|ratio|"
+        r"coefficient|prevalence|incidence|rate|frequency|proportion"
+    )
+    _non_interventions = (
+        rf"{_patient_terms}|{_model_terms}|with|experiencing|showing|having|exhibiting"
+    )
+    _model_performance_terms = (
+        r"model|discrimination|calibration|performance|accuracy|c[- ]statistic|"
+        r"c[- ]index|auroc|roc|brier|fit|prediction\s+intervals?|interval\s+width|"
+        r"loss|residuals?|overfitting|concordance|sample\s+size|predicted\s+probability"
+    )
+    _prepositions = (
+        r"from|by|to|with|in|at|for|on|during|between|into|through|over|under|after|before"
+    )
+
+    has_causal_claims = (
+        bool(
+            re.search(
+                r"\b(?:causal|causes?|causation|treatment[- ]effects?|treatment\s+effects?|effect of|impact of|etiolog\w*)\b",
+                text_clean_claims,
+            )
+        )
+        or bool(
+            re.search(
+                rf"\b(?!(?:{_non_interventions})\b)([a-zA-Z_-]+(?:\s+[a-zA-Z_-]+)?)\s+{_aux}{_verbs}\s+"
+                rf"(?:(?:the|a|an)\s+)?(?:(?:risk|rate|incidence|odds|hazard|probability)\s+of\s+)?"
+                rf"(?!(?:{_model_performance_terms}|{_prepositions})\b)[a-zA-Z0-9_-]+",
+                text_clean_claims,
+            )
+        )
+        or bool(
+            re.search(
+                rf"\b(?!(?:{_non_interventions})\b)([a-zA-Z_-]+(?:\s+[a-zA-Z_-]+)?)\s+"
+                rf"(?:(?:has|had|have|shows?|showed|demonstrates?|demonstrated)\s+)?"
+                rf"no\s+(?:statistically\s+significant\s+)?(?:treatment\s+)?effect\s+on\s+"
+                rf"(?:(?:the|a|an)\s+)?(?:(?:risk|rate|incidence|odds|hazard|probability)\s+of\s+)?"
+                rf"(?!(?:{_model_performance_terms}|{_prepositions})\b)[a-zA-Z0-9_-]+",
+                text_clean_claims,
+            )
+        )
+        or bool(
+            re.search(
+                r"\bno\s+treatment[- ]effect\s+(?:on\s+[^.;\n]+?\s+)?(?:was|is|were)\s+observed\b",
+                text_clean_claims,
+            )
+        )
+    )
+    clean_design = (
+        re.sub(r"[\s\/\-\u2010-\u2015\u2212]+", "_", str(resolved_design).lower())
+        if resolved_design
+        else ""
+    )
+    # Explicit observational keywords in clean_design
+    # Negated observational labels (e.g. "non_observational", "nonobservational") do not trigger confounding caveats.
+    # Distinguish matched randomized trials from observational matching.
+    # Token-bounded true randomization test excludes quasi/pseudo/unrandomized/not-randomized/Mendelian-randomization designs and avoids matching "rct" in words like "infarction".
+    is_negated_observational = bool(
+        re.search(r"(?:^|_)non_?observational(?:_|$)", clean_design)
+    )
+    is_true_randomized = bool(
+        clean_design
+        and (
+            bool(re.search(r"(?:^|_)rct(?:_|$)", clean_design))
+            or bool(
+                re.search(
+                    r"(?:^|_)(?:randomi[zs]ed|randomi[zs]ation)(?:_|$)",
+                    clean_design,
+                )
+            )
+        )
+        and not bool(
+            re.search(
+                r"(?:^|_)(?:quasi|pseudo|un|non|not)_?(?:randomi|rct)",
+                clean_design,
+            )
+        )
+        and not bool(re.search(r"mendelian_?randomi", clean_design))
+    )
+    is_matched_observational = bool(
+        ("matched" in clean_design or "matching" in clean_design)
+        and not is_true_randomized
+    )
+    is_pre_experimental = bool(
+        clean_design
+        and not is_true_randomized
+        and bool(
+            re.search(
+                r"(?:^|_)pre_?experiment(?:al)?(?:$|(?!_(?:period|phase|stage|epoch|interval|baseline|measure|data|time|washout|run_in)(?:_|$))(?:_[a-z0-9]+)*?_(?:study|design|trial|evaluation|investigation|research)(?:_|$))",
+                clean_design,
+            )
+        )
+    )
+    has_explicit_observational = bool(
+        clean_design
+        and (
+            ("observational" in clean_design and not is_negated_observational)
+            or is_matched_observational
+            or is_pre_experimental
+            or any(
+                obs in clean_design
+                for obs in [
+                    "cohort",
+                    "case_control",
+                    "cross_sectional",
+                    "case_referent",
+                    "non_randomized",
+                    "nonrandomized",
+                    "non_randomised",
+                    "nonrandomised",
+                    "not_randomi",
+                    "notrandomi",
+                    "quasi_randomi",
+                    "quasirandomi",
+                    "pseudo_randomi",
+                    "pseudorandomi",
+                    "un_randomi",
+                    "unrandomi",
+                    "quasi_rct",
+                    "quasirct",
+                    "quasi_experimental",
+                    "quasiexperimental",
+                    "quasi_experiment",
+                    "quasiexperiment",
+                    "non_experimental",
+                    "nonexperimental",
+                    "natural_experiment",
+                    "single_arm",
+                    "target_trial",
+                    "trial_emulation",
+                    "emulated_trial",
+                    "mendelian_randomi",
+                    "mendelianrandomi",
+                ]
+            )
+        )
+    )
+
+    # Type 2 study archetype matching:
+    # Exclude disease entities (e.g. "type 2 diabetes", "type 2 MI") and diagnostic accuracy / evaluation targets
+    # from the Type 2 etiologic effect path, preserving genuine Type 2 etiologic studies.
+    is_type_2_archetype = bool(
+        clean_design
+        and "type_2" in clean_design
+        and not bool(
+            re.search(
+                r"(?:^|_)type_2_(?:diabetes|dm|diabetic|myocardial|mi|bipolar)(?:_|$)",
+                clean_design,
+            )
+        )
+    )
+    is_type_2_etiologic = bool(
+        is_type_2_archetype
+        and any(et in clean_design for et in ["etiologic", "etiological", "etiology"])
+        and not any(
+            diag in clean_design
+            for diag in [
+                "diagnostic_accuracy",
+                "diagnostic_performance",
+                "diagnostic_evaluation",
+                "diagnostic_study",
+                "diagnostic_test",
+            ]
+        )
+    )
+
+    # Diagnostic target / workup exemption:
+    # Explicit observational keywords take precedence over the exemption (e.g. "non-randomized diagnostic test").
+    # Type 2 etiology workups consistently require confounding caveats.
+    is_etiologic_diagnostic_target = bool(
+        clean_design
+        and (
+            any(term in clean_design for term in ["work_up", "workup"])
+            or any(
+                diag in clean_design
+                for diag in [
+                    "diagnostic_accuracy",
+                    "diagnostic_performance",
+                    "diagnostic_evaluation",
+                    "diagnostic_study",
+                    "diagnostic_test",
+                ]
+            )
+        )
+        and not has_explicit_observational
+        and not is_type_2_etiologic
+    )
+
+    # Etiologic prediction targets (e.g. "prediction model for etiologic stroke subtype")
+    # predict an etiologic category/subtype rather than evaluating etiologic effects.
+    # Restrict to designs predicting an etiologic category or subtype; do not exempt
+    # etiologic studies merely because they mention predictive risk factors.
+    is_etiologic_prediction_target = bool(
+        clean_design
+        and any(et in clean_design for et in ["etiologic", "etiological", "etiology"])
+        and any(
+            pred in clean_design
+            for pred in [
+                "prediction",
+                "predictive",
+                "prognostic",
+                "risk_model",
+                "risk_prediction",
+                "tripod",
+            ]
+        )
+        and any(
+            target in clean_design
+            for target in [
+                "subtype",
+                "subtypes",
+                "classification",
+                "category",
+                "categories",
+                "diagnosis",
+            ]
+        )
+        and not has_explicit_observational
+    )
+
+    has_observational_keyword = bool(
+        clean_design
+        and (
+            is_type_2_etiologic
+            or (
+                any(
+                    et in clean_design
+                    for et in ["etiologic", "etiological", "etiology"]
+                )
+                and not is_etiologic_diagnostic_target
+                and not is_etiologic_prediction_target
+            )
+            or has_explicit_observational
+        )
+    )
+    is_trial = bool(
+        clean_design
+        and (
+            is_true_randomized
+            or any(t in clean_design for t in ["trial", "experiment"])
+        )
+        and not has_observational_keyword
+    )
+    is_observational = bool(
+        clean_design
+        and has_observational_keyword
+        and not is_trial
+        and not is_etiologic_diagnostic_target
+    )
+    is_confirmed_prediction = bool(
+        clean_design
+        and any(
+            pred_type in clean_design
+            for pred_type in [
+                "prediction",
+                "predictive",
+                "prognostic",
+                "diagnostic",
+                "validation",
+                "tripod",
+                "risk_model",
+                "risk_prediction",
+                "risk_score",
+                "work_up",
+                "workup",
+            ]
+        )
+        and not (
+            "risk_score" in clean_design
+            and any(m in clean_design for m in ["match", "matched", "matching"])
+        )
+    ) or (
+        not clean_design
+        and bool(
+            re.search(
+                r"\b(?:clinical\s+risk\s+prediction\s+model|prediction\s+model|tripod(?:\s+guidelines|\s+statement)?)\b",
+                text_lower,
+            )
+        )
+    )
+    is_non_causal_prediction = (
+        is_confirmed_prediction
+        and not has_causal_claims
+        and not is_observational
+    )
+
+    is_causal = (
+        is_observational
+        or has_causal_key
+        or (has_regression_key and not is_non_causal_prediction)
+        or has_causal_claims
     )
     has_caveat = True
     if is_causal:
         has_caveat = any(
-            phrase in narrative_text.lower()
+            phrase in text_lower
             for phrase in [
                 "unmeasured confounding",
                 "residual confounding",
@@ -1935,54 +2327,5 @@ def verify_standalone_integrity(
 
 ## 4. Evidence-Base Verification & Superscript Citations Pipeline
 
-When the **Polish Grilling Gate (#6)** is engaged (via explicit prompt request e.g. "หาหลักฐานมาประกอบ" / "find evidence", Gate #5 Full Polish selection, or triggered on-demand), execute this 4-step evidence verification and citation workflow (if Standard Skip Polish is active, standard deliverables proceed directly using strictly user-provided sources, resolving incomplete citations and comparing real empirical findings by routing citation lookups through available literature MCPs first, with any available web search tool (e.g., `web_search`, `search_web`) as fallback, without exploratory literature reviews; if user provided no references, omit the References section entirely):
-
-### Step 1: Clinical Claims vs Analyzed Data Audit
-- Cross-audit every narrative statement in Discussion and Results against `results_dict` and study design.
-- Base permitted causal language on the prespecified estimand, study design, confounder control, and identification assumptions (do not treat weighting alone as sufficient or unweighted observational data as automatically prohibiting causal claims; report associative framing where identification is unverified, and require E-values only where defined and appropriate for the supported effect measure and sensitivity question).
-- Derive the significance threshold ($\alpha$) and confidence-interval level ($1-\alpha$) from analysis metadata rather than assuming fixed $0.05$ and $95\%$; verify that non-significant results in superiority or null-hypothesis tests ($P > \alpha$) are strictly stated as "insufficient evidence to reject the null hypothesis" rather than claiming equivalence or "no effect", while preserving separate margin- and CI-based interpretation for prespecified non-inferiority or equivalence analyses.
-- Compare normalized point estimates, confidence intervals, and $P$-values against tabular outputs using the half-unit decimal precision tolerance rule (`abs(val - kn) <= 0.5 * 10**(-d) + 1e-9`, where `d` is the number of decimal digits displayed in the narrative text; $d=0$ for integers), strictly permitting percentage-scale matching (`kn * 100.0`) only when the token explicitly carries a `%` sign, and enforcing the same half-unit precision tolerance on `allowed_untraced` constants.
-
-### Step 2: Empirical Research Grounding & Primary Source Verification via MCPs & Bibliographic Engines
-
-- **Dynamic Bibliographic Source & MCP Adaptation**:
-  - Dynamically discover and adapt to any literature or medical database MCP servers connected in the environment (e.g. PubMed MCP, PRISMA MCP, NEJM, Cochrane, Semantic Scholar, ScienceDirect, or optional `medical-terminology` MCP when available).
-  - Prioritize specialized MCP tools when available for fast, authoritative metadata and abstract retrieval; seamlessly fallback to any available web search tool (e.g., `web_search`, `search_web`) or PubMed web queries when dedicated MCP database servers are absent.
-- **Step 2A: User-Scoped Source Resolution & Online Empirical Comparison (Standard & Full Polish)**:
-  - When user-provided materials, clinical notes, or prompts cite or mention external studies (e.g., "Singer 2016", "Sepsis-3", "KDIGO 2012") with or without full text or complete bibliographic metadata:
-    - Always resolve it into a complete, verified citation.
-    - **Zero-PHI Literature Query Boundary**: Keep raw user materials, clinical-note text, and patient excerpts out of external MCP or web search queries. Build external requests strictly from bibliographic metadata and, when needed, de-identified, non-patient-specific topic or claim descriptors (e.g., disease entity, estimand, intervention); redact any Protected Health Information (HN, patient name, DOB, Thai National ID, phone) before dispatching queries.
-    - Query available MCPs or any available web search tool to retrieve and verify the authentic primary publication and claim support using bibliographic fields appropriate to the source type: for journal articles, Title, full Author list, Journal, Year, Volume, Pages (or article number / e-locator when pages are not assigned), and DOI (when assigned); for clinical practice guidelines, consensus statements, government reports, or standards, Title, issuing body/organization, Year, version or report identifier, and official URL when no DOI exists; and for books or older publications, authors/editors, Title, publisher, and Year.
-    - **Discussion Empirical Grounding (Conditional on Source Content)**: Even when the user supplies a local document or full text, query online sources (MCPs or any available web search tool) if searchable. Extract and present real empirical research figures (sample sizes, benchmark effect sizes, control group event rates, 95% CIs) as comparable ONLY when the source actually reports them, matches the target estimand, population, outcome, and time horizon, and directly supports the specific **Discussion narrative** claim. Sources that do not report relevant empirical figures (e.g., clinical guidelines, consensus criteria, classification frameworks) or differ in clinical context/estimand must be cited for the conceptual claims, recommendations, or criteria they support without inventing, importing, or presenting non-comparable figures.
-    - **Offline / Unavailable Literature Services**: When online literature services (MCPs and web search tools) are unavailable or unreachable, authenticated local full text with source-appropriate bibliographic metadata satisfies verification ONLY when carrying an accepted provenance or validation signal (user-provided file in workspace/prompt, publisher/journal masthead or frontmatter, DOI/PMID header, or official organization publication cover; accepting issuing body and official URL/identifier when no DOI exists); otherwise halt explicitly (anti-phantom citation invariant).
-    - Insert the complete, verified study into the References list and assign sequential superscript citations (`<sup>1</sup>`, `<sup>2,3</sup>`) formatted in the chosen Journal House Style.
-  - **Zero Unsolicited References in Standard Mode**: If the user does not provide references or mention external literature, the Standard Mode deliverable contains NO external literature References section.
-- **Step 2B: Relevant Literature Enrichment (Full Polish Only)**:
-  - Actively search available literature MCPs or any available web search tool (e.g., `web_search`, `search_web`) for additional authentic, relevant published studies, clinical trials, or guidelines that directly relate to the study's clinical topic, target population, and analyzed outcomes (strictly constructing queries from de-identified medical topic descriptors without raw patient materials).
-  - Extract and present real empirical findings and comparison benchmarks as comparable ONLY when reported by the source, matching the target estimand, population, outcome, and time horizon, and directly supporting a specific Discussion claim (otherwise cite the source for its conceptual claims without figures or omit it), assigning sequential superscript citations and expanding the Reference list.
-- **Verification & Safety Rules (All Modes)**:
-  - **Zero-PHI Query Boundary**: Enforce complete redaction or rejection of raw user materials, clinical-note text, or patient identifiers before sending requests to external MCPs or web search tools. Construct all external search queries strictly from verified bibliographic metadata and de-identified medical concept terms.
-  - **Bibliographic Verification**: Verify bibliographic metadata via query: `"<First Author> <Journal> <Year> <Title keywords>"` or DOI/PMID (or `"<Issuing Body> <Title> <Year>"` for guidelines/reports) across available MCPs or any available web search tool. Require bibliographic fields appropriate to the source type (accepting issuing body and official URL/identifier when no DOI exists). When literature services are unavailable, authenticated local full text satisfies verification only when carrying an accepted provenance signal with source-appropriate bibliographic metadata; explicitly halt if verification is unavailable.
-  - **Optional `medical-terminology` MCP**: When the `medical-terminology` MCP server is available in the environment, use it to validate medical terminology, standardized ontology codes (SNOMED CT, LOINC, RxNorm, ICD-10), and laboratory reference ranges.
-  - Confirm that the cited paper's primary findings directly support the specific sentence in the manuscript.
-  - **Anti-Phantom Citation Invariant**: Zero fabricated papers, hallucinated author lists, or synthetic DOIs. If a citation cannot be verified or its actual conclusions contradict the narrative statement, halt at Grilling Gate #6 to reconcile or replace the citation.
-
-### Step 3: Sequential In-Text Superscript Citations
-- Number citations sequentially in order of first appearance using superscript notation (`<sup>1</sup>`, `<sup>2,3</sup>`, `<sup>4–6</sup>`). Track citation-to-reference assignments so repeated citations reuse the same reference number and anchor instead of creating duplicate entries.
-- Multi-renderer implementation:
-  - **HTML (`generate_html_report`)**: `Early resuscitation improves survival.<sup class="citation"><a href="#ref-1">1</a></sup>` (styled via CSS `sup.citation`, un-escaped safely; emits `id="ref-N"` on reference paragraphs matching each citation's `href="#ref-N"` target).
-  - **Word (`render_docx`)**: Converted into native OpenXML text runs with `run.font.superscript = True` and `8.5 pt` font size.
-  - **PowerPoint (`render_pptx`)**: Cleaned to Unicode superscripts (`¹`, `²`) or bracketed numbers `[1]`, eliminating raw HTML tag leaks.
-  - **Markdown (`render_markdown`)**: Rendered cleanly as `<sup>1</sup>` or `[^1]`.
-
-### Step 4: Bibliographic Reference List Assembly by Journal House Style
-Format the concluding **References** section strictly in the locked Journal House Style:
-
-| Journal Style | In-Text Citation | Reference List Format Example |
-| :--- | :--- | :--- |
-| **NEJM** | `...guidelines.<sup>1</sup>` | `1. Singer M, Deutschman CS, Seymour CW, et al. The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA 2016;315:801-10.` |
-| **JAMA** | `...guidelines.<sup>1</sup>` | `1. Singer M, Deutschman CS, Seymour CW, et al. The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA. 2016;315(8):801-810. doi:10.1001/jama.2016.0287` |
-| **Lancet** | `...guidelines<sup>1</sup>` | `1 Singer M, Deutschman CS, Seymour CW, et al. The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA 2016; 315: 801–10.` |
-| **BMJ** | `...guidelines.<sup>1</sup>` | `1 Singer M, Deutschman CS, Seymour CW, et al. The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA 2016;315:801-10. doi:10.1001/jama.2016.0287` |
-| **Clinical** | `...guidelines<sup>1</sup>` | `1. Singer, M. et al. The Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3). JAMA 315, 801–810 (2016).` |
+Disclosed to [evidence-pipeline.md](evidence-pipeline.md). Read [evidence-pipeline.md](evidence-pipeline.md) whenever **Polish Grilling Gate (#6)** or **Output Alignment Gate (#5c)** citation verification is engaged.
 ```
