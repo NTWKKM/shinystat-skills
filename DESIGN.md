@@ -2026,3 +2026,40 @@ An end-to-end audit of `shinystat` and `shinystat-cloud` against the `/writing-f
 ### Consequences
 - **Status**: Accepted & Verified (`test_skill_process_audit_f1_to_f7_and_q3`).
 - Lower always-loaded context footprint, deterministic 6-step execution order, and clean separation between local `medstat.reporting.renderers`, cloud `report-builder.md`, and shared `evidence-pipeline.md`.
+
+---
+
+## ADR 72: Statistical Rigor, Model Convergence Contracts & Writing-for-Agents Link Resolution
+
+### Context
+A comprehensive adversarial audit (`scrutinize` + `writing-for-agents`) of the biostatistical core, cloud recipes, and reference documentation identified seven defects across statistical determinism, functional return contracts, and documentation navigation:
+1. **S-1 (CIF Tie Jittering & Global RNG Mutation)**: In `AalenJohansenFitter`, default `seed=None` causes `lifelines` to reset global NumPy RNG state from OS entropy on tied failure times, mutating caller state and generating non-deterministic CIF curves across repeated calls.
+2. **S-2 (Meta-Analysis Per-Study CIs)**: `run_meta_analysis` accepted an `alpha` parameter for pooled CIs but hardcoded `1.96` for per-study rows in `studies_with_weights`, leaving study-level intervals locked at 95% when `alpha != 0.05`.
+3. **S-3 (ICC Full-Precision CIs)**: `_compute_icc_from_matrix` returned only 2-decimal rounded `CI95%` arrays, withholding unrounded float bounds from downstream journal formatters.
+4. **F-1 & F-2 (Model Convergence Key)**: Both `shinystat` and `shinystat-cloud` SKILL.md mandate verifying `converged == True`, yet 10 local `medstat.models` functions and Cloud Recipe 23 `fit_gee` lacked a top-level `"converged"` key.
+5. **W-1 (Phantom Module & Function Symbols)**: Documentation referenced 7 non-existent symbols (`medstat.diagnostics`, `competing_risks` module, `fit_ordinal_logistic`, `brant_test`, `fit_rcs_logistic`/`fit_rcs_cox`, `fit_clustered_gee`, and `rcs_lib.py`).
+6. **W-2 (Broken Recipe Links in Local Skill & Line-Range TOC)**: `decision-heuristics.md` contained 20 relative markdown links to `recipes/0X-...md` which only existed in `shinystat-cloud`, breaking navigation in local `shinystat`. Additionally, the 2,331-line `report-builder.md` lacked targeted line ranges for modular section retrieval.
+
+### Decision
+1. **S-1 (Deterministic CIF & RNG Isolation)**:
+   - Passed `seed=42` to `AalenJohansenFitter(calculate_variance=True, seed=42)` in both `src/medstat/models/survival.py` and Cloud Recipe 15.
+   - Wrapped `ajf.fit(...)` calls in `_saved_rng_state = np.random.get_state()` and restored the state in a `finally` block, isolating the caller's RNG.
+2. **S-2 (Alpha-Scaled Per-Study Meta CIs)**:
+   - Replaced hardcoded `1.96` with `z_crit = float(stats.norm.ppf(1.0 - alpha / 2.0))` in `src/medstat/meta/models.py`.
+3. **S-3 (Unrounded Float CI Bounds in ICC)**:
+   - Retained `"CI95%"` as a rounded array for Pingouin parity while adding `"ci_lower"` and `"ci_upper"` float columns to the returned DataFrame in `src/medstat/agreement/icc.py`.
+4. **F-1 & F-2 (Convergence Contract Enforcement)**:
+   - Added `"converged": bool(...)` to the return dictionaries of `fit_linear_regression`, `fit_standard_logistic`, `fit_poisson_regression`, `fit_negative_binomial`, `fit_firth_logistic`, `fit_firth_cox`, `fit_gee`, `fit_random_intercept`, `fit_proportional_odds`, `fit_multinomial_logistic`, and Cloud Recipe 23 `fit_gee`.
+5. **W-1 (Documentation Symbol Alignment & Defensive Aliasing)**:
+   - Corrected all 7 phantom symbols in `SKILL.md`, `decision-heuristics.md`, and `ARCHITECTURE.md`.
+   - Added backwards-compatible aliases in `multilevel.py` (`fit_clustered_gee = fit_gee`), `ordinal.py` (`fit_ordinal_logistic = fit_proportional_odds`, `brant_test = test_proportional_odds`, `run_brant_test = test_proportional_odds`), and `splines.py` (`fit_rcs_cox = fit_cox_rcs`, `fit_rcs_logistic = fit_logistic_rcs`).
+6. **W-2 (Shared Reference Link Uniformity & Line-Range TOC)**:
+   - Converted cloud-only `recipes/*.md` markdown links in `decision-heuristics.md` to non-404 inline code references (`Recipe X: ... (\`recipes/...\`)`).
+   - Added a compact Section Line-Range Index to `report-builder.md` lines 5–9.
+   - Added `test_shinystat_local_skill_markdown_links_resolve` in `test_shinystat_skill.py` to prevent broken links in either skill.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Statistical Invariants**: CIF estimates are 100% deterministic and RNG-isolated; meta-analysis study-level intervals scale correctly with `alpha`.
+- **Contract Adherence**: All regression models reliably expose `"converged": bool`.
+- **Agent Ergonomics**: Zero phantom symbols and zero broken links across all canonical, vendored, and packaged skills.

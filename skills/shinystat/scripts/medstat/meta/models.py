@@ -303,10 +303,10 @@ def run_meta_analysis(
     studies_with_weights["weight_re_pct"] = w_re_pct
     studies_with_weights["effect_size"] = np.exp(theta) if is_ratio else theta
     studies_with_weights["ci_lower"] = (
-        np.exp(theta - 1.96 * se_arr) if is_ratio else (theta - 1.96 * se_arr)
+        np.exp(theta - z_crit * se_arr) if is_ratio else (theta - z_crit * se_arr)
     )
     studies_with_weights["ci_upper"] = (
-        np.exp(theta + 1.96 * se_arr) if is_ratio else (theta + 1.96 * se_arr)
+        np.exp(theta + z_crit * se_arr) if is_ratio else (theta + z_crit * se_arr)
     )
 
     return {

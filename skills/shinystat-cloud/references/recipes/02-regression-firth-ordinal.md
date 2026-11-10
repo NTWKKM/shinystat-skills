@@ -1062,6 +1062,7 @@ def fit_gee(
     return {
         "model": res,
         "summary_df": summary_df,
+        "converged": bool(getattr(res, "converged", True)),
         "n_clusters": n_clusters,
         "cov_type": cov_type,
         "design_effect": deff_info["design_effect"],

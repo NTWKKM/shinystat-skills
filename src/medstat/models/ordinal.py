@@ -204,9 +204,16 @@ def fit_proportional_odds(
     except Exception:
         pseudo_r2 = np.nan
 
+    converged = bool(
+        getattr(result, "mle_retvals", {}).get(
+            "converged", getattr(result, "converged", True)
+        )
+    )
+
     return {
         "model": result,
         "summary_df": summary_df,
+        "converged": converged,
         "predictor_df": predictor_df,
         "threshold_df": threshold_df,
         "categories": [
@@ -411,11 +418,24 @@ def fit_multinomial_logistic(
     model = sm.MNLogit(y_series.values, X_mat)
     result = model.fit(maxiter=maxiter, disp=False)
 
+    converged = bool(
+        getattr(result, "mle_retvals", {}).get(
+            "converged", getattr(result, "converged", True)
+        )
+    )
+
     return {
         "model": result,
+        "converged": converged,
         "log_likelihood": float(result.llf),
         "aic": float(result.aic),
         "bic": float(result.bic),
         "params": result.params,
         "pvalues": result.pvalues,
     }
+
+
+# Backwards compatibility and agent aliases
+fit_ordinal_logistic = fit_proportional_odds
+brant_test = test_proportional_odds
+run_brant_test = test_proportional_odds

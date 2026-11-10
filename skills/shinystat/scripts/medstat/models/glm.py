@@ -57,6 +57,7 @@ def fit_linear_regression(
     return {
         "model": result,
         "summary_df": summary_df,
+        "converged": True,
         "r_squared": float(result.rsquared),
         "r_squared_adj": float(result.rsquared_adj),
         "f_statistic": float(result.fvalue) if result.fvalue is not None else np.nan,
@@ -122,9 +123,16 @@ def fit_standard_logistic(
             "(medstat.models.firth.fit_firth_logistic) or set type: logistic with options.method: firth in your spec YAML."
         )
 
+    converged = bool(
+        getattr(result, "mle_retvals", {}).get(
+            "converged", getattr(result, "converged", True)
+        )
+    )
+
     return {
         "model": result,
         "summary_df": summary_df,
+        "converged": converged,
         "pseudo_r2": float(prsquared) if np.isfinite(prsquared) else np.nan,
         "log_likelihood": float(result.llf),
         "aic": float(result.aic),
@@ -180,9 +188,16 @@ def fit_poisson_regression(
         index=names,
     )
 
+    converged = bool(
+        getattr(result, "mle_retvals", {}).get(
+            "converged", getattr(result, "converged", True)
+        )
+    )
+
     return {
         "model": result,
         "summary_df": summary_df,
+        "converged": converged,
         "log_likelihood": float(result.llf),
         "aic": float(result.aic),
         "bic": float(result.bic),
@@ -246,9 +261,16 @@ def fit_negative_binomial(
         else float(getattr(result, "scale", np.nan))
     )
 
+    converged = bool(
+        getattr(result, "mle_retvals", {}).get(
+            "converged", getattr(result, "converged", True)
+        )
+    )
+
     return {
         "model": result,
         "summary_df": summary_df,
+        "converged": converged,
         "alpha_dispersion": alpha_disp,
         "log_likelihood": float(result.llf),
         "aic": float(result.aic),

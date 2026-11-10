@@ -2,9 +2,12 @@
 
 In cloud sandboxes (e.g. Claude Web Artifacts), `medstat` is not installed as an external package. This reference provides self-contained, pure-Python reporting recipes that assemble biostatistical findings into publication-grade documents (Markdown, self-contained HTML, Word `.docx`, and PowerPoint `.pptx`) with zero custom dependencies.
 
-**Load conditions:**
-- When generating Markdown or HTML reports, read [§1–§2.B](#1-cloud-report-generation-architecture) and [§3 (`verify_standalone_integrity`)](#3-standalone-reporting-integrity-verification); confirm format first via **Output Format Alignment Gate** (`SKILL.md` §2.5).
-- Read [§2.B.1 (`build_plotly_*_spec`)](#b1-standalone-pure-python-plotly-spec-generators-zero-dependencies) only when `plotly_figs` is needed; read [§2.C (`generate_docx_report`)](#c-standalone-word-docx-report-when-python-docx-is-installed) only when `.docx` is chosen.
+**Load conditions & Targeted Line-Range Index:**
+- When generating Markdown or HTML reports, read [§1–§2.B](#1-cloud-report-generation-architecture) (lines 11–327) and [§3 (`verify_standalone_integrity`)](#3-standalone-reporting-integrity-verification) (lines 1538–2327); confirm format first via **Output Format Alignment Gate** (`SKILL.md` §2.5).
+- Read [§2.B.1 (`build_plotly_*_spec`)](#b1-standalone-pure-python-plotly-spec-generators-zero-dependencies) (lines 328–1192) only when interactive `plotly_figs` specs are needed.
+- Read [§2.C (`generate_docx_report`)](#c-standalone-word-docx-report-when-python-docx-is-installed) (lines 1193–1269) only when `.docx` is chosen.
+- Read [§2.D (`generate_pptx_deck`)](#2d-standalone-powerpoint-deck-generator-pptx) (lines 1270–1390) only when `.pptx` is chosen.
+- Read [§2.E (`generate_pdf_report`)](#2e-standalone-pdf-report-generator-pdf) (lines 1391–1537) only when `.pdf` is chosen.
 
 ---
 

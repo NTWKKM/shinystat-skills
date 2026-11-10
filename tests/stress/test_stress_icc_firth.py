@@ -141,6 +141,27 @@ class TestICCSciPyParity:
                 err_msg=f"CI95% mismatch at {res_ours['Type'].iloc[i]}",
             )
 
+    def test_icc_unrounded_ci_lower_upper_columns(self, shrout_fleiss_data):
+        """Verify calculate_icc returns unrounded ci_lower and ci_upper float columns alongside rounded CI95% (S-3)."""
+        from medstat.agreement.icc import calculate_icc
+
+        icc_res = calculate_icc(shrout_fleiss_data, "target", "rater", "score")
+        assert "ci_lower" in icc_res.columns
+        assert "ci_upper" in icc_res.columns
+        assert "CI95%" in icc_res.columns
+
+        # Verify float dtype
+        assert np.issubdtype(icc_res["ci_lower"].dtype, np.floating)
+        assert np.issubdtype(icc_res["ci_upper"].dtype, np.floating)
+
+        # Verify unrounded precision (more than 2 decimal digits present)
+        for idx, row in icc_res.iterrows():
+            ci95_arr = row["CI95%"]
+            assert len(ci95_arr) == 2
+            # CI95% is rounded to 2 decimals
+            assert round(float(row["ci_lower"]), 2) == ci95_arr[0]
+            assert round(float(row["ci_upper"]), 2) == ci95_arr[1]
+
     def test_icc_large_scale_matrix(self):
         """Stress test: 5,000 subjects x 20 raters (100,000 measurements).
         Demonstrates pure-SciPy speedup over Pingouin (>1,000x) and numerical stability."""

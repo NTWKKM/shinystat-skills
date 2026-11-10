@@ -182,6 +182,7 @@ def fit_firth_logistic(
     return {
         "model": model,
         "summary_df": summary_df,
+        "converged": bool(getattr(model, "converged_", True)),
         "loglik": float(llf) if np.isfinite(llf) else np.nan,
         "aic": float(aic) if np.isfinite(aic) else np.nan,
         "bic": float(bic) if np.isfinite(bic) else np.nan,
@@ -320,6 +321,7 @@ def fit_firth_cox(
     return {
         "model": model,
         "summary_df": summary_df,
+        "converged": bool(getattr(model, "converged_", True)),
         "ci_fallback": ci_fallback,
         "lrt_fallback_vars": lrt_fallback_vars,
     }

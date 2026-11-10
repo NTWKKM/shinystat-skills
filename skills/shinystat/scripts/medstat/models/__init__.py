@@ -24,7 +24,7 @@ from medstat.models.ordinal import (
     test_proportional_odds,
 )
 from medstat.models.sensitivity import bootstrap_confidence_interval, calculate_e_value
-from medstat.models.splines import fit_cox_rcs
+from medstat.models.splines import fit_cox_rcs, fit_logistic_rcs
 from medstat.models.survival import (
     CompetingRisksCIFResult,
     bootstrap_fine_gray_se,
@@ -107,6 +107,7 @@ __all__ = [
     "refit_cox_with_strata",
     "piecewise_hr",
     "fit_cox_rcs",
+    "fit_logistic_rcs",
     "fit_proportional_odds",
     "test_proportional_odds",
     "fit_multinomial_logistic",

@@ -324,3 +324,152 @@ class TestConftestForwardingWrapper:
         )
         assert proc312.returncode == 5
         assert "no tests collected" in proc312.stdout.lower()
+
+
+class TestCompetingRisksCIFDeterministic:
+    """Regression test for S-1: Aalen-Johansen CIF Determinism and RNG State Isolation."""
+
+    def test_cif_deterministic_with_ties_and_rng_isolation(self):
+        from medstat.models.survival import fit_competing_risks_cif
+
+        # Create cohort with intentional tied failure times across primary & competing events
+        durations = np.array([5.0, 5.0, 10.0, 10.0, 15.0, 20.0, 20.0, 25.0, 30.0, 30.0])
+        events = np.array([1, 2, 1, 0, 2, 1, 2, 0, 1, 2])
+
+        # Record initial RNG state
+        np.random.seed(12345)
+        state_before = np.random.get_state()
+
+        # Run 1
+        res1 = fit_competing_risks_cif(
+            durations=durations,
+            event_observed=events,
+            event_of_interest=1,
+            competing_event=2,
+            horizons=[10.0, 20.0],
+        )
+
+        state_after_run1 = np.random.get_state()
+        # Verify RNG state was preserved
+        assert state_before[0] == state_after_run1[0]
+        assert np.array_equal(state_before[1], state_after_run1[1])
+
+        # Run 2
+        res2 = fit_competing_risks_cif(
+            durations=durations,
+            event_observed=events,
+            event_of_interest=1,
+            competing_event=2,
+            horizons=[10.0, 20.0],
+        )
+
+        # Determinism check across repeated calls
+        table1 = res1["cif_table"]
+        table2 = res2["cif_table"]
+        np.testing.assert_allclose(
+            table1["cif_primary"].to_numpy(),
+            table2["cif_primary"].to_numpy(),
+            err_msg="cif_primary is not deterministic across runs with tied event times",
+        )
+        np.testing.assert_allclose(
+            table1["cif_competing"].to_numpy(),
+            table2["cif_competing"].to_numpy(),
+            err_msg="cif_competing is not deterministic across runs with tied event times",
+        )
+
+
+class TestMetaAnalysisAlphaScaling:
+    """Regression test for S-2: Per-study CIs respect alpha parameter in run_meta_analysis."""
+
+    def test_meta_analysis_per_study_ci_alpha_scaling(self):
+        from medstat.meta.models import run_meta_analysis
+
+        df = pd.DataFrame(
+            {
+                "study": ["Study A", "Study B", "Study C"],
+                "effect_size": [1.5, 2.0, 1.8],
+                "se": [0.2, 0.25, 0.15],
+            }
+        )
+
+        res_95 = run_meta_analysis(df, alpha=0.05, effect_measure="RR")
+        res_99 = run_meta_analysis(df, alpha=0.01, effect_measure="RR")
+
+        studies_95 = res_95["studies"]
+        studies_99 = res_99["studies"]
+
+        # 99% CI must be strictly wider than 95% CI for every study
+        assert (studies_99["ci_lower"] < studies_95["ci_lower"]).all()
+        assert (studies_99["ci_upper"] > studies_95["ci_upper"]).all()
+
+
+class TestModelConvergenceContracts:
+    """Regression test for F-1: Missing 'converged' key across all 10 local regression model functions."""
+
+    def test_all_ten_local_regression_models_return_converged_key(self):
+        from medstat.models.firth import fit_firth_cox, fit_firth_logistic
+        from medstat.models.glm import (
+            fit_linear_regression,
+            fit_negative_binomial,
+            fit_poisson_regression,
+            fit_standard_logistic,
+        )
+        from medstat.models.multilevel import fit_gee, fit_random_intercept
+        from medstat.models.ordinal import (
+            fit_multinomial_logistic,
+            fit_proportional_odds,
+        )
+
+        np.random.seed(42)
+        n = 100
+        x1 = np.random.normal(size=n)
+        x2 = np.random.normal(size=n)
+        X = pd.DataFrame({"x1": x1, "x2": x2})
+        y_cont = 1.0 + 2.0 * x1 + np.random.normal(size=n)
+        y_bin = (y_cont > np.median(y_cont)).astype(int)
+        y_count = np.random.poisson(lam=np.exp(0.5 + 0.2 * x1))
+        y_ord = pd.cut(y_cont, bins=3, labels=[0, 1, 2]).astype(int)
+        cluster = np.random.choice([1, 2, 3, 4], size=n)
+        time = np.random.exponential(scale=10, size=n) + 1.0
+
+        # 1. GLM linear
+        m1 = fit_linear_regression(y_cont, X)
+        assert (
+            "converged" in m1 and isinstance(m1["converged"], bool) and m1["converged"]
+        )
+
+        # 2. GLM logistic
+        m2 = fit_standard_logistic(y_bin, X)
+        assert "converged" in m2 and isinstance(m2["converged"], bool)
+
+        # 3. GLM poisson
+        m3 = fit_poisson_regression(y_count, X)
+        assert "converged" in m3 and isinstance(m3["converged"], bool)
+
+        # 4. GLM negative binomial
+        m4 = fit_negative_binomial(y_count, X)
+        assert "converged" in m4 and isinstance(m4["converged"], bool)
+
+        # 5. Firth logistic
+        m5 = fit_firth_logistic(y_bin, X)
+        assert "converged" in m5 and isinstance(m5["converged"], bool)
+
+        # 6. Firth cox
+        m6 = fit_firth_cox(time, y_bin, X)
+        assert "converged" in m6 and isinstance(m6["converged"], bool)
+
+        # 7. GEE
+        m7 = fit_gee(y_bin, X, cluster)
+        assert "converged" in m7 and isinstance(m7["converged"], bool)
+
+        # 8. Random intercept
+        m8 = fit_random_intercept(y_cont, X, cluster)
+        assert "converged" in m8 and isinstance(m8["converged"], bool)
+
+        # 9. Proportional odds
+        m9 = fit_proportional_odds(y_ord, X)
+        assert "converged" in m9 and isinstance(m9["converged"], bool)
+
+        # 10. Multinomial logistic
+        m10 = fit_multinomial_logistic(y_ord, X)
+        assert "converged" in m10 and isinstance(m10["converged"], bool)

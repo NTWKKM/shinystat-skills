@@ -842,13 +842,16 @@ def fit_competing_risks_cif(
             f"No competing events (code={competing_event}) observed. Aalen-Johansen converges to standard KM."
         )
 
-    # 1. Fit Aalen-Johansen for Primary Event
-    ajf_primary = AalenJohansenFitter(calculate_variance=True)
-    ajf_primary.fit(dur, evt, event_of_interest=event_of_interest)
+    # 1. Fit Aalen-Johansen for Primary Event and Competing Event with deterministic seed
+    _saved_rng_state = np.random.get_state()
+    try:
+        ajf_primary = AalenJohansenFitter(calculate_variance=True, seed=42)
+        ajf_primary.fit(dur, evt, event_of_interest=event_of_interest)
 
-    # 2. Fit Aalen-Johansen for Competing Event
-    ajf_competing = AalenJohansenFitter(calculate_variance=True)
-    ajf_competing.fit(dur, evt, event_of_interest=competing_event)
+        ajf_competing = AalenJohansenFitter(calculate_variance=True, seed=42)
+        ajf_competing.fit(dur, evt, event_of_interest=competing_event)
+    finally:
+        np.random.set_state(_saved_rng_state)
 
     # 3. Fit Naive Kaplan-Meier (treating competing risks as uninformative censoring)
     km_naive = KaplanMeierFitter(alpha=alpha)

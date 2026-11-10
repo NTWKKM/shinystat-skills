@@ -265,6 +265,7 @@ def fit_gee(
     return {
         "model": result,
         "summary_df": summary_df,
+        "converged": bool(getattr(result, "converged", True)),
         "cov_struct": cov_struct,
         "family": family,
         "nobs": int(result.nobs),
@@ -359,6 +360,7 @@ def fit_random_intercept(
     return {
         "model": result,
         "summary_df": summary_df,
+        "converged": bool(getattr(result, "converged", True)),
         "random_intercept_var": re_var,
         "residual_var": resid_var,
         "cluster_icc": icc_re,
@@ -367,3 +369,7 @@ def fit_random_intercept(
         "nobs": int(result.nobs),
         "n_clusters": len(np.unique(c_clean)),
     }
+
+
+# Backwards compatibility and agent aliases
+fit_clustered_gee = fit_gee

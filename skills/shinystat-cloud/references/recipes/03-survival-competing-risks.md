@@ -627,12 +627,16 @@ def fit_competing_risks_cif(
     if n_primary == 0:
         raise ValueError(f"No events of interest (code={event_of_interest}) observed.")
 
-    # 1. Fit Aalen-Johansen
-    ajf1 = AalenJohansenFitter(calculate_variance=True)
-    ajf1.fit(dur, evt, event_of_interest=event_of_interest)
+    # 1. Fit Aalen-Johansen with deterministic seed and preserved RNG state
+    _saved_rng_state = np.random.get_state()
+    try:
+        ajf1 = AalenJohansenFitter(calculate_variance=True, seed=42)
+        ajf1.fit(dur, evt, event_of_interest=event_of_interest)
 
-    ajf2 = AalenJohansenFitter(calculate_variance=True)
-    ajf2.fit(dur, evt, event_of_interest=competing_event)
+        ajf2 = AalenJohansenFitter(calculate_variance=True, seed=42)
+        ajf2.fit(dur, evt, event_of_interest=competing_event)
+    finally:
+        np.random.set_state(_saved_rng_state)
 
     # 2. Fit Naive KM (censoring competing risks)
     km_naive = KaplanMeierFitter(alpha=alpha)
