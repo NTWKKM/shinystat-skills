@@ -419,4 +419,28 @@ STUDY_DESIGN_INTEGRITY_CASES: list[StudyDesignIntegrityCase] = [
         expected_caveat=False,
         expected_passed=False,
     ),
+    StudyDesignIntegrityCase(
+        id="myocardial_infarction_matched_cohort",
+        study_design="myocardial infarction matched cohort",
+        narrative="Methods: Cohort retention flow was analyzed. A myocardial infarction matched cohort was evaluated across 400 patients; odds ratio was 1.35.",
+        results_dict={"sample_size": 400, "odds_ratio": 1.35},
+        expected_caveat=False,
+        expected_passed=False,
+    ),
+    StudyDesignIntegrityCase(
+        id="quasi_randomized_trial",
+        study_design="quasi-randomized trial",
+        narrative="Methods: Cohort retention flow was analyzed. Quasi-randomized trial evaluating intervention across 300 patients; odds ratio was 1.25.",
+        results_dict={"sample_size": 300, "odds_ratio": 1.25},
+        expected_caveat=False,
+        expected_passed=False,
+    ),
+    StudyDesignIntegrityCase(
+        id="pseudo_randomized_study",
+        study_design="pseudo-randomized study",
+        narrative="Methods: Cohort retention flow was analyzed. Pseudo-randomized study across 350 patients; odds ratio was 1.20.",
+        results_dict={"sample_size": 350, "odds_ratio": 1.20},
+        expected_caveat=False,
+        expected_passed=False,
+    ),
 ]

@@ -2495,7 +2495,7 @@ def test_cloud_verify_standalone_study_design_parity(case, ensure_packaged_cloud
     )
 
     doc = ReportDocument(
-        title=f"Parity Test: {case.study_design}",
+        title="Parity Test",
         results_dict=case.results_dict,
         study_design=case.study_design,
     )

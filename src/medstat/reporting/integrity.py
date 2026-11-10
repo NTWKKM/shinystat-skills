@@ -772,12 +772,23 @@ def verify_report_integrity(
     # Explicit observational keywords in clean_design
     # Negated observational labels (e.g. "non_observational", "nonobservational") do not trigger confounding caveats.
     # Distinguish matched randomized trials from observational matching.
+    # Token-bounded true randomization test excludes quasi/pseudo/unrandomized designs and avoids matching "rct" in words like "infarction".
     is_negated_observational = bool(
         re.search(r"(?:^|_)non_?observational(?:_|$)", clean_design)
     )
+    is_true_randomized = bool(
+        clean_design
+        and (
+            bool(re.search(r"(?:^|_)rct(?:_|$)", clean_design))
+            or bool(re.search(r"(?:^|_)randomi[zs]", clean_design))
+        )
+        and not bool(
+            re.search(r"(?:^|_)(?:quasi|pseudo|un|non)_?randomi", clean_design)
+        )
+    )
     is_matched_observational = bool(
         ("matched" in clean_design or "matching" in clean_design)
-        and not any(t in clean_design for t in ["randomized", "randomised", "rct"])
+        and not is_true_randomized
     )
     has_explicit_observational = bool(
         clean_design
@@ -795,6 +806,11 @@ def verify_report_integrity(
                     "nonrandomized",
                     "non_randomised",
                     "nonrandomised",
+                    "quasi_randomi",
+                    "quasirandomi",
+                    "pseudo_randomi",
+                    "pseudorandomi",
+                    "unrandomi",
                     "quasi_experimental",
                     "quasiexperimental",
                     "quasi_experiment",
@@ -910,9 +926,9 @@ def verify_report_integrity(
     )
     is_trial = bool(
         clean_design
-        and any(
-            t in clean_design
-            for t in ["randomized", "randomised", "rct", "trial", "experiment"]
+        and (
+            is_true_randomized
+            or any(t in clean_design for t in ["trial", "experiment"])
         )
         and not has_observational_keyword
     )

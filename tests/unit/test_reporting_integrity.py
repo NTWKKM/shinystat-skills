@@ -2065,7 +2065,7 @@ def test_integrity_study_design_regression_suite(case):
     Validates causal caveat requirements, observational classification, and diagnostic/prediction exemptions.
     """
     doc = ReportDocument(
-        title=f"Study Design Test: {case.study_design}",
+        title="Study Design Test",
         results_dict=case.results_dict,
         study_design=case.study_design,
     )
