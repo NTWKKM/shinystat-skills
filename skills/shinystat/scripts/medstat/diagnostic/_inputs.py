@@ -70,4 +70,7 @@ def binary_complete_cases(func_name: str, y_true: Any, *scores: Any) -> tuple[np
             f"{func_name}: y_true must be coded 0/1 (missing allowed); found {len(invalid)} "
             f"observed value(s) outside {{0, 1}}: {shown}."
         )
-    return complete_cases(func_name, y_true, *scores, pos_label=1)
+    # Encode the validated numeric values, not the raw labels: "1" == 1 is False, so
+    # passing string labels through would code every "1" as a non-event.
+    y_numeric = pd.to_numeric(y, errors="coerce").astype(float).to_numpy()
+    return complete_cases(func_name, y_numeric, *scores, pos_label=1)

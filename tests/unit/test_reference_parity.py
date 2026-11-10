@@ -655,6 +655,26 @@ def test_dca_and_calibration_reject_non_binary_labels():
         calculate_ici(y, p)
 
 
+@pytest.mark.parametrize(
+    "labels",
+    [
+        np.array(["0", "1", "1", "0", None, "1"], dtype=object),
+        np.array([0, 1, 1, 0, np.nan, 1]),
+        np.array([False, True, True, False, None, True], dtype=object),
+    ],
+)
+def test_binary_complete_cases_encodes_string_and_bool_labels(labels):
+    from medstat.diagnostic._inputs import binary_complete_cases
+    from medstat.diagnostic.dca import calculate_dca
+
+    p = np.array([0.1, 0.9, 0.8, 0.2, 0.5, 0.7])
+    y, s = binary_complete_cases("t", labels, p)
+    np.testing.assert_array_equal(y, [0, 1, 1, 0, 1])
+    np.testing.assert_allclose(s, [0.1, 0.9, 0.8, 0.2, 0.7])
+    nb = calculate_dca(labels, p, thresholds=[0.5])["net_benefit"].iloc[0]
+    assert nb == pytest.approx(3 / 5)
+
+
 def test_mediation_nonlinear_requires_binary_treatment():
     from medstat.causal.mediation import run_mediation
 
