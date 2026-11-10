@@ -17,6 +17,19 @@ import pandas as pd
 import scipy.stats as stats
 
 
+def _wald_nri(estimate: float, var: float, n: int) -> tuple[float, float, float]:
+    """Return (se, z, p) for an NRI component; NaN when the Wald variance is degenerate.
+
+    A zero variance arises when n < 2 or every subject moves the same way (p_up or
+    p_down equal to 1, or no movement at all); the normal approximation is then undefined.
+    """
+    if n < 2 or not np.isfinite(var) or var <= 0.0:
+        return float("nan"), float("nan"), float("nan")
+    se = float(np.sqrt(var))
+    z = float(estimate / se)
+    return se, z, float(2.0 * stats.norm.sf(abs(z)))
+
+
 def compute_reclassification_metrics(
     y_true: pd.Series | np.ndarray,
     p_old: pd.Series | np.ndarray,
@@ -82,13 +95,7 @@ def compute_reclassification_metrics(
     var_e_cont = (
         (p_up_e + p_down_e - nri_e_cont**2) / n_events if n_events > 0 else 0.0
     )
-    se_e_cont = float(np.sqrt(max(0.0, var_e_cont)))
-    z_e_cont = float(nri_e_cont / se_e_cont) if se_e_cont > 0.0 else 0.0
-    p_val_e_cont = (
-        float(2.0 * stats.norm.sf(abs(z_e_cont)))
-        if se_e_cont > 0.0
-        else (1.0 if nri_e_cont == 0.0 else 0.0)
-    )
+    se_e_cont, z_e_cont, p_val_e_cont = _wald_nri(nri_e_cont, var_e_cont, n_events)
 
     n_up_ne = int(np.sum(mask_0 & up_cont))
     n_down_ne = int(np.sum(mask_0 & down_cont))
@@ -100,24 +107,19 @@ def compute_reclassification_metrics(
         if n_nonevents > 0
         else 0.0
     )
-    se_ne_cont = float(np.sqrt(max(0.0, var_ne_cont)))
-    z_ne_cont = float(nri_ne_cont / se_ne_cont) if se_ne_cont > 0.0 else 0.0
-    p_val_ne_cont = (
-        float(2.0 * stats.norm.sf(abs(z_ne_cont)))
-        if se_ne_cont > 0.0
-        else (1.0 if nri_ne_cont == 0.0 else 0.0)
+    se_ne_cont, z_ne_cont, p_val_ne_cont = _wald_nri(
+        nri_ne_cont, var_ne_cont, n_nonevents
     )
 
     nri_total_cont = nri_e_cont + nri_ne_cont
-    var_total_cont = var_e_cont + var_ne_cont
-    se_total_cont = float(np.sqrt(max(0.0, var_total_cont)))
-    z_total_cont = (
-        float(nri_total_cont / se_total_cont) if se_total_cont > 0.0 else 0.0
+    # Total inference requires both components to be estimable.
+    var_total_cont = (
+        var_e_cont + var_ne_cont
+        if np.isfinite(se_e_cont) and np.isfinite(se_ne_cont)
+        else float("nan")
     )
-    p_val_total_cont = (
-        float(2.0 * stats.norm.sf(abs(z_total_cont)))
-        if se_total_cont > 0.0
-        else (1.0 if nri_total_cont == 0.0 else 0.0)
+    se_total_cont, z_total_cont, p_val_total_cont = _wald_nri(
+        nri_total_cont, var_total_cont, n_total
     )
 
     z_crit = 1.959963984540054
@@ -205,13 +207,7 @@ def compute_reclassification_metrics(
         var_e_cat = (
             (p_up_e_cat + p_down_e_cat - nri_e_cat**2) / n_events if n_events > 0 else 0.0
         )
-        se_e_cat = float(np.sqrt(max(0.0, var_e_cat)))
-        z_e_cat = float(nri_e_cat / se_e_cat) if se_e_cat > 0.0 else 0.0
-        p_val_e_cat = (
-            float(2.0 * stats.norm.sf(abs(z_e_cat)))
-            if se_e_cat > 0.0
-            else (1.0 if nri_e_cat == 0.0 else 0.0)
-        )
+        se_e_cat, z_e_cat, p_val_e_cat = _wald_nri(nri_e_cat, var_e_cat, n_events)
 
         n_up_ne_cat = int(np.sum(mask_0 & up_cat))
         n_down_ne_cat = int(np.sum(mask_0 & down_cat))
@@ -223,24 +219,18 @@ def compute_reclassification_metrics(
             if n_nonevents > 0
             else 0.0
         )
-        se_ne_cat = float(np.sqrt(max(0.0, var_ne_cat)))
-        z_ne_cat = float(nri_ne_cat / se_ne_cat) if se_ne_cat > 0.0 else 0.0
-        p_val_ne_cat = (
-            float(2.0 * stats.norm.sf(abs(z_ne_cat)))
-            if se_ne_cat > 0.0
-            else (1.0 if nri_ne_cat == 0.0 else 0.0)
+        se_ne_cat, z_ne_cat, p_val_ne_cat = _wald_nri(
+            nri_ne_cat, var_ne_cat, n_nonevents
         )
 
         nri_total_cat = nri_e_cat + nri_ne_cat
-        var_total_cat = var_e_cat + var_ne_cat
-        se_total_cat = float(np.sqrt(max(0.0, var_total_cat)))
-        z_total_cat = (
-            float(nri_total_cat / se_total_cat) if se_total_cat > 0.0 else 0.0
+        var_total_cat = (
+            var_e_cat + var_ne_cat
+            if np.isfinite(se_e_cat) and np.isfinite(se_ne_cat)
+            else float("nan")
         )
-        p_val_total_cat = (
-            float(2.0 * stats.norm.sf(abs(z_total_cat)))
-            if se_total_cat > 0.0
-            else (1.0 if nri_total_cat == 0.0 else 0.0)
+        se_total_cat, z_total_cat, p_val_total_cat = _wald_nri(
+            nri_total_cat, var_total_cat, n_total
         )
 
         pct_up = float(np.sum(m_combined[np.triu_indices(k_bins, k=1)]) / n_total * 100.0)
@@ -375,16 +365,20 @@ def compute_reclassification_metrics(
     rel_idi = float(idi_val / slope_old) if slope_old > 1e-12 else None
 
     delta_p = p_1 - p_0
-    var_delta_1 = float(np.var(delta_p[mask_1], ddof=1)) if n_events > 1 else 0.0
-    var_delta_0 = float(np.var(delta_p[mask_0], ddof=1)) if n_nonevents > 1 else 0.0
-
-    se_idi = float(np.sqrt(max(0.0, var_delta_1 / n_events + var_delta_0 / n_nonevents)))
-    z_idi = float(idi_val / se_idi) if se_idi > 0.0 else 0.0
-    p_val_idi = (
-        float(2.0 * stats.norm.sf(abs(z_idi)))
-        if se_idi > 0.0
-        else (1.0 if idi_val == 0.0 else 0.0)
-    )
+    if n_events < 2 or n_nonevents < 2:
+        # Sample variance of delta_p is not estimable in a group of one: no inference.
+        se_idi = z_idi = p_val_idi = float("nan")
+    else:
+        var_delta_1 = float(np.var(delta_p[mask_1], ddof=1))
+        var_delta_0 = float(np.var(delta_p[mask_0], ddof=1))
+        se_idi = float(np.sqrt(var_delta_1 / n_events + var_delta_0 / n_nonevents))
+        if se_idi > 0.0:
+            z_idi = float(idi_val / se_idi)
+            p_val_idi = float(2.0 * stats.norm.sf(abs(z_idi)))
+        elif idi_val == 0.0:
+            z_idi, p_val_idi = 0.0, 1.0
+        else:
+            se_idi = z_idi = p_val_idi = float("nan")
 
     res_idi = {
         "estimate": float(idi_val),
@@ -444,8 +438,10 @@ def _lookup_censoring_survival_left_limit(
     vals = kmf_censor.survival_function_.iloc[:, 0].to_numpy(dtype=float)
     is_scalar = np.isscalar(times)
     t_arr = np.atleast_1d(np.asarray(times, dtype=float))
-    idx = np.clip(np.searchsorted(timeline, t_arr, side="left") - 1, 0, len(vals) - 1)
-    res = np.clip(vals[idx], clip_min, 1.0)
+    raw_idx = np.searchsorted(timeline, t_arr, side="left") - 1
+    idx = np.clip(raw_idx, 0, len(vals) - 1)
+    # No timeline point strictly before t: G(t-) = G(0-) = 1.
+    res = np.where(raw_idx < 0, 1.0, np.clip(vals[idx], clip_min, 1.0))
     return float(res[0]) if is_scalar else res
 
 
@@ -533,13 +529,16 @@ def _calc_ipcw_roc_point(
     sum_w_ctrl = float(np.sum(w_ctrl))
     unique_th = np.sort(np.unique(np.concatenate([sc_cases, sc_ctrl])))[::-1]
 
-    tpr_list = [0.0]
-    fpr_list = [0.0]
-    th_list = [float("inf")]
-    for th in unique_th:
-        tpr_list.append(float(np.sum(w_cases[sc_cases >= th]) / sum_w_cases) if sum_w_cases > 0 else 0.0)
-        fpr_list.append(float(np.sum(w_ctrl[sc_ctrl >= th]) / sum_w_ctrl) if sum_w_ctrl > 0 else 0.0)
-        th_list.append(float(th))
+    # Weighted counts at or above each threshold via sorted cumulative sums (O(N log N)).
+    def _weight_at_or_above(sc: np.ndarray, w: np.ndarray, total: float) -> np.ndarray:
+        order = np.argsort(sc, kind="stable")
+        cum = np.concatenate([[0.0], np.cumsum(w[order])])
+        below = cum[np.searchsorted(sc[order], unique_th, side="left")]
+        return (total - below) / total if total > 0 else np.zeros(len(unique_th))
+
+    tpr_list = [0.0] + _weight_at_or_above(sc_cases, w_cases, sum_w_cases).tolist()
+    fpr_list = [0.0] + _weight_at_or_above(sc_ctrl, w_ctrl, sum_w_ctrl).tolist()
+    th_list = [float("inf")] + [float(th) for th in unique_th]
     tpr_list.append(1.0)
     fpr_list.append(1.0)
     th_list.append(float("-inf"))
@@ -821,8 +820,12 @@ def compute_time_dependent_roc(
                     comparison_by_horizon[h]["se"] = se_d
                     comparison_by_horizon[h]["ci_lower"] = float(np.percentile(b_deltas, 2.5))
                     comparison_by_horizon[h]["ci_upper"] = float(np.percentile(b_deltas, 97.5))
-                    z_d = float(d_auc / se_d) if se_d > 0 else 0.0
-                    comparison_by_horizon[h]["p_value"] = float(2.0 * stats.norm.sf(abs(z_d)))
+                    # Zero bootstrap SE: the normal test is undefined, so no p-value.
+                    comparison_by_horizon[h]["p_value"] = (
+                        float(2.0 * stats.norm.sf(abs(d_auc / se_d)))
+                        if se_d > 0
+                        else float("nan")
+                    )
                     comparison_by_horizon[h]["ci_method"] = "bootstrap"
 
     trajectory = {

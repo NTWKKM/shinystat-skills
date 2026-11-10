@@ -52,3 +52,22 @@ def complete_cases(
             f"{func_name}: excluded {n_drop} of {len(keep)} rows with missing outcome or score."
         )
     return (y01[keep], *(a[keep] for a in arrays))
+
+
+def binary_complete_cases(func_name: str, y_true: Any, *scores: Any) -> tuple[np.ndarray, ...]:
+    """complete_cases for 0/1-coded outcomes: reject observed labels outside {0, 1}.
+
+    Used by DCA and calibration, where any other label would otherwise be silently
+    coded as a non-event. ROC callers keep complete_cases with a custom pos_label.
+    """
+    y = pd.Series(np.asarray(y_true, dtype=object).ravel())
+    observed = y[~pd.isna(y)]
+    numeric = pd.to_numeric(observed, errors="coerce")
+    invalid = observed[numeric.isna() | ~numeric.isin([0, 1])]
+    if len(invalid):
+        shown = sorted({str(v) for v in invalid.unique()})[:5]
+        raise ValueError(
+            f"{func_name}: y_true must be coded 0/1 (missing allowed); found {len(invalid)} "
+            f"observed value(s) outside {{0, 1}}: {shown}."
+        )
+    return complete_cases(func_name, y_true, *scores, pos_label=1)

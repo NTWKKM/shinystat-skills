@@ -38,7 +38,7 @@ Calculate diagnostic EPV:
 ├── EPV ≥ 10 & No Separation ──▶ Standard Multivariable Logistic (Recipe 10) / Standard Unpenalized Cox PH (Recipe 11 with default `penalizer=0.0`)
 ├── Monotone Separation Detected ──▶ Halt at Grilling Gate for clinical confirmation:
 │   ├── Binary Logistic: (A) Firth penalized likelihood with profile likelihood CIs (Recipe 7), or (B) Remove/collapse separating covariate
-│   └── Cox Proportional Hazards (Monotone Likelihood): (A) Penalized Cox — local: Firth penalized Cox with profile likelihood CIs (`fit_firth_cox`); cloud: scale-aware L2-penalized Cox (Recipe 11: standardize continuous predictors when scales differ, select and validate `penalizer > 0` on the supported data, report the transformation), or (B) Remove/collapse separating covariate
+│   └── Cox Proportional Hazards (Monotone Likelihood): (A) Penalized Cox — local: Firth penalized Cox with profile likelihood CIs (`fit_firth_cox`; check its `ci_fallback` flag and, when True, report the intervals as Wald intervals, not profile likelihood); cloud: scale-aware L2-penalized Cox (Recipe 11: standardize continuous predictors when scales differ, select and validate `penalizer > 0` on the supported data, report the transformation), or (B) Remove/collapse separating covariate
 └── Low EPV (< 10) without Separation
     ├── Binary Logistic:
     │   ├── Strategy 1 (Etiological Effect): Firth penalized logistic regression with profile likelihood CIs (Recipe 7)
@@ -57,7 +57,7 @@ Calculate diagnostic EPV:
 Audit Missingness Pattern & Mechanism (`littles_mcar_test` / Recipe 8; note H0: MCAR; failing to reject does not prove MCAR)
 
 ├── Per-variable missingness < 5% in non-primary covariates ──▶ Complete-case analysis with documented justification
-├── Missing 5%–40% under Missing at Random (MAR) ──▶ Multiple Imputation by Chained Equations (`MICEImputer` / Recipe 12; proper Bayesian draws, M ≥ 5 for ≤ 30% missing, M ≥ 20 for > 30% missing; always run Complete-Case Analysis as sensitivity analysis, noting agreement does not prove MAR or exclude MNAR bias)
+├── Missing 5%–40% under Missing at Random (MAR) ──▶ Multiple Imputation by Chained Equations for numeric (continuous) targets (`MICEImputer` / Recipe 12 `impute_mice_datasets`; categorical or binary targets need a type-appropriate imputation model such as logistic / polytomous regression, e.g. Recipe 12 `impute_mice_mixed_datasets`; proper Bayesian draws, M ≥ 5 for ≤ 30% missing, M ≥ 20 for > 30% missing; always run Complete-Case Analysis as sensitivity analysis, noting agreement does not prove MAR or exclude MNAR bias)
 ├── Non-Primary Missing > 40% (Not MNAR) ──▶ Halt at Grilling Gate: (a) drop auxiliary covariate, (b) high-M MICE (M ≥ 40, tracking FMI) under MAR, or (c) pattern-mixture modeling (or missing-indicator adjustment restricted to randomized-trial baseline covariates or explicitly labeled sensitivity analyses)
 ├── Primary Outcome Missing ──▶ Default: avoid outcome imputation in observational cohorts and preserve retention flow (N_initial ➔ N_analyzed); for trial/longitudinal dropout under MAR, allow protocol-justified outcome imputation (MICE) or MMRM with mandatory complete-case and tipping-point sensitivity analyses
 └── Missingness Informative / MNAR ──▶ Halt for clinical domain review or sensitivity bounds

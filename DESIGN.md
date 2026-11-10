@@ -2143,3 +2143,21 @@ A joint audit of statistical correctness and of how agents consume the two skill
 - **Behavioural change**: `fit_iptw_outcome_model` raises on unknown model types; engine meta-analysis of a `log_effect` column now displays ratios; engine PSM pairings and Recipe 14 ATT / ATC weights change (re-run earlier matched or ATT analyses); CIF values at tied event times move in the fourth decimal.
 - **Not changed**: skill descriptions (their method lists are pinned by tests and an earlier ADR); the residual CIF conservation error (~0.001) from lifelines' sequential handling of ties.
 - **Not audited**: figures, renderers, `verify_report_integrity`, `evidence-pipeline.md`, `subagent-protocol.md`, the MICE imputation model, and RCS / mediation / time-dependent ROC against external references.
+
+
+## ADR 76: Degenerate-Inference Reporting & Input Validation (CodeRabbit PR 27 Review)
+
+### Context
+CodeRabbit's review of PR 27 found code paths that turned undefined statistics into confident ones, or silently re-coded inputs: zero-variance Wald / DeLong / bootstrap tests reported P = 0 or 1 with zero-width CIs; Recipe 18 bootstrap fits differed from the original fit and a failed calibration slope counted as 1; Recipe 24 dropped incomplete studies, accepted any `effect_measure` as RD, and inferred a ratio scale from an absent `log_effect` column; DCA / calibration coded labels outside {0, 1} as non-events; Bland-Altman LoA coverage followed `ci`; G(0−) took the first KM value.
+
+### Decision
+1. Undefined inference is NaN with a reason, never a fabricated P / CI: paired DeLong (zero variance, nonzero difference), NRI components with zero Wald variance or n < 2 (total unavailable if either is), IDI with a group < 2, time-dependent ΔAUROC with zero bootstrap SE, recalibration CIs after logistic fallback (`fallback_reason`).
+2. Recipe 18: one `_fit_logit` procedure (MLE, regularized fallback, convergence check) for the original model and every resample; failed slopes are NaN and excluded from shrinkage; validation R² is unclamped below zero.
+3. Recipe 24: incomplete studies raise with study IDs; `effect_measure` validated and must be single-valued; raw `effect_size` ratios are logged; an absent `effect_col` with only `effect_size` requires explicit scale; HKSJ with k < 3 reports `ci_method="normal"` plus a warning; leave-one-out uses the selected CI method.
+4. Recipe 2/3/5/17: NaN Wilson CI for undefined PPV / NPV; rank-based (midrank) DeLong placements; LoA fixed at 95%; G(0−) = 1; weighted ROC points via cumulative sums.
+5. Engine: `binary_complete_cases` rejects non-0/1 labels in DCA and calibration (ROC keeps `pos_label`); Imai mediation requires a 0/1 treatment and uses an add-one Monte Carlo P; Riley `mape_target` must lie in (0, 1).
+6. Docs: Firth Cox `ci_fallback` disclosure; MICE scope limited to numeric targets; unsupported Plotly builders removed from `figures.md`; report-builder load conditions name `generate_pptx_report` and §2.B for the HTML fallback.
+
+### Consequences
+- **Status**: Accepted & Verified (new cases in `tests/unit/test_reference_parity.py`; rank DeLong equals the pairwise kernel to 1e-12).
+- **Behavioural change**: degenerate NRI fields in the Recipe 16 snapshot are now null; Recipe 24 raises where it used to drop studies or guess a scale; DCA / calibration raise on non-0/1 labels.

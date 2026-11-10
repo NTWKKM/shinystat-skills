@@ -41,6 +41,7 @@ def ensure_packaged_cloud_skill():
     required_files = [
         CLOUD_DIR / "SKILL.md",
         CLOUD_DIR / "references" / "report-builder.md",
+        CLOUD_DIR / "references" / "report-plotly-specs.md",
         CLOUD_DIR / "references" / "decision-heuristics.md",
         CLOUD_DIR / "references" / "figures.md",
         CLOUD_DIR / "references" / "flows.md",

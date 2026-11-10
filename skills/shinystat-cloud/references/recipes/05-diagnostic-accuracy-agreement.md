@@ -96,11 +96,15 @@ def calculate_2x2_metrics(tp: int, fp: int, fn: int, tn: int, ci: float = 0.95) 
         float(np.exp(np.log(dor) + z * se_log_dor)),
     )
 
+    def _wilson_or_nan(k: int, n: int) -> tuple[float, float]:
+        # Undefined proportion (zero denominator): no interval.
+        return calculate_ci_wilson_score(k, n, ci) if n > 0 else (np.nan, np.nan)
+
     return {
-        "Sensitivity": (float(sens), calculate_ci_wilson_score(tp, n_pos, ci)),
-        "Specificity": (float(spec), calculate_ci_wilson_score(tn, n_neg, ci)),
-        "PPV": (float(ppv), calculate_ci_wilson_score(tp, tp + fp, ci)),
-        "NPV": (float(npv), calculate_ci_wilson_score(tn, tn + fn, ci)),
+        "Sensitivity": (float(sens), _wilson_or_nan(tp, n_pos)),
+        "Specificity": (float(spec), _wilson_or_nan(tn, n_neg)),
+        "PPV": (float(ppv), _wilson_or_nan(tp, tp + fp)),
+        "NPV": (float(npv), _wilson_or_nan(tn, tn + fn)),
         "LR_pos": (float(lr_pos), lr_pos_ci),
         "LR_neg": (float(lr_neg), lr_neg_ci),
         "DOR": (float(dor), dor_ci),
@@ -127,14 +131,19 @@ from sklearn.metrics import roc_curve
 
 
 def _delong_placements(y_true: np.ndarray, y_score: np.ndarray):
-    """Compute positive (v10) and negative (v01) placement values for DeLong test."""
+    """Compute positive (v10) and negative (v01) placement values for DeLong test.
+
+    Rank-based (Sun & Xu 2014): midranks reproduce the pairwise kernel
+    1[pos > neg] + 0.5 * 1[pos == neg] exactly, in O(N log N) memory-light time.
+    """
     pos_scores = y_score[y_true == 1]
     neg_scores = y_score[y_true == 0]
-    greater = (pos_scores[:, None] > neg_scores).astype(float)
-    equal = (pos_scores[:, None] == neg_scores).astype(float)
-    comp = greater + 0.5 * equal
-    v10 = comp.mean(axis=1)
-    v01 = comp.mean(axis=0)
+    m, n = len(pos_scores), len(neg_scores)
+    r_all = stats.rankdata(np.concatenate([pos_scores, neg_scores]))
+    r_pos = stats.rankdata(pos_scores)
+    r_neg = stats.rankdata(neg_scores)
+    v10 = (r_all[:m] - r_pos) / n
+    v01 = 1.0 - (r_all[m:] - r_neg) / m
     auc = float(v10.mean())
     return v10, v01, auc
 
@@ -243,22 +252,37 @@ def delong_paired_test(y_true, score1, score2, alpha: float = 0.05) -> dict:
     )
 
     diff = auc1 - auc2
-    var_diff = max(var1 + var2 - 2.0 * cov12, 1e-12)
-    se_diff = float(np.sqrt(var_diff))
-
-    z_stat = diff / se_diff
-    p_val = float(2.0 * stats.norm.sf(abs(z_stat)))
+    var_diff = float(var1 + var2 - 2.0 * cov12)
     z_crit = stats.norm.ppf(1.0 - alpha / 2.0)
+    warning = None
+
+    if var_diff > 1e-12:
+        se_diff = float(np.sqrt(var_diff))
+        z_stat = diff / se_diff
+        p_val = float(2.0 * stats.norm.sf(abs(z_stat)))
+        ci_l, ci_u = float(diff - z_crit * se_diff), float(diff + z_crit * se_diff)
+    elif abs(diff) <= 1e-12:
+        # Identical rankings: no difference to test.
+        se_diff, z_stat, p_val, ci_l, ci_u = 0.0, 0.0, 1.0, float(diff), float(diff)
+    else:
+        # Degenerate placements (e.g. perfect separation): asymptotic variance is zero,
+        # so the normal test is undefined. Report inference as unavailable.
+        se_diff, z_stat, p_val, ci_l, ci_u = (np.nan,) * 5
+        warning = (
+            "DeLong variance of the AUC difference is zero (degenerate placements); "
+            "z-test and CI unavailable. Use a bootstrap or exact method."
+        )
 
     return {
         "auc1": float(auc1),
         "auc2": float(auc2),
         "difference": float(diff),
         "se_difference": se_diff,
-        "ci_lower": float(diff - z_crit * se_diff),
-        "ci_upper": float(diff + z_crit * se_diff),
+        "ci_lower": ci_l,
+        "ci_upper": ci_u,
         "z_statistic": float(z_stat),
         "p_value": p_val,
+        "warning": warning,
     }
 ```
 
@@ -498,7 +522,8 @@ def calculate_bland_altman(m1, m2, ci: float = 0.95) -> dict:
     se_mean = sd_diff / np.sqrt(n)
 
     t_crit = stats.t.ppf(1.0 - (1.0 - ci) / 2.0, df=n - 1)
-    z_loa = stats.norm.ppf(1.0 - (1.0 - ci) / 2.0)
+    # Limits of agreement always cover 95% of differences; `ci` sets only the CI level.
+    z_loa = stats.norm.ppf(0.975)
     upper_loa = mean_diff + z_loa * sd_diff
     lower_loa = mean_diff - z_loa * sd_diff
 

@@ -5,8 +5,8 @@ In cloud sandboxes (e.g. Claude Web Artifacts), `medstat` is not installed as an
 **Load conditions** (read only the section your `#5a` format needs):
 - Markdown or HTML: [§1–§2.B](#1-cloud-report-generation-architecture); confirm the format first via Gate #5a (`SKILL.md` §2).
 - Interactive `plotly_figs` inside the HTML report: [report-plotly-specs.md](report-plotly-specs.md) (`build_plotly_*_spec`).
-- `.docx`: [§2.C (`generate_docx_report`)](#c-standalone-word-docx-report-when-python-docx-is-installed).
-- `.pptx`: [§2.D (`generate_pptx_deck`)](#2d-standalone-powerpoint-deck-generator-pptx).
+- `.docx`: [§2.C (`generate_docx_report`)](#c-standalone-word-docx-report-when-python-docx-is-installed); also load §2.B (`generate_html_report`) when `python-docx` is unavailable and the HTML fallback is used.
+- `.pptx`: [§2.D (`generate_pptx_report`)](#2d-standalone-powerpoint-deck-generator-pptx); also load §2.B (`generate_html_report`) when `python-pptx` is unavailable and the HTML fallback is used.
 - `.pdf`: [§2.E (`generate_pdf_report`)](#2e-standalone-pdf-report-generator-pdf).
 - Every format, before delivery: [§3 (`verify_standalone_integrity`)](#3-standalone-reporting-integrity-verification).
 

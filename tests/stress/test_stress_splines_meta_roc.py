@@ -385,6 +385,15 @@ class TestCompetingRisksCIFDeterministic:
             table2["cif_competing"].to_numpy(),
             err_msg="cif_competing is not deterministic across runs with tied event times",
         )
+        ci_cols = [c for c in table1.columns if c.endswith(("_ci_lower", "_ci_upper"))]
+        assert ci_cols, "cif_table must expose CI bound columns"
+        for col in ci_cols:
+            np.testing.assert_allclose(
+                table1[col].to_numpy(dtype=float),
+                table2[col].to_numpy(dtype=float),
+                err_msg=f"{col} is not deterministic across runs with tied event times",
+            )
+        pd.testing.assert_frame_equal(res1["horizon_summary"], res2["horizon_summary"])
 
 
 class TestMetaAnalysisAlphaScaling:

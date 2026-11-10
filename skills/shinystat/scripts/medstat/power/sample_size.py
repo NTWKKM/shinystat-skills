@@ -342,6 +342,11 @@ def calculate_riley_sample_size(
             f"optimism_margin must be strictly in (0, 1), got {optimism_margin}"
         )
 
+    if mape_target is not None and not (
+        math.isfinite(mape_target) and 0.0 < mape_target < 1.0
+    ):
+        raise ValueError(f"mape_target must be strictly in (0, 1), got {mape_target}")
+
     phi = float(prevalence)
     p_params = int(n_parameters)
     s_target = float(shrinkage_target)
@@ -381,18 +386,15 @@ def calculate_riley_sample_size(
     # RvS-2: n = exp((-0.508 + 0.259*ln(phi) + 0.504*ln(p) - ln(m)) / 0.544)
     # MAPE is symmetric in the outcome coding: the van Smeden formula uses min(phi, 1 - phi),
     # so the default 0.05 target applies for any prevalence (ADR 74).
-    target_m = mape_target if mape_target is not None else 0.05
-    if target_m is not None:
-        min_phi = min(phi, 1.0 - phi)
-        exponent = (
-            -0.508
-            + 0.259 * math.log(min_phi)
-            + 0.504 * math.log(p_params)
-            - math.log(target_m)
-        ) / 0.544
-        n_crit2 = int(math.ceil(math.exp(exponent)))
-    else:
-        n_crit2 = None
+    target_m = float(mape_target) if mape_target is not None else 0.05
+    min_phi = min(phi, 1.0 - phi)
+    exponent = (
+        -0.508
+        + 0.259 * math.log(min_phi)
+        + 0.504 * math.log(p_params)
+        - math.log(target_m)
+    ) / 0.544
+    n_crit2 = int(math.ceil(math.exp(exponent)))
 
     # 3. Criterion 3: Uniform shrinkage factor (overfitting minimization)
     # n3 = ceil(P / ((S - 1) * ln(1 - R2_CS / S)))
@@ -426,9 +428,8 @@ def calculate_riley_sample_size(
         "Criterion 1 (Intercept)": n_crit1,
         "Criterion 3 (Shrinkage)": n_crit3,
         "Criterion 4 (Optimism)": n_crit4,
+        "Criterion 2 (MAPE)": n_crit2,  # last: keeps the earlier tie-break order
     }
-    if n_crit2 is not None:
-        eval_dict["Criterion 2 (MAPE)"] = n_crit2
 
     n_total = max(eval_dict.values())
     binding_crit = max(eval_dict, key=eval_dict.get)  # type: ignore[arg-type]

@@ -109,6 +109,14 @@ def run_mediation(
 
     rng = np.random.default_rng(seed)
 
+    if (is_binary_outcome or is_binary_mediator) and not _is_binary(df_clean[treatment]):
+        # The g-computation contrast is E[Y(1, .)] - E[Y(0, .)]; for a non 0/1 treatment it
+        # would be an extrapolated 1-vs-0 contrast rather than an observed one.
+        raise ValueError(
+            f"Treatment '{treatment}' must be coded 0/1 when the mediator or outcome is binary "
+            "(Imai g-computation estimates the 1 vs 0 contrast)."
+        )
+
     if is_binary_outcome or is_binary_mediator:
         # Non-linear models: the product alpha_1 * beta_med is not a causal effect on any
         # scale (non-collapsibility of the logit). Use Imai et al. (2010) g-computation of
@@ -137,11 +145,10 @@ def run_mediation(
         acme_point, ade_point, total_point = point["acme"], point["ade"], point["total"]
         prop_med = (acme_point / total_point) if abs(total_point) > 1e-9 else 0.0
         acme_ci, ade_ci, total_ci = _ci("acme"), _ci("ade"), _ci("total")
-        p_value_acme = float(
-            min(
-                1.0, 2.0 * min(np.mean(draws["acme"] <= 0), np.mean(draws["acme"] >= 0))
-            )
-        )
+        # Add-one Monte Carlo estimator: never exactly 0 with finitely many draws.
+        n_draws = len(draws["acme"])
+        tail = min(np.sum(draws["acme"] <= 0), np.sum(draws["acme"] >= 0))
+        p_value_acme = float(min(1.0, 2.0 * (tail + 1) / (n_draws + 1)))
         scale = "risk_difference" if is_binary_outcome else "mean_difference"
         method_desc = (
             "Imai et al. (2010) quasi-Bayesian g-computation "

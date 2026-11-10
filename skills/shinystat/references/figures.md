@@ -229,8 +229,6 @@ Grouped horizontal bar chart of **Apparent vs Optimism-Corrected** metrics (incl
 In cloud Python sandboxes, `medstat` is not available as an external package. Instead of importing `medstat.figures.html`, use the standalone pure-Python Plotly spec generators provided in [report-plotly-specs.md](report-plotly-specs.md). They build native JSON-serializable dictionaries (`{"data": [...], "layout": {...}}`) with zero external dependencies and pass directly into `generate_html_report(..., plotly_figs=[spec])`:
 
 - **`build_plotly_roc_spec(roc_data, ...)`**: Empirical ROC curve with interactive threshold/sensitivity/specificity hover tooltips, chance diagonal, and optimal cutoff markers.
-- **`build_plotly_reclassification_spec(reclass_data, ...)`**: Interactive scatter plot of baseline vs updated risks with hover tooltips and event/non-event toggles.
-- **`build_plotly_time_dependent_roc_spec(td_data, ...)`**: Interactive longitudinal AUROC trajectory with CI bounds or multi-horizon ROC curves.
 - **`build_plotly_km_spec(km_data, ...)`**: Step-function survival curves with 95% CI shaded ribbons and hover tooltips.
 - **`build_plotly_calibration_spec(calib_bins, ...)`**: Decile calibration points with 95% Wilson CI error bars and Brier/ICI annotations.
 - **`build_plotly_dca_spec(dca_data, ...)`**: Vickers Decision Curve Analysis comparing model net benefit against Treat All and Treat None.

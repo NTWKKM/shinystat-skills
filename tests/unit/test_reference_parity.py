@@ -517,11 +517,15 @@ def test_psm_matching_is_invariant_to_row_order_and_matches_recipe6(recipes):
     from medstat.causal.psm import propensity_score_match
 
     df = _adr75_cohort()
-    _, info = propensity_score_match(df, "trt", ["x1", "x2"])
-    _, info_shuffled = propensity_score_match(
+    matched, info = propensity_score_match(df, "trt", ["x1", "x2"])
+    matched_shuffled, info_shuffled = propensity_score_match(
         df.sample(frac=1.0, random_state=3), "trt", ["x1", "x2"]
     )
     assert info["n_treated_matched"] == info_shuffled["n_treated_matched"]
+    # Same treated subjects are matched regardless of input row order.
+    assert set(matched.index[matched["trt"] == 1]) == set(
+        matched_shuffled.index[matched_shuffled["trt"] == 1]
+    )
     rec = recipes["match_propensity_scores"](df, "trt", ["x1", "x2"])
     assert rec["n_matched_pairs"] == info["n_treated_matched"]
 
@@ -560,3 +564,111 @@ def test_skill_reference_files_fit_one_read(skill):
         if (n := len(md.read_text(encoding="utf-8").splitlines())) > 2000
     }
     assert not too_long, f"Reference files over 2000 lines in {skill}: {too_long}"
+
+
+# ---------------------------------------------------------------------------
+# ADR 76: CodeRabbit PR 27 review — degenerate inference, input validation
+# ---------------------------------------------------------------------------
+def test_recipe3_rank_delong_matches_pairwise_kernel(recipes):
+    rng = np.random.default_rng(3)
+    y = rng.binomial(1, 0.4, 300)
+    s = np.round(rng.normal(y * 0.8, 1.0), 1)  # ties on purpose
+    v10, v01, auc = recipes["_delong_placements"](y, s)
+    pos, neg = s[y == 1], s[y == 0]
+    comp = (pos[:, None] > neg) + 0.5 * (pos[:, None] == neg)
+    np.testing.assert_allclose(v10, comp.mean(axis=1), atol=1e-12)
+    np.testing.assert_allclose(v01, comp.mean(axis=0), atol=1e-12)
+    assert auc == pytest.approx(comp.mean())
+
+
+def test_recipe3_paired_delong_degenerate_is_unavailable(recipes):
+    y = np.array([0, 0, 0, 0, 1, 1, 1, 1])
+    s = np.arange(8, dtype=float)
+    res = recipes["delong_paired_test"](y, s, -s)
+    assert res["difference"] == 1.0
+    assert np.isnan(res["p_value"]) and res["warning"]
+
+
+def test_recipe2_undefined_ppv_has_nan_interval(recipes):
+    res = recipes["calculate_2x2_metrics"](tp=0, fp=0, fn=5, tn=20)
+    assert np.isnan(res["PPV"][0]) and all(np.isnan(res["PPV"][1]))
+    assert res["Specificity"][1][0] > 0
+
+
+def test_recipe5_loa_coverage_fixed_at_95(recipes):
+    rng = np.random.default_rng(0)
+    a = rng.normal(size=50)
+    b = a + rng.normal(size=50)
+    r95 = recipes["calculate_bland_altman"](a, b, ci=0.95)
+    r90 = recipes["calculate_bland_altman"](a, b, ci=0.90)
+    assert r95["upper_loa"] == pytest.approx(r90["upper_loa"])
+
+
+def test_recipe16_degenerate_nri_and_idi_are_unavailable(recipes):
+    y = np.array([1] + [0] * 9)
+    p0 = np.linspace(0.1, 0.5, 10)
+    p1 = p0 + 0.05
+    res = recipes["compute_reclassification_metrics"](y, p0, p1)
+    assert np.isnan(res["nri_continuous"]["events"]["p_value"])
+    assert np.isnan(res["nri_continuous"]["total"]["p_value"])
+    assert np.isnan(res["idi"]["p_value"])
+
+
+def test_recipe24_rejects_incomplete_or_mixed_inputs(recipes):
+    df = pd.DataFrame(
+        {"study": ["a", "b"], "et": [3, np.nan], "nt": [20, 20], "ec": [5, 6], "nc": [20, 20]}
+    )
+    with pytest.raises(ValueError, match="Incomplete study inputs"):
+        recipes["compute_binary_effect_sizes"](df, "et", "nt", "ec", "nc", "study")
+    with pytest.raises(ValueError, match="Unsupported effect_measure"):
+        recipes["compute_binary_effect_sizes"](
+            df.dropna(), "et", "nt", "ec", "nc", "study", effect_measure="HR"
+        )
+    md = pd.DataFrame({"study": ["a", "b", "c"], "effect_size": [1.2, 2.0, 1.5], "se": [0.2] * 3})
+    with pytest.raises(ValueError, match="scale of 'effect_size' is unknown"):
+        recipes["run_meta_analysis"](md)
+
+
+def test_recipe24_raw_ratio_effect_col_is_logged(recipes):
+    df = pd.DataFrame(
+        {"study": ["a", "b", "c"], "et": [3, 5, 8], "nt": [20] * 3, "ec": [6, 9, 10], "nc": [20] * 3}
+    )
+    es = recipes["compute_binary_effect_sizes"](df, "et", "nt", "ec", "nc", "study")
+    via_log = recipes["run_meta_analysis"](es)
+    via_raw = recipes["run_meta_analysis"](es, effect_col="effect_size")
+    assert via_raw["random_effects"]["effect_disp"] == pytest.approx(
+        via_log["random_effects"]["effect_disp"]
+    )
+    hk = recipes["run_meta_analysis"](es.iloc[:2], use_hksj=True)
+    assert hk["random_effects"]["ci_method"] == "normal" and hk["warnings"]
+
+
+def test_dca_and_calibration_reject_non_binary_labels():
+    from medstat.diagnostic.calibration import calculate_ici
+    from medstat.diagnostic.dca import calculate_dca
+
+    y = np.array([0, 1, 2, 1, 0, np.nan])
+    p = np.array([0.1, 0.8, 0.7, 0.6, 0.2, 0.5])
+    with pytest.raises(ValueError, match="outside"):
+        calculate_dca(y, p)
+    with pytest.raises(ValueError, match="outside"):
+        calculate_ici(y, p)
+
+
+def test_mediation_nonlinear_requires_binary_treatment():
+    from medstat.causal.mediation import run_mediation
+
+    rng = np.random.default_rng(1)
+    n = 200
+    t = rng.normal(size=n)
+    m = rng.binomial(1, 0.5, n)
+    y = rng.binomial(1, 0.5, n)
+    with pytest.raises(ValueError, match="coded 0/1"):
+        run_mediation(pd.DataFrame({"t": t, "m": m, "y": y}), "t", "m", "y", n_sims=10)
+
+
+def test_riley_rejects_invalid_mape_target():
+    from medstat.power.sample_size import calculate_riley_sample_size
+
+    with pytest.raises(ValueError, match="mape_target"):
+        calculate_riley_sample_size(10, 0.3, cox_snell_r2=0.15, mape_target=0.0)

@@ -104,23 +104,43 @@ def bootstrap_internal_validation(
     n_predictors = len(model_predictors)
     epp = float(n_minority / n_predictors) if n_predictors > 0 else 0.0
 
+    def _fit_logit(y: np.ndarray, X_c: np.ndarray) -> tuple[np.ndarray | None, str | None]:
+        """Fitting procedure shared by the original model and every bootstrap resample.
+
+        Returns (params, fallback_reason). MLE is used when it converges without
+        separation (|beta| <= 50); otherwise a lightly L1-regularized logit is fitted.
+        params is None when neither fit converges to finite estimates.
+        """
+        try:
+            mle = sm.Logit(y, X_c).fit(disp=False)
+            converged = getattr(mle, "mle_retvals", {}).get("converged", True)
+            if not converged or np.any(np.abs(mle.params) > 50.0):
+                raise RuntimeError("Model separation or non-convergence detected.")
+            return np.asarray(mle.params, dtype=float), None
+        except Exception as e:
+            reason = str(e)
+        try:
+            reg = sm.Logit(y, X_c).fit_regularized(method="l1", alpha=1e-4, disp=False)
+            converged = getattr(reg, "mle_retvals", {}).get("converged", True)
+            params = np.asarray(reg.params, dtype=float)
+            if not converged or not np.all(np.isfinite(params)):
+                return None, reason
+            return params, reason
+        except Exception:
+            return None, reason
+
     # 1. Fit initial model with separation/singular fallback
     X_orig_const = sm.add_constant(X_orig, has_constant="add")
     warnings = []
-    try:
-        orig_model = sm.Logit(y_orig, X_orig_const).fit(disp=False)
-        converged = getattr(orig_model, "mle_retvals", {}).get("converged", True)
-        if not converged or np.any(np.abs(orig_model.params) > 50.0):
-            raise RuntimeError("Model separation or non-convergence detected.")
-        orig_params = orig_model.params
-    except Exception as e:
+    orig_params, fallback_reason = _fit_logit(y_orig, X_orig_const)
+    if orig_params is None:
+        raise RuntimeError(
+            f"Logistic model failed to converge with MLE and regularized fallback ({fallback_reason})."
+        )
+    if fallback_reason is not None:
         warnings.append(
-            f"Standard MLE logit failed or encountered quasi-complete separation ({e}); falling back to regularized logit."
+            f"Standard MLE logit failed or encountered quasi-complete separation ({fallback_reason}); falling back to regularized logit."
         )
-        reg_model = sm.Logit(y_orig, X_orig_const).fit_regularized(
-            method="l1", alpha=1e-4, disp=False
-        )
-        orig_params = reg_model.params
 
     lp_orig = np.dot(X_orig_const, orig_params)
     p_orig = expit(lp_orig)
@@ -137,9 +157,10 @@ def bootstrap_internal_validation(
         ll_model = float(
             np.sum(y_true * np.log(p_c) + (1.0 - y_true) * np.log(1.0 - p_c))
         )
-        cs_r2 = max(0.0, 1.0 - math.exp(-2.0 * (ll_model - ll_null) / n))
+        # Unclamped: a model can fit worse than the null on validation data (R2 < 0).
+        cs_r2 = 1.0 - math.exp(-2.0 * (ll_model - ll_null) / n)
         r2_max = max(1e-12, 1.0 - math.exp(2.0 * ll_null / n))
-        nag_r2 = min(1.0, max(0.0, cs_r2 / r2_max))
+        nag_r2 = min(1.0, cs_r2 / r2_max)
         auc = (
             float(roc_auc_score(y_true, p_pred))
             if len(np.unique(y_true)) == 2
@@ -165,15 +186,16 @@ def bootstrap_internal_validation(
             except Exception:
                 inter = 0.0
 
-        # Slope
+        # Slope: NaN (unavailable) when the LP is constant or the fit fails/does not converge
         if np.allclose(lp, lp[0]):
-            slope = 1.0
+            slope = float("nan")
         else:
             try:
                 mod_slope = sm.Logit(y_true, sm.add_constant(lp)).fit(disp=False)
-                slope = float(mod_slope.params[1])
+                ok = getattr(mod_slope, "mle_retvals", {}).get("converged", True)
+                slope = float(mod_slope.params[1]) if ok else float("nan")
             except Exception:
-                slope = 1.0
+                slope = float("nan")
 
         return {
             "auroc": auc,
@@ -193,6 +215,7 @@ def bootstrap_internal_validation(
     optimism_records = {k: [] for k in apparent}
     test_slopes = []
     n_successful = 0
+    n_boot_regularized = 0
 
     for _ in range(n_bootstrap):
         boot_idx = rng.choice(n_total, size=n_total, replace=True)
@@ -204,13 +227,12 @@ def bootstrap_internal_validation(
         if np.any(np.var(X_b, axis=0) <= 1e-12):
             continue
         X_b_const = sm.add_constant(X_b, has_constant="add")
-        try:
-            boot_mod = sm.Logit(y_b, X_b_const).fit(disp=False)
-            b_params = boot_mod.params
-            if np.isnan(b_params).any() or np.isinf(b_params).any():
-                continue
-        except Exception:
+        # Same procedure as the original model; non-converged resamples are rejected.
+        b_params, b_reason = _fit_logit(y_b, X_b_const)
+        if b_params is None or not np.all(np.isfinite(b_params)):
             continue
+        if b_reason is not None:
+            n_boot_regularized += 1
 
         lp_b = np.dot(X_b_const, b_params)
         p_b = expit(lp_b)
@@ -225,7 +247,14 @@ def bootstrap_internal_validation(
             boot_records[k].append(m_b[k])
             test_records[k].append(m_test[k])
             optimism_records[k].append(m_b[k] - m_test[k])
-        test_slopes.append(m_test["calibration_slope"])
+        if np.isfinite(m_test["calibration_slope"]):
+            test_slopes.append(m_test["calibration_slope"])
+
+    def _finite_mean(vals: list[float]) -> float:
+        """Mean over finite values; unavailable (NaN) resamples, e.g. failed slopes, are excluded."""
+        v = np.asarray(vals, dtype=float)
+        v = v[np.isfinite(v)]
+        return float(np.mean(v)) if len(v) else float("nan")
 
     # Summary
     metrics_summary = {}
@@ -237,12 +266,14 @@ def bootstrap_internal_validation(
             t_mean = np.nan
             corrected = np.nan
         else:
-            opt_mean = float(np.mean(optimism_records[k])) if optimism_records[k] else 0.0
-            b_mean = float(np.mean(boot_records[k])) if boot_records[k] else app_val
-            t_mean = float(np.mean(test_records[k])) if test_records[k] else app_val
+            opt_mean = _finite_mean(optimism_records[k])
+            b_mean = _finite_mean(boot_records[k])
+            t_mean = _finite_mean(test_records[k])
             corrected = app_val - opt_mean
-            if k in ("auroc", "nagelkerke_r2", "cox_snell_r2"):
+            if k == "auroc":
                 corrected = max(0.0, min(1.0, corrected))
+            elif k in ("nagelkerke_r2", "cox_snell_r2"):
+                corrected = min(1.0, corrected)  # may be negative (worse than null)
             elif k == "brier_score":
                 corrected = max(0.0, corrected)
         metrics_summary[k] = {
@@ -256,12 +287,12 @@ def bootstrap_internal_validation(
     orig_intercept = float(orig_params[0])
     orig_betas = [float(b) for b in orig_params[1:]]
 
-    if n_successful == 0:
+    if n_successful == 0 or not test_slopes:
         shrinkage_factor = np.nan
         shrunk_intercept = np.nan
         shrunk_betas = [np.nan for _ in orig_betas]
     else:
-        raw_s = float(np.mean(test_slopes)) if test_slopes else 1.0
+        raw_s = float(np.mean(test_slopes))
         shrinkage_factor = float(np.clip(raw_s, 0.01, 1.0))
         shrunk_betas = [shrinkage_factor * b for b in orig_betas]
         lp_shrunk_no_inter = np.dot(X_orig, shrunk_betas)
@@ -302,6 +333,15 @@ def bootstrap_internal_validation(
         warnings.append(
             f"Fewer than 50% of bootstrap resamples converged ({n_successful}/{n_bootstrap})."
         )
+    if n_successful > 0 and len(test_slopes) < n_successful:
+        warnings.append(
+            f"Calibration slope unavailable in {n_successful - len(test_slopes)} resample(s); "
+            "excluded from the shrinkage factor."
+        )
+    if n_boot_regularized > 0:
+        warnings.append(
+            f"{n_boot_regularized} bootstrap resample(s) used the regularized-logit fallback."
+        )
 
     return {
         "n_total": n_total,
@@ -310,6 +350,7 @@ def bootstrap_internal_validation(
         "events_per_predictor": epp,
         "n_bootstrap": n_bootstrap,
         "n_successful_replicates": n_successful,
+        "n_regularized_replicates": n_boot_regularized,
         "missing_data_summary": exclusion_summary,
         "apparent_metrics": apparent,
         "metrics": metrics_summary,
@@ -472,6 +513,7 @@ def recalibrate_prediction_model(
 
     X = sm.add_constant(lp_orig)
     logistic_fallback = False
+    fallback_reason = None
     try:
         fit_mod = sm.Logit(y_arr, X).fit(disp=False)
         converged = getattr(fit_mod, "mle_retvals", {}).get("converged", True)
@@ -482,12 +524,14 @@ def recalibrate_prediction_model(
         alpha_ci = [float(c) for c in fit_mod.conf_int()[0]]
         beta_ci = [float(c) for c in fit_mod.conf_int()[1]]
         p_log = expit(alpha_log + beta_log * lp_orig)
-    except Exception:
+    except Exception as e:
         logistic_fallback = True
+        fallback_reason = f"Logistic recalibration failed ({e}); intercept-only parameters used."
         alpha_log = alpha_inter
         beta_log = 1.0
-        alpha_ci = [alpha_inter, alpha_inter]
-        beta_ci = [1.0, 1.0]
+        # No fitted logistic model, so no estimable intervals.
+        alpha_ci = [float("nan"), float("nan")]
+        beta_ci = [float("nan"), float("nan")]
         p_log = p_inter
 
     if norm_m == "intercept_only":
@@ -522,6 +566,7 @@ def recalibrate_prediction_model(
                 "alpha_ci": alpha_ci,
                 "beta": beta_log,
                 "beta_ci": beta_ci,
+                "fallback_reason": fallback_reason,
             },
             "p_recalibrated": p_log,
             "p_recalibrated_intercept_only": p_inter,
@@ -544,6 +589,7 @@ def recalibrate_prediction_model(
                 "alpha": alpha_log,
                 "beta": beta_log,
                 "fallback": logistic_fallback,
+                "fallback_reason": fallback_reason,
             },
             "p_recalibrated": p_log,
             "p_recalibrated_intercept_only": p_inter,
@@ -557,7 +603,7 @@ def recalibrate_prediction_model(
 
 ## 20. Sample Size Determination for Clinical Prediction Models (Riley et al. 2020) & Diagnostic AUROC (Obuchowski 1998)
 
-Calculates the minimum required sample size for multivariable prediction model development per the 4 criteria of Riley et al. (BMJ 2020;368:m441), including numerical derivation of $R^2_{CS}$ from C-statistic or Nagelkerke $R^2$. Also determines required case and control sample sizes for diagnostic ROC test evaluation against a null benchmark per Obuchowski (1998) and Hanley & McNeil (1982).
+Calculates the minimum required sample size for multivariable prediction model development per the 4 criteria of Riley et al. (BMJ 2020;368:m441), including numerical derivation of $R^2_{CS}$ from C-statistic or Nagelkerke $R^2$. The C-statistic conversion assumes a normally distributed linear predictor with equal variance in events and non-events; `cox_snell_r2_source` records which input was used. Also determines required case and control sample sizes for diagnostic ROC test evaluation against a null benchmark per Obuchowski (1998) and Hanley & McNeil (1982).
 
 ```python
 import math
@@ -574,7 +620,12 @@ def _approximate_cox_snell_r2_from_c_stat(
     prevalence: float,
     deg: int = 64,
 ) -> float:
-    """Exact deterministic Gauss-Hermite numerical integration of Riley et al. (2021)."""
+    """Exact deterministic Gauss-Hermite numerical integration of Riley et al. (2021).
+
+    Assumes the linear predictor is normally distributed with equal variance in events
+    and non-events (binormal model), so that c = Phi(mu1 / sqrt(2)). Skewed or
+    multimodal predictor distributions make the derived Cox-Snell R2 approximate.
+    """
     c = float(c_stat)
     phi = float(prevalence)
     if not (0.5 < c < 1.0):
@@ -724,6 +775,12 @@ def calculate_riley_sample_size(
         "prevalence": phi,
         "events_per_parameter": epp,
         "cox_snell_r2": cs_r2,
+        "cox_snell_r2_source": (
+            "cox_snell_r2" if cox_snell_r2 is not None
+            else "nagelkerke_r2" if nagelkerke_r2 is not None
+            else "c_statistic (assumes normal linear predictor with equal variance "
+            "in events and non-events)"
+        ),
         "nagelkerke_r2": float(cs_r2 / r2_max),
         "r2_max": float(r2_max),
         "shrinkage_target": s_target,
@@ -814,6 +871,22 @@ import pandas as pd
 import scipy.stats as stats
 
 
+def _reject_incomplete_studies(df: pd.DataFrame, cols: list[str], study_col: str) -> pd.DataFrame:
+    """Raise when any study lacks an input; never drop studies silently from the pooled set."""
+    incomplete = df[cols].isna().any(axis=1)
+    if incomplete.any():
+        details = [
+            f"{df.at[i, study_col] if pd.notna(df.at[i, study_col]) else f'row {i}'} "
+            f"(missing: {', '.join(c for c in cols if pd.isna(df.at[i, c]))})"
+            for i in df.index[incomplete]
+        ]
+        raise ValueError(
+            "Incomplete study inputs; impute, correct, or explicitly exclude these studies "
+            f"and report the exclusion: {'; '.join(details)}."
+        )
+    return df[cols].copy()
+
+
 def compute_binary_effect_sizes(
     df: pd.DataFrame,
     events_t_col: str,
@@ -824,8 +897,12 @@ def compute_binary_effect_sizes(
     effect_measure: Literal["OR", "RR", "RD"] = "OR",
 ) -> pd.DataFrame:
     """Compute log effect sizes and standard errors for 2x2 binary endpoints."""
+    if effect_measure not in ("OR", "RR", "RD"):
+        raise ValueError(
+            f"Unsupported effect_measure '{effect_measure}'. Expected 'OR', 'RR', or 'RD'."
+        )
     cols = [study_col, events_t_col, n_t_col, events_c_col, n_c_col]
-    clean = df[cols].dropna().copy()
+    clean = _reject_incomplete_studies(df, cols, study_col)
     records = []
     for _, row in clean.iterrows():
         study = str(row[study_col])
@@ -903,7 +980,7 @@ def compute_continuous_effect_sizes(
             f"Unsupported effect_measure '{effect_measure}'. Expected 'MD' or 'SMD'."
         )
     cols = [study_col, mean_t_col, sd_t_col, n_t_col, mean_c_col, sd_c_col, n_c_col]
-    clean = df[cols].dropna().copy()
+    clean = _reject_incomplete_studies(df, cols, study_col)
     records = []
     for _, row in clean.iterrows():
         study = str(row[study_col])
@@ -972,7 +1049,14 @@ def run_meta_analysis(
     k = len(df_work)
     if k < 2:
         raise ValueError(f"Meta-analysis requires at least 2 studies (got {k}).")
+    if "effect_measure" in df_work.columns:
+        measures = df_work["effect_measure"].dropna().astype(str).str.upper().unique()
+        if len(measures) > 1:
+            raise ValueError(
+                f"Cannot pool different effect measures in one analysis: {sorted(measures)}."
+            )
 
+    effect_col_present = effect_col in df_work.columns
     if exponentiate is not None:
         is_ratio = bool(exponentiate)
     elif "is_ratio" in df_work.columns:
@@ -987,12 +1071,23 @@ def run_meta_analysis(
                 "Column 'is_ratio' contains conflicting values across studies; pass 'exponentiate' explicitly."
             )
         is_ratio = first_val
-    elif isinstance(effect_col, str) and effect_col.startswith("log_"):
+    elif effect_col_present and isinstance(effect_col, str) and effect_col.startswith("log_"):
+        # Name-based inference only for a column that exists.
         is_ratio = True
+    elif not effect_col_present and "effect_size" in df_work.columns:
+        raise ValueError(
+            f"Column '{effect_col}' not found and the scale of 'effect_size' is unknown; "
+            "pass exponentiate=True (ratio) or exponentiate=False (difference), or supply an 'is_ratio' column."
+        )
     else:
         is_ratio = False
-    if effect_col in df_work.columns:
+    if effect_col_present:
         theta = df_work[effect_col].to_numpy(dtype=float)
+        if is_ratio and effect_col == "effect_size":
+            # Raw OR / RR (e.g. from compute_binary_effect_sizes) are pooled on the log scale.
+            if not np.all(np.isfinite(theta)) or np.any(theta <= 0):
+                raise ValueError("Ratio effect_size values must be finite and > 0 to log-transform.")
+            theta = np.log(theta)
     elif "effect_size" in df_work.columns:
         raw_eff = df_work["effect_size"].to_numpy(dtype=float)
         if not np.all(np.isfinite(raw_eff)):
@@ -1033,6 +1128,12 @@ def run_meta_analysis(
     sum_w_re = float(np.sum(w_re))
     theta_re = float(np.sum(w_re * theta) / sum_w_re)
 
+    warnings_out = []
+    if use_hksj and k < 3:
+        warnings_out.append(
+            f"HKSJ requested but k = {k} < 3; random-effects CI uses the normal (Wald) approximation."
+        )
+    re_ci_method = "HKSJ" if (use_hksj and k >= 3) else "normal"
     if use_hksj and k >= 3:
         q_hksj = float((1.0 / (k - 1)) * np.sum(w_re * ((theta - theta_re) ** 2)))
         se_re = math.sqrt(max(1.0, q_hksj) / sum_w_re)
@@ -1088,13 +1189,23 @@ def run_meta_analysis(
             wre_sub = 1.0 / (se_sub**2 + t2_sub)
             swre_sub = float(np.sum(wre_sub))
             th_re_sub = float(np.sum(wre_sub * th_sub) / swre_sub)
-            sere_sub = math.sqrt(1.0 / swre_sub)
+            k_sub = k - 1
+            if use_hksj and k_sub >= 3:
+                q_h = float(np.sum(wre_sub * ((th_sub - th_re_sub) ** 2)) / (k_sub - 1))
+                sere_sub = math.sqrt(max(1.0, q_h) / swre_sub)
+                crit_sub = float(stats.t.ppf(1.0 - alpha / 2.0, df=k_sub - 1))
+                loo_method = "HKSJ"
+            else:
+                sere_sub = math.sqrt(1.0 / swre_sub)
+                crit_sub = z_crit
+                loo_method = "normal (HKSJ requires k >= 3)" if use_hksj else "normal"
             leave_one_out.append(
                 {
                     "omitted_study": str(df_work[study_col].iloc[idx]),
                     "effect_disp": _disp(th_re_sub),
-                    "ci_lower": _disp(th_re_sub - z_crit * sere_sub),
-                    "ci_upper": _disp(th_re_sub + z_crit * sere_sub),
+                    "ci_lower": _disp(th_re_sub - crit_sub * sere_sub),
+                    "ci_upper": _disp(th_re_sub + crit_sub * sere_sub),
+                    "ci_method": loo_method,
                 }
             )
 
@@ -1121,6 +1232,7 @@ def run_meta_analysis(
             "ci_lower": _disp(ci_re_low),
             "ci_upper": _disp(ci_re_high),
             "p_value": p_re,
+            "ci_method": re_ci_method,
             "prediction_interval": [_disp(pi_low), _disp(pi_high)]
             if not np.isnan(pi_low)
             else None,
@@ -1137,5 +1249,6 @@ def run_meta_analysis(
             "egger_p_value": egger_p,
         },
         "leave_one_out": leave_one_out,
+        "warnings": warnings_out,
     }
 ```
