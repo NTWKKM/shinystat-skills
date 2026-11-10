@@ -772,7 +772,7 @@ def verify_report_integrity(
     # Explicit observational keywords in clean_design
     # Negated observational labels (e.g. "non_observational", "nonobservational") do not trigger confounding caveats.
     # Distinguish matched randomized trials from observational matching.
-    # Token-bounded true randomization test excludes quasi/pseudo/unrandomized/not-randomized/Mendelian designs and avoids matching "rct" in words like "infarction".
+    # Token-bounded true randomization test excludes quasi/pseudo/unrandomized/not-randomized/Mendelian-randomization designs and avoids matching "rct" in words like "infarction".
     is_negated_observational = bool(
         re.search(r"(?:^|_)non_?observational(?:_|$)", clean_design)
     )
@@ -793,7 +793,7 @@ def verify_report_integrity(
                 clean_design,
             )
         )
-        and "mendelian" not in clean_design
+        and not bool(re.search(r"mendelian_?randomi", clean_design))
     )
     is_matched_observational = bool(
         ("matched" in clean_design or "matching" in clean_design)
@@ -829,6 +829,10 @@ def verify_report_integrity(
                     "quasiexperimental",
                     "quasi_experiment",
                     "quasiexperiment",
+                    "pre_experimental",
+                    "preexperimental",
+                    "pre_experiment",
+                    "preexperiment",
                     "non_experimental",
                     "nonexperimental",
                     "natural_experiment",
@@ -836,7 +840,8 @@ def verify_report_integrity(
                     "target_trial",
                     "trial_emulation",
                     "emulated_trial",
-                    "mendelian",
+                    "mendelian_randomi",
+                    "mendelianrandomi",
                 ]
             )
         )
