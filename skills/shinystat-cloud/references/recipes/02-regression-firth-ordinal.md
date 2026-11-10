@@ -546,6 +546,31 @@ def fit_proportional_odds(
     cutpoints = np.asarray(raw_thresh[1:-1], dtype=float)
     predictor_df = summary_df.iloc[:k_vars].copy()
 
+    # statsmodels stores thresholds 2..K-1 as log-increments; report every threshold row on the cutpoint
+    # scale (matches R MASS::polr) with delta-method SEs: c_0 = t_0, c_i = t_0 + sum_{j<=i} exp(t_j).
+    k_thresh = len(cutpoints)
+    theta_thr = np.asarray(result.params, dtype=float)[k_vars:]
+    jac = np.zeros((k_thresh, k_thresh), dtype=float)
+    jac[:, 0] = 1.0
+    for i in range(1, k_thresh):
+        jac[i, 1 : i + 1] = np.exp(theta_thr[1 : i + 1])
+    cov_thr = np.asarray(result.cov_params(), dtype=float)[k_vars:, k_vars:]
+    se_cut = np.sqrt(np.maximum(0.0, np.diag(jac @ cov_thr @ jac.T)))
+    z_cut = cutpoints / np.where(se_cut > 0, se_cut, np.nan)
+    threshold_df = pd.DataFrame(
+        {
+            "coef": cutpoints,
+            "std_error": se_cut,
+            "z_stat": z_cut,
+            "p_value": 2.0 * stats.norm.sf(np.abs(z_cut)),
+            "odds_ratio": np.nan,
+            "or_ci_lower": np.nan,
+            "or_ci_upper": np.nan,
+        },
+        index=summary_df.index[k_vars:],
+    )
+    summary_df = pd.concat([predictor_df, threshold_df])
+
     return {
         "model": result,
         "converged": bool(result.mle_retvals.get("converged", True)),

@@ -107,7 +107,8 @@ def perform_matching(
     ratio: int = 1,
 ) -> pd.DataFrame:
     """
-    Perform greedy 1:1 or 1:k nearest-neighbor propensity score matching within caliper.
+    Perform greedy 1:1 or 1:k nearest-neighbor propensity score matching within caliper,
+    processing treated subjects in descending propensity order (largest first).
 
     Parameters:
         df: Input DataFrame containing treatment and propensity scores.
@@ -146,7 +147,11 @@ def perform_matching(
     used_controls = set()
     current_pair = 0
 
-    for i, t_idx in enumerate(treated.index):
+    # Greedy matching in descending propensity order ("largest first", the MatchIt default and the order
+    # used by cloud Recipe 6): the hardest-to-match treated subjects choose first, independent of row order.
+    match_order = np.argsort(-treated_logit[:, 0], kind="stable")
+    for i in match_order:
+        t_idx = treated.index[i]
         # Find closest available controls within caliper
         sorted_ctrl_indices = np.argsort(distances[i, :])
         curr_matched_controls = []
@@ -208,7 +213,7 @@ def propensity_score_match(
         df: Input DataFrame.
         treatment_col: Binary treatment indicator column name.
         covariates: List of confounder column names.
-        caliper: Caliper width on PS scale (default 0.2).
+        caliper: Caliper width in SDs of the logit propensity score (default 0.2; Austin 2011).
         ratio: Matching ratio (default 1).
 
     Returns:

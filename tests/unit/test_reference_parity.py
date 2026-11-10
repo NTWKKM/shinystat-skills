@@ -46,6 +46,7 @@ def test_firth_cox_matches_r_coxphf():
 # ---------------------------------------------------------------------------
 # Cloud recipe loader (same mechanism as test_shinystat_cloud.py)
 # ---------------------------------------------------------------------------
+SKILLS_DIR = Path(__file__).resolve().parents[2] / "skills"
 RECIPES_DIR = (
     Path(__file__).resolve().parents[2]
     / "skills"
@@ -400,3 +401,162 @@ def test_riley_mape_symmetric_in_prevalence():
         hi["criteria"]["criterion2_mape"]["n"] == lo["criteria"]["criterion2_mape"]["n"]
     )
     assert hi["criteria"]["criterion2_mape"]["n"] is not None
+
+
+# ---------------------------------------------------------------------------
+# ADR 75: engine / recipe parity and skill-document pointer integrity
+# ---------------------------------------------------------------------------
+def _adr75_cohort(n: int = 500, seed: int = 11) -> pd.DataFrame:
+    rng = np.random.default_rng(seed)
+    x1 = rng.normal(size=n)
+    x2 = rng.binomial(1, 0.4, size=n).astype(float)
+    trt = rng.binomial(1, 1 / (1 + np.exp(-(0.7 * x1 - 0.3))))
+    y = rng.binomial(1, 1 / (1 + np.exp(-(-1 + 0.5 * trt + 0.8 * x1))))
+    lat = 0.8 * x1 - 0.5 * x2 + rng.logistic(size=n)
+    return pd.DataFrame(
+        {
+            "x1": x1,
+            "x2": x2,
+            "trt": trt,
+            "y": y,
+            "ord": np.digitize(lat, [-1, 0.3, 1.5]),
+        }
+    )
+
+
+def test_iptw_outcome_model_rejects_unknown_type_and_maps_logistic():
+    from medstat.causal.iptw import compute_iptw_weights, fit_iptw_outcome_model
+
+    df = _adr75_cohort()
+    w = compute_iptw_weights(df, "trt", ["x1", "x2"]).df
+    binary = fit_iptw_outcome_model(w, "y", "trt", outcome_type="binary")
+    logistic = fit_iptw_outcome_model(w, "y", "trt", model_type="logistic")
+    assert logistic["model_type"] == "binary"
+    assert logistic["odds_ratio"] == pytest.approx(binary["odds_ratio"])
+    with pytest.raises(ValueError, match="Unsupported outcome_type"):
+        fit_iptw_outcome_model(w, "y", "trt", model_type="probit")
+
+
+@pytest.mark.parametrize("estimand", ["ATE", "ATT", "ATC", "ATO"])
+def test_recipe14_iptw_weights_match_engine(recipes, estimand):
+    from medstat.causal.iptw import compute_iptw_weights
+
+    df = _adr75_cohort()
+    engine = compute_iptw_weights(df, "trt", ["x1", "x2"], estimand=estimand).df
+    recipe_df, _ = recipes["compute_iptw"](df, "trt", ["x1", "x2"], estimand=estimand)
+    np.testing.assert_allclose(
+        recipe_df["iptw_weight"].to_numpy(), engine["iptw_weight"].to_numpy(), rtol=1e-6
+    )
+
+
+def test_recipe21_ordinal_thresholds_on_cutpoint_scale(recipes):
+    from medstat.models.ordinal import fit_proportional_odds
+
+    df = _adr75_cohort()
+    rec = recipes["fit_proportional_odds"](df["ord"], df[["x1", "x2"]])
+    eng = fit_proportional_odds(df["ord"], df[["x1", "x2"]])
+    thresholds = rec["summary_df"]["coef"].to_numpy()[2:]
+    np.testing.assert_allclose(thresholds, rec["cutpoints"], rtol=1e-8)
+    assert np.all(np.diff(thresholds) > 0), "cutpoints must be strictly increasing"
+    np.testing.assert_allclose(
+        rec["summary_df"][["coef", "std_error"]].to_numpy(),
+        eng["summary_df"][["coef", "std_error"]].to_numpy(),
+        rtol=1e-5,
+    )
+
+
+def test_meta_analysis_ratio_scale_matches_recipe24(recipes):
+    from medstat.meta.models import run_meta_analysis
+
+    rng = np.random.default_rng(5)
+    se = rng.uniform(0.1, 0.5, 8)
+    ma = pd.DataFrame(
+        {
+            "study": [f"s{i}" for i in range(8)],
+            "log_effect": 0.3 + rng.normal(0, se),
+            "se": se,
+        }
+    )
+    eng = run_meta_analysis(ma)
+    rec = recipes["run_meta_analysis"](ma)
+    assert eng["is_ratio"] is True and rec["is_ratio"] is True
+    assert eng["random_effects"]["effect_disp"] == pytest.approx(
+        rec["random_effects"]["effect_disp"]
+    )
+    assert eng["random_effects"]["effect_disp"] == pytest.approx(
+        np.exp(eng["random_effects"]["log_effect"])
+    )
+    assert run_meta_analysis(ma, exponentiate=False)["is_ratio"] is False
+    md = ma.rename(columns={"log_effect": "effect"})
+    assert run_meta_analysis(md)["is_ratio"] is False
+    assert run_meta_analysis(md, effect_measure="OR")["is_ratio"] is True
+
+
+def test_p_values_keep_precision_for_large_z():
+    from medstat.meta.models import run_meta_analysis
+
+    ma = pd.DataFrame({"log_effect": [0.5, 0.52, 0.48], "se": [0.05, 0.05, 0.05]})
+    p = run_meta_analysis(ma, exponentiate=False)["fixed_effect"]["p_value"]
+    assert 0.0 < p < 1e-50  # z ~ 17: 1 - cdf underflows to exactly 0.0
+
+
+def test_cif_conserves_probability_with_tied_event_times():
+    from medstat.models.survival import fit_competing_risks_cif
+
+    rng = np.random.default_rng(7)
+    n = 600
+    t1, t2, c = rng.exponential(8, n), rng.exponential(12, n), rng.uniform(2, 15, n)
+    t = np.minimum.reduce([t1, t2, c])
+    ev = np.where(t == t1, 1, np.where(t == t2, 2, 0))
+    t = np.round(t, 1) + 0.1  # heavy ties
+    res = fit_competing_risks_cif(t, ev, horizons=[2.0, 5.0])
+    assert res.probability_conservation_max_error < 0.005
+
+
+def test_psm_matching_is_invariant_to_row_order_and_matches_recipe6(recipes):
+    from medstat.causal.psm import propensity_score_match
+
+    df = _adr75_cohort()
+    _, info = propensity_score_match(df, "trt", ["x1", "x2"])
+    _, info_shuffled = propensity_score_match(
+        df.sample(frac=1.0, random_state=3), "trt", ["x1", "x2"]
+    )
+    assert info["n_treated_matched"] == info_shuffled["n_treated_matched"]
+    rec = recipes["match_propensity_scores"](df, "trt", ["x1", "x2"])
+    assert rec["n_matched_pairs"] == info["n_treated_matched"]
+
+
+@pytest.mark.parametrize("skill", ["shinystat", "shinystat-cloud"])
+def test_skill_reference_pointers_resolve(skill):
+    """Every markdown link and backticked references/recipes path in a skill resolves inside that skill."""
+    import re
+
+    root = SKILLS_DIR / skill
+    missing = []
+    for md in root.rglob("*.md"):
+        text = re.sub(r"```.*?```", "", md.read_text(encoding="utf-8"), flags=re.DOTALL)
+        targets = re.findall(r"\]\(([\w\-./]+\.md)(?:#[^)\s]*)?\)", text)
+        targets += re.findall(r"`((?:references|recipes)/[\w\-./]+\.md)`", text)
+        for target in targets:
+            candidates = [
+                md.parent / target,
+                root / target,
+                root / "references" / target,
+            ]
+            if not any(c.exists() for c in candidates):
+                missing.append(f"{md.relative_to(root)} -> {target}")
+    assert not missing, (
+        f"Dangling reference pointers in {skill}: {sorted(set(missing))}"
+    )
+
+
+@pytest.mark.parametrize("skill", ["shinystat", "shinystat-cloud"])
+def test_skill_reference_files_fit_one_read(skill):
+    """Each reference file stays within a single default 2000-line read."""
+    root = SKILLS_DIR / skill
+    too_long = {
+        str(md.relative_to(root)): n
+        for md in root.rglob("*.md")
+        if (n := len(md.read_text(encoding="utf-8").splitlines())) > 2000
+    }
+    assert not too_long, f"Reference files over 2000 lines in {skill}: {too_long}"

@@ -2352,6 +2352,7 @@ def meta_cmd(
         study_col=study_col,
         model=model,
         method=method,
+        effect_measure=measure,
     )
 
     if egger:

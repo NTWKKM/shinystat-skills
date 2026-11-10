@@ -186,12 +186,14 @@ skills/
             ├── 02-regression-firth-ordinal.md
             ├── 03-survival-competing-risks.md
             ├── 04-causal-iptw-psm.md
-            └── 05-diagnostic-meta-power.md
+            ├── 05-diagnostic-accuracy-agreement.md
+            ├── 06-reclassification-tdroc.md
+            └── 07-validation-samplesize-meta.md
 ```
 
 #### Standalone Cloud Recipe Index (Recipes 1–24)
 
-For the standalone `shinystat-cloud` skill, 24 zero-`medstat` standalone Python recipes (`Recipe 1` through `Recipe 24`: Table 1, 2x2/ROC/tdROC/NRI/IDI diagnostics, calibration/DCA/recalibration, TRIPOD+AI bootstrap validation, Riley/Obuchowski sample size, logistic/Firth/ordinal/RCS/GEE regression, KM/Cox/competing-risks CIF & Fine-Gray, PSM/IPTW/E-values, MICE, Bland-Altman/ICC, and meta-analysis) are grouped into 5 progressive disclosure modules (`01-data-missing-table1.md` to `05-diagnostic-meta-power.md`). See the canonical mapping table in [`skills/shinystat-cloud/SKILL.md`](skills/shinystat-cloud/SKILL.md#recipe-index--file-mapping-recipes-124).
+For the standalone `shinystat-cloud` skill, 24 zero-`medstat` standalone Python recipes (`Recipe 1` through `Recipe 24`: Table 1, 2x2/ROC/tdROC/NRI/IDI diagnostics, calibration/DCA/recalibration, TRIPOD+AI bootstrap validation, Riley/Obuchowski sample size, logistic/Firth/ordinal/RCS/GEE regression, KM/Cox/competing-risks CIF & Fine-Gray, PSM/IPTW/E-values, MICE, Bland-Altman/ICC, and meta-analysis) are grouped into 7 progressive disclosure modules (`01-data-missing-table1.md` to `07-validation-samplesize-meta.md`). See the canonical mapping table in [`skills/shinystat-cloud/SKILL.md`](skills/shinystat-cloud/SKILL.md#recipe-index--file-mapping-recipes-124).
 
 ### Installing Skills for Your AI Coding Agent
 
@@ -288,7 +290,7 @@ Upload the cloud skill as a `.zip` file via **Upload a skill**:
 
 Then in [claude.ai](https://claude.ai): Navigate to **Customize** → **Skills** → **+** → **Create skill** → **Upload a skill** and select `shinystat-cloud.zip`. Ensure **Code execution and file creation** is enabled. Claude reads the YAML frontmatter from `SKILL.md` inside the skill archive.
 
-> **Note:** The dedicated cloud package (`packaging/cloud/shinystat-cloud.zip`) contains 24 modular pure-Python standalone recipes in `references/recipes/01-*.md` through `05-*.md`, standalone figure helpers in `references/figures.md`, and multi-format report generators (`.md`, `.html`, `.docx`, `.pptx`, `.pdf`) + `verify_standalone_integrity` in `references/report-builder.md` so cloud sandboxes can execute all analyses using standard scientific libraries (`pandas`, `scipy.stats`, `statsmodels`, `lifelines`, `scikit-learn`) without `medstat-core` installed.
+> **Note:** The dedicated cloud package (`packaging/cloud/shinystat-cloud.zip`) contains 24 modular pure-Python standalone recipes in `references/recipes/01-*.md` through `07-*.md`, standalone figure helpers in `references/figures.md`, and multi-format report generators (`.md`, `.html`, `.docx`, `.pptx`, `.pdf`) + `verify_standalone_integrity` in `references/report-builder.md` so cloud sandboxes can execute all analyses using standard scientific libraries (`pandas`, `scipy.stats`, `statsmodels`, `lifelines`, `scikit-learn`) without `medstat-core` installed.
 
 </details>
 

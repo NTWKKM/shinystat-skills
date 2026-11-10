@@ -166,11 +166,8 @@ def fit_proportional_odds(
         z_crit = 1.959963984540054
         ci_lower = cutpoints - z_crit * se_cutpoints
         ci_upper = cutpoints + z_crit * se_cutpoints
-        p_cutpoints = 2.0 * (
-            1.0
-            - stats.norm.cdf(
-                np.abs(cutpoints / np.where(se_cutpoints > 0, se_cutpoints, np.nan))
-            )
+        p_cutpoints = 2.0 * stats.norm.sf(
+            np.abs(cutpoints / np.where(se_cutpoints > 0, se_cutpoints, np.nan))
         )
     except Exception:
         se_cutpoints = np.full(k_thresh, np.nan)

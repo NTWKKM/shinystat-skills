@@ -895,11 +895,16 @@ def fit_competing_risks_cif(
     # Timeline of all failure times
     timeline = np.sort(np.unique(np.concatenate([[0.0], dur[evt > 0]])))
 
-    cif1 = _step_lookup(ajf_primary.cumulative_density_, timeline)
-    var1 = np.maximum(_step_lookup(ajf_primary.variance_, timeline), 0.0)
+    # lifelines' Aalen-Johansen jitters tied event times by ~1e-4, so its curve at an observed time t may
+    # not yet include every event recorded at t. Read each AJ step midway to the next distinct event time,
+    # where all events at t are counted; identical to reading at t when there are no ties.
+    aj_eval = np.r_[(timeline[:-1] + timeline[1:]) / 2.0, np.inf]
 
-    cif2 = _step_lookup(ajf_competing.cumulative_density_, timeline)
-    var2 = np.maximum(_step_lookup(ajf_competing.variance_, timeline), 0.0)
+    cif1 = _step_lookup(ajf_primary.cumulative_density_, aj_eval)
+    var1 = np.maximum(_step_lookup(ajf_primary.variance_, aj_eval), 0.0)
+
+    cif2 = _step_lookup(ajf_competing.cumulative_density_, aj_eval)
+    var2 = np.maximum(_step_lookup(ajf_competing.variance_, aj_eval), 0.0)
 
     s_naive = _step_lookup(km_naive.survival_function_, timeline)
     naive_cif = np.clip(1.0 - s_naive, 0.0, 1.0)
@@ -934,10 +939,10 @@ def fit_competing_risks_cif(
     clinical_warnings = []
     if horizons is not None and len(horizons) > 0:
         h_arr = np.asarray(horizons, dtype=float)
-        h_cif1 = _step_lookup(ajf_primary.cumulative_density_, h_arr)
-        h_var1 = np.maximum(_step_lookup(ajf_primary.variance_, h_arr), 0.0)
-        h_cif2 = _step_lookup(ajf_competing.cumulative_density_, h_arr)
-        h_var2 = np.maximum(_step_lookup(ajf_competing.variance_, h_arr), 0.0)
+        # Horizon value = last timeline step at or before the horizon (tie-safe, see aj_eval above)
+        h_idx = np.maximum(np.searchsorted(timeline, h_arr, side="right") - 1, 0)
+        h_cif1, h_var1 = cif1[h_idx], var1[h_idx]
+        h_cif2, h_var2 = cif2[h_idx], var2[h_idx]
         h_s_naive = _step_lookup(km_naive.survival_function_, h_arr)
         h_naive = np.clip(1.0 - h_s_naive, 0.0, 1.0)
 

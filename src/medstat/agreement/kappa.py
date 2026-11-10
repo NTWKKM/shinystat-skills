@@ -246,7 +246,7 @@ def cohens_kappa(
     ci_lower = max(-1.0, float(kappa - 1.96 * se_ci))
     ci_upper = min(1.0, float(kappa + 1.96 * se_ci))
     z = (kappa / se_null) if se_null > 0 else 0.0
-    p_val = float(2.0 * (1.0 - stats.norm.cdf(abs(z))))
+    p_val = float(2.0 * stats.norm.sf(abs(z)))
 
     return {
         "kappa": float(kappa),
@@ -345,7 +345,7 @@ def fleiss_kappa(subject_category_matrix: np.ndarray) -> dict[str, Any]:
     )
     se_null = float(np.sqrt(max(0.0, var_p)))
     z = (kappa / se_null) if se_null > 0 else 0.0
-    p_val = float(2.0 * (1.0 - stats.norm.cdf(abs(z))))
+    p_val = float(2.0 * stats.norm.sf(abs(z)))
 
     return {
         "kappa": float(kappa),

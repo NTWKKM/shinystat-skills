@@ -266,11 +266,21 @@ def compute_iptw(
             raise ValueError(
                 f"truncate_quantiles low ({q_low}) cannot exceed high ({q_high})"
             )
-        w_low, w_high = (
-            np.quantile(w_raw, q_low),
-            np.quantile(w_raw, q_high),
-        )
-        w_final = np.clip(w_raw, w_low, w_high)
+        # ATT / ATC: the reference group keeps weight 1.0, so truncate within the re-weighted group only
+        # (pooled quantiles would be diluted by the block of 1.0 weights). ATE truncates all weights.
+        if estimand_u == "ATT":
+            clip_mask = T == 0
+        elif estimand_u == "ATC":
+            clip_mask = T == 1
+        else:
+            clip_mask = np.ones(len(w_raw), dtype=bool)
+        w_final = w_raw.copy()
+        if np.any(clip_mask):
+            w_low, w_high = (
+                np.quantile(w_raw[clip_mask], q_low),
+                np.quantile(w_raw[clip_mask], q_high),
+            )
+            w_final[clip_mask] = np.clip(w_raw[clip_mask], w_low, w_high)
     else:
         w_final = w_raw.copy()
 

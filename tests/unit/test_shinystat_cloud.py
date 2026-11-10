@@ -749,8 +749,8 @@ def test_each_recipe_is_self_contained():
     orig_rng_state = np.random.get_state()
     try:
         recipe_files = sorted(RECIPES_DIR.glob("*.md"))
-        assert len(recipe_files) == 5, (
-            f"Expected 5 modular recipe files, got {len(recipe_files)}"
+        assert len(recipe_files) == 7, (
+            f"Expected 7 modular recipe files, got {len(recipe_files)}"
         )
         parts = [p.read_text(encoding="utf-8") for p in recipe_files]
         content = "\n\n".join(parts)
@@ -2191,9 +2191,12 @@ def test_cloud_report_builder_docx_fallback_and_integrity(
 
 
 def _extract_report_builder_namespace():
-    """Extract and execute all Python code blocks from report-builder.md in an isolated namespace."""
-    rb_path = CLOUD_DIR / "references" / "report-builder.md"
-    content = rb_path.read_text(encoding="utf-8")
+    """Extract and execute all Python code blocks from report-builder.md and its
+    companion report-plotly-specs.md in an isolated namespace."""
+    content = "\n\n".join(
+        (CLOUD_DIR / "references" / name).read_text(encoding="utf-8")
+        for name in ("report-builder.md", "report-plotly-specs.md")
+    )
     blocks = re.findall(r"```python\n(.*?)\n```", content, re.DOTALL)
     ns = {}
     for block in blocks:

@@ -2110,3 +2110,36 @@ Follow-up to ADR 73 for the medium-severity audit findings:
 - **Status**: Accepted & Verified. Ordinal summary matches R `MASS::polr` (1e-4); Table 1 Fisher P-values match `scipy.stats.fisher_exact`; mediation recovers the true natural effects (40 replicates: mean ACME bias 0.00000, 95% CI coverage 39/40).
 - **Behavioural change**: mediation with a binary outcome now reports risk differences instead of log-odds products (`test_regression_guardrails_pr4` updated); Recipe 1 two-group P-values change (snapshot regenerated); Riley N can increase for prevalence > 0.5 when MAPE binds.
 
+
+## ADR 75: Engine / Recipe Parity, Silent-Fallback Removal & Agent-Facing Reference Integrity
+
+### Context
+A joint audit of statistical correctness and of how agents consume the two skills (writing-for-agents criteria), run after ADR 73/74. The engine matched R `survival` / `MASS` on Cox, log-rank, `polr`, Aalen-Johansen CIF and Fine-Gray (SHR and `cluster(id)` robust SE). Remaining defects:
+1. **`fit_iptw_outcome_model`**: any `model_type` / `outcome_type` not containing "binary" or "surv" fell through to WLS, so `model_type="logistic"` silently returned a linear probability model; the `Unsupported outcome_type` branch was unreachable.
+2. **Recipe 21**: `summary_df` threshold rows were still statsmodels' log-increments (ADR 74 fixed only the engine).
+3. **Recipe 14**: ATT / ATC truncation used pooled weight quantiles; the engine clips only the re-weighted group (ATT OR 1.419 vs 1.400 on the same data).
+4. **Meta-analysis display scale**: with no `is_ratio` column the engine reported the pooled log effect as `effect_disp` while Recipe 24 exponentiated a `log_effect` column.
+5. **PSM**: the engine matched treated subjects in row order, Recipe 6 in descending propensity order (197 vs 207 pairs).
+6. **CIF conservation audit**: lifelines jitters tied event times, so reading the Aalen-Johansen curve exactly at a tied time missed events (conservation error 0.018).
+7. **P-values** computed as `2 * (1 - cdf)` underflowed to exactly 0.0 beyond |z| ≈ 8.3.
+8. **`decision-heuristics.md`** (shared verbatim by both skills) pointed at `recipes/*.md` 21 times, files the local skill does not ship; offered only L2-penalized Cox while the local `SKILL.md` prescribes `fit_firth_cox`; and stated the PH-violation rule twice with different nuisance-covariate remedies.
+9. **Oversized references**: `05-diagnostic-meta-power.md` (2,753 lines) and `report-builder.md` (2,334 lines) exceeded one default 2000-line read.
+10. **`SKILL.md`**: Gate #5 required every option of every axis in one `ask_question` turn, which a capped question tool (`AskUserQuestion`: 4 questions × 4 options) cannot carry; the Execute criterion "passes diagnostics" was unsatisfiable after a remedied PH / Brant violation; axis 5d asked on every run; the cloud file carried two recipe-to-file tables.
+
+### Decision
+1. `_OUTCOME_TYPE_ALIASES` maps accepted names (`logistic`, `logit`, `cox`, ...) to the three families; anything else raises `ValueError`.
+2. Recipe 21 reports threshold rows on the cutpoint scale with delta-method SEs (same Jacobian as the engine).
+3. Recipe 14 truncates within the re-weighted group for ATT / ATC.
+4. Engine `run_meta_analysis` gains `exponentiate` and resolves the display scale in the order `exponentiate` → `is_ratio` column (conflicts raise) → `effect_measure` → `log_*` effect column → difference scale.
+5. Engine PSM matches largest-first (stable sort on logit PS): row-order invariant and identical to Recipe 6.
+6. CIF timeline values are read midway to the next distinct event time and horizons index that timeline, in engine and Recipe 15.
+7. P-values use the survival function (`norm.sf` / `t.sf`) in the engine and the diagnostic recipes.
+8. `decision-heuristics.md` names both routes per method (local API function · cloud Recipe #) with no file paths; the cloud `SKILL.md` Recipe Index is the single recipe-to-file map; Cox sparse-data remedies list Firth Cox (local) and L2 Cox (cloud); the PH rule lives once under §2.E. Module paths stay out of the shared file (cloud guard `test_decision_heuristics_has_no_phantom_medstat_modules`).
+9. Recipes split into `05-diagnostic-accuracy-agreement.md` (Recipes 2–5), `06-reclassification-tdroc.md` (16–17), `07-validation-samplesize-meta.md` (18–20, 24); Plotly spec generators move from `report-builder.md` to `report-plotly-specs.md`; the stale-prone line-range index is replaced by per-format load conditions.
+10. `SKILL.md` (both): capped question tools split the consolidated turn into consecutive calls and name overflow options in the question text; Execute is done when each diagnostic passes or has its documented remedy applied and reported; axis 5d is asked only for multi-model or Full Polish runs; the cloud file keeps one Recipe Index; repeated "N/A" EPV clauses collapse to their Run Sequence source.
+
+### Consequences
+- **Status**: Accepted & Verified. New guards in `tests/unit/test_reference_parity.py`: engine = recipe for IPTW weights (4 estimands), ordinal thresholds, meta display scale and PSM pair count; pointer resolution and the 2000-line bound for every reference file of both skills.
+- **Behavioural change**: `fit_iptw_outcome_model` raises on unknown model types; engine meta-analysis of a `log_effect` column now displays ratios; engine PSM pairings and Recipe 14 ATT / ATC weights change (re-run earlier matched or ATT analyses); CIF values at tied event times move in the fourth decimal.
+- **Not changed**: skill descriptions (their method lists are pinned by tests and an earlier ADR); the residual CIF conservation error (~0.001) from lifelines' sequential handling of ties.
+- **Not audited**: figures, renderers, `verify_report_integrity`, `evidence-pipeline.md`, `subagent-protocol.md`, the MICE imputation model, and RCS / mediation / time-dependent ROC against external references.

@@ -189,7 +189,7 @@ def run_mediation(
         # Sobel test p-value for indirect effect
         sobel_se = np.sqrt(alpha_1**2 * se_beta_med**2 + beta_med**2 * se_alpha_1**2)
         z_stat = (acme_point / sobel_se) if sobel_se > 0 else 0.0
-        p_value_acme = float(2.0 * (1.0 - stats.norm.cdf(abs(z_stat))))
+        p_value_acme = float(2.0 * stats.norm.sf(abs(z_stat)))
         scale = "linear"
         method_desc = "Quasi-Bayesian Monte Carlo & Baron-Kenny (Linear Scale)"
         extra = {}

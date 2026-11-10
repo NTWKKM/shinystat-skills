@@ -648,9 +648,12 @@ def fit_competing_risks_cif(
         return np.where(idx >= 0, s.iloc[np.maximum(idx, 0)].to_numpy(dtype=float), 0.0)
 
     timeline = np.sort(np.unique(np.concatenate([[0.0], dur[evt > 0]])))
-    cif1 = _lookup(ajf1.cumulative_density_, timeline)
-    var1 = np.maximum(_lookup(ajf1.variance_, timeline), 0.0)
-    cif2 = _lookup(ajf2.cumulative_density_, timeline)
+    # lifelines jitters tied event times by ~1e-4: read each AJ step midway to the next distinct event
+    # time so every event recorded at t is counted (identical to reading at t when there are no ties).
+    aj_eval = np.r_[(timeline[:-1] + timeline[1:]) / 2.0, np.inf]
+    cif1 = _lookup(ajf1.cumulative_density_, aj_eval)
+    var1 = np.maximum(_lookup(ajf1.variance_, aj_eval), 0.0)
+    cif2 = _lookup(ajf2.cumulative_density_, aj_eval)
     s_naive = _lookup(km_naive.survival_function_, timeline)
     naive = np.clip(1.0 - s_naive, 0.0, 1.0)
 
@@ -680,8 +683,8 @@ def fit_competing_risks_cif(
             raise ValueError(
                 f"Horizons must be non-negative finite numbers; got {horizons}"
             )
-        h_cif1 = _lookup(ajf1.cumulative_density_, h_arr)
-        h_var1 = np.maximum(_lookup(ajf1.variance_, h_arr), 0.0)
+        h_idx = np.maximum(np.searchsorted(timeline, h_arr, side="right") - 1, 0)
+        h_cif1, h_var1 = cif1[h_idx], var1[h_idx]
         h_naive = np.clip(1.0 - _lookup(km_naive.survival_function_, h_arr), 0.0, 1.0)
         h_rows = []
         for i, h in enumerate(h_arr):

@@ -22,6 +22,23 @@ from medstat.logging import get_logger
 logger = get_logger(__name__)
 
 
+# Outcome-model families accepted by fit_iptw_outcome_model; anything else raises (never a silent WLS fallback).
+_OUTCOME_TYPE_ALIASES: dict[str, str] = {
+    "continuous": "continuous",
+    "linear": "continuous",
+    "gaussian": "continuous",
+    "wls": "continuous",
+    "binary": "binary",
+    "logistic": "binary",
+    "logit": "binary",
+    "binomial": "binary",
+    "survival": "survival",
+    "cox": "survival",
+    "coxph": "survival",
+    "time_to_event": "survival",
+}
+
+
 @dataclass
 class IPTWResult:
     """Container for IPTW results supporting both attribute and tuple unpacking."""
@@ -307,13 +324,13 @@ def fit_iptw_outcome_model(
     if t_col is None:
         raise ValueError("Either 'treatment_col' or 'treatment' must be specified.")
 
-    m_type = (model_type or outcome_type).lower()
-    if "binary" in m_type:
-        m_type = "binary"
-    elif "surv" in m_type:
-        m_type = "survival"
-    else:
-        m_type = "continuous"
+    requested_type = model_type or outcome_type
+    m_type = _OUTCOME_TYPE_ALIASES.get(str(requested_type).strip().lower())
+    if m_type is None:
+        raise ValueError(
+            f"Unsupported outcome_type '{requested_type}'. Choose from: 'continuous', 'binary', 'survival' "
+            f"(aliases: {sorted(_OUTCOME_TYPE_ALIASES)})."
+        )
 
     dur_col = duration_col
     evt_col = outcome_col

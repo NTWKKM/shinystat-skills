@@ -18,6 +18,20 @@ from medstat.logging import get_logger
 
 logger = get_logger(__name__)
 
+_RATIO_MEASURES = {"OR", "RR", "HR", "IRR", "SHR", "DOR"}
+_DIFFERENCE_MEASURES = {"RD", "MD", "SMD", "CONTINUOUS"}
+
+
+def _measure_key(effect_measure: Any) -> str:
+    """Normalise an effect-measure label ('log_or', 'OR', 'md') to its upper-case family key."""
+    return (
+        str(effect_measure or "")
+        .strip()
+        .upper()
+        .removeprefix("LOG_")
+        .removeprefix("LOG")
+    )
+
 
 def compute_binary_effect_sizes(
     df: pd.DataFrame,
@@ -168,6 +182,7 @@ def run_meta_analysis(
     study_col: str | None = None,
     model: str | None = None,
     method: str | None = None,
+    exponentiate: bool | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """
@@ -176,7 +191,11 @@ def run_meta_analysis(
     Parameters:
         df: DataFrame containing columns 'study', 'log_effect', 'se', and optionally 'is_ratio'.
         method_re: Random-effects tau^2 estimator ('DL' = DerSimonian-Laird).
-        use_hksj: If True, uses Hartung-Knapp-Sidik-Jonkman adjustment.
+        use_hksj: If True, uses the modified Hartung-Knapp-Sidik-Jonkman adjustment (variance scale
+            truncated at 1, so the interval is never narrower than the DerSimonian-Laird one).
+        exponentiate: Whether pooled effects are displayed on the ratio scale (exp of the log effect).
+            None resolves in order: 'is_ratio' column, effect_measure in {OR, RR, HR, IRR, SHR, DOR},
+            an effect column named 'log_*', else False (same rule as cloud Recipe 24).
         alpha: Significance level (default 0.05 for 95% CIs).
     """
     valid_methods_re = ["DL", "DERSIMONIAN-LAIRD"]
@@ -203,6 +222,11 @@ def run_meta_analysis(
         )
 
     df_work = df.copy()
+    source_effect_col = (
+        effect_col if (effect_col and effect_col in df.columns) else None
+    )
+    if source_effect_col is None and "log_effect" in df.columns:
+        source_effect_col = "log_effect"
     effect_measure = kwargs.get("effect_measure") or kwargs.get("measure")
     if not effect_measure:
         for c in ["effect_measure", "measure"]:
@@ -234,9 +258,21 @@ def run_meta_analysis(
     if np.any(se_arr <= 0) or np.any(np.isnan(se_arr)):
         raise ValueError("Standard error must be strictly positive.")
     se = se_arr
-    is_ratio = (
-        bool(df_work["is_ratio"].iloc[0]) if "is_ratio" in df_work.columns else False
-    )
+    if exponentiate is not None:
+        is_ratio = bool(exponentiate)
+    elif "is_ratio" in df_work.columns:
+        flags = df_work["is_ratio"]
+        if flags.isna().any() or flags.astype(bool).nunique() > 1:
+            raise ValueError(
+                "Column 'is_ratio' has missing or conflicting values across studies; pass 'exponentiate' explicitly."
+            )
+        is_ratio = bool(flags.iloc[0])
+    elif _measure_key(effect_measure) in _RATIO_MEASURES:
+        is_ratio = True
+    elif _measure_key(effect_measure) in _DIFFERENCE_MEASURES:
+        is_ratio = False
+    else:
+        is_ratio = bool(source_effect_col and source_effect_col.startswith("log_"))
 
     # 1. Fixed-Effect Model (Inverse Variance)
     w_fe = 1.0 / (se**2)
@@ -248,7 +284,7 @@ def run_meta_analysis(
     ci_fe_low = theta_fe - z_crit * se_fe
     ci_fe_high = theta_fe + z_crit * se_fe
     z_fe = theta_fe / se_fe if se_fe > 0 else 0.0
-    p_fe = float(2.0 * (1.0 - stats.norm.cdf(abs(z_fe))))
+    p_fe = float(2.0 * stats.norm.sf(abs(z_fe)))
 
     # 2. Heterogeneity (Cochran's Q, I^2, Tau^2)
     q_stat = float(np.sum(w_fe * ((theta - theta_fe) ** 2)))
@@ -276,13 +312,13 @@ def run_meta_analysis(
         ci_re_low = theta_re - t_crit * se_re
         ci_re_high = theta_re + t_crit * se_re
         t_val = theta_re / se_re if se_re > 0 else 0.0
-        p_re = float(2.0 * (1.0 - stats.t.cdf(abs(t_val), df=k - 1)))
+        p_re = float(2.0 * stats.t.sf(abs(t_val), df=k - 1))
     else:
         se_re = math.sqrt(1.0 / sum_w_re)
         ci_re_low = theta_re - z_crit * se_re
         ci_re_high = theta_re + z_crit * se_re
         z_re = theta_re / se_re if se_re > 0 else 0.0
-        p_re = float(2.0 * (1.0 - stats.norm.cdf(abs(z_re))))
+        p_re = float(2.0 * stats.norm.sf(abs(z_re)))
 
     # 4. 95% Prediction Interval
     pi_low, pi_high = np.nan, np.nan
