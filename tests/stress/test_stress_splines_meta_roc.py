@@ -350,9 +350,13 @@ class TestCompetingRisksCIFDeterministic:
         )
 
         state_after_run1 = np.random.get_state()
-        # Verify RNG state was preserved
+        # Verify RNG state was preserved after Run 1
         assert state_before[0] == state_after_run1[0]
         assert np.array_equal(state_before[1], state_after_run1[1])
+
+        # Set a different global RNG seed before Run 2 to verify external RNG immunity
+        np.random.seed(99999)
+        state_before_run2 = np.random.get_state()
 
         # Run 2
         res2 = fit_competing_risks_cif(
@@ -363,7 +367,12 @@ class TestCompetingRisksCIFDeterministic:
             horizons=[10.0, 20.0],
         )
 
-        # Determinism check across repeated calls
+        state_after_run2 = np.random.get_state()
+        # Verify RNG state was preserved after Run 2
+        assert state_before_run2[0] == state_after_run2[0]
+        assert np.array_equal(state_before_run2[1], state_after_run2[1])
+
+        # Determinism check across repeated calls with different initial global seeds
         table1 = res1["cif_table"]
         table2 = res2["cif_table"]
         np.testing.assert_allclose(
@@ -435,41 +444,87 @@ class TestModelConvergenceContracts:
         # 1. GLM linear
         m1 = fit_linear_regression(y_cont, X)
         assert (
-            "converged" in m1 and isinstance(m1["converged"], bool) and m1["converged"]
+            "converged" in m1
+            and isinstance(m1["converged"], bool)
+            and m1["converged"] is True
         )
 
         # 2. GLM logistic
         m2 = fit_standard_logistic(y_bin, X)
-        assert "converged" in m2 and isinstance(m2["converged"], bool)
+        assert (
+            "converged" in m2
+            and isinstance(m2["converged"], bool)
+            and m2["converged"] is True
+        )
 
         # 3. GLM poisson
         m3 = fit_poisson_regression(y_count, X)
-        assert "converged" in m3 and isinstance(m3["converged"], bool)
+        assert (
+            "converged" in m3
+            and isinstance(m3["converged"], bool)
+            and m3["converged"] is True
+        )
 
         # 4. GLM negative binomial
         m4 = fit_negative_binomial(y_count, X)
-        assert "converged" in m4 and isinstance(m4["converged"], bool)
+        assert (
+            "converged" in m4
+            and isinstance(m4["converged"], bool)
+            and m4["converged"] is True
+        )
 
         # 5. Firth logistic
         m5 = fit_firth_logistic(y_bin, X)
-        assert "converged" in m5 and isinstance(m5["converged"], bool)
+        assert (
+            "converged" in m5
+            and isinstance(m5["converged"], bool)
+            and m5["converged"] is True
+        )
 
         # 6. Firth cox
         m6 = fit_firth_cox(time, y_bin, X)
-        assert "converged" in m6 and isinstance(m6["converged"], bool)
+        assert (
+            "converged" in m6
+            and isinstance(m6["converged"], bool)
+            and m6["converged"] is True
+        )
 
         # 7. GEE
         m7 = fit_gee(y_bin, X, cluster)
-        assert "converged" in m7 and isinstance(m7["converged"], bool)
+        assert (
+            "converged" in m7
+            and isinstance(m7["converged"], bool)
+            and m7["converged"] is True
+        )
 
         # 8. Random intercept
         m8 = fit_random_intercept(y_cont, X, cluster)
-        assert "converged" in m8 and isinstance(m8["converged"], bool)
+        assert (
+            "converged" in m8
+            and isinstance(m8["converged"], bool)
+            and m8["converged"] is True
+        )
 
         # 9. Proportional odds
         m9 = fit_proportional_odds(y_ord, X)
-        assert "converged" in m9 and isinstance(m9["converged"], bool)
+        assert (
+            "converged" in m9
+            and isinstance(m9["converged"], bool)
+            and m9["converged"] is True
+        )
 
         # 10. Multinomial logistic
         m10 = fit_multinomial_logistic(y_ord, X)
-        assert "converged" in m10 and isinstance(m10["converged"], bool)
+        assert (
+            "converged" in m10
+            and isinstance(m10["converged"], bool)
+            and m10["converged"] is True
+        )
+
+        # Negative test: Non-convergence with constrained maxiter=1
+        m_nonconv = fit_standard_logistic(y_bin, X, maxiter=1)
+        assert (
+            "converged" in m_nonconv
+            and isinstance(m_nonconv["converged"], bool)
+            and m_nonconv["converged"] is False
+        )

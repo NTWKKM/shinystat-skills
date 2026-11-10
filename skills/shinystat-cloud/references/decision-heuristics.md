@@ -8,7 +8,7 @@ Reference guide for the `shinystat-cloud` and `shinystat` autonomous agents in c
 
 | Study Archetype | Target Estimand / Goal | Primary Model / Method | Key Assumption / Diagnostics | Recommended Recipe / Library |
 | :--- | :--- | :--- | :--- | :--- |
-| **Type 1: Baseline Cohort** | Cohort characteristics | Table 1 (Mean/SD, Median/IQR, Count/%, SMD) | Normality inspection; Fisher exact fallback for small cells | Recipe 1: Table 1 & SMD (`recipes/01-data-missing-table1.md`) |
+| **Type 1: Baseline Cohort** | Cohort characteristics | Table 1 (Mean/SD, Median/IQR, Count/%, SMD) | Normality inspection; Fisher exact fallback for small cells | `generate_table_one`, `calculate_smd` / Recipe 1: Table 1 & SMD (`recipes/01-data-missing-table1.md`) |
 | **Type 2: Binary Outcome** | Odds Ratio (OR), Risk factors | Multivariable Binary Logistic Regression | Linearity of log-odds; Crude & Adjusted OR table | Recipe 10: Logistic Regression Table (`recipes/02-regression-firth-ordinal.md`) & Recipe 22: Harrell RCS Splines (`recipes/02-regression-firth-ordinal.md`) |
 | **Type 2-Sparse: Separation** | OR estimate in rare events | Firth Penalized Logistic Regression | Profile likelihood CIs; resolves monotone separation | Recipe 7: Firth Logistic Regression (`recipes/02-regression-firth-ordinal.md`) |
 | **Type 2b: Ordinal Scale** | Cumulative Odds Ratio | Cumulative Logit Proportional Odds | Brant test for parallel lines; multinomial logit fallback | Recipe 21: Ordinal Logistic & Brant Test (`recipes/02-regression-firth-ordinal.md`) |

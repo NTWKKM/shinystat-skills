@@ -162,6 +162,16 @@ class TestICCSciPyParity:
             assert round(float(row["ci_lower"]), 2) == ci95_arr[0]
             assert round(float(row["ci_upper"]), 2) == ci95_arr[1]
 
+        # Verify that unrounded columns retain more precision than 2-decimal rounded version
+        assert any(
+            row["ci_lower"] != round(float(row["ci_lower"]), 2)
+            for _, row in icc_res.iterrows()
+        )
+        assert any(
+            row["ci_upper"] != round(float(row["ci_upper"]), 2)
+            for _, row in icc_res.iterrows()
+        )
+
     def test_icc_large_scale_matrix(self):
         """Stress test: 5,000 subjects x 20 raters (100,000 measurements).
         Demonstrates pure-SciPy speedup over Pingouin (>1,000x) and numerical stability."""
@@ -290,8 +300,10 @@ class TestICCSciPyParity:
             }
         )
         res_ours = calculate_icc(df_constant, "target", "rater", "score")
-        # All ICCs should be NaN without raising unhandled exceptions
+        # All ICCs and CI bounds should be NaN without raising unhandled exceptions
         assert res_ours["ICC"].isna().all()
+        assert res_ours["ci_lower"].isna().all()
+        assert res_ours["ci_upper"].isna().all()
 
     def test_icc_boundary_validations(self):
         """Stress test: Boundary inputs that must raise ValueError."""
