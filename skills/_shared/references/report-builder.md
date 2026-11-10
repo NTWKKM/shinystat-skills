@@ -1805,11 +1805,22 @@ def verify_standalone_integrity(
         ("matched" in clean_design or "matching" in clean_design)
         and not is_true_randomized
     )
+    is_pre_experimental = bool(
+        clean_design
+        and not is_true_randomized
+        and bool(
+            re.search(
+                r"(?:^|_)pre_?experiment(?:al)?(?:$|_(?:study|design|trial|evaluation|investigation|research)(?:_|$))",
+                clean_design,
+            )
+        )
+    )
     has_explicit_observational = bool(
         clean_design
         and (
             ("observational" in clean_design and not is_negated_observational)
             or is_matched_observational
+            or is_pre_experimental
             or any(
                 obs in clean_design
                 for obs in [
@@ -1835,10 +1846,6 @@ def verify_standalone_integrity(
                     "quasiexperimental",
                     "quasi_experiment",
                     "quasiexperiment",
-                    "pre_experimental",
-                    "preexperimental",
-                    "pre_experiment",
-                    "preexperiment",
                     "non_experimental",
                     "nonexperimental",
                     "natural_experiment",

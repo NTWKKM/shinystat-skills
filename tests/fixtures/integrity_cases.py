@@ -491,4 +491,20 @@ STUDY_DESIGN_INTEGRITY_CASES: list[StudyDesignIntegrityCase] = [
         expected_caveat=True,
         expected_passed=True,
     ),
+    StudyDesignIntegrityCase(
+        id="randomized_trial_with_pre_experiment_baseline_measurements",
+        study_design="randomized controlled trial with pre-experiment baseline measurements",
+        narrative="Methods: Cohort retention flow was analyzed. A randomized controlled trial with pre-experiment baseline measurements was conducted across 300 patients; sample size 300.",
+        results_dict={"sample_size": 300},
+        expected_caveat=True,
+        expected_passed=True,
+    ),
+    StudyDesignIntegrityCase(
+        id="randomized_trial_with_pre_experimental_period",
+        study_design="randomized controlled trial with pre-experimental period",
+        narrative="Methods: Cohort retention flow was analyzed. A randomized controlled trial with pre-experimental period was conducted across 280 patients; sample size 280.",
+        results_dict={"sample_size": 280},
+        expected_caveat=True,
+        expected_passed=True,
+    ),
 ]
