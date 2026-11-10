@@ -1778,7 +1778,7 @@ def verify_standalone_integrity(
     # Explicit observational keywords in clean_design
     # Negated observational labels (e.g. "non_observational", "nonobservational") do not trigger confounding caveats.
     # Distinguish matched randomized trials from observational matching.
-    # Token-bounded true randomization test excludes quasi/pseudo/unrandomized designs and avoids matching "rct" in words like "infarction".
+    # Token-bounded true randomization test excludes quasi/pseudo/unrandomized/not-randomized/Mendelian designs and avoids matching "rct" in words like "infarction".
     is_negated_observational = bool(
         re.search(r"(?:^|_)non_?observational(?:_|$)", clean_design)
     )
@@ -1786,11 +1786,20 @@ def verify_standalone_integrity(
         clean_design
         and (
             bool(re.search(r"(?:^|_)rct(?:_|$)", clean_design))
-            or bool(re.search(r"(?:^|_)randomi[zs]", clean_design))
+            or bool(
+                re.search(
+                    r"(?:^|_)(?:randomi[zs]ed|randomi[zs]ation)(?:_|$)",
+                    clean_design,
+                )
+            )
         )
         and not bool(
-            re.search(r"(?:^|_)(?:quasi|pseudo|un|non)_?randomi", clean_design)
+            re.search(
+                r"(?:^|_)(?:quasi|pseudo|un|non|not)_?(?:randomi|rct)",
+                clean_design,
+            )
         )
+        and "mendelian" not in clean_design
     )
     is_matched_observational = bool(
         ("matched" in clean_design or "matching" in clean_design)
@@ -1812,11 +1821,16 @@ def verify_standalone_integrity(
                     "nonrandomized",
                     "non_randomised",
                     "nonrandomised",
+                    "not_randomi",
+                    "notrandomi",
                     "quasi_randomi",
                     "quasirandomi",
                     "pseudo_randomi",
                     "pseudorandomi",
+                    "un_randomi",
                     "unrandomi",
+                    "quasi_rct",
+                    "quasirct",
                     "quasi_experimental",
                     "quasiexperimental",
                     "quasi_experiment",
@@ -1828,6 +1842,7 @@ def verify_standalone_integrity(
                     "target_trial",
                     "trial_emulation",
                     "emulated_trial",
+                    "mendelian",
                 ]
             )
         )
