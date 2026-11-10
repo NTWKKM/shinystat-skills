@@ -194,7 +194,7 @@ Automates pre-modeling and post-modeling diagnostic validation plots.
 
 ### 10. Cumulative Incidence Function (`plot_cif`)
 Visualizes non-parametric Aalen-Johansen CIF curves alongside Naive $1 - \text{Kaplan-Meier}$ overestimation audit.
-- **Features**: Event of interest CIF with Greenwood 95% confidence bands, competing risk CIF curves, and optional Naive $1 - \text{KM}$ curve (rendered when `'naive_1_minus_km'` is present and `show_naive_km=True`) illustrating bias when competing events are treated as independent censoring.
+- **Features**: Event of interest CIF with asymmetric log(-log) 95% confidence bands (Aalen-Johansen variance), competing risk CIF curves, and optional Naive $1 - \text{KM}$ curve (rendered when `'naive_1_minus_km'` is present and `show_naive_km=True`) illustrating bias when competing events are treated as independent censoring.
 - **Column Contract**: `cif_table` DataFrame must contain `'time'`, `'cif_primary'`, and `'cif_competing'` columns (with optional `'cif_primary_ci_lower'`, `'cif_primary_ci_upper'`, `'cif_competing_ci_lower'`, `'cif_competing_ci_upper'`, `'naive_1_minus_km'`).
 - **Usage**:
 ```python

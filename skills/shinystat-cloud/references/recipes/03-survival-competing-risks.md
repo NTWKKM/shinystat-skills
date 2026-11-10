@@ -655,8 +655,13 @@ def fit_competing_risks_cif(
     naive = np.clip(1.0 - s_naive, 0.0, 1.0)
 
     z = float(stats.norm.ppf(1.0 - alpha / 2.0))
-    cif1_l = np.clip(cif1 - z * np.sqrt(var1), 0.0, 1.0)
-    cif1_u = np.clip(cif1 + z * np.sqrt(var1), 0.0, 1.0)
+    # Asymmetric log(-log) CI: F**exp(+/- z * SE(F) / |F log F|), stays inside (0, 1).
+    se1 = np.sqrt(var1)
+    cif1_l, cif1_u = cif1.copy(), cif1.copy()
+    ok = (cif1 > 0.0) & (cif1 < 1.0) & (se1 > 0.0)
+    sd_theta = se1[ok] / np.abs(cif1[ok] * np.log(cif1[ok]))
+    cif1_l[ok] = cif1[ok] ** np.exp(z * sd_theta)
+    cif1_u[ok] = cif1[ok] ** np.exp(-z * sd_theta)
 
     cif_table = pd.DataFrame({
         "time": timeline,

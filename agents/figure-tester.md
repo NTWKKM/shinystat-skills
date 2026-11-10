@@ -10,7 +10,6 @@ subagent: true
 model: inherit
 commandExecutionPolicy: auto
 skills:
-  - skills/journal-figures
   - skills/shinystat
 ---
 
@@ -33,7 +32,7 @@ You must test and verify all 7 primary figure categories and their edge cases:
    - Inset break: Low-event zoomed inset (`nejm_inset_ylim=(ymin, ymax)`).
 2. **Competing Risks Cumulative Incidence Function (`plot_cif`)**:
    - Primary event CIF and competing event CIF step functions.
-   - Asymmetric Greenwood 95% confidence intervals.
+   - Asymmetric log(-log) 95% confidence intervals (Aalen-Johansen variance).
    - Naive $1 - \text{KM}$ overestimation curve overlay demonstrating bias quantification.
    - Probability conservation audit ($\sum \text{CIF}_k(t) + \hat{S}(t) \approx 1.0$).
 

@@ -373,9 +373,11 @@ class TestFirthPenalizedModels:
         )
         summary = firth_res["summary_df"]
 
-        # Finite, reasonable coefficient (around 0.53)
+        # R logistf(y ~ x): beta = 0.852827, SE = 0.438833, PL 95% CI (0.195596, 3.164163)
         assert np.isfinite(summary.loc["predictor", "estimate"])
-        assert 0.3 < summary.loc["predictor", "estimate"] < 0.8
+        assert summary.loc["predictor", "estimate"] == pytest.approx(0.852827, abs=1e-4)
+        assert summary.loc["predictor", "ci_lower"] == pytest.approx(0.195596, abs=1e-3)
+        assert summary.loc["predictor", "ci_upper"] == pytest.approx(3.164163, abs=1e-3)
 
         # Finite standard error (< 1.0)
         assert summary.loc["predictor", "std_error"] < 1.0

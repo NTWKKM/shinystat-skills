@@ -387,8 +387,10 @@ def fit_iptw_outcome_model(
         X = pd.concat(X_vars, axis=1)
         X = sm.add_constant(X)
 
+        # IPTW weights are probability weights -> var_weights. freq_weights treats them as
+        # replicate counts (nobs = sum(w), meat sum w*s^2): SE too small for ATE, too large for ATO.
         glm_model = sm.GLM(
-            Y, X, family=sm.families.Binomial(), freq_weights=weights
+            Y, X, family=sm.families.Binomial(), var_weights=weights
         ).fit(cov_type=robust_cov_type)
 
         t_idx = 1

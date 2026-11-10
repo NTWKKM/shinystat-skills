@@ -194,6 +194,9 @@ def fit_proportional_odds(
         index=thresh_sub.index,
     )
     predictor_df = summary_df.iloc[:k_vars].copy()
+    # summary_df threshold rows must be on the cutpoint scale too: statsmodels' raw rows 2..K-1
+    # are log-increments, which read as cutpoints under the same "a/b" labels (ADR 74).
+    summary_df = pd.concat([predictor_df, threshold_df[summary_df.columns]])
 
     # Null model log-likelihood for pseudo R2
     try:

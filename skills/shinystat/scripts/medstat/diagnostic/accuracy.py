@@ -13,6 +13,8 @@ import numpy as np
 import pandas as pd
 import scipy.stats as stats
 
+from medstat.diagnostic._inputs import binary_outcome, logger
+
 
 def calculate_ci_wilson_score(
     k: float, n: float, ci: float = 0.95
@@ -162,8 +164,17 @@ def calculate_diagnostic_accuracy(
     """
     Calculate 2x2 diagnostic metrics directly from true and predicted binary vectors.
     """
-    y_t = (np.asarray(y_true) == pos_label).astype(int)
-    y_p = (np.asarray(y_pred) == pos_label).astype(int)
+    y_t, ok_t = binary_outcome(y_true, pos_label=pos_label)
+    y_p, ok_p = binary_outcome(y_pred, pos_label=pos_label)
+    if len(y_t) != len(y_p):
+        raise ValueError("y_true and y_pred must have equal length.")
+    keep = ok_t & ok_p
+    if not keep.all():
+        logger.warning(
+            f"calculate_diagnostic_accuracy: excluded {int((~keep).sum())} of {len(keep)} rows "
+            "with missing reference or index test result."
+        )
+    y_t, y_p = y_t[keep], y_p[keep]
 
     tp = int(np.sum((y_t == 1) & (y_p == 1)))
     fp = int(np.sum((y_t == 0) & (y_p == 1)))

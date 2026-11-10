@@ -2063,3 +2063,50 @@ A comprehensive adversarial audit (`scrutinize` + `writing-for-agents`) of the b
 - **Statistical Invariants**: CIF estimates are 100% deterministic and RNG-isolated; meta-analysis study-level intervals scale correctly with `alpha`.
 - **Contract Adherence**: All regression models reliably expose `"converged": bool`.
 - **Agent Ergonomics**: Zero phantom symbols and zero broken links across all canonical, vendored, and packaged skills.
+
+## ADR 73: Reference-Parity Statistical Corrections (Firth Penalty, IPTW Variance, Egger Intercept, Missing Outcomes, CIF Intervals)
+
+### Context
+Two independent audits, re-verified numerically against R and closed-form references, found defects that snapshot tests could not detect because they compare the engine with itself:
+1. **Firth penalty doubled**: `fit_firth_logistic` / `fit_firth_cox` defaulted to `penalty_weight=1.0`, documented as the Jeffreys prior. In `firthmodels` the Jeffreys prior is `0.5` (l + 0.5·log|I|). Estimates were over-shrunk toward the null (R `sex2`: `dia` OR 11.1 vs logistf 22.1; `breast`: `G` HR 5.9 vs coxphf 11.3). The R benchmark CSVs in `tests/benchmarks/python_results` were never consumed by a test.
+2. **IPTW binary SE**: `fit_iptw_outcome_model` and Cloud Recipe 14 used `GLM(freq_weights=w)`, which treats weights as replicate counts (nobs = Σw, frequency meat). SE was too small for ATE (0.238 vs 0.278) and too large for ATO (0.374 vs 0.266).
+3. **Egger p-value (Cloud Recipe 24)**: `stats.linregress(...).pvalue` tests the slope, not the intercept (symmetric funnel: p = 1.1e-8 vs correct 0.275). Engine `eggers_test` was correct.
+4. **Missing outcomes coded as non-events**: `(np.asarray(y) == pos_label).astype(int)` / `asarray(y, dtype=int)` ran before NaN filtering in ROC, DeLong (single and paired), 2x2 accuracy, DCA, calibration curve/slope/intercept, ICI and Hosmer-Lemeshow (DCA net benefit 0.20 vs 0.333).
+5. **CIF intervals**: Aalen-Johansen CIs were symmetric Wald bands clipped to [0, 1] while documentation claimed asymmetric intervals.
+6. **Cloud Recipe 7**: Firth logistic returned no p-values, and profile CIs nested Nelder-Mead inside `brentq` (non-smooth profile, frequent Wald fallback).
+
+### Decision
+1. Default `penalty_weight=0.5` in both Firth functions; docstrings state the l + a·log|I| convention.
+2. `var_weights=w` (probability weights) for the binary IPTW outcome model in engine and Recipe 14. statsmodels GLM applies no n/(n−p) factor for `HC1`, so the reported SE equals the HC0 probability-weight sandwich.
+3. Recipe 24 Egger p-value = two-sided t-test of the intercept (`intercept / intercept_stderr`, df = k − 2).
+4. New `medstat.diagnostic._inputs.complete_cases` excludes rows with a missing outcome or score and logs the excluded count; used by every function in item 4.
+5. `_cif_loglog_ci` (engine) and the matching Recipe 15 code compute log(−log) intervals F^exp(±z·SE/|F log F|).
+6. Recipe 7 profiles via constrained Newton-Raphson on the nuisance block (logistf scheme) and returns penalized likelihood-ratio `p_values` with `p_value_method`.
+7. `tests/unit/test_reference_parity.py` pins items 1–6 to external references (R logistf/coxphf benchmarks, R `survfit(conf.type="log-log")`, statsmodels OLS intercept, explicit sandwich algebra). The Firth stress test now asserts R logistf values in place of a band fitted to the doubled penalty.
+
+### Consequences
+- **Status**: Accepted & Verified (engine and Recipe 7 Firth match logistf/coxphf to 1e-4; CIF CIs match R to 3 dp, limited by lifelines tie jittering).
+- **Behavioural change**: Firth estimates move away from the null; previously generated Firth results, IPTW binary CIs and Recipe 24 Egger p-values should be re-run.
+- **Follow-up**: the medium-severity findings from the same audits are resolved in ADR 74.
+
+## ADR 74: Medium-Severity Reporting & Estimand Corrections (Table 1, Ordinal Cutpoints, Weighted SMD, Non-linear Mediation, Riley MAPE)
+
+### Context
+Follow-up to ADR 73 for the medium-severity audit findings:
+1. **Table 1 (`generate_table_one`)**: categorical percentages used all rows as denominator, so missing values counted as "not this level" (percentages did not sum to 100%, SMDs were biased when missingness differed by arm); no Fisher fallback despite `decision-heuristics.md` §1 and Cloud Recipe 1 providing one. Cloud Recipe 1 used pooled-variance ANOVA / Kruskal-Wallis for two groups while the engine used Welch / Mann-Whitney, so local and cloud P-values disagreed.
+2. **Ordinal `summary_df`**: rows 2..K−1 were statsmodels' raw log-increments labelled like cutpoints (e.g. `1/2` = 0.265 vs polr 0.331); `threshold_df` was already correct.
+3. **`calculate_smd(df, treatment, covariate, weights)`**: passed the full-length weight vector as treated-group weights only → `IndexError`.
+4. **Mediation**: with a logistic outcome the product α·β and α·β + β_T were reported on the log-odds scale (non-collapsible, not a natural effect); binary mediators were fitted by OLS.
+5. **Riley MAPE**: the default 0.05 target was silently dropped for prevalence > 0.5, although the formula already uses min(φ, 1 − φ) and MAPE is invariant to swapping event labels.
+
+### Decision
+1. Table 1 uses non-missing denominators per variable, appends `(Missing: n)` to each variable label, and applies Fisher's exact test to 2×2 tables with any expected count < 5 (`_categorical_p_value`). Cloud Recipe 1 uses Welch t / Mann-Whitney for two groups (ANOVA / Kruskal-Wallis for > 2).
+2. `summary_df` threshold rows are taken from the cutpoint-scale `threshold_df` (delta-method SEs).
+3. DataFrame mode of `calculate_smd` slices a full-length weight vector (or column name) into treated / control weights.
+4. Linear mediator + linear outcome keeps the product of coefficients (equal to the Imai ACME). A logistic mediator and/or outcome routes to `_imai_quasi_bayes`: g-computation of E[Y(t, M(t'))] over the empirical covariates with quasi-Bayesian parameter draws; ACME/ADE are averaged over t ∈ {0, 1}, total = E[Y(1, M(1))] − E[Y(0, M(0))], `scale` = `risk_difference` (binary Y) or `mean_difference`, ACME p-value from the simulation distribution.
+5. MAPE target defaults to 0.05 for every prevalence in engine and Cloud Recipe 20.
+
+### Consequences
+- **Status**: Accepted & Verified. Ordinal summary matches R `MASS::polr` (1e-4); Table 1 Fisher P-values match `scipy.stats.fisher_exact`; mediation recovers the true natural effects (40 replicates: mean ACME bias 0.00000, 95% CI coverage 39/40).
+- **Behavioural change**: mediation with a binary outcome now reports risk differences instead of log-odds products (`test_regression_guardrails_pr4` updated); Recipe 1 two-group P-values change (snapshot regenerated); Riley N can increase for prevalence > 0.5 when MAPE binds.
+

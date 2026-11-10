@@ -384,7 +384,9 @@ def fit_weighted_outcome_model(
                 f"Binary outcome column '{outcome_col}' must contain both classes (0 and 1)."
             )
         X = sm.add_constant(T)
-        res = sm.GLM(Y, X, family=sm.families.Binomial(), freq_weights=weights).fit(cov_type="HC1")
+        # var_weights = probability (IPTW) weights; freq_weights would treat them as replicate counts
+        # (wrong nobs and meat), under-stating SE for ATE and over-stating it for ATO.
+        res = sm.GLM(Y, X, family=sm.families.Binomial(), var_weights=weights).fit(cov_type="HC1")
         or_val = float(np.exp(res.params[1]))
         ci = res.conf_int()[1]
         return {

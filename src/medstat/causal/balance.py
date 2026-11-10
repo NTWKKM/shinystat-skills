@@ -31,6 +31,7 @@ def calculate_smd(
     Supports both:
     - calculate_smd(treated_series, control_series)
     - calculate_smd(df, treatment_col, covariate_col)
+    - calculate_smd(df, treatment_col, covariate_col, weights)  # full-length vector or column name
     """
     if isinstance(treated, pd.DataFrame):
         df = treated
@@ -40,7 +41,24 @@ def calculate_smd(
         c_mask = df[treatment_col] == 0
         t_s = df.loc[t_mask, covar_col]
         c_s = df.loc[c_mask, covar_col]
-        return calculate_smd(t_s, c_s, weights_treated=weights_control)
+        if weights_control is None:
+            return calculate_smd(t_s, c_s)
+        # DataFrame mode: the 4th argument is one full-length weight vector (or column name)
+        w_all = (
+            df[weights_control].to_numpy(dtype=float)
+            if isinstance(weights_control, str)
+            else np.asarray(weights_control, dtype=float).ravel()
+        )
+        if len(w_all) != len(df):
+            raise ValueError(
+                f"Weight vector length ({len(w_all)}) must equal DataFrame rows ({len(df)})."
+            )
+        return calculate_smd(
+            t_s,
+            c_s,
+            weights_treated=w_all[t_mask.to_numpy()],
+            weights_control=w_all[c_mask.to_numpy()],
+        )
 
     t_arr = np.asarray(treated, dtype=float)
     c_arr = np.asarray(control, dtype=float)

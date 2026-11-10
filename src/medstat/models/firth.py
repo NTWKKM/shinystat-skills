@@ -44,7 +44,7 @@ def fit_firth_logistic(
     X: pd.DataFrame | np.ndarray,
     feature_names: list[str] | None = None,
     fit_intercept: bool = True,
-    penalty_weight: float = 1.0,
+    penalty_weight: float = 0.5,
     ci_method: Literal["pl", "wald"] = "pl",
     alpha: float = 0.05,
 ) -> dict[str, Any]:
@@ -56,7 +56,8 @@ def fit_firth_logistic(
         X: Covariate matrix or DataFrame.
         feature_names: Optional names for covariates.
         fit_intercept: Whether to fit an intercept term.
-        penalty_weight: Firth penalty scale parameter (default 1.0 = standard Jeffreys prior).
+        penalty_weight: Weight a in l(b) + a*log|I(b)| (default 0.5 = Firth 1993 Jeffreys prior,
+            numerically identical to R logistf). 1.0 doubles the penalty and over-shrinks.
         ci_method: 'pl' for Profile Likelihood (recommended) or 'wald'.
         alpha: Significance level for confidence intervals (default 0.05 for 95% CI).
 
@@ -197,7 +198,7 @@ def fit_firth_cox(
     X: pd.DataFrame | np.ndarray,
     covariate_names: list[str] | None = None,
     feature_names: list[str] | None = None,
-    penalty_weight: float = 1.0,
+    penalty_weight: float = 0.5,
     ci_method: Literal["pl", "wald"] = "pl",
     alpha: float = 0.05,
 ) -> dict[str, Any]:
@@ -210,7 +211,8 @@ def fit_firth_cox(
         X: Covariate matrix or DataFrame.
         covariate_names: Optional names for covariates.
         feature_names: Alias for covariate_names.
-        penalty_weight: Penalty scale parameter (default 1.0).
+        penalty_weight: Weight a in pl(b) + a*log|I(b)| (default 0.5 = Heinze-Schemper 2001,
+            numerically identical to R coxphf).
         ci_method: 'pl' for Profile Likelihood or 'wald'.
         alpha: Significance level for confidence intervals (default 0.05).
 

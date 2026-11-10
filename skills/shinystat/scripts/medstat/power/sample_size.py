@@ -379,9 +379,9 @@ def calculate_riley_sample_size(
 
     # 2. Criterion 2: Mean Absolute Prediction Error (MAPE, van Smeden 2019)
     # RvS-2: n = exp((-0.508 + 0.259*ln(phi) + 0.504*ln(p) - ln(m)) / 0.544)
-    target_m = (
-        mape_target if mape_target is not None else (0.05 if phi <= 0.5 else None)
-    )
+    # MAPE is symmetric in the outcome coding: the van Smeden formula uses min(phi, 1 - phi),
+    # so the default 0.05 target applies for any prevalence (ADR 74).
+    target_m = mape_target if mape_target is not None else 0.05
     if target_m is not None:
         min_phi = min(phi, 1.0 - phi)
         exponent = (

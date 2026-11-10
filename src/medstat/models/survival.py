@@ -778,6 +778,25 @@ class CompetingRisksCIFResult:
         raise KeyError(f"Invalid key '{item}' for CompetingRisksCIFResult")
 
 
+def _cif_loglog_ci(
+    cif: np.ndarray, var: np.ndarray, z: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Asymmetric log(-log) CI for a cumulative incidence F(t) (Kalbfleisch-Prentice; cmprsk convention).
+
+    theta = log(-log F), SE(theta) = SE(F) / |F log F|; bounds are F**exp(+/- z SE(theta)),
+    so they stay inside (0, 1) without clipping. F in {0, 1} returns a degenerate interval.
+    """
+    cif = np.asarray(cif, dtype=float)
+    se = np.sqrt(np.maximum(np.asarray(var, dtype=float), 0.0))
+    lower, upper = cif.copy(), cif.copy()
+    ok = (cif > 0.0) & (cif < 1.0) & (se > 0.0)
+    f = cif[ok]
+    sd_theta = se[ok] / np.abs(f * np.log(f))
+    lower[ok] = f ** np.exp(z * sd_theta)
+    upper[ok] = f ** np.exp(-z * sd_theta)
+    return lower, upper
+
+
 def fit_competing_risks_cif(
     durations: pd.Series | np.ndarray,
     event_observed: pd.Series | np.ndarray,
@@ -888,10 +907,8 @@ def fit_competing_risks_cif(
     s_overall = _step_lookup(km_overall.survival_function_, timeline)
 
     z = float(stats.norm.ppf(1.0 - alpha / 2.0))
-    cif1_l = np.clip(cif1 - z * np.sqrt(var1), 0.0, 1.0)
-    cif1_u = np.clip(cif1 + z * np.sqrt(var1), 0.0, 1.0)
-    cif2_l = np.clip(cif2 - z * np.sqrt(var2), 0.0, 1.0)
-    cif2_u = np.clip(cif2 + z * np.sqrt(var2), 0.0, 1.0)
+    cif1_l, cif1_u = _cif_loglog_ci(cif1, var1, z)
+    cif2_l, cif2_u = _cif_loglog_ci(cif2, var2, z)
 
     conservation_sum = cif1 + cif2 + s_overall
     max_error = float(np.max(np.abs(conservation_sum - 1.0)))
@@ -924,10 +941,8 @@ def fit_competing_risks_cif(
         h_s_naive = _step_lookup(km_naive.survival_function_, h_arr)
         h_naive = np.clip(1.0 - h_s_naive, 0.0, 1.0)
 
-        h_cif1_l = np.clip(h_cif1 - z * np.sqrt(h_var1), 0.0, 1.0)
-        h_cif1_u = np.clip(h_cif1 + z * np.sqrt(h_var1), 0.0, 1.0)
-        h_cif2_l = np.clip(h_cif2 - z * np.sqrt(h_var2), 0.0, 1.0)
-        h_cif2_u = np.clip(h_cif2 + z * np.sqrt(h_var2), 0.0, 1.0)
+        h_cif1_l, h_cif1_u = _cif_loglog_ci(h_cif1, h_var1, z)
+        h_cif2_l, h_cif2_u = _cif_loglog_ci(h_cif2, h_var2, z)
 
         h_rows = []
         for i, h in enumerate(h_arr):

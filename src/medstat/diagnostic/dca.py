@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
+from medstat.diagnostic._inputs import complete_cases
 from medstat.theme.palette import get_color_palette
 
 COLORS = get_color_palette()
@@ -36,12 +37,7 @@ def calculate_dca(
     Returns:
         pd.DataFrame with columns: threshold, net_benefit, strategy, tp_rate, fp_rate
     """
-    y_t = np.asarray(y_true, dtype=int).ravel()
-    y_p = np.asarray(y_pred, dtype=float).ravel()
-
-    valid = ~(np.isnan(y_t) | np.isnan(y_p))
-    y_t = y_t[valid]
-    y_p = y_p[valid]
+    y_t, y_p = complete_cases("calculate_dca", y_true, y_pred)
 
     n = len(y_t)
     if n == 0:

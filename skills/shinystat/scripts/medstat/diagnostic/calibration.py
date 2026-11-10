@@ -18,6 +18,7 @@ from scipy.special import logit
 from sklearn.calibration import calibration_curve
 from sklearn.metrics import brier_score_loss
 
+from medstat.diagnostic._inputs import complete_cases
 from medstat.theme.palette import get_color_palette
 
 COLORS = get_color_palette()
@@ -70,8 +71,8 @@ def calculate_calibration_curve(
     """
     Compute calibration curve: observed event proportions vs predicted mean probabilities.
     """
-    y_t = np.asarray(y_true, dtype=int).ravel()
-    y_p = np.clip(np.asarray(y_pred, dtype=float).ravel(), 1e-6, 1.0 - 1e-6)
+    y_t, y_p = complete_cases("calculate_calibration_curve", y_true, y_pred)
+    y_p = np.clip(y_p, 1e-6, 1.0 - 1e-6)
 
     prob_true, prob_pred = calibration_curve(y_t, y_p, n_bins=n_bins, strategy=strategy)
 
@@ -92,8 +93,10 @@ def calculate_calibration_slope_and_intercept(
     Calculate calibration intercept (calibration-in-the-large) and calibration slope.
     Ideal: intercept = 0, slope = 1.
     """
-    y_t = np.asarray(y_true, dtype=int).ravel()
-    y_p = np.clip(np.asarray(y_pred, dtype=float).ravel(), 1e-6, 1.0 - 1e-6)
+    y_t, y_p = complete_cases(
+        "calculate_calibration_slope_and_intercept", y_true, y_pred
+    )
+    y_p = np.clip(y_p, 1e-6, 1.0 - 1e-6)
 
     # Log-odds of predictions
     log_odds = logit(y_p)
@@ -136,8 +139,8 @@ def calculate_ici(
     Calculate Integrated Calibration Index (ICI), E50, E90, and Emax
     according to Austin & Steyerberg (2019).
     """
-    y_t = np.asarray(y_true, dtype=int).ravel()
-    y_p = np.clip(np.asarray(y_pred, dtype=float).ravel(), 1e-6, 1.0 - 1e-6)
+    y_t, y_p = complete_cases("calculate_ici", y_true, y_pred)
+    y_p = np.clip(y_p, 1e-6, 1.0 - 1e-6)
 
     # Binning approximation or spline smoothing
     # Sort by predicted probability
@@ -186,8 +189,7 @@ def hosmer_lemeshow_test(
     """
     Hosmer-Lemeshow Goodness-of-Fit test for binary logistic models.
     """
-    y_t = np.asarray(y_true, dtype=int).ravel()
-    y_p = np.asarray(y_pred, dtype=float).ravel()
+    y_t, y_p = complete_cases("hosmer_lemeshow_test", y_true, y_pred)
 
     n = len(y_t)
     if n < g:

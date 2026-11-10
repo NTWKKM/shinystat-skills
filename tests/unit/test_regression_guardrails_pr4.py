@@ -217,9 +217,12 @@ class TestMediationFixes:
             df, treatment="trt", mediator="med", outcome="y", covariates=["cov"]
         )
 
-        assert res["scale"] == "log_odds"
-        assert res["effect_scale"] == "log_odds"
-        assert "Log-Odds" in res["method"]
+        # ADR 74: logistic outcome -> Imai g-computation on the risk-difference scale
+        # (the log-odds product alpha*beta is not a causal effect: non-collapsibility).
+        assert res["scale"] == "risk_difference"
+        assert res["effect_scale"] == "risk_difference"
+        assert "Imai" in res["method"] and "logistic outcome" in res["method"]
+        assert -1.0 <= res["acme"] <= 1.0
         assert "acme" in res
         assert "ade" in res
 

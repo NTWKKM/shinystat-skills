@@ -11,21 +11,21 @@
       "Characteristic": "age",
       "treatment_arm=0 (N = 319)": "61.3 (11.6)",
       "treatment_arm=1 (N = 181)": "62.8 (11.2)",
-      "P-value": "0.138",
+      "P-value": "0.133",
       "SMD": "0.14"
     },
     {
       "Characteristic": "bmi",
       "treatment_arm=0 (N = 319)": "26.5 (4.7)",
       "treatment_arm=1 (N = 181)": "26.8 (4.4)",
-      "P-value": "0.502",
+      "P-value": "0.494",
       "SMD": "0.06"
     },
     {
       "Characteristic": "egfr",
       "treatment_arm=0 (N = 319)": "70.5 (19.7)",
       "treatment_arm=1 (N = 181)": "65.2 (20.1)",
-      "P-value": "0.004",
+      "P-value": "0.005",
       "SMD": "-0.27"
     },
     {
@@ -2872,10 +2872,17 @@
     ],
     "ci_upper": [
       0.078282,
-      1.064372,
+      1.064375,
       1.949816,
       0.925777
     ],
+    "p_values": [
+      1e-06,
+      0.009571,
+      0.996514,
+      0.028619
+    ],
+    "p_value_method": "penalized_lrt",
     "converged": 1,
     "ci_method": [
       "profile",
@@ -2898,7 +2905,7 @@
         "term": "Covariate_0",
         "estimate": 1.035812,
         "ci_lower": 1.008574,
-        "ci_upper": 1.064372,
+        "ci_upper": 1.064375,
         "scale": "OR"
       },
       {

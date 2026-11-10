@@ -2280,9 +2280,9 @@ def calculate_riley_sample_size(
     n1 = int(math.ceil(((1.96 / intercept_margin) ** 2) * phi * (1.0 - phi)))
 
     # Criterion 2: MAPE (van Smeden 2019)
-    target_m = (
-        mape_target if mape_target is not None else (0.05 if phi <= 0.5 else None)
-    )
+    # MAPE is invariant to swapping event / non-event labels, so min(phi, 1 - phi) keeps the
+    # van Smeden (2019) formula inside its validated range (<= 0.5) for any prevalence.
+    target_m = mape_target if mape_target is not None else 0.05
     if target_m is not None:
         min_phi = min(phi, 1.0 - phi)
         exp_val = (
@@ -2347,7 +2347,7 @@ def calculate_riley_sample_size(
                 "target_mape": target_m,
                 "status": "evaluated"
                 if n2 is not None
-                else "N/A (default MAPE target 0.05 is only validated for prevalence <= 0.50; pass mape_target explicitly to evaluate)",
+                else "N/A (MAPE criterion not evaluated)",
             },
             "criterion3_shrinkage": {"n": n3, "target_shrinkage": s_target},
             "criterion4_optimism": {"n": n4, "optimism_margin": optimism_margin},
@@ -2681,8 +2681,10 @@ def run_meta_analysis(
         prec = 1.0 / se
         if len(np.unique(prec)) >= 2:
             snd = theta / se
+            # Egger asymmetry = INTERCEPT of SND ~ precision (linregress.pvalue tests the slope).
             res_egger = stats.linregress(prec, snd)
-            egger_p = float(res_egger.pvalue)
+            t_inter = res_egger.intercept / res_egger.intercept_stderr
+            egger_p = float(2.0 * stats.t.sf(abs(t_inter), df=k - 2))
 
     leave_one_out = []
     if k >= 3 and study_col in df_work.columns:
