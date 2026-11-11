@@ -17,10 +17,10 @@ reviews:
     - "skills/**"
     - "tests/**"
     - "docs/**"
-    - "/*.md"
-    - "/*.toml"
-    - "/*.yaml"
-    - "/*.yml"
+    - "*.md"
+    - "*.toml"
+    - "*.yaml"
+    - "*.yml"
 
     # Exclude platform mirror directories (.agent, .agents, .claude, .cursor)
     - "!.agent/**"
