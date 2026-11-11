@@ -18,6 +18,47 @@ from medstat.logging import get_logger
 
 logger = get_logger(__name__)
 
+_RATIO_MEASURES = {"OR", "RR", "HR", "IRR", "SHR", "DOR"}
+_DIFFERENCE_MEASURES = {"RD", "MD", "SMD", "CONTINUOUS"}
+# Column that carries effects on their natural (display) scale, e.g. raw OR / RR, as written by
+# compute_binary_effect_sizes / compute_continuous_effect_sizes (same rule as cloud Recipe 24).
+_RAW_EFFECT_COLS = {"effect_size"}
+
+
+# Accepted labels per measure family (CLI --measure, 'effect_measure' / 'measure' columns, forest titles).
+_MEASURE_ALIASES = {
+    "OR": {"OR", "ODDS_RATIO", "ODDSRATIO"},
+    "RR": {"RR", "RISK_RATIO", "RELATIVE_RISK"},
+    "HR": {"HR", "HAZARD_RATIO"},
+    "IRR": {"IRR", "INCIDENCE_RATE_RATIO", "RATE_RATIO"},
+    "SHR": {"SHR", "SUBDISTRIBUTION_HAZARD_RATIO"},
+    "DOR": {"DOR", "DIAGNOSTIC_ODDS_RATIO"},
+    "RD": {"RD", "RISK_DIFFERENCE"},
+    "MD": {"MD", "MEAN_DIFF", "MEAN_DIFFERENCE", "WMD"},
+    "SMD": {"SMD", "STANDARDIZED_MEAN_DIFFERENCE", "HEDGES_G"},
+    "CONTINUOUS": {"CONTINUOUS"},
+}
+_ALIAS_TO_FAMILY = {a: fam for fam, names in _MEASURE_ALIASES.items() for a in names}
+
+
+class EffectScaleError(ValueError):
+    """The input scale of the pooled effect column cannot be resolved (raw vs log, ratio vs difference)."""
+
+
+def resolve_effect_measure(label: Any) -> tuple[str | None, bool]:
+    """Map an effect-measure label to (family, log_input).
+
+    'OR', 'odds_ratio' -> ('OR', False); 'log_or', 'lnor', 'log odds ratio' -> ('OR', True);
+    'md', 'wmd', 'mean_difference' -> ('MD', False). Unknown or empty labels -> (None, False).
+    """
+    key = "_".join(str(label or "").strip().upper().replace("-", " ").split())
+    if key in _ALIAS_TO_FAMILY:
+        return _ALIAS_TO_FAMILY[key], False
+    for prefix in ("LOG_", "LN_", "LOG", "LN"):
+        if key.startswith(prefix) and key[len(prefix) :] in _ALIAS_TO_FAMILY:
+            return _ALIAS_TO_FAMILY[key[len(prefix) :]], True
+    return None, False
+
 
 def compute_binary_effect_sizes(
     df: pd.DataFrame,
@@ -168,6 +209,7 @@ def run_meta_analysis(
     study_col: str | None = None,
     model: str | None = None,
     method: str | None = None,
+    exponentiate: bool | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """
@@ -176,7 +218,14 @@ def run_meta_analysis(
     Parameters:
         df: DataFrame containing columns 'study', 'log_effect', 'se', and optionally 'is_ratio'.
         method_re: Random-effects tau^2 estimator ('DL' = DerSimonian-Laird).
-        use_hksj: If True, uses Hartung-Knapp-Sidik-Jonkman adjustment.
+        use_hksj: If True, uses the modified Hartung-Knapp-Sidik-Jonkman adjustment (variance scale
+            truncated at 1, so the interval is never narrower than the DerSimonian-Laird one).
+        exponentiate: Whether pooled effects are displayed on the ratio scale (exp of the log effect).
+            None resolves in order: 'is_ratio' column, effect_measure in {OR, RR, HR, IRR, SHR, DOR},
+            an effect column named 'log_*', else False (same rule as cloud Recipe 24).
+            A raw-scale 'effect_size' column with a ratio scale is log-transformed
+            before pooling; with no declared scale it raises EffectScaleError, unless the measure
+            label declares log input ('log_or', 'lnor'; see resolve_effect_measure).
         alpha: Significance level (default 0.05 for 95% CIs).
     """
     valid_methods_re = ["DL", "DERSIMONIAN-LAIRD"]
@@ -194,15 +243,25 @@ def run_meta_analysis(
         "DL",
         "DERSIMONIAN-LAIRD",
         "FE",
+        "IV",
         "RE",
         "FIXED",
         "RANDOM",
     ]:
         raise ValueError(
-            f"Unsupported method '{method}'. Must be one of: DL, FE, RE, fixed, random."
+            f"Unsupported method '{method}'. Must be one of: DL, FE, IV, RE, fixed, random."
         )
 
     df_work = df.copy()
+    source_effect_col = (
+        effect_col if (effect_col and effect_col in df.columns) else None
+    )
+    if source_effect_col is None and "log_effect" in df.columns:
+        source_effect_col = "log_effect"
+    if source_effect_col is None:
+        source_effect_col = next(
+            (c for c in ["effect", "effect_size", "es"] if c in df.columns), None
+        )
     effect_measure = kwargs.get("effect_measure") or kwargs.get("measure")
     if not effect_measure:
         for c in ["effect_measure", "measure"]:
@@ -234,9 +293,43 @@ def run_meta_analysis(
     if np.any(se_arr <= 0) or np.any(np.isnan(se_arr)):
         raise ValueError("Standard error must be strictly positive.")
     se = se_arr
-    is_ratio = (
-        bool(df_work["is_ratio"].iloc[0]) if "is_ratio" in df_work.columns else False
-    )
+    measure_family, log_labelled = resolve_effect_measure(effect_measure)
+    if exponentiate is not None:
+        is_ratio = bool(exponentiate)
+    elif "is_ratio" in df_work.columns:
+        flags = df_work["is_ratio"]
+        if flags.isna().any() or flags.astype(bool).nunique() > 1:
+            raise ValueError(
+                "Column 'is_ratio' has missing or conflicting values across studies; pass 'exponentiate' explicitly."
+            )
+        is_ratio = bool(flags.iloc[0])
+    elif measure_family in _RATIO_MEASURES:
+        is_ratio = True
+    elif measure_family in _DIFFERENCE_MEASURES:
+        is_ratio = False
+    else:
+        is_ratio = bool(source_effect_col and source_effect_col.startswith("log_"))
+
+    # A raw-scale 'effect_size' column holds ratios as OR / RR, not log values;
+    # a measure label starting with 'log' declares log-scale input instead.
+    raw_input = source_effect_col in _RAW_EFFECT_COLS and not log_labelled
+    if raw_input:
+        scale_declared = (
+            exponentiate is not None
+            or "is_ratio" in df_work.columns
+            or measure_family is not None
+        )
+        if not scale_declared:
+            raise EffectScaleError(
+                f"The scale of '{source_effect_col}' is unknown; pass exponentiate=True (ratio) or "
+                "exponentiate=False (difference), an effect_measure, or an 'is_ratio' column."
+            )
+        if is_ratio:
+            if not np.all(np.isfinite(theta)) or np.any(theta <= 0):
+                raise EffectScaleError(
+                    f"Ratio values in '{source_effect_col}' must be finite and > 0 to log-transform."
+                )
+            theta = np.log(theta)
 
     # 1. Fixed-Effect Model (Inverse Variance)
     w_fe = 1.0 / (se**2)
@@ -248,7 +341,7 @@ def run_meta_analysis(
     ci_fe_low = theta_fe - z_crit * se_fe
     ci_fe_high = theta_fe + z_crit * se_fe
     z_fe = theta_fe / se_fe if se_fe > 0 else 0.0
-    p_fe = float(2.0 * (1.0 - stats.norm.cdf(abs(z_fe))))
+    p_fe = float(2.0 * stats.norm.sf(abs(z_fe)))
 
     # 2. Heterogeneity (Cochran's Q, I^2, Tau^2)
     q_stat = float(np.sum(w_fe * ((theta - theta_fe) ** 2)))
@@ -276,13 +369,13 @@ def run_meta_analysis(
         ci_re_low = theta_re - t_crit * se_re
         ci_re_high = theta_re + t_crit * se_re
         t_val = theta_re / se_re if se_re > 0 else 0.0
-        p_re = float(2.0 * (1.0 - stats.t.cdf(abs(t_val), df=k - 1)))
+        p_re = float(2.0 * stats.t.sf(abs(t_val), df=k - 1))
     else:
         se_re = math.sqrt(1.0 / sum_w_re)
         ci_re_low = theta_re - z_crit * se_re
         ci_re_high = theta_re + z_crit * se_re
         z_re = theta_re / se_re if se_re > 0 else 0.0
-        p_re = float(2.0 * (1.0 - stats.norm.cdf(abs(z_re))))
+        p_re = float(2.0 * stats.norm.sf(abs(z_re)))
 
     # 4. 95% Prediction Interval
     pi_low, pi_high = np.nan, np.nan
@@ -303,10 +396,10 @@ def run_meta_analysis(
     studies_with_weights["weight_re_pct"] = w_re_pct
     studies_with_weights["effect_size"] = np.exp(theta) if is_ratio else theta
     studies_with_weights["ci_lower"] = (
-        np.exp(theta - 1.96 * se_arr) if is_ratio else (theta - 1.96 * se_arr)
+        np.exp(theta - z_crit * se_arr) if is_ratio else (theta - z_crit * se_arr)
     )
     studies_with_weights["ci_upper"] = (
-        np.exp(theta + 1.96 * se_arr) if is_ratio else (theta + 1.96 * se_arr)
+        np.exp(theta + z_crit * se_arr) if is_ratio else (theta + z_crit * se_arr)
     )
 
     return {

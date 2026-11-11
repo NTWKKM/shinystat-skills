@@ -166,11 +166,8 @@ def fit_proportional_odds(
         z_crit = 1.959963984540054
         ci_lower = cutpoints - z_crit * se_cutpoints
         ci_upper = cutpoints + z_crit * se_cutpoints
-        p_cutpoints = 2.0 * (
-            1.0
-            - stats.norm.cdf(
-                np.abs(cutpoints / np.where(se_cutpoints > 0, se_cutpoints, np.nan))
-            )
+        p_cutpoints = 2.0 * stats.norm.sf(
+            np.abs(cutpoints / np.where(se_cutpoints > 0, se_cutpoints, np.nan))
         )
     except Exception:
         se_cutpoints = np.full(k_thresh, np.nan)
@@ -194,6 +191,9 @@ def fit_proportional_odds(
         index=thresh_sub.index,
     )
     predictor_df = summary_df.iloc[:k_vars].copy()
+    # summary_df threshold rows must be on the cutpoint scale too: statsmodels' raw rows 2..K-1
+    # are log-increments, which read as cutpoints under the same "a/b" labels (ADR 74).
+    summary_df = pd.concat([predictor_df, threshold_df[summary_df.columns]])
 
     # Null model log-likelihood for pseudo R2
     try:
@@ -204,9 +204,16 @@ def fit_proportional_odds(
     except Exception:
         pseudo_r2 = np.nan
 
+    converged = bool(
+        getattr(result, "mle_retvals", {}).get(
+            "converged", getattr(result, "converged", True)
+        )
+    )
+
     return {
         "model": result,
         "summary_df": summary_df,
+        "converged": converged,
         "predictor_df": predictor_df,
         "threshold_df": threshold_df,
         "categories": [
@@ -411,11 +418,24 @@ def fit_multinomial_logistic(
     model = sm.MNLogit(y_series.values, X_mat)
     result = model.fit(maxiter=maxiter, disp=False)
 
+    converged = bool(
+        getattr(result, "mle_retvals", {}).get(
+            "converged", getattr(result, "converged", True)
+        )
+    )
+
     return {
         "model": result,
+        "converged": converged,
         "log_likelihood": float(result.llf),
         "aic": float(result.aic),
         "bic": float(result.bic),
         "params": result.params,
         "pvalues": result.pvalues,
     }
+
+
+# Backwards compatibility and agent aliases
+fit_ordinal_logistic = fit_proportional_odds
+brant_test = test_proportional_odds
+run_brant_test = test_proportional_odds

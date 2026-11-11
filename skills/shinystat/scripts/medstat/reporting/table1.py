@@ -100,6 +100,9 @@ def generate_table_one(
             sd = s_all.std(ddof=1)
             overall_str = f"{mean:.{digits}f} ± {sd:.{digits}f}"
             label = f"{var}, mean ± SD"
+        n_missing = int(data[var].isna().sum())
+        if n_missing:
+            label += f" (Missing: {n_missing})"
 
         row = {"Characteristic": label, "Overall": overall_str}
 
@@ -154,52 +157,50 @@ def generate_table_one(
         rows.append(row)
 
     # 3. Categorical Variables
+    # Percentages and SMDs use non-missing values as denominator; the missing count is
+    # reported in the header (Zero Silent Deletion) instead of being folded into "not this level".
     for var in categorical_vars:
         if var not in data.columns:
             continue
-
-        clean_var = data[var].dropna()
-        cats = [c for c in clean_var.unique()]
+        observed = data[data[var].notna()]
+        n_missing = int(len(data) - len(observed))
+        n_obs = len(observed)
+        cats = list(observed[var].unique())
         cats.sort(key=lambda x: str(x))
 
-        header_cat = {"Characteristic": f"{var}, n (%)", "Overall": ""}
+        header_label = f"{var}, n (%)"
+        if n_missing:
+            header_label += f" (Missing: {n_missing})"
+        header_cat = {"Characteristic": header_label, "Overall": ""}
         for s in strata_levels:
             header_cat[f"{s}"] = ""
 
-        # Precompute Chi-square across all levels
         p_cat_str = ""
-        smd_cat_str = ""
         if strata_levels:
-            try:
-                ct = pd.crosstab(data[var], data[strata])
-                if ct.size > 0:
-                    chi2, p, _, _ = stats.chi2_contingency(ct)
-                    p_cat_str = "<0.001" if p < 0.001 else f"{p:.3f}"
-            except Exception:
-                p_cat_str = "—"
+            p_cat_str = _categorical_p_value(observed, var, strata)
 
         if include_p and strata_levels:
             header_cat["P-value"] = p_cat_str
         if include_smd and len(strata_levels) == 2:
-            header_cat["SMD"] = smd_cat_str
+            header_cat["SMD"] = ""
         rows.append(header_cat)
 
-        # Iterate over individual categories
+        groups_obs = {s: observed[observed[strata] == s][var] for s in strata_levels}
         for cat in cats:
-            n_cat = int(np.sum(data[var] == cat))
-            pct_cat = (n_cat / n_total * 100.0) if n_total > 0 else 0.0
+            n_cat = int(np.sum(observed[var] == cat))
+            pct_cat = (n_cat / n_obs * 100.0) if n_obs > 0 else 0.0
             cat_row = {
                 "Characteristic": f"   {cat}",
                 "Overall": f"{n_cat} ({pct_cat:.1f}%)",
             }
             grp_props = []
             for s in strata_levels:
-                sub_grp = data[data[strata] == s]
-                n_grp = len(sub_grp)
-                n_c = int(np.sum(sub_grp[var] == cat))
+                g_vals = groups_obs[s]
+                n_grp = len(g_vals)
+                n_c = int(np.sum(g_vals == cat))
                 pct_c = (n_c / n_grp * 100.0) if n_grp > 0 else 0.0
                 cat_row[f"{s}"] = f"{n_c} ({pct_c:.1f}%)"
-                grp_props.append((sub_grp[var] == cat).astype(int))
+                grp_props.append((g_vals == cat).astype(int))
 
             if include_p and strata_levels:
                 cat_row["P-value"] = ""
@@ -214,3 +215,17 @@ def generate_table_one(
             rows.append(cat_row)
 
     return pd.DataFrame(rows)
+
+
+def _categorical_p_value(observed: pd.DataFrame, var: str, strata: str) -> str:
+    """Pearson chi-square; Fisher's exact test for a 2x2 table with any expected count < 5."""
+    try:
+        ct = pd.crosstab(observed[var], observed[strata])
+        if ct.size == 0 or min(ct.shape) < 2:
+            return ""
+        _, p, _, expected = stats.chi2_contingency(ct)
+        if ct.shape == (2, 2) and (expected < 5).any():
+            _, p = stats.fisher_exact(ct.to_numpy())
+        return "<0.001" if p < 0.001 else f"{p:.3f}"
+    except Exception:
+        return "—"

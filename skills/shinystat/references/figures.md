@@ -194,7 +194,7 @@ Automates pre-modeling and post-modeling diagnostic validation plots.
 
 ### 10. Cumulative Incidence Function (`plot_cif`)
 Visualizes non-parametric Aalen-Johansen CIF curves alongside Naive $1 - \text{Kaplan-Meier}$ overestimation audit.
-- **Features**: Event of interest CIF with Greenwood 95% confidence bands, competing risk CIF curves, and optional Naive $1 - \text{KM}$ curve (rendered when `'naive_1_minus_km'` is present and `show_naive_km=True`) illustrating bias when competing events are treated as independent censoring.
+- **Features**: Event of interest CIF with asymmetric log(-log) 95% confidence bands (Aalen-Johansen variance), competing risk CIF curves, and optional Naive $1 - \text{KM}$ curve (rendered when `'naive_1_minus_km'` is present and `show_naive_km=True`) illustrating bias when competing events are treated as independent censoring.
 - **Column Contract**: `cif_table` DataFrame must contain `'time'`, `'cif_primary'`, and `'cif_competing'` columns (with optional `'cif_primary_ci_lower'`, `'cif_primary_ci_upper'`, `'cif_competing_ci_lower'`, `'cif_competing_ci_upper'`, `'naive_1_minus_km'`).
 - **Usage**:
 ```python
@@ -226,11 +226,9 @@ Grouped horizontal bar chart of **Apparent vs Optimism-Corrected** metrics (incl
 
 ## 3. Standalone Interactive HTML Figures (Zero-Dependency Plotly Dicts)
 
-In cloud Python sandboxes, `medstat` is not available as an external package. Instead of importing `medstat.figures.html`, use the standalone pure-Python Plotly spec generators provided in [report-builder.md](report-builder.md#b1-standalone-pure-python-plotly-spec-generators-zero-dependencies). They build native JSON-serializable dictionaries (`{"data": [...], "layout": {...}}`) with zero external dependencies and pass directly into `generate_html_report(..., plotly_figs=[spec])`:
+In cloud Python sandboxes, `medstat` is not available as an external package. Instead of importing `medstat.figures.html`, use the standalone pure-Python Plotly spec generators provided in [report-plotly-specs.md](report-plotly-specs.md). They build native JSON-serializable dictionaries (`{"data": [...], "layout": {...}}`) with zero external dependencies and pass directly into `generate_html_report(..., plotly_figs=[spec])`:
 
 - **`build_plotly_roc_spec(roc_data, ...)`**: Empirical ROC curve with interactive threshold/sensitivity/specificity hover tooltips, chance diagonal, and optimal cutoff markers.
-- **`build_plotly_reclassification_spec(reclass_data, ...)`**: Interactive scatter plot of baseline vs updated risks with hover tooltips and event/non-event toggles.
-- **`build_plotly_time_dependent_roc_spec(td_data, ...)`**: Interactive longitudinal AUROC trajectory with CI bounds or multi-horizon ROC curves.
 - **`build_plotly_km_spec(km_data, ...)`**: Step-function survival curves with 95% CI shaded ribbons and hover tooltips.
 - **`build_plotly_calibration_spec(calib_bins, ...)`**: Decile calibration points with 95% Wilson CI error bars and Brier/ICI annotations.
 - **`build_plotly_dca_spec(dca_data, ...)`**: Vickers Decision Curve Analysis comparing model net benefit against Treat All and Treat None.

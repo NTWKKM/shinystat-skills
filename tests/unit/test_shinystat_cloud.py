@@ -41,6 +41,7 @@ def ensure_packaged_cloud_skill():
     required_files = [
         CLOUD_DIR / "SKILL.md",
         CLOUD_DIR / "references" / "report-builder.md",
+        CLOUD_DIR / "references" / "report-plotly-specs.md",
         CLOUD_DIR / "references" / "decision-heuristics.md",
         CLOUD_DIR / "references" / "figures.md",
         CLOUD_DIR / "references" / "flows.md",
@@ -210,7 +211,10 @@ def test_delong_nan_safety_in_series(recipes):
     paired_res = paired_test(y_series, score1, score2)
     assert "difference" in paired_res
     assert "p_value" in paired_res
-    assert not np.isnan(paired_res["p_value"])
+    # Both scores separate the 4 complete cases perfectly (identical rankings): the DeLong
+    # variance is zero, so inference is unavailable rather than P = 1 (ADR 76 round 4).
+    assert paired_res["difference"] == 0.0
+    assert np.isnan(paired_res["p_value"]) and paired_res["warning"]
 
 
 # -----------------------------------------------------------------------------
@@ -749,8 +753,8 @@ def test_each_recipe_is_self_contained():
     orig_rng_state = np.random.get_state()
     try:
         recipe_files = sorted(RECIPES_DIR.glob("*.md"))
-        assert len(recipe_files) == 5, (
-            f"Expected 5 modular recipe files, got {len(recipe_files)}"
+        assert len(recipe_files) == 7, (
+            f"Expected 7 modular recipe files, got {len(recipe_files)}"
         )
         parts = [p.read_text(encoding="utf-8") for p in recipe_files]
         content = "\n\n".join(parts)
@@ -2191,9 +2195,12 @@ def test_cloud_report_builder_docx_fallback_and_integrity(
 
 
 def _extract_report_builder_namespace():
-    """Extract and execute all Python code blocks from report-builder.md in an isolated namespace."""
-    rb_path = CLOUD_DIR / "references" / "report-builder.md"
-    content = rb_path.read_text(encoding="utf-8")
+    """Extract and execute all Python code blocks from report-builder.md and its
+    companion report-plotly-specs.md in an isolated namespace."""
+    content = "\n\n".join(
+        (CLOUD_DIR / "references" / name).read_text(encoding="utf-8")
+        for name in ("report-builder.md", "report-plotly-specs.md")
+    )
     blocks = re.findall(r"```python\n(.*?)\n```", content, re.DOTALL)
     ns = {}
     for block in blocks:

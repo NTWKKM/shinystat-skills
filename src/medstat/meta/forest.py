@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 import plotly.graph_objects as go
 
+from medstat.meta.models import resolve_effect_measure
 from medstat.theme.palette import get_color_palette
 
 COLORS = get_color_palette()
@@ -144,22 +145,18 @@ def create_forest_plot(meta_results: dict[str, Any]) -> go.Figure:
     het_str = f"Heterogeneity: I² = {het['I2']:.1f}%, τ² = {het['tau2']:.3f}, p = {het['p_value']:.3f}"
 
     measure = meta_results.get("effect_measure")
-    measure_norm = str(measure).strip().upper() if measure else ""
+    family, _ = resolve_effect_measure(measure)
     if is_ratio:
-        if measure_norm in ("OR", "ODDS_RATIO", "ODDS RATIO"):
-            x_title = "Odds Ratio (log scale)"
-        elif measure_norm in (
-            "RR",
-            "RISK_RATIO",
-            "RISK RATIO",
-            "RELATIVE_RISK",
-            "RELATIVE RISK",
-        ):
-            x_title = "Risk Ratio (log scale)"
-        elif measure_norm in ("HR", "HAZARD_RATIO", "HAZARD RATIO"):
-            x_title = "Hazard Ratio (log scale)"
-        elif measure_norm in ("IRR", "INCIDENCE_RATE_RATIO", "INCIDENCE RATE RATIO"):
-            x_title = "Incidence Rate Ratio (log scale)"
+        titles = {
+            "OR": "Odds Ratio",
+            "RR": "Risk Ratio",
+            "HR": "Hazard Ratio",
+            "IRR": "Incidence Rate Ratio",
+            "SHR": "Subdistribution Hazard Ratio",
+            "DOR": "Diagnostic Odds Ratio",
+        }
+        if family in titles:
+            x_title = f"{titles[family]} (log scale)"
         elif measure:
             x_title = f"{measure} (log scale)"
         else:

@@ -141,6 +141,37 @@ class TestICCSciPyParity:
                 err_msg=f"CI95% mismatch at {res_ours['Type'].iloc[i]}",
             )
 
+    def test_icc_unrounded_ci_lower_upper_columns(self, shrout_fleiss_data):
+        """Verify calculate_icc returns unrounded ci_lower and ci_upper float columns alongside rounded CI95% (S-3)."""
+        from medstat.agreement.icc import calculate_icc
+
+        icc_res = calculate_icc(shrout_fleiss_data, "target", "rater", "score")
+        assert "ci_lower" in icc_res.columns
+        assert "ci_upper" in icc_res.columns
+        assert "CI95%" in icc_res.columns
+
+        # Verify float dtype
+        assert np.issubdtype(icc_res["ci_lower"].dtype, np.floating)
+        assert np.issubdtype(icc_res["ci_upper"].dtype, np.floating)
+
+        # Verify unrounded precision (more than 2 decimal digits present)
+        for idx, row in icc_res.iterrows():
+            ci95_arr = row["CI95%"]
+            assert len(ci95_arr) == 2
+            # CI95% is rounded to 2 decimals
+            assert round(float(row["ci_lower"]), 2) == ci95_arr[0]
+            assert round(float(row["ci_upper"]), 2) == ci95_arr[1]
+
+        # Verify that unrounded columns retain more precision than 2-decimal rounded version
+        assert any(
+            row["ci_lower"] != round(float(row["ci_lower"]), 2)
+            for _, row in icc_res.iterrows()
+        )
+        assert any(
+            row["ci_upper"] != round(float(row["ci_upper"]), 2)
+            for _, row in icc_res.iterrows()
+        )
+
     def test_icc_large_scale_matrix(self):
         """Stress test: 5,000 subjects x 20 raters (100,000 measurements).
         Demonstrates pure-SciPy speedup over Pingouin (>1,000x) and numerical stability."""
@@ -269,8 +300,10 @@ class TestICCSciPyParity:
             }
         )
         res_ours = calculate_icc(df_constant, "target", "rater", "score")
-        # All ICCs should be NaN without raising unhandled exceptions
+        # All ICCs and CI bounds should be NaN without raising unhandled exceptions
         assert res_ours["ICC"].isna().all()
+        assert res_ours["ci_lower"].isna().all()
+        assert res_ours["ci_upper"].isna().all()
 
     def test_icc_boundary_validations(self):
         """Stress test: Boundary inputs that must raise ValueError."""
@@ -340,9 +373,11 @@ class TestFirthPenalizedModels:
         )
         summary = firth_res["summary_df"]
 
-        # Finite, reasonable coefficient (around 0.53)
+        # R logistf(y ~ x): beta = 0.852827, SE = 0.438833, PL 95% CI (0.195596, 3.164163)
         assert np.isfinite(summary.loc["predictor", "estimate"])
-        assert 0.3 < summary.loc["predictor", "estimate"] < 0.8
+        assert summary.loc["predictor", "estimate"] == pytest.approx(0.852827, abs=1e-4)
+        assert summary.loc["predictor", "ci_lower"] == pytest.approx(0.195596, abs=1e-3)
+        assert summary.loc["predictor", "ci_upper"] == pytest.approx(3.164163, abs=1e-3)
 
         # Finite standard error (< 1.0)
         assert summary.loc["predictor", "std_error"] < 1.0

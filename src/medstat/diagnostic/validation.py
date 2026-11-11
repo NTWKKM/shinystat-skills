@@ -148,6 +148,66 @@ def _find_reestimated_intercept(
         return float(logit(prev) - np.mean(lp_arr))
 
 
+def _fit_logit_shared(
+    y: np.ndarray, X: np.ndarray, penalty: str
+) -> tuple[np.ndarray | None, str | None]:
+    """Fitting procedure shared by the original model and every bootstrap resample (Recipe 18).
+
+    Returns (params on the original predictor scale incl. intercept, fallback_reason).
+    - 'none': MLE on standardized predictors, accepted when it converges with no
+      PerfectSeparationWarning and every |gamma| <= 10 per SD (unit-free separation check);
+      otherwise an L1-regularized logit (alpha=1e-4) on the same standardized scale.
+    - 'firth': Firth's penalized likelihood, which is finite under separation and
+      equivariant to predictor rescaling; accepted when converged and finite.
+    params is None when no accepted fit exists.
+    """
+    import warnings as _warnings
+
+    from statsmodels.tools.sm_exceptions import PerfectSeparationWarning
+
+    if penalty == "firth":
+        from medstat.models.firth import fit_firth_logistic
+
+        try:
+            res = fit_firth_logistic(y=y, X=X, fit_intercept=True, ci_method="wald")
+            params = np.asarray(res["model"].coef_, dtype=float).ravel()
+            if not res["converged"] or not np.all(np.isfinite(params)):
+                return None, "Firth fit did not converge to finite estimates."
+            return params, None
+        except Exception as e:
+            return None, str(e)
+
+    mu = X.mean(axis=0)
+    sd = X.std(axis=0)
+    sd = np.where(sd > 0, sd, 1.0)
+    Z_c = sm.add_constant((X - mu) / sd, has_constant="add")
+
+    def _to_original(gamma: np.ndarray) -> np.ndarray:
+        beta = gamma[1:] / sd
+        return np.concatenate([[gamma[0] - float(np.sum(beta * mu))], beta])
+
+    try:
+        with _warnings.catch_warnings():
+            _warnings.simplefilter("error", PerfectSeparationWarning)
+            mle = sm.Logit(y, Z_c).fit(disp=False)
+        gamma = np.asarray(mle.params, dtype=float)
+        converged = getattr(mle, "mle_retvals", {}).get("converged", True)
+        if not converged or np.any(np.abs(gamma[1:]) > 10.0):
+            raise RuntimeError("Model separation or non-convergence detected.")
+        return _to_original(gamma), None
+    except Exception as e:
+        reason = str(e)
+    try:
+        reg = sm.Logit(y, Z_c).fit_regularized(method="l1", alpha=1e-4, disp=False)
+        gamma = np.asarray(reg.params, dtype=float)
+        converged = getattr(reg, "mle_retvals", {}).get("converged", True)
+        if not converged or not np.all(np.isfinite(gamma)):
+            return None, reason
+        return _to_original(gamma), reason
+    except Exception:
+        return None, reason
+
+
 def bootstrap_internal_validation(
     df: pd.DataFrame,
     outcome: str,
@@ -238,26 +298,18 @@ def bootstrap_internal_validation(
     n_predictors = len(model_predictors)
     epp = float(n_minority / n_predictors) if n_predictors > 0 else 0.0
 
-    # 1. Fit original model on full dataset
+    # 1. Fit original model on full dataset (same procedure as every bootstrap resample)
     X_orig_const = sm.add_constant(X_orig, has_constant="add")
-    if norm_penalty == "firth":
-        from medstat.models.firth import fit_firth_logistic
-
-        try:
-            firth_res = fit_firth_logistic(
-                y=y_orig, X=X_orig, feature_names=model_predictors, fit_intercept=True
-            )
-            orig_params = np.asarray(firth_res["model"].coef_).ravel()
-        except Exception as e:
-            raise RuntimeError(
-                f"Failed to fit initial Firth logistic model: {e}"
-            ) from e
-    else:
-        try:
-            orig_model = sm.Logit(y_orig, X_orig_const).fit(disp=False)
-            orig_params = orig_model.params
-        except Exception as e:
-            raise RuntimeError(f"Failed to fit initial logistic model: {e}") from e
+    warnings_list: list[str] = []
+    orig_params, orig_reason = _fit_logit_shared(y_orig, X_orig, norm_penalty)
+    if orig_params is None:
+        model_name = "Firth logistic" if norm_penalty == "firth" else "logistic"
+        raise RuntimeError(f"Failed to fit initial {model_name} model: {orig_reason}")
+    if orig_reason is not None:
+        warnings_list.append(
+            f"Standard MLE logit failed or encountered quasi-complete separation ({orig_reason}); "
+            "falling back to regularized logit."
+        )
 
     lp_orig = np.dot(X_orig_const, orig_params)
     p_orig = expit(lp_orig)
@@ -290,9 +342,9 @@ def bootstrap_internal_validation(
     boot_records: dict[str, list[float]] = {k: [] for k in metric_keys}
     test_records: dict[str, list[float]] = {k: [] for k in metric_keys}
     optimism_records: dict[str, list[float]] = {k: [] for k in metric_keys}
-    test_slopes: list[float] = []
 
     n_successful = 0
+    n_boot_regularized = 0
 
     for _ in range(n_bootstrap):
         boot_idx = rng.choice(n_total, size=n_total, replace=True)
@@ -304,36 +356,16 @@ def bootstrap_internal_validation(
         if sum_boot == 0 or sum_boot == n_total:
             continue
 
-        # Skip samples with zero variance in any dummy/predictor column (singular design matrix)
-        if np.any(np.var(X_boot, axis=0) <= 1e-12):
+        # Skip samples where any dummy/predictor column is constant (singular design
+        # matrix); a range check is unit-free, unlike a raw-scale variance floor.
+        if np.any(np.ptp(X_boot, axis=0) == 0.0):
             continue
 
         X_boot_const = sm.add_constant(X_boot, has_constant="add")
-        if norm_penalty == "firth":
-            from medstat.models.firth import fit_firth_logistic
-
-            try:
-                b_fit = fit_firth_logistic(
-                    y=y_boot,
-                    X=X_boot,
-                    feature_names=model_predictors,
-                    fit_intercept=True,
-                )
-                b_params = np.asarray(b_fit["model"].coef_).ravel()
-                if np.any(np.isnan(b_params)) or np.any(np.abs(b_params) > 50.0):
-                    continue
-            except Exception:
-                continue
-        else:
-            try:
-                boot_model = sm.Logit(y_boot, X_boot_const).fit(disp=False)
-                if not boot_model.mle_retvals.get("converged", True):
-                    continue
-                b_params = boot_model.params
-                if np.any(np.isnan(b_params)) or np.any(np.abs(b_params) > 50.0):
-                    continue
-            except Exception:
-                continue
+        # Same procedure as the original fit; resamples with no accepted fit are rejected.
+        b_params, b_reason = _fit_logit_shared(y_boot, X_boot, norm_penalty)
+        if b_params is None:
+            continue
 
         # Evaluate on bootstrap sample (boot_metrics)
         lp_boot = np.dot(X_boot_const, b_params)
@@ -355,10 +387,15 @@ def bootstrap_internal_validation(
         t_inter = _compute_calibration_intercept_offset(y_orig, lp_test)
         t_slope = _compute_calibration_slope(y_orig, lp_test)
 
-        if not np.isfinite(t_slope) or not np.isfinite(t_inter):
+        if (
+            not np.isfinite(b_slope)
+            or not np.isfinite(t_slope)
+            or not np.isfinite(t_inter)
+        ):
             continue
 
-        test_slopes.append(t_slope)
+        if b_reason is not None:
+            n_boot_regularized += 1
 
         # Record metrics
         b_vals = {
@@ -411,9 +448,16 @@ def bootstrap_internal_validation(
             "test_mean": t_mean,
         }
 
-    # 4. Uniform Shrinkage Factor
-    mean_test_slope = float(np.mean(test_slopes))
-    shrinkage_factor = float(np.clip(mean_test_slope, 0.01, 1.0))
+    # 4. Uniform Shrinkage Factor = optimism-corrected calibration slope
+    # (apparent - mean paired bootstrap optimism); equals the mean test slope only when the
+    # apparent slope is exactly 1 (unpenalized MLE).
+    corrected_slope = metrics_summary["calibration_slope"]["optimism_corrected"]
+    if not np.isfinite(corrected_slope):
+        raise RuntimeError(
+            "Optimism-corrected calibration slope is unavailable (apparent slope undefined); "
+            "uniform shrinkage cannot be estimated."
+        )
+    shrinkage_factor = float(np.clip(corrected_slope, 0.01, 1.0))
 
     # 5. Shrunk Model Coefficients
     # beta_shrunk_j = s_hat * beta_orig_j for j >= 1
@@ -432,7 +476,10 @@ def bootstrap_internal_validation(
         shrunk_coef_dict[p_name] = s_c
 
     # 6. Clinical Guardrails & Warnings
-    warnings_list = []
+    if n_boot_regularized > 0:
+        warnings_list.append(
+            f"{n_boot_regularized} bootstrap resample(s) used the regularized-logit fallback."
+        )
     if epp < 10.0:
         warnings_list.append(
             f"Low events per predictor (EPP = {epp:.2f} < 10), indicating elevated risk of model overfitting."
@@ -453,6 +500,7 @@ def bootstrap_internal_validation(
         "events_per_predictor": epp,
         "n_bootstrap": n_bootstrap,
         "n_successful_replicates": n_successful,
+        "n_regularized_replicates": n_boot_regularized,
         "apparent_metrics": apparent_metrics,
         "metrics": metrics_summary,
         "shrinkage_factor": shrinkage_factor,

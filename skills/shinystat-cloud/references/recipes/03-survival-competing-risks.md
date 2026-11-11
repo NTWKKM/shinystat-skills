@@ -564,7 +564,7 @@ def fit_survival_analysis_suite(
 
 ## 15. Competing Risks Survival Analysis (Aalen-Johansen CIF & Fine-Gray Model)
 
-Aalen-Johansen CIF with a naive \$1 - \text{KM}\$ overestimation audit, Cause-Specific Cox (etiological rate ratio), and Fine-Gray Subdistribution Hazard (clinical prognosis) via IPCW counting-process expansion. Fine-Gray standard errors come from an *entry-aware* cluster sandwich or a patient bootstrap.
+Aalen-Johansen CIF (computed from the original risk sets, so tied event times are exact) with a naive \$1 - \text{KM}\$ overestimation audit, Cause-Specific Cox (etiological rate ratio), and Fine-Gray Subdistribution Hazard (clinical prognosis) via IPCW counting-process expansion. Fine-Gray standard errors come from an *entry-aware* cluster sandwich or a patient bootstrap.
 
 ```python
 import warnings
@@ -576,6 +576,44 @@ from lifelines import AalenJohansenFitter, CoxPHFitter, KaplanMeierFitter
 from lifelines.exceptions import StatisticalWarning
 
 
+def _aalen_johansen_exact(
+    dur: np.ndarray, evt: np.ndarray, cause: int, timeline: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Aalen-Johansen CIF and its Greenwood-type variance at `timeline`, from untied risk sets.
+
+    Uses the original event times (no jittering), so all events tied at t are counted at t and
+    no later event leaks in. Variance is the Collett (2015, p. 411) formula used by lifelines:
+    Var F(t) = sum_i (F(t) - F_i)^2 d_i / (n_i (n_i - d_i)) + S_{i-1}^2 d_ki (n_i - d_ki) / n_i^3
+               - 2 (F(t) - F_i) S_{i-1} d_ki / n_i^2, summed over event times t_i <= t.
+    Without ties it equals lifelines' AalenJohansenFitter exactly.
+    """
+    t_ev = np.unique(dur[evt > 0])
+    n_i = len(dur) - np.searchsorted(np.sort(dur), t_ev, side="left")
+    d_i = np.bincount(np.searchsorted(t_ev, dur[evt > 0]), minlength=len(t_ev))
+    d_k = np.bincount(
+        np.searchsorted(t_ev, dur[evt == cause]), minlength=len(t_ev)
+    ).astype(float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        s_lag = np.r_[1.0, np.cumprod(1.0 - d_i / n_i)[:-1]]
+        f_i = np.cumsum(s_lag * d_k / n_i)
+        # Terminal risk set (every subject at risk fails, n_i == d_i): F cannot change after t_i
+        # and (F(t) - F_i) = 0 there, so its Greenwood term contributes 0, not 0 * inf.
+        a = np.where(n_i > d_i, d_i / (n_i * np.maximum(n_i - d_i, 1)), 0.0)
+        b = s_lag**2 * d_k * (n_i - d_k) / n_i**3
+        c = s_lag * d_k / n_i**2
+        # Expand (F - F_i)^2 and (F - F_i) so each term is a running sum.
+        ca, caf, caf2 = np.cumsum(a), np.cumsum(a * f_i), np.cumsum(a * f_i**2)
+        cb, cc, ccf = np.cumsum(b), np.cumsum(c), np.cumsum(c * f_i)
+        var_i = (
+            f_i**2 * ca - 2.0 * f_i * caf + caf2 + cb - 2.0 * (f_i * cc - ccf)
+        )
+    # Callers guarantee at least one event, so t_ev is non-empty.
+    idx = np.searchsorted(t_ev, timeline, side="right") - 1
+    cif = np.where(idx >= 0, f_i[np.maximum(idx, 0)], 0.0)
+    var = np.where(idx >= 0, var_i[np.maximum(idx, 0)], 0.0)
+    return cif, np.where(np.isfinite(var), np.maximum(var, 0.0), np.nan)
+
+
 def fit_competing_risks_cif(
     durations: np.ndarray | pd.Series,
     event_observed: np.ndarray | pd.Series,
@@ -584,7 +622,12 @@ def fit_competing_risks_cif(
     horizons: list[float] | None = None,
     alpha: float = 0.05,
 ) -> dict[str, Any]:
-    """Fit Aalen-Johansen CIF curves and audit Naive 1 - KM overestimation bias."""
+    """Fit Aalen-Johansen CIF curves and audit Naive 1 - KM overestimation bias.
+
+    `cif_table` / `horizon_summary` hold the exact CIFs from the original event times. The returned
+    `ajf_primary` / `ajf_competing` lifelines fits use jittered times when events are tied, so their
+    curves can differ slightly; report CIFs from `cif_table` / `horizon_summary`.
+    """
     if event_of_interest <= 0 or competing_event <= 0:
         raise ValueError(
             f"event_of_interest ({event_of_interest}) and competing_event ({competing_event}) must be positive integers (> 0); 0 is reserved for censoring."
@@ -627,12 +670,16 @@ def fit_competing_risks_cif(
     if n_primary == 0:
         raise ValueError(f"No events of interest (code={event_of_interest}) observed.")
 
-    # 1. Fit Aalen-Johansen
-    ajf1 = AalenJohansenFitter(calculate_variance=True)
-    ajf1.fit(dur, evt, event_of_interest=event_of_interest)
+    # 1. Fit Aalen-Johansen with deterministic seed and preserved RNG state
+    _saved_rng_state = np.random.get_state()
+    try:
+        ajf1 = AalenJohansenFitter(calculate_variance=True, seed=42)
+        ajf1.fit(dur, evt, event_of_interest=event_of_interest)
 
-    ajf2 = AalenJohansenFitter(calculate_variance=True)
-    ajf2.fit(dur, evt, event_of_interest=competing_event)
+        ajf2 = AalenJohansenFitter(calculate_variance=True, seed=42)
+        ajf2.fit(dur, evt, event_of_interest=competing_event)
+    finally:
+        np.random.set_state(_saved_rng_state)
 
     # 2. Fit Naive KM (censoring competing risks)
     km_naive = KaplanMeierFitter(alpha=alpha)
@@ -644,15 +691,25 @@ def fit_competing_risks_cif(
         return np.where(idx >= 0, s.iloc[np.maximum(idx, 0)].to_numpy(dtype=float), 0.0)
 
     timeline = np.sort(np.unique(np.concatenate([[0.0], dur[evt > 0]])))
-    cif1 = _lookup(ajf1.cumulative_density_, timeline)
-    var1 = np.maximum(_lookup(ajf1.variance_, timeline), 0.0)
-    cif2 = _lookup(ajf2.cumulative_density_, timeline)
+    # lifelines jitters tied event times by up to 1e-4, which can split ties or reorder events closer
+    # than that: CIF and variance come from the original risk sets (equal to lifelines without ties).
+    cif1, var1 = _aalen_johansen_exact(dur, evt, event_of_interest, timeline)
+    cif2, _ = _aalen_johansen_exact(dur, evt, competing_event, timeline)
     s_naive = _lookup(km_naive.survival_function_, timeline)
     naive = np.clip(1.0 - s_naive, 0.0, 1.0)
 
     z = float(stats.norm.ppf(1.0 - alpha / 2.0))
-    cif1_l = np.clip(cif1 - z * np.sqrt(var1), 0.0, 1.0)
-    cif1_u = np.clip(cif1 + z * np.sqrt(var1), 0.0, 1.0)
+    # Asymmetric log(-log) CI: F**exp(+/- z * SE(F) / |F log F|), stays inside (0, 1).
+    # Zero variance or F in {0, 1}: degenerate interval; undefined variance: NaN bounds.
+    se1 = np.sqrt(var1)
+    cif1_l, cif1_u = cif1.copy(), cif1.copy()
+    interior = (cif1 > 0.0) & (cif1 < 1.0)
+    ok = interior & np.isfinite(se1) & (se1 > 0.0)
+    sd_theta = se1[ok] / np.abs(cif1[ok] * np.log(cif1[ok]))
+    cif1_l[ok] = cif1[ok] ** np.exp(z * sd_theta)
+    cif1_u[ok] = cif1[ok] ** np.exp(-z * sd_theta)
+    undefined = interior & ~np.isfinite(se1)
+    cif1_l[undefined] = cif1_u[undefined] = np.nan
 
     cif_table = pd.DataFrame({
         "time": timeline,
@@ -671,8 +728,8 @@ def fit_competing_risks_cif(
             raise ValueError(
                 f"Horizons must be non-negative finite numbers; got {horizons}"
             )
-        h_cif1 = _lookup(ajf1.cumulative_density_, h_arr)
-        h_var1 = np.maximum(_lookup(ajf1.variance_, h_arr), 0.0)
+        h_idx = np.maximum(np.searchsorted(timeline, h_arr, side="right") - 1, 0)
+        h_cif1, h_var1 = cif1[h_idx], var1[h_idx]
         h_naive = np.clip(1.0 - _lookup(km_naive.survival_function_, h_arr), 0.0, 1.0)
         h_rows = []
         for i, h in enumerate(h_arr):

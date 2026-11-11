@@ -275,6 +275,88 @@ def test_shinystat_cloud_canonical_skill_exists_and_valid():
     )
 
 
+def test_shinystat_local_skill_markdown_links_resolve():
+    """Verify every relative Markdown link in skills/shinystat resolves to an existing file and valid heading slug."""
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    local_skill_dir = repo_root / "skills" / "shinystat"
+    assert local_skill_dir.exists(), "skills/shinystat not found"
+
+    md_link_pattern = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+    resolved_links_count = 0
+    for md_file in local_skill_dir.rglob("*.md"):
+        if not md_file.is_file():
+            continue
+        text = md_file.read_text(encoding="utf-8")
+        for match in md_link_pattern.finditer(text):
+            target = match.group(2).strip()
+            if target.startswith(("http://", "https://", "mailto:")):
+                continue
+            target_clean = target.split()[0]
+            if target_clean.startswith("#"):
+                fragment = target_clean[1:]
+                target_file = md_file
+            else:
+                rel_part, _, fragment = target_clean.partition("#")
+                if not rel_part:
+                    continue
+                target_file = (md_file.parent / rel_part).resolve()
+                assert target_file.exists(), (
+                    f"Broken relative link in {md_file.relative_to(local_skill_dir)}: "
+                    f"target '{target}' does not exist at {target_file}"
+                )
+                assert (
+                    local_skill_dir.resolve() in target_file.parents
+                    or target_file == local_skill_dir.resolve()
+                ), (
+                    f"Escaping relative link in {md_file.relative_to(local_skill_dir)}: "
+                    f"target '{target}' resolves outside local skill directory at {target_file}"
+                )
+            if fragment and target_file.suffix == ".md":
+                slugs = _extract_heading_slugs(target_file.read_text(encoding="utf-8"))
+                assert fragment in slugs, (
+                    f"Linked fragment '#{fragment}' in {md_file.relative_to(local_skill_dir)} "
+                    f"not found in {target_file.relative_to(local_skill_dir)} headings"
+                )
+            resolved_links_count += 1
+
+    assert resolved_links_count > 0, "Expected relative Markdown links in local skill"
+
+
+def test_no_phantom_module_or_function_symbols_in_skill_docs():
+    """Verify skill docs do not reference non-existent module or function names (W-1)."""
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    local_skill = repo_root / "skills" / "shinystat" / "SKILL.md"
+    decision_heuristics = (
+        repo_root / "skills" / "_shared" / "references" / "decision-heuristics.md"
+    )
+
+    skill_text = local_skill.read_text(encoding="utf-8")
+    heuristics_text = decision_heuristics.read_text(encoding="utf-8")
+
+    # SKILL.md checks
+    assert "medstat.diagnostics" not in skill_text, (
+        "Found phantom 'medstat.diagnostics' (should be medstat.diagnostic)"
+    )
+    assert "(`survival`, `competing_risks`)" not in skill_text, (
+        "Found phantom 'competing_risks' module in SKILL.md"
+    )
+
+    # decision-heuristics.md checks
+    assert "fit_ordinal_logistic" not in heuristics_text, (
+        "Found phantom 'fit_ordinal_logistic' (should be fit_proportional_odds)"
+    )
+    assert "fit_rcs_logistic" not in heuristics_text, (
+        "Found phantom 'fit_rcs_logistic' (should be fit_logistic_rcs)"
+    )
+    assert "fit_rcs_cox" not in heuristics_text, (
+        "Found phantom 'fit_rcs_cox' (should be fit_cox_rcs)"
+    )
+    assert "fit_clustered_gee" not in heuristics_text, (
+        "Found phantom 'fit_clustered_gee' (should be fit_gee)"
+    )
+    assert "rcs_lib.py" not in heuristics_text, "Found phantom 'rcs_lib.py'"
+
+
 def test_shinystat_reference_manual_exists():
     """Verify skills/shinystat/references/decision-heuristics.md exists and contains archetype mappings."""
     repo_root = Path(__file__).resolve().parent.parent.parent

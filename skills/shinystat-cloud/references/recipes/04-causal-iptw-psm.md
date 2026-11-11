@@ -266,11 +266,21 @@ def compute_iptw(
             raise ValueError(
                 f"truncate_quantiles low ({q_low}) cannot exceed high ({q_high})"
             )
-        w_low, w_high = (
-            np.quantile(w_raw, q_low),
-            np.quantile(w_raw, q_high),
-        )
-        w_final = np.clip(w_raw, w_low, w_high)
+        # ATT / ATC: the reference group keeps weight 1.0, so truncate within the re-weighted group only
+        # (pooled quantiles would be diluted by the block of 1.0 weights). ATE truncates all weights.
+        if estimand_u == "ATT":
+            clip_mask = T == 0
+        elif estimand_u == "ATC":
+            clip_mask = T == 1
+        else:
+            clip_mask = np.ones(len(w_raw), dtype=bool)
+        w_final = w_raw.copy()
+        if np.any(clip_mask):
+            w_low, w_high = (
+                np.quantile(w_raw[clip_mask], q_low),
+                np.quantile(w_raw[clip_mask], q_high),
+            )
+            w_final[clip_mask] = np.clip(w_raw[clip_mask], w_low, w_high)
     else:
         w_final = w_raw.copy()
 
@@ -384,7 +394,9 @@ def fit_weighted_outcome_model(
                 f"Binary outcome column '{outcome_col}' must contain both classes (0 and 1)."
             )
         X = sm.add_constant(T)
-        res = sm.GLM(Y, X, family=sm.families.Binomial(), freq_weights=weights).fit(cov_type="HC1")
+        # var_weights = probability (IPTW) weights; freq_weights would treat them as replicate counts
+        # (wrong nobs and meat), under-stating SE for ATE and over-stating it for ATO.
+        res = sm.GLM(Y, X, family=sm.families.Binomial(), var_weights=weights).fit(cov_type="HC1")
         or_val = float(np.exp(res.params[1]))
         ci = res.conf_int()[1]
         return {

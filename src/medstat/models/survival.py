@@ -760,7 +760,13 @@ def fit_survival_analysis_suite(
 
 @dataclass
 class CompetingRisksCIFResult:
-    """Container for Competing Risks Cumulative Incidence Function (CIF) results."""
+    """Container for Competing Risks Cumulative Incidence Function (CIF) results.
+
+    `cif_table` and `horizon_summary` hold the exact Aalen-Johansen values from the original
+    event times. `ajf_primary` / `ajf_competing` are lifelines fits kept for plotting and API
+    compatibility; with tied event times lifelines jitters them, so their curves can differ
+    slightly from the exact values. Report CIFs from `cif_table` / `horizon_summary`.
+    """
 
     ajf_primary: AalenJohansenFitter
     ajf_competing: AalenJohansenFitter
@@ -776,6 +782,67 @@ class CompetingRisksCIFResult:
         if hasattr(self, item):
             return getattr(self, item)
         raise KeyError(f"Invalid key '{item}' for CompetingRisksCIFResult")
+
+
+def _cif_loglog_ci(
+    cif: np.ndarray, var: np.ndarray, z: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Asymmetric log(-log) CI for a cumulative incidence F(t) (Kalbfleisch-Prentice; cmprsk convention).
+
+    theta = log(-log F), SE(theta) = SE(F) / |F log F|; bounds are F**exp(+/- z SE(theta)),
+    so they stay inside (0, 1) without clipping. F in {0, 1} (or zero variance) returns a
+    degenerate interval; an undefined (non-finite) variance with 0 < F < 1 returns NaN bounds.
+    """
+    cif = np.asarray(cif, dtype=float)
+    se = np.sqrt(np.maximum(np.asarray(var, dtype=float), 0.0))
+    lower, upper = cif.copy(), cif.copy()
+    interior = (cif > 0.0) & (cif < 1.0)
+    ok = interior & np.isfinite(se) & (se > 0.0)
+    f = cif[ok]
+    sd_theta = se[ok] / np.abs(f * np.log(f))
+    lower[ok] = f ** np.exp(z * sd_theta)
+    upper[ok] = f ** np.exp(-z * sd_theta)
+    undefined = interior & ~np.isfinite(se)
+    lower[undefined] = upper[undefined] = np.nan
+    return lower, upper
+
+
+def _aalen_johansen_exact(
+    dur: np.ndarray, evt: np.ndarray, cause: int, timeline: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Aalen-Johansen CIF and its Greenwood-type variance at `timeline`, from untied risk sets.
+
+    Uses the original event times (no jittering), so all events tied at t are counted at t and
+    no later event leaks in. Variance is the Collett (2015, p. 411) formula used by lifelines:
+    Var F(t) = sum_i (F(t) - F_i)^2 d_i / (n_i (n_i - d_i)) + S_{i-1}^2 d_ki (n_i - d_ki) / n_i^3
+               - 2 (F(t) - F_i) S_{i-1} d_ki / n_i^2, summed over event times t_i <= t.
+    Without ties it equals lifelines' AalenJohansenFitter exactly.
+    """
+    t_ev = np.unique(dur[evt > 0])
+    n_i = len(dur) - np.searchsorted(np.sort(dur), t_ev, side="left")
+    d_i = np.bincount(np.searchsorted(t_ev, dur[evt > 0]), minlength=len(t_ev))
+    d_k = np.bincount(
+        np.searchsorted(t_ev, dur[evt == cause]), minlength=len(t_ev)
+    ).astype(float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        s_lag = np.r_[1.0, np.cumprod(1.0 - d_i / n_i)[:-1]]
+        f_i = np.cumsum(s_lag * d_k / n_i)
+        # Terminal risk set (every subject at risk fails, n_i == d_i): F cannot change after t_i
+        # and (F(t) - F_i) = 0 there, so its Greenwood term contributes 0, not 0 * inf.
+        a = np.where(n_i > d_i, d_i / (n_i * np.maximum(n_i - d_i, 1)), 0.0)
+        b = s_lag**2 * d_k * (n_i - d_k) / n_i**3
+        c = s_lag * d_k / n_i**2
+        # Expand (F - F_i)^2 and (F - F_i) so each term is a running sum.
+        ca, caf, caf2 = np.cumsum(a), np.cumsum(a * f_i), np.cumsum(a * f_i**2)
+        cb, cc, ccf = np.cumsum(b), np.cumsum(c), np.cumsum(c * f_i)
+        var_i = (
+            f_i**2 * ca - 2.0 * f_i * caf + caf2 + cb - 2.0 * (f_i * cc - ccf)
+        )
+    # Callers guarantee at least one event, so t_ev is non-empty.
+    idx = np.searchsorted(t_ev, timeline, side="right") - 1
+    cif = np.where(idx >= 0, f_i[np.maximum(idx, 0)], 0.0)
+    var = np.where(idx >= 0, var_i[np.maximum(idx, 0)], 0.0)
+    return cif, np.where(np.isfinite(var), np.maximum(var, 0.0), np.nan)
 
 
 def fit_competing_risks_cif(
@@ -842,13 +909,16 @@ def fit_competing_risks_cif(
             f"No competing events (code={competing_event}) observed. Aalen-Johansen converges to standard KM."
         )
 
-    # 1. Fit Aalen-Johansen for Primary Event
-    ajf_primary = AalenJohansenFitter(calculate_variance=True)
-    ajf_primary.fit(dur, evt, event_of_interest=event_of_interest)
+    # 1. Fit Aalen-Johansen for Primary Event and Competing Event with deterministic seed
+    _saved_rng_state = np.random.get_state()
+    try:
+        ajf_primary = AalenJohansenFitter(calculate_variance=True, seed=42)
+        ajf_primary.fit(dur, evt, event_of_interest=event_of_interest)
 
-    # 2. Fit Aalen-Johansen for Competing Event
-    ajf_competing = AalenJohansenFitter(calculate_variance=True)
-    ajf_competing.fit(dur, evt, event_of_interest=competing_event)
+        ajf_competing = AalenJohansenFitter(calculate_variance=True, seed=42)
+        ajf_competing.fit(dur, evt, event_of_interest=competing_event)
+    finally:
+        np.random.set_state(_saved_rng_state)
 
     # 3. Fit Naive Kaplan-Meier (treating competing risks as uninformative censoring)
     km_naive = KaplanMeierFitter(alpha=alpha)
@@ -873,11 +943,11 @@ def fit_competing_risks_cif(
     # Timeline of all failure times
     timeline = np.sort(np.unique(np.concatenate([[0.0], dur[evt > 0]])))
 
-    cif1 = _step_lookup(ajf_primary.cumulative_density_, timeline)
-    var1 = np.maximum(_step_lookup(ajf_primary.variance_, timeline), 0.0)
-
-    cif2 = _step_lookup(ajf_competing.cumulative_density_, timeline)
-    var2 = np.maximum(_step_lookup(ajf_competing.variance_, timeline), 0.0)
+    # lifelines' Aalen-Johansen jitters tied event times by up to 1e-4, which can split ties or
+    # reorder events closer than that; CIF and variance are therefore computed from the original
+    # risk sets (identical to lifelines when there are no ties). The fitted objects stay available.
+    cif1, var1 = _aalen_johansen_exact(dur, evt, event_of_interest, timeline)
+    cif2, var2 = _aalen_johansen_exact(dur, evt, competing_event, timeline)
 
     s_naive = _step_lookup(km_naive.survival_function_, timeline)
     naive_cif = np.clip(1.0 - s_naive, 0.0, 1.0)
@@ -885,10 +955,8 @@ def fit_competing_risks_cif(
     s_overall = _step_lookup(km_overall.survival_function_, timeline)
 
     z = float(stats.norm.ppf(1.0 - alpha / 2.0))
-    cif1_l = np.clip(cif1 - z * np.sqrt(var1), 0.0, 1.0)
-    cif1_u = np.clip(cif1 + z * np.sqrt(var1), 0.0, 1.0)
-    cif2_l = np.clip(cif2 - z * np.sqrt(var2), 0.0, 1.0)
-    cif2_u = np.clip(cif2 + z * np.sqrt(var2), 0.0, 1.0)
+    cif1_l, cif1_u = _cif_loglog_ci(cif1, var1, z)
+    cif2_l, cif2_u = _cif_loglog_ci(cif2, var2, z)
 
     conservation_sum = cif1 + cif2 + s_overall
     max_error = float(np.max(np.abs(conservation_sum - 1.0)))
@@ -914,17 +982,15 @@ def fit_competing_risks_cif(
     clinical_warnings = []
     if horizons is not None and len(horizons) > 0:
         h_arr = np.asarray(horizons, dtype=float)
-        h_cif1 = _step_lookup(ajf_primary.cumulative_density_, h_arr)
-        h_var1 = np.maximum(_step_lookup(ajf_primary.variance_, h_arr), 0.0)
-        h_cif2 = _step_lookup(ajf_competing.cumulative_density_, h_arr)
-        h_var2 = np.maximum(_step_lookup(ajf_competing.variance_, h_arr), 0.0)
+        # Horizon value = last timeline step at or before the horizon (exact risk-set values above)
+        h_idx = np.maximum(np.searchsorted(timeline, h_arr, side="right") - 1, 0)
+        h_cif1, h_var1 = cif1[h_idx], var1[h_idx]
+        h_cif2, h_var2 = cif2[h_idx], var2[h_idx]
         h_s_naive = _step_lookup(km_naive.survival_function_, h_arr)
         h_naive = np.clip(1.0 - h_s_naive, 0.0, 1.0)
 
-        h_cif1_l = np.clip(h_cif1 - z * np.sqrt(h_var1), 0.0, 1.0)
-        h_cif1_u = np.clip(h_cif1 + z * np.sqrt(h_var1), 0.0, 1.0)
-        h_cif2_l = np.clip(h_cif2 - z * np.sqrt(h_var2), 0.0, 1.0)
-        h_cif2_u = np.clip(h_cif2 + z * np.sqrt(h_var2), 0.0, 1.0)
+        h_cif1_l, h_cif1_u = _cif_loglog_ci(h_cif1, h_var1, z)
+        h_cif2_l, h_cif2_u = _cif_loglog_ci(h_cif2, h_var2, z)
 
         h_rows = []
         for i, h in enumerate(h_arr):

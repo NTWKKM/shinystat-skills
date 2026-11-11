@@ -2026,3 +2026,144 @@ An end-to-end audit of `shinystat` and `shinystat-cloud` against the `/writing-f
 ### Consequences
 - **Status**: Accepted & Verified (`test_skill_process_audit_f1_to_f7_and_q3`).
 - Lower always-loaded context footprint, deterministic 6-step execution order, and clean separation between local `medstat.reporting.renderers`, cloud `report-builder.md`, and shared `evidence-pipeline.md`.
+
+---
+
+## ADR 72: Statistical Rigor, Model Convergence Contracts & Writing-for-Agents Link Resolution
+
+### Context
+A comprehensive adversarial audit (`scrutinize` + `writing-for-agents`) of the biostatistical core, cloud recipes, and reference documentation identified seven defects across statistical determinism, functional return contracts, and documentation navigation:
+1. **S-1 (CIF Tie Jittering & Global RNG Mutation)**: In `AalenJohansenFitter`, default `seed=None` causes `lifelines` to reset global NumPy RNG state from OS entropy on tied failure times, mutating caller state and generating non-deterministic CIF curves across repeated calls.
+2. **S-2 (Meta-Analysis Per-Study CIs)**: `run_meta_analysis` accepted an `alpha` parameter for pooled CIs but hardcoded `1.96` for per-study rows in `studies_with_weights`, leaving study-level intervals locked at 95% when `alpha != 0.05`.
+3. **S-3 (ICC Full-Precision CIs)**: `_compute_icc_from_matrix` returned only 2-decimal rounded `CI95%` arrays, withholding unrounded float bounds from downstream journal formatters.
+4. **F-1 & F-2 (Model Convergence Key)**: Both `shinystat` and `shinystat-cloud` SKILL.md mandate verifying `converged == True`, yet 10 local `medstat.models` functions and Cloud Recipe 23 `fit_gee` lacked a top-level `"converged"` key.
+5. **W-1 (Phantom Module & Function Symbols)**: Documentation referenced 7 non-existent symbols (`medstat.diagnostics`, `competing_risks` module, `fit_ordinal_logistic`, `brant_test`, `fit_rcs_logistic`/`fit_rcs_cox`, `fit_clustered_gee`, and `rcs_lib.py`).
+6. **W-2 (Broken Recipe Links in Local Skill & Line-Range TOC)**: `decision-heuristics.md` contained 20 relative markdown links to `recipes/0X-...md` which only existed in `shinystat-cloud`, breaking navigation in local `shinystat`. Additionally, the 2,331-line `report-builder.md` lacked targeted line ranges for modular section retrieval.
+
+### Decision
+1. **S-1 (Deterministic CIF & RNG Isolation)**:
+   - Passed `seed=42` to `AalenJohansenFitter(calculate_variance=True, seed=42)` in both `src/medstat/models/survival.py` and Cloud Recipe 15.
+   - Wrapped `ajf.fit(...)` calls in `_saved_rng_state = np.random.get_state()` and restored the state in a `finally` block, isolating the caller's RNG.
+2. **S-2 (Alpha-Scaled Per-Study Meta CIs)**:
+   - Replaced hardcoded `1.96` with `z_crit = float(stats.norm.ppf(1.0 - alpha / 2.0))` in `src/medstat/meta/models.py`.
+3. **S-3 (Unrounded Float CI Bounds in ICC)**:
+   - Retained `"CI95%"` as a rounded array for Pingouin parity while adding `"ci_lower"` and `"ci_upper"` float columns to the returned DataFrame in `src/medstat/agreement/icc.py`.
+4. **F-1 & F-2 (Convergence Contract Enforcement)**:
+   - Added `"converged": bool(...)` to the return dictionaries of `fit_linear_regression`, `fit_standard_logistic`, `fit_poisson_regression`, `fit_negative_binomial`, `fit_firth_logistic`, `fit_firth_cox`, `fit_gee`, `fit_random_intercept`, `fit_proportional_odds`, `fit_multinomial_logistic`, and Cloud Recipe 23 `fit_gee`.
+5. **W-1 (Documentation Symbol Alignment & Defensive Aliasing)**:
+   - Corrected all 7 phantom symbols in `SKILL.md`, `decision-heuristics.md`, and `ARCHITECTURE.md`.
+   - Added backwards-compatible aliases in `multilevel.py` (`fit_clustered_gee = fit_gee`), `ordinal.py` (`fit_ordinal_logistic = fit_proportional_odds`, `brant_test = test_proportional_odds`, `run_brant_test = test_proportional_odds`), and `splines.py` (`fit_rcs_cox = fit_cox_rcs`, `fit_rcs_logistic = fit_logistic_rcs`).
+6. **W-2 (Shared Reference Link Uniformity & Line-Range TOC)**:
+   - Converted cloud-only `recipes/*.md` markdown links in `decision-heuristics.md` to non-404 inline code references (`Recipe X: ... (\`recipes/...\`)`).
+   - Added a compact Section Line-Range Index to `report-builder.md` lines 5–9.
+   - Added `test_shinystat_local_skill_markdown_links_resolve` in `test_shinystat_skill.py` to prevent broken links in either skill.
+
+### Consequences
+- **Status**: Accepted & Fully Verified.
+- **Statistical Invariants**: CIF estimates are 100% deterministic and RNG-isolated; meta-analysis study-level intervals scale correctly with `alpha`.
+- **Contract Adherence**: All regression models reliably expose `"converged": bool`.
+- **Agent Ergonomics**: Zero phantom symbols and zero broken links across all canonical, vendored, and packaged skills.
+
+## ADR 73: Reference-Parity Statistical Corrections (Firth Penalty, IPTW Variance, Egger Intercept, Missing Outcomes, CIF Intervals)
+
+### Context
+Two independent audits, re-verified numerically against R and closed-form references, found defects that snapshot tests could not detect because they compare the engine with itself:
+1. **Firth penalty doubled**: `fit_firth_logistic` / `fit_firth_cox` defaulted to `penalty_weight=1.0`, documented as the Jeffreys prior. In `firthmodels` the Jeffreys prior is `0.5` (l + 0.5·log|I|). Estimates were over-shrunk toward the null (R `sex2`: `dia` OR 11.1 vs logistf 22.1; `breast`: `G` HR 5.9 vs coxphf 11.3). The R benchmark CSVs in `tests/benchmarks/python_results` were never consumed by a test.
+2. **IPTW binary SE**: `fit_iptw_outcome_model` and Cloud Recipe 14 used `GLM(freq_weights=w)`, which treats weights as replicate counts (nobs = Σw, frequency meat). SE was too small for ATE (0.238 vs 0.278) and too large for ATO (0.374 vs 0.266).
+3. **Egger p-value (Cloud Recipe 24)**: `stats.linregress(...).pvalue` tests the slope, not the intercept (symmetric funnel: p = 1.1e-8 vs correct 0.275). Engine `eggers_test` was correct.
+4. **Missing outcomes coded as non-events**: `(np.asarray(y) == pos_label).astype(int)` / `asarray(y, dtype=int)` ran before NaN filtering in ROC, DeLong (single and paired), 2x2 accuracy, DCA, calibration curve/slope/intercept, ICI and Hosmer-Lemeshow (DCA net benefit 0.20 vs 0.333).
+5. **CIF intervals**: Aalen-Johansen CIs were symmetric Wald bands clipped to [0, 1] while documentation claimed asymmetric intervals.
+6. **Cloud Recipe 7**: Firth logistic returned no p-values, and profile CIs nested Nelder-Mead inside `brentq` (non-smooth profile, frequent Wald fallback).
+
+### Decision
+1. Default `penalty_weight=0.5` in both Firth functions; docstrings state the l + a·log|I| convention.
+2. `var_weights=w` (probability weights) for the binary IPTW outcome model in engine and Recipe 14. statsmodels GLM applies no n/(n−p) factor for `HC1`, so the reported SE equals the HC0 probability-weight sandwich.
+3. Recipe 24 Egger p-value = two-sided t-test of the intercept (`intercept / intercept_stderr`, df = k − 2).
+4. New `medstat.diagnostic._inputs.complete_cases` excludes rows with a missing outcome or score and logs the excluded count; used by every function in item 4.
+5. `_cif_loglog_ci` (engine) and the matching Recipe 15 code compute log(−log) intervals F^exp(±z·SE/|F log F|).
+6. Recipe 7 profiles via constrained Newton-Raphson on the nuisance block (logistf scheme) and returns penalized likelihood-ratio `p_values` with `p_value_method`.
+7. `tests/unit/test_reference_parity.py` pins items 1–6 to external references (R logistf/coxphf benchmarks, R `survfit(conf.type="log-log")`, statsmodels OLS intercept, explicit sandwich algebra). The Firth stress test now asserts R logistf values in place of a band fitted to the doubled penalty.
+
+### Consequences
+- **Status**: Accepted & Verified (engine and Recipe 7 Firth match logistf/coxphf to 1e-4; CIF CIs match R to 3 dp, limited by lifelines tie jittering).
+- **Behavioural change**: Firth estimates move away from the null; previously generated Firth results, IPTW binary CIs and Recipe 24 Egger p-values should be re-run.
+- **Follow-up**: the medium-severity findings from the same audits are resolved in ADR 74.
+
+## ADR 74: Medium-Severity Reporting & Estimand Corrections (Table 1, Ordinal Cutpoints, Weighted SMD, Non-linear Mediation, Riley MAPE)
+
+### Context
+Follow-up to ADR 73 for the medium-severity audit findings:
+1. **Table 1 (`generate_table_one`)**: categorical percentages used all rows as denominator, so missing values counted as "not this level" (percentages did not sum to 100%, SMDs were biased when missingness differed by arm); no Fisher fallback despite `decision-heuristics.md` §1 and Cloud Recipe 1 providing one. Cloud Recipe 1 used pooled-variance ANOVA / Kruskal-Wallis for two groups while the engine used Welch / Mann-Whitney, so local and cloud P-values disagreed.
+2. **Ordinal `summary_df`**: rows 2..K−1 were statsmodels' raw log-increments labelled like cutpoints (e.g. `1/2` = 0.265 vs polr 0.331); `threshold_df` was already correct.
+3. **`calculate_smd(df, treatment, covariate, weights)`**: passed the full-length weight vector as treated-group weights only → `IndexError`.
+4. **Mediation**: with a logistic outcome the product α·β and α·β + β_T were reported on the log-odds scale (non-collapsible, not a natural effect); binary mediators were fitted by OLS.
+5. **Riley MAPE**: the default 0.05 target was silently dropped for prevalence > 0.5, although the formula already uses min(φ, 1 − φ) and MAPE is invariant to swapping event labels.
+
+### Decision
+1. Table 1 uses non-missing denominators per variable, appends `(Missing: n)` to each variable label, and applies Fisher's exact test to 2×2 tables with any expected count < 5 (`_categorical_p_value`). Cloud Recipe 1 uses Welch t / Mann-Whitney for two groups (ANOVA / Kruskal-Wallis for > 2).
+2. `summary_df` threshold rows are taken from the cutpoint-scale `threshold_df` (delta-method SEs).
+3. DataFrame mode of `calculate_smd` slices a full-length weight vector (or column name) into treated / control weights.
+4. Linear mediator + linear outcome keeps the product of coefficients (equal to the Imai ACME). A logistic mediator and/or outcome routes to `_imai_quasi_bayes`: g-computation of E[Y(t, M(t'))] over the empirical covariates with quasi-Bayesian parameter draws; ACME/ADE are averaged over t ∈ {0, 1}, total = E[Y(1, M(1))] − E[Y(0, M(0))], `scale` = `risk_difference` (binary Y) or `mean_difference`, ACME p-value from the simulation distribution.
+5. MAPE target defaults to 0.05 for every prevalence in engine and Cloud Recipe 20.
+
+### Consequences
+- **Status**: Accepted & Verified. Ordinal summary matches R `MASS::polr` (1e-4); Table 1 Fisher P-values match `scipy.stats.fisher_exact`; mediation recovers the true natural effects (40 replicates: mean ACME bias 0.00000, 95% CI coverage 39/40).
+- **Behavioural change**: mediation with a binary outcome now reports risk differences instead of log-odds products (`test_regression_guardrails_pr4` updated); Recipe 1 two-group P-values change (snapshot regenerated); Riley N can increase for prevalence > 0.5 when MAPE binds.
+
+
+## ADR 75: Engine / Recipe Parity, Silent-Fallback Removal & Agent-Facing Reference Integrity
+
+### Context
+A joint audit of statistical correctness and of how agents consume the two skills (writing-for-agents criteria), run after ADR 73/74. The engine matched R `survival` / `MASS` on Cox, log-rank, `polr`, Aalen-Johansen CIF and Fine-Gray (SHR and `cluster(id)` robust SE). Remaining defects:
+1. **`fit_iptw_outcome_model`**: any `model_type` / `outcome_type` not containing "binary" or "surv" fell through to WLS, so `model_type="logistic"` silently returned a linear probability model; the `Unsupported outcome_type` branch was unreachable.
+2. **Recipe 21**: `summary_df` threshold rows were still statsmodels' log-increments (ADR 74 fixed only the engine).
+3. **Recipe 14**: ATT / ATC truncation used pooled weight quantiles; the engine clips only the re-weighted group (ATT OR 1.419 vs 1.400 on the same data).
+4. **Meta-analysis display scale**: with no `is_ratio` column the engine reported the pooled log effect as `effect_disp` while Recipe 24 exponentiated a `log_effect` column.
+5. **PSM**: the engine matched treated subjects in row order, Recipe 6 in descending propensity order (197 vs 207 pairs).
+6. **CIF conservation audit**: lifelines jitters tied event times, so reading the Aalen-Johansen curve exactly at a tied time missed events (conservation error 0.018).
+7. **P-values** computed as `2 * (1 - cdf)` underflowed to exactly 0.0 beyond |z| ≈ 8.3.
+8. **`decision-heuristics.md`** (shared verbatim by both skills) pointed at `recipes/*.md` 21 times, files the local skill does not ship; offered only L2-penalized Cox while the local `SKILL.md` prescribes `fit_firth_cox`; and stated the PH-violation rule twice with different nuisance-covariate remedies.
+9. **Oversized references**: `05-diagnostic-meta-power.md` (2,753 lines) and `report-builder.md` (2,334 lines) exceeded one default 2000-line read.
+10. **`SKILL.md`**: Gate #5 required every option of every axis in one `ask_question` turn, which a capped question tool (`AskUserQuestion`: 4 questions × 4 options) cannot carry; the Execute criterion "passes diagnostics" was unsatisfiable after a remedied PH / Brant violation; axis 5d asked on every run; the cloud file carried two recipe-to-file tables.
+
+### Decision
+1. `_OUTCOME_TYPE_ALIASES` maps accepted names (`logistic`, `logit`, `cox`, ...) to the three families; anything else raises `ValueError`.
+2. Recipe 21 reports threshold rows on the cutpoint scale with delta-method SEs (same Jacobian as the engine).
+3. Recipe 14 truncates within the re-weighted group for ATT / ATC.
+4. Engine `run_meta_analysis` gains `exponentiate` and resolves the display scale in the order `exponentiate` → `is_ratio` column (conflicts raise) → `effect_measure` → `log_*` effect column → difference scale.
+5. Engine PSM matches largest-first (stable sort on logit PS): row-order invariant and identical to Recipe 6.
+6. CIF timeline values are read midway to the next distinct event time and horizons index that timeline, in engine and Recipe 15.
+7. P-values use the survival function (`norm.sf` / `t.sf`) in the engine and the diagnostic recipes.
+8. `decision-heuristics.md` names both routes per method (local API function · cloud Recipe #) with no file paths; the cloud `SKILL.md` Recipe Index is the single recipe-to-file map; Cox sparse-data remedies list Firth Cox (local) and L2 Cox (cloud); the PH rule lives once under §2.E. Module paths stay out of the shared file (cloud guard `test_decision_heuristics_has_no_phantom_medstat_modules`).
+9. Recipes split into `05-diagnostic-accuracy-agreement.md` (Recipes 2–5), `06-reclassification-tdroc.md` (16–17), `07-validation-samplesize-meta.md` (18–20, 24); Plotly spec generators move from `report-builder.md` to `report-plotly-specs.md`; the stale-prone line-range index is replaced by per-format load conditions.
+10. `SKILL.md` (both): capped question tools split the consolidated turn into consecutive calls and name overflow options in the question text; Execute is done when each diagnostic passes or has its documented remedy applied and reported; axis 5d is asked only for multi-model or Full Polish runs; the cloud file keeps one Recipe Index; repeated "N/A" EPV clauses collapse to their Run Sequence source.
+
+### Consequences
+- **Status**: Accepted & Verified. New guards in `tests/unit/test_reference_parity.py`: engine = recipe for IPTW weights (4 estimands), ordinal thresholds, meta display scale and PSM pair count; pointer resolution and the 2000-line bound for every reference file of both skills.
+- **Behavioural change**: `fit_iptw_outcome_model` raises on unknown model types; engine meta-analysis of a `log_effect` column now displays ratios; engine PSM pairings and Recipe 14 ATT / ATC weights change (re-run earlier matched or ATT analyses); CIF values at tied event times move in the fourth decimal.
+- **Not changed**: skill descriptions (their method lists are pinned by tests and an earlier ADR); the residual CIF conservation error (~0.001) from lifelines' sequential handling of ties.
+- **Not audited**: figures, renderers, `verify_report_integrity`, `evidence-pipeline.md`, `subagent-protocol.md`, the MICE imputation model, and RCS / mediation / time-dependent ROC against external references.
+
+
+## ADR 76: Degenerate-Inference Reporting & Input Validation (CodeRabbit PR 27 Review)
+
+### Context
+CodeRabbit's review of PR 27 found code paths that turned undefined statistics into confident ones, or silently re-coded inputs: zero-variance Wald / DeLong / bootstrap tests reported P = 0 or 1 with zero-width CIs; Recipe 18 bootstrap fits differed from the original fit and a failed calibration slope counted as 1; Recipe 24 dropped incomplete studies, accepted any `effect_measure` as RD, and inferred a ratio scale from an absent `log_effect` column; DCA / calibration coded labels outside {0, 1} as non-events; Bland-Altman LoA coverage followed `ci`; G(0−) took the first KM value.
+
+### Decision
+1. Undefined inference is NaN with a reason, never a fabricated P / CI: paired DeLong (zero variance, nonzero difference), NRI components with zero Wald variance or n < 2 (total unavailable if either is), IDI with a group < 2, time-dependent ΔAUROC with zero bootstrap SE, recalibration CIs after logistic fallback (`fallback_reason`).
+2. Recipe 18: one `_fit_logit` procedure (MLE, regularized fallback, convergence check) for the original model and every resample; failed slopes are NaN and excluded from shrinkage; validation R² is unclamped below zero.
+3. Recipe 24: incomplete studies raise with study IDs; `effect_measure` validated and must be single-valued; raw `effect_size` ratios are logged; an absent `effect_col` with only `effect_size` requires explicit scale; HKSJ with k < 3 reports `ci_method="normal"` plus a warning; leave-one-out uses the selected CI method.
+4. Recipe 2/3/5/17: NaN Wilson CI for undefined PPV / NPV; rank-based (midrank) DeLong placements; LoA fixed at 95%; G(0−) = 1; weighted ROC points via cumulative sums.
+5. Engine: `binary_complete_cases` rejects non-0/1 labels in DCA and calibration (ROC keeps `pos_label`); Imai mediation requires a 0/1 treatment and uses an add-one Monte Carlo P; Riley `mape_target` must lie in (0, 1).
+6. Docs: Firth Cox `ci_fallback` disclosure; MICE scope limited to numeric targets; unsupported Plotly builders removed from `figures.md`; report-builder load conditions name `generate_pptx_report` and §2.B for the HTML fallback.
+
+### Consequences
+- **Status**: Accepted & Verified (new cases in `tests/unit/test_reference_parity.py`; rank DeLong equals the pairwise kernel to 1e-12).
+- **Behavioural change**: degenerate NRI fields in the Recipe 16 snapshot are now null; Recipe 24 raises where it used to drop studies or guess a scale; DCA / calibration raise on non-0/1 labels.
+- **Round 2 (CodeRabbit re-review)**: paired DeLong variance comes from paired placement differences and is unavailable only when every difference is identical (no fixed 1e-12 floor); Recipe 18 fits on standardized predictors (unit-free separation check |γ| ≤ 10 per SD plus `PerfectSeparationWarning`, L1 fallback on the standardized scale, coefficients back-transformed) and takes ŝ from the optimism-corrected slope (snapshot ŝ 0.897898 → 0.897923); `fit_firth_logistic` / `fit_firth_cox` return per-term `ci_methods`; string / boolean outcome labels are encoded after validation in `binary_complete_cases`.
+- **Round 3 (CodeRabbit re-review)**: Recipe 16 IDI with zero SE is unavailable even when IDI = 0 (no P = 1 / zero-width CI); Recipe 2 LR+ / LR− / DOR are NaN when either reference-standard class is absent (no Haldane-fabricated ratio); Recipe 20 `mape_target` must lie in (0, 1) like the engine; the engine bootstrap also skips replicates whose bootstrap-sample slope is non-finite; Firth `ci_methods` keys keep the original term labels (duplicates raise), and tests force a single-term profile failure in both Firth models; `decision-heuristics.md` names `MICEImputer.fit_transform(columns=...)` for the local route.
+- **Round 4 (CodeRabbit re-review)**: Recipe 3 paired DeLong with zero variance is unavailable even when the AUC difference is 0 (no P = 1 / zero-width CI); Recipe 18 and the engine skip a resample only when a predictor column is exactly constant (`np.ptp == 0`, unit-free) instead of a raw-scale variance floor of 1e-12 that discarded every resample for predictors in small units; Recipe 24 resolves the display scale from `effect_measure` before the `log_*` column name, matching the engine order; `decision-heuristics.md` limits `MICEImputer` dummy encoding to fully observed categorical predictors and routes incomplete ones to a joint imputer with categorical models. The paired DeLong warning no longer recommends a bootstrap unconditionally: a class-stratified bootstrap is degenerate as well when both scores separate perfectly.
+- **Round 5 (CodeRabbit re-review)**: the Aalen-Johansen CIF and its Collett / Greenwood variance are computed from the original risk sets (`_aalen_johansen_exact`, engine and Recipe 15) instead of reading lifelines' jittered curve at midpoints, so tied events are counted exactly and events closer than the 1e-4 jitter cannot leak into an earlier time; values equal lifelines to 1e-12 without ties and the CIF conservation error drops to ~0 (previously ~0.001). Engine `run_meta_analysis` log-transforms a raw `effect_size` column on a ratio scale and raises when its scale is undeclared (a `log*` measure label declares log input), matching Recipe 24; the `meta` CLI runs its Egger guards before pooling and reports pooling errors as a `--measure` parameter error.
+- **Round 6 (CodeRabbit re-review)**: a terminal risk set (every subject at risk fails) contributes 0 to the Greenwood term of the CIF variance instead of 0 × ∞, so the last CIF keeps a finite variance and a proper interval (five simultaneous events, two primary: F = 0.4, Var = 0.048); a non-finite variance with 0 < F < 1 gives NaN bounds rather than a zero-width interval; the returned lifelines fitters are documented as jittered, with `cif_table` / `horizon_summary` as the exact source. `resolve_effect_measure` is the single alias table (`odds_ratio`, `lnor`, `log odds ratio`, `wmd`, ...) for the engine, the `meta` CLI Egger guard and forest-plot titles; scale failures raise `EffectScaleError`, which the CLI reports against `--measure` while other pooling errors carry no `--measure` hint; `--method` is a validated choice (dl, re, fe, iv) that the engine accepts. Egger's test is estimated only after pooling has validated the standard errors, so an invalid SE gives the pooling validation error instead of an unhandled statsmodels exception.
+- **Engine parity**: `medstat.diagnostic.validation.bootstrap_internal_validation` uses the same procedure via `_fit_logit_shared` (standardized MLE with unit-free separation check and L1 fallback, or Firth for `penalty="firth"` accepted when converged and finite, no |β| > 50 filter) for the original fit and every resample, and takes ŝ from the optimism-corrected slope; engine original coefficients and ŝ match Recipe 18 (`test_engine_bootstrap_validation_matches_recipe18`).

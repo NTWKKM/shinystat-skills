@@ -188,7 +188,7 @@ def plot_standalone_cif(
 
 ### 3. Multivariable / Subgroup / Meta-Analysis Forest Plot
 
-- **Primary Recipe**: Use `fit_firth_logistic` in [02-regression-firth-ordinal.md](recipes/02-regression-firth-ordinal.md) (Recipe 1), or `run_meta_analysis` in [05-diagnostic-meta-power.md](recipes/05-diagnostic-meta-power.md) (Recipe 24).
+- **Primary Recipe**: Use `fit_firth_logistic` in [02-regression-firth-ordinal.md](recipes/02-regression-firth-ordinal.md) (Recipe 1), or `run_meta_analysis` in [07-validation-samplesize-meta.md](recipes/07-validation-samplesize-meta.md) (Recipe 24).
 - **Scale & Axis Guidance**: For ratio effect measures (OR / RR / HR), use `log_scale=True`, `null_value=1.0`, and ratio axis labels (e.g. `xlabel="Adjusted Odds Ratio (95% CI)"`). For continuous difference effect measures (MD / SMD), use `log_scale=False`, `null_value=0.0`, and difference axis labels (e.g. `xlabel="Mean Difference (95% CI)"` or `xlabel="Standardized Mean Difference (95% CI)"`).
 - **Standalone Plot Template**:
 ```python
@@ -258,7 +258,7 @@ def plot_standalone_forest(
 
 ### 4. Diagnostic ROC Curve with DeLong 95% CI & Optimal Threshold
 
-- **Primary Recipe**: Use `auc_ci_delong` and `delong_paired_test` in [05-diagnostic-meta-power.md](recipes/05-diagnostic-meta-power.md) (Recipe 3).
+- **Primary Recipe**: Use `auc_ci_delong` and `delong_paired_test` in [05-diagnostic-accuracy-agreement.md](recipes/05-diagnostic-accuracy-agreement.md) (Recipe 3).
 - **Standalone Plot Template**:
 ```python
 import matplotlib.pyplot as plt
@@ -305,7 +305,7 @@ def plot_standalone_roc(
 
 ### 5. Calibration Belt & Decision Curve Analysis (DCA)
 
-- **Primary Recipe**: Use `evaluate_calibration` and `calculate_dca` in [05-diagnostic-meta-power.md](recipes/05-diagnostic-meta-power.md) (Recipe 4).
+- **Primary Recipe**: Use `evaluate_calibration` and `calculate_dca` in [05-diagnostic-accuracy-agreement.md](recipes/05-diagnostic-accuracy-agreement.md) (Recipe 4).
 - **Standalone Plot Template**:
 ```python
 import matplotlib.pyplot as plt
@@ -450,7 +450,7 @@ def plot_standalone_love(
 
 ### 7. Bland-Altman Method Agreement Plot
 
-- **Primary Recipe**: Use `calculate_bland_altman` in [05-diagnostic-meta-power.md](recipes/05-diagnostic-meta-power.md) (Recipe 5), marking mean bias and $\pm 1.96\text{ SD}$ Limits of Agreement (LoA) with 95% CI shading.
+- **Primary Recipe**: Use `calculate_bland_altman` in [05-diagnostic-accuracy-agreement.md](recipes/05-diagnostic-accuracy-agreement.md) (Recipe 5), marking mean bias and $\pm 1.96\text{ SD}$ Limits of Agreement (LoA) with 95% CI shading.
 - **Standalone Plot Template**:
 ```python
 import matplotlib.pyplot as plt
@@ -661,7 +661,7 @@ def plot_schoenfeld_residuals(
 
 ## 3. Standalone Interactive HTML Figures (Zero-Dependency Plotly Dicts)
 
-When generating interactive HTML reports with Dual / Toggle View in cloud sandboxes, use the pure-Python dictionary builders in [report-builder.md §B1](report-builder.md#b1-standalone-pure-python-plotly-spec-generators-zero-dependencies):
+When generating interactive HTML reports with Dual / Toggle View in cloud sandboxes, use the pure-Python dictionary builders in [report-plotly-specs.md](report-plotly-specs.md):
 - `build_plotly_roc_spec`
 - `build_plotly_km_spec`
 - `build_plotly_forest_spec`

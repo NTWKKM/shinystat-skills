@@ -14,6 +14,8 @@ import pandas as pd
 import scipy.stats as stats
 from sklearn.metrics import roc_auc_score, roc_curve
 
+from medstat.diagnostic._inputs import complete_cases
+
 
 def calculate_roc_curve(
     y_true: pd.Series | np.ndarray,
@@ -23,12 +25,9 @@ def calculate_roc_curve(
     """
     Compute empirical ROC curve points (FPR, TPR, thresholds) and AUC.
     """
-    y_t = (np.asarray(y_true) == pos_label).astype(int)
-    y_s = np.asarray(y_score, dtype=float)
-
-    valid = ~(np.isnan(y_t) | np.isnan(y_s))
-    y_t = y_t[valid]
-    y_s = y_s[valid]
+    y_t, y_s = complete_cases(
+        "calculate_roc_curve", y_true, y_score, pos_label=pos_label
+    )
 
     if len(np.unique(y_t)) < 2:
         raise ValueError("ROC curve requires both positive and negative cases.")
@@ -109,12 +108,7 @@ def auc_ci_delong(
     """
     Compute AUC and DeLong analytical 95% confidence intervals (DeLong et al., 1988).
     """
-    y_t = (np.asarray(y_true) == pos_label).astype(int)
-    y_s = np.asarray(y_score, dtype=float)
-
-    valid = ~(np.isnan(y_t) | np.isnan(y_s))
-    y_t = y_t[valid]
-    y_s = y_s[valid]
+    y_t, y_s = complete_cases("auc_ci_delong", y_true, y_score, pos_label=pos_label)
 
     n_pos = np.sum(y_t == 1)
     n_neg = np.sum(y_t == 0)
@@ -153,14 +147,9 @@ def delong_paired_test(
     """
     Paired DeLong test for comparing two correlated ROC curves evaluated on the same subjects.
     """
-    y_t = (np.asarray(y_true) == pos_label).astype(int)
-    s1 = np.asarray(score1, dtype=float)
-    s2 = np.asarray(score2, dtype=float)
-
-    valid = ~(np.isnan(y_t) | np.isnan(s1) | np.isnan(s2))
-    y_t = y_t[valid]
-    s1 = s1[valid]
-    s2 = s2[valid]
+    y_t, s1, s2 = complete_cases(
+        "delong_paired_test", y_true, score1, score2, pos_label=pos_label
+    )
 
     n_pos = np.sum(y_t == 1)
     n_neg = np.sum(y_t == 0)
@@ -191,7 +180,7 @@ def delong_paired_test(
     se_diff = np.sqrt(var_diff)
 
     z_stat = diff / se_diff
-    p_val = 2.0 * (1.0 - stats.norm.cdf(abs(z_stat)))
+    p_val = 2.0 * stats.norm.sf(abs(z_stat))
 
     z_crit = stats.norm.ppf(1.0 - alpha / 2.0)
     ci_low = diff - z_crit * se_diff
@@ -276,7 +265,7 @@ def compute_reclassification_metrics(
     se_e_cont = float(np.sqrt(max(0.0, var_e_cont)))
     z_e_cont = float(nri_e_cont / se_e_cont) if se_e_cont > 0.0 else 0.0
     p_val_e_cont = (
-        float(2.0 * (1.0 - stats.norm.cdf(abs(z_e_cont))))
+        float(2.0 * stats.norm.sf(abs(z_e_cont)))
         if se_e_cont > 0.0
         else (1.0 if nri_e_cont == 0.0 else 0.0)
     )
@@ -292,7 +281,7 @@ def compute_reclassification_metrics(
     se_ne_cont = float(np.sqrt(max(0.0, var_ne_cont)))
     z_ne_cont = float(nri_ne_cont / se_ne_cont) if se_ne_cont > 0.0 else 0.0
     p_val_ne_cont = (
-        float(2.0 * (1.0 - stats.norm.cdf(abs(z_ne_cont))))
+        float(2.0 * stats.norm.sf(abs(z_ne_cont)))
         if se_ne_cont > 0.0
         else (1.0 if nri_ne_cont == 0.0 else 0.0)
     )
@@ -302,7 +291,7 @@ def compute_reclassification_metrics(
     se_total_cont = float(np.sqrt(max(0.0, var_total_cont)))
     z_total_cont = float(nri_total_cont / se_total_cont) if se_total_cont > 0.0 else 0.0
     p_val_total_cont = (
-        float(2.0 * (1.0 - stats.norm.cdf(abs(z_total_cont))))
+        float(2.0 * stats.norm.sf(abs(z_total_cont)))
         if se_total_cont > 0.0
         else (1.0 if nri_total_cont == 0.0 else 0.0)
     )
@@ -401,7 +390,7 @@ def compute_reclassification_metrics(
         se_e_cat = float(np.sqrt(max(0.0, var_e_cat)))
         z_e_cat = float(nri_e_cat / se_e_cat) if se_e_cat > 0.0 else 0.0
         p_val_e_cat = (
-            float(2.0 * (1.0 - stats.norm.cdf(abs(z_e_cat))))
+            float(2.0 * stats.norm.sf(abs(z_e_cat)))
             if se_e_cat > 0.0
             else (1.0 if nri_e_cat == 0.0 else 0.0)
         )
@@ -419,7 +408,7 @@ def compute_reclassification_metrics(
         se_ne_cat = float(np.sqrt(max(0.0, var_ne_cat)))
         z_ne_cat = float(nri_ne_cat / se_ne_cat) if se_ne_cat > 0.0 else 0.0
         p_val_ne_cat = (
-            float(2.0 * (1.0 - stats.norm.cdf(abs(z_ne_cat))))
+            float(2.0 * stats.norm.sf(abs(z_ne_cat)))
             if se_ne_cat > 0.0
             else (1.0 if nri_ne_cat == 0.0 else 0.0)
         )
@@ -429,7 +418,7 @@ def compute_reclassification_metrics(
         se_total_cat = float(np.sqrt(max(0.0, var_total_cat)))
         z_total_cat = float(nri_total_cat / se_total_cat) if se_total_cat > 0.0 else 0.0
         p_val_total_cat = (
-            float(2.0 * (1.0 - stats.norm.cdf(abs(z_total_cat))))
+            float(2.0 * stats.norm.sf(abs(z_total_cat)))
             if se_total_cat > 0.0
             else (1.0 if nri_total_cat == 0.0 else 0.0)
         )
@@ -581,7 +570,7 @@ def compute_reclassification_metrics(
     )
     z_idi = float(idi_val / se_idi) if se_idi > 0.0 else 0.0
     p_val_idi = (
-        float(2.0 * (1.0 - stats.norm.cdf(abs(z_idi))))
+        float(2.0 * stats.norm.sf(abs(z_idi)))
         if se_idi > 0.0
         else (1.0 if idi_val == 0.0 else 0.0)
     )
@@ -1171,7 +1160,7 @@ def compute_time_dependent_roc(
                     )
                     z_d = float(d_auc / se_d) if se_d > 0.0 else 0.0
                     comparison_by_horizon[h]["p_value"] = float(
-                        2.0 * (1.0 - stats.norm.cdf(abs(z_d)))
+                        2.0 * stats.norm.sf(abs(z_d))
                     )
                     comparison_by_horizon[h]["ci_method"] = "bootstrap"
                 else:

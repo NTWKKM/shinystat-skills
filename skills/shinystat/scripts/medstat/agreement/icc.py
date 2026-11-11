@@ -219,6 +219,8 @@ def _compute_icc_from_matrix(
             "df1": int(df_B),
             "df2": int(df_W),
             "pval": float(p_1),
+            "ci_lower": float(ci_icc1_low),
+            "ci_upper": float(ci_icc1_high),
             "CI95%": ci_icc1,
         },
         {
@@ -229,6 +231,8 @@ def _compute_icc_from_matrix(
             "df1": int(df_B),
             "df2": int(df_E),
             "pval": float(p_23),
+            "ci_lower": float(L2),
+            "ci_upper": float(U2),
             "CI95%": ci_icc2,
         },
         {
@@ -239,6 +243,8 @@ def _compute_icc_from_matrix(
             "df1": int(df_B),
             "df2": int(df_E),
             "pval": float(p_23),
+            "ci_lower": float(ci_icc3_low),
+            "ci_upper": float(ci_icc3_high),
             "CI95%": ci_icc3,
         },
         {
@@ -249,6 +255,8 @@ def _compute_icc_from_matrix(
             "df1": int(df_B),
             "df2": int(df_W),
             "pval": float(p_1),
+            "ci_lower": float(ci_icc1k_low),
+            "ci_upper": float(ci_icc1k_high),
             "CI95%": ci_icc1k,
         },
         {
@@ -259,6 +267,8 @@ def _compute_icc_from_matrix(
             "df1": int(df_B),
             "df2": int(df_E),
             "pval": float(p_23),
+            "ci_lower": float(ci_icc2k_low),
+            "ci_upper": float(ci_icc2k_high),
             "CI95%": ci_icc2k,
         },
         {
@@ -269,6 +279,8 @@ def _compute_icc_from_matrix(
             "df1": int(df_B),
             "df2": int(df_E),
             "pval": float(p_23),
+            "ci_lower": float(ci_icc3k_low),
+            "ci_upper": float(ci_icc3k_high),
             "CI95%": ci_icc3k,
         },
     ]
@@ -295,3 +307,7 @@ def _compute_icc_from_matrix(
         return filtered
 
     return res_df
+
+
+# Backwards compatibility and agent aliases
+compute_icc = calculate_icc

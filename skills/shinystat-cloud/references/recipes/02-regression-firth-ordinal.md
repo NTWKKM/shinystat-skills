@@ -8,7 +8,7 @@
 
 ## 7. Firth's Penalized Likelihood Logistic Regression
 
-When sample sizes are small or monotone separation occurs ($\text{EPV} < 10$), standard MLE estimates explode ($\text{OR} \to \infty$). Firth's penalized logistic regression modifies the score equation by Jeffreys invariant prior: $U^*(\beta) = U(\beta) + a(\beta)$, where $a_j = \frac{1}{2}\text{tr}(I^{-1}\frac{\partial I}{\partial \beta_j}) = \sum_i h_i (0.5 - \pi_i) x_{ij}$. Reduces first-order parameter estimation bias (Heinze & Schemper, 2002). Implements **step-halving** to guarantee likelihood monotonicity and **profile likelihood confidence intervals** to eliminate Hauck-Donner explosion.
+When sample sizes are small or monotone separation occurs ($\text{EPV} < 10$), standard MLE estimates explode ($\text{OR} \to \infty$). Firth's penalized logistic regression modifies the score equation by Jeffreys invariant prior: $U^*(\beta) = U(\beta) + a(\beta)$, where $a_j = \frac{1}{2}\text{tr}(I^{-1}\frac{\partial I}{\partial \beta_j}) = \sum_i h_i (0.5 - \pi_i) x_{ij}$. Reduces first-order parameter estimation bias (Heinze & Schemper, 2002). Implements **step-halving** to guarantee likelihood monotonicity, **profile likelihood confidence intervals** (constrained Newton-Raphson profile, as in R `logistf`), and **penalized likelihood-ratio $P$-values** (`p_values`) to avoid Hauck-Donner Wald artefacts.
 
 ```python
 import numpy as np
@@ -27,6 +27,48 @@ def _firth_penalized_loglik(beta: np.ndarray, X: np.ndarray, y: np.ndarray) -> f
         return -np.inf
     ll = np.sum(y * eta - np.logaddexp(0.0, eta))
     return float(ll + 0.5 * logdet)
+
+
+def _firth_constrained_fit(
+    X: np.ndarray, y: np.ndarray, j: int, b_j: float, start: np.ndarray,
+    max_iter: int = 100, tol: float = 1e-8,
+) -> float:
+    """Max penalized log-lik with beta_j fixed at b_j (logistf profile scheme).
+
+    Newton-Raphson on the nuisance block with the full-model Firth score
+    U*_k = sum_i x_ik (y_i - pi_i + h_i (0.5 - pi_i)) and step-halving.
+    Smooth in b_j, so brentq can bracket the profile root reliably.
+    """
+    p = X.shape[1]
+    free = np.array([k for k in range(p) if k != j], dtype=int)
+    beta = np.asarray(start, dtype=float).copy()
+    beta[j] = b_j
+    pll = _firth_penalized_loglik(beta, X, y)
+    if free.size == 0:
+        return pll
+    for _ in range(max_iter):
+        pi = expit(X @ beta)
+        W = pi * (1.0 - pi)
+        I = (X.T * W) @ X
+        I_inv = np.linalg.pinv(I)
+        h = np.sum((X @ I_inv) * X, axis=1) * W
+        u = X[:, free].T @ (y - pi + h * (0.5 - pi))
+        step = np.linalg.pinv(I[np.ix_(free, free)]) @ u
+        t = 1.0
+        while True:
+            cand = beta.copy()
+            cand[free] += t * step
+            new_pll = _firth_penalized_loglik(cand, X, y)
+            if new_pll >= pll or t < 1e-6:
+                break
+            t *= 0.5
+        if new_pll < pll:
+            break
+        moved = np.max(np.abs(cand - beta))
+        beta, pll = cand, new_pll
+        if moved < tol:
+            break
+    return float(pll)
 
 
 def fit_firth_logistic(
@@ -143,27 +185,9 @@ def fit_firth_logistic(
         target_pll = current_pll - 0.5 * stats.chi2.ppf(0.95, df=1)
 
         for j in range(p):
-            other_idx = [idx for idx in range(p) if idx != j]
 
-            def profile_obj(b_j):
-                if len(other_idx) == 0:
-                    return (
-                        _firth_penalized_loglik(np.array([b_j]), X_arr, y_arr)
-                        - target_pll
-                    )
-
-                def nuisance_loss(nuis):
-                    b_full = np.zeros(p)
-                    b_full[j] = b_j
-                    b_full[other_idx] = nuis
-                    return -_firth_penalized_loglik(b_full, X_arr, y_arr)
-
-                res = optimize.minimize(
-                    nuisance_loss, beta[other_idx], method="Nelder-Mead"
-                )
-                if not res.success:
-                    return np.nan
-                return -res.fun - target_pll
+            def profile_obj(b_j, j=j):
+                return _firth_constrained_fit(X_arr, y_arr, j, b_j, beta) - target_pll
 
             # Root search with explicit Wald fallback tracking
             try:
@@ -192,6 +216,16 @@ def fit_firth_logistic(
                 ci_upper[j] = beta[j] + 1.96 * se[j]
                 ci_method[j] = "wald_fallback"
 
+    # Penalized likelihood-ratio test p-values (Heinze & Schemper 2002; R logistf default):
+    # 2 * [pll(beta_hat) - max pll | beta_j = 0] ~ chi2(1). Wald p-values are unreliable under separation.
+    p_values = np.full(p, np.nan)
+    if converged:
+        for j in range(p):
+            lr = 2.0 * (current_pll - _firth_constrained_fit(X_arr, y_arr, j, 0.0, beta))
+            p_values[j] = float(stats.chi2.sf(max(lr, 0.0), df=1))
+    else:
+        p_values = 2.0 * stats.norm.sf(np.abs(beta / se))
+
     forest_items = []
     start_j = 1 if fit_intercept else 0
     for j in range(start_j, p):
@@ -213,6 +247,8 @@ def fit_firth_logistic(
         "odds_ratios": np.exp(beta),
         "ci_lower": np.exp(ci_lower),
         "ci_upper": np.exp(ci_upper),
+        "p_values": p_values,
+        "p_value_method": "penalized_lrt" if converged else "wald_fallback",
         "converged": converged,
         "ci_method": ci_method,
         "pll_history": pll_history,
@@ -509,6 +545,31 @@ def fit_proportional_odds(
     raw_thresh = model.transform_threshold_params(result.params)
     cutpoints = np.asarray(raw_thresh[1:-1], dtype=float)
     predictor_df = summary_df.iloc[:k_vars].copy()
+
+    # statsmodels stores thresholds 2..K-1 as log-increments; report every threshold row on the cutpoint
+    # scale (matches R MASS::polr) with delta-method SEs: c_0 = t_0, c_i = t_0 + sum_{j<=i} exp(t_j).
+    k_thresh = len(cutpoints)
+    theta_thr = np.asarray(result.params, dtype=float)[k_vars:]
+    jac = np.zeros((k_thresh, k_thresh), dtype=float)
+    jac[:, 0] = 1.0
+    for i in range(1, k_thresh):
+        jac[i, 1 : i + 1] = np.exp(theta_thr[1 : i + 1])
+    cov_thr = np.asarray(result.cov_params(), dtype=float)[k_vars:, k_vars:]
+    se_cut = np.sqrt(np.maximum(0.0, np.diag(jac @ cov_thr @ jac.T)))
+    z_cut = cutpoints / np.where(se_cut > 0, se_cut, np.nan)
+    threshold_df = pd.DataFrame(
+        {
+            "coef": cutpoints,
+            "std_error": se_cut,
+            "z_stat": z_cut,
+            "p_value": 2.0 * stats.norm.sf(np.abs(z_cut)),
+            "odds_ratio": np.nan,
+            "or_ci_lower": np.nan,
+            "or_ci_upper": np.nan,
+        },
+        index=summary_df.index[k_vars:],
+    )
+    summary_df = pd.concat([predictor_df, threshold_df])
 
     return {
         "model": result,
@@ -1062,6 +1123,7 @@ def fit_gee(
     return {
         "model": res,
         "summary_df": summary_df,
+        "converged": bool(getattr(res, "converged", True)),
         "n_clusters": n_clusters,
         "cov_type": cov_type,
         "design_effect": deff_info["design_effect"],

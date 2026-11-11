@@ -566,7 +566,8 @@ def test_tier1_meta_random_effects_dersimonian_laird(meta_fixture_path):
     res = meta_mod.run_meta_analysis(df, method_re="DL")
     assert "random_effects" in res
     re = res["random_effects"]
-    assert re["ci_lower"] <= re["log_effect"] <= re["ci_upper"]
+    # CI bounds share the display scale of effect_disp (ratio scale for a log_effect column; ADR 75)
+    assert re["ci_lower"] <= re["effect_disp"] <= re["ci_upper"]
 
 
 def test_tier1_meta_heterogeneity_statistics(meta_fixture_path):

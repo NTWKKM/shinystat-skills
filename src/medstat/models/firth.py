@@ -20,6 +20,15 @@ from medstat.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _ci_methods_by_term(names: list[Any], term_is_wald: np.ndarray) -> dict[Any, str]:
+    """Map each term label (as in ``summary_df.index``) to its interval method."""
+    if len(set(names)) != len(names):
+        raise ValueError(
+            "Term labels must be unique so each term's interval method is reported."
+        )
+    return {n: ("wald" if w else "profile") for n, w in zip(names, term_is_wald)}
+
+
 def check_separation(
     y: pd.Series | np.ndarray,
     X: pd.DataFrame | np.ndarray,
@@ -44,7 +53,7 @@ def fit_firth_logistic(
     X: pd.DataFrame | np.ndarray,
     feature_names: list[str] | None = None,
     fit_intercept: bool = True,
-    penalty_weight: float = 1.0,
+    penalty_weight: float = 0.5,
     ci_method: Literal["pl", "wald"] = "pl",
     alpha: float = 0.05,
 ) -> dict[str, Any]:
@@ -56,7 +65,8 @@ def fit_firth_logistic(
         X: Covariate matrix or DataFrame.
         feature_names: Optional names for covariates.
         fit_intercept: Whether to fit an intercept term.
-        penalty_weight: Firth penalty scale parameter (default 1.0 = standard Jeffreys prior).
+        penalty_weight: Weight a in l(b) + a*log|I(b)| (default 0.5 = Firth 1993 Jeffreys prior,
+            numerically identical to R logistf). 1.0 doubles the penalty and over-shrinks.
         ci_method: 'pl' for Profile Likelihood (recommended) or 'wald'.
         alpha: Significance level for confidence intervals (default 0.05 for 95% CI).
 
@@ -66,7 +76,8 @@ def fit_firth_logistic(
             - 'summary_df': pd.DataFrame with estimate, odds_ratio, ci_lower, ci_upper, p_value
             - 'loglik': penalized log-likelihood
             - 'aic', 'bic': model fit information criteria
-            - 'ci_fallback': boolean indicating if PL fell back to Wald
+            - 'ci_fallback': boolean indicating if PL fell back to Wald for any term
+            - 'ci_methods': {term: 'profile' | 'wald'}, the interval method per term
     """
     y_arr = np.asarray(y, dtype=float).ravel()
     if isinstance(X, pd.DataFrame):
@@ -130,6 +141,8 @@ def fit_firth_logistic(
 
     # 2. Confidence intervals (Profile Likelihood first, fallback to Wald)
     ci_fallback = False
+    # Per-term interval method: a model-wide fallback flag does not say which terms fell back.
+    term_is_wald = np.full(len(coefs), ci_method != "pl")
     wald_low = coefs - stats.norm.ppf(1.0 - alpha / 2.0) * se
     wald_high = coefs + stats.norm.ppf(1.0 - alpha / 2.0) * se
 
@@ -144,12 +157,15 @@ def fit_firth_logistic(
                     low = np.where(non_finite, wald_low, low)
                     high = np.where(non_finite, wald_high, high)
                     ci_fallback = True
+                    term_is_wald = non_finite
             else:
                 low, high = wald_low, wald_high
                 ci_fallback = True
+                term_is_wald[:] = True
         except Exception:
             low, high = wald_low, wald_high
             ci_fallback = True
+            term_is_wald[:] = True
     else:
         low, high = wald_low, wald_high
 
@@ -182,10 +198,12 @@ def fit_firth_logistic(
     return {
         "model": model,
         "summary_df": summary_df,
+        "converged": bool(getattr(model, "converged_", True)),
         "loglik": float(llf) if np.isfinite(llf) else np.nan,
         "aic": float(aic) if np.isfinite(aic) else np.nan,
         "bic": float(bic) if np.isfinite(bic) else np.nan,
         "ci_fallback": ci_fallback,
+        "ci_methods": _ci_methods_by_term(names, term_is_wald),
         "lrt_fallback_vars": lrt_fallback_vars,
     }
 
@@ -196,7 +214,7 @@ def fit_firth_cox(
     X: pd.DataFrame | np.ndarray,
     covariate_names: list[str] | None = None,
     feature_names: list[str] | None = None,
-    penalty_weight: float = 1.0,
+    penalty_weight: float = 0.5,
     ci_method: Literal["pl", "wald"] = "pl",
     alpha: float = 0.05,
 ) -> dict[str, Any]:
@@ -209,7 +227,8 @@ def fit_firth_cox(
         X: Covariate matrix or DataFrame.
         covariate_names: Optional names for covariates.
         feature_names: Alias for covariate_names.
-        penalty_weight: Penalty scale parameter (default 1.0).
+        penalty_weight: Weight a in pl(b) + a*log|I(b)| (default 0.5 = Heinze-Schemper 2001,
+            numerically identical to R coxphf).
         ci_method: 'pl' for Profile Likelihood or 'wald'.
         alpha: Significance level for confidence intervals (default 0.05).
 
@@ -275,6 +294,8 @@ def fit_firth_cox(
 
     # Confidence Intervals
     ci_fallback = False
+    # Per-term interval method: a model-wide fallback flag does not say which terms fell back.
+    term_is_wald = np.full(len(coefs), ci_method != "pl")
     wald_low = coefs - stats.norm.ppf(1.0 - alpha / 2.0) * se
     wald_high = coefs + stats.norm.ppf(1.0 - alpha / 2.0) * se
 
@@ -289,12 +310,15 @@ def fit_firth_cox(
                     low = np.where(non_finite, wald_low, low)
                     high = np.where(non_finite, wald_high, high)
                     ci_fallback = True
+                    term_is_wald = non_finite
             else:
                 low, high = wald_low, wald_high
                 ci_fallback = True
+                term_is_wald[:] = True
         except Exception:
             low, high = wald_low, wald_high
             ci_fallback = True
+            term_is_wald[:] = True
     else:
         low, high = wald_low, wald_high
 
@@ -320,6 +344,8 @@ def fit_firth_cox(
     return {
         "model": model,
         "summary_df": summary_df,
+        "converged": bool(getattr(model, "converged_", True)),
         "ci_fallback": ci_fallback,
+        "ci_methods": _ci_methods_by_term(names, term_is_wald),
         "lrt_fallback_vars": lrt_fallback_vars,
     }

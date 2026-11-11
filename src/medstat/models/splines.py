@@ -87,9 +87,9 @@ def fit_cox_rcs(
         event_col: Name of binary event column.
         rcs_var: Continuous variable to model with splines (alias: spline_var).
         adjust_cols: Optional list of additional covariates to adjust for (alias: covariates).
-        knots: Number of spline knots (must be >= 3, default 4). Also accepts n_knots.
+        knots: Spline degrees of freedom passed to patsy.cr(df=...) (must be >= 3, default 4). Also accepts n_knots.
         ref_value: Reference value for hazard ratio comparisons (defaults to median of rcs_var).
-        constraints: Centering/orthogonality constraint passed to patsy cr (default: 'center').
+        constraints: Centering/orthogonality constraint passed to patsy.cr (default: 'center').
 
     Returns:
         CoxRCSResult: Tuple/dict supporting (plotly_figure, contrast_dataframe, model_stats_dict)
@@ -303,7 +303,7 @@ def fit_logistic_rcs(
         outcome: Binary outcome column.
         spline_var: Continuous variable to model with splines.
         covariates: Optional baseline confounders.
-        n_knots: Number of knots (default: 4).
+        n_knots: Spline degrees of freedom passed to patsy.cr(df=...) (default: 4).
         ref_value: Reference value for Odds Ratio comparisons (default: median).
 
     Returns:
@@ -423,3 +423,8 @@ def fit_logistic_rcs(
         "non_linear_pvalue": non_linear_p,
         "log_likelihood": float(logit_model.llf),
     }
+
+
+# Backwards compatibility and agent aliases
+fit_rcs_cox = fit_cox_rcs
+fit_rcs_logistic = fit_logistic_rcs

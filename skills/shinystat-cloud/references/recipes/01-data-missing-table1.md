@@ -96,11 +96,13 @@ def generate_table_one(
                 else:
                     row[col_labels[g]] = "-"
             try:
-                pval = (
-                    stats.kruskal(*group_vals).pvalue
-                    if len(groups) > 1 and all(len(v) for v in group_vals)
-                    else np.nan
-                )
+                # 2 groups: Mann-Whitney U (matches medstat); >2 groups: Kruskal-Wallis
+                if len(groups) == 2 and all(len(v) for v in group_vals):
+                    pval = stats.mannwhitneyu(group_vals[0], group_vals[1]).pvalue
+                elif len(groups) > 2 and all(len(v) for v in group_vals):
+                    pval = stats.kruskal(*group_vals).pvalue
+                else:
+                    pval = np.nan
             except Exception:
                 pval = np.nan
         else:
@@ -112,11 +114,13 @@ def generate_table_one(
                 else:
                     row[col_labels[g]] = "-"
             try:
-                pval = (
-                    stats.f_oneway(*group_vals).pvalue
-                    if len(groups) > 1 and all(len(v) for v in group_vals)
-                    else np.nan
-                )
+                # 2 groups: Welch t-test (unequal variances; matches medstat); >2 groups: one-way ANOVA
+                if len(groups) == 2 and all(len(v) for v in group_vals):
+                    pval = stats.ttest_ind(group_vals[0], group_vals[1], equal_var=False).pvalue
+                elif len(groups) > 2 and all(len(v) for v in group_vals):
+                    pval = stats.f_oneway(*group_vals).pvalue
+                else:
+                    pval = np.nan
             except Exception:
                 pval = np.nan
 
