@@ -243,8 +243,8 @@ def bootstrap_internal_validation(
         X_b = X_orig[boot_idx]
         if len(np.unique(y_b)) < 2:
             continue
-        # Skip samples with zero variance in any dummy/predictor column
-        if np.any(np.var(X_b, axis=0) <= 1e-12):
+        # Skip samples where any dummy/predictor column is constant (range check: unit-free)
+        if np.any(np.ptp(X_b, axis=0) == 0.0):
             continue
         X_b_const = sm.add_constant(X_b, has_constant="add")
         # Same procedure as the original model; non-converged resamples are rejected.
@@ -1063,8 +1063,9 @@ def run_meta_analysis(
         se_col: Column name containing standard errors (default 'se').
         study_col: Column name containing study identifiers (default 'study').
         exponentiate: Whether to exponentiate log effects for display (effect_disp, CIs).
-            When None, infers True if 'is_ratio' column is True or effect_col starts with 'log_',
-            otherwise False.
+            When None, resolves in order: 'is_ratio' column, 'effect_measure' column
+            (OR/RR/HR/IRR/SHR/DOR ratio; RD/MD/SMD difference), effect_col starting with
+            'log_', otherwise False.
     """
     if not (isinstance(alpha, (int, float)) and math.isfinite(alpha) and 0.0 < alpha < 1.0):
         raise ValueError("alpha must be a finite number strictly between 0 and 1.")
@@ -1079,6 +1080,13 @@ def run_meta_analysis(
             raise ValueError(
                 f"Cannot pool different effect measures in one analysis: {sorted(measures)}."
             )
+
+    ratio_measures = {"OR", "RR", "HR", "IRR", "SHR", "DOR"}
+    difference_measures = {"RD", "MD", "SMD"}
+    declared = (
+        df_work["effect_measure"].dropna() if "effect_measure" in df_work.columns else pd.Series([], dtype=object)
+    )
+    declared_measure = str(declared.iloc[0]).strip().upper() if len(declared) else ""
 
     effect_col_present = effect_col in df_work.columns
     if exponentiate is not None:
@@ -1095,6 +1103,10 @@ def run_meta_analysis(
                 "Column 'is_ratio' contains conflicting values across studies; pass 'exponentiate' explicitly."
             )
         is_ratio = first_val
+    elif declared_measure in ratio_measures | difference_measures:
+        # The declared measure decides the scale before any column-name inference
+        # (e.g. effect_measure="MD" in a 'log_effect' column stays additive).
+        is_ratio = declared_measure in ratio_measures
     elif effect_col_present and isinstance(effect_col, str) and effect_col.startswith("log_"):
         # Name-based inference only for a column that exists.
         is_ratio = True

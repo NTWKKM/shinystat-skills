@@ -356,8 +356,9 @@ def bootstrap_internal_validation(
         if sum_boot == 0 or sum_boot == n_total:
             continue
 
-        # Skip samples with zero variance in any dummy/predictor column (singular design matrix)
-        if np.any(np.var(X_boot, axis=0) <= 1e-12):
+        # Skip samples where any dummy/predictor column is constant (singular design
+        # matrix); a range check is unit-free, unlike a raw-scale variance floor.
+        if np.any(np.ptp(X_boot, axis=0) == 0.0):
             continue
 
         X_boot_const = sm.add_constant(X_boot, has_constant="add")

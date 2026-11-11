@@ -906,3 +906,67 @@ def test_engine_bootstrap_skips_replicates_with_failed_boot_slope(monkeypatch):
     res = validation.bootstrap_internal_validation(df, "y", ["x1", "x2"], n_bootstrap=10)
     assert res["n_successful_replicates"] == 9
     assert np.isfinite(res["metrics"]["calibration_slope"]["optimism"])
+
+
+# ---------------------------------------------------------------------------
+# ADR 76 (round 4): CodeRabbit re-review
+# ---------------------------------------------------------------------------
+def test_recipe3_paired_delong_identical_rankings_are_unavailable(recipes):
+    y = np.array([0, 0, 0, 0, 1, 1, 1, 1])
+    s = np.array([0.1, 0.5, 0.3, 0.7, 0.4, 0.6, 0.8, 0.9])
+    res = recipes["delong_paired_test"](y, s, 3.5 * s + 10.0)
+    assert res["difference"] == pytest.approx(0.0, abs=1e-12)
+    for key in ("se_difference", "z_statistic", "p_value", "ci_lower", "ci_upper"):
+        assert np.isnan(res[key]), key
+    assert res["warning"]
+
+
+def _tiny_unit_frame():
+    rng = np.random.default_rng(4)
+    n = 300
+    x = rng.normal(size=n)
+    y = rng.binomial(1, 1 / (1 + np.exp(-(0.3 + 1.2 * x))))
+    # Variance ~1e-14: below the old raw-scale 1e-12 floor, so every resample was skipped.
+    return pd.DataFrame({"y": y, "x": x, "x_tiny": x * 1e-7})
+
+
+def test_recipe18_constant_check_is_unit_free(recipes):
+    df = _tiny_unit_frame()
+    a = recipes["bootstrap_internal_validation"](df, "y", ["x"], n_bootstrap=20)
+    b = recipes["bootstrap_internal_validation"](df, "y", ["x_tiny"], n_bootstrap=20)
+    assert b["n_successful_replicates"] == a["n_successful_replicates"] == 20
+    assert b["shrinkage_factor"] == pytest.approx(a["shrinkage_factor"], rel=1e-6)
+
+
+def test_engine_bootstrap_constant_check_is_unit_free():
+    from medstat.diagnostic.validation import bootstrap_internal_validation
+
+    df = _tiny_unit_frame()
+    a = bootstrap_internal_validation(df, "y", ["x"], n_bootstrap=20)
+    b = bootstrap_internal_validation(df, "y", ["x_tiny"], n_bootstrap=20)
+    assert b["n_successful_replicates"] == a["n_successful_replicates"] == 20
+    assert b["shrinkage_factor"] == pytest.approx(a["shrinkage_factor"], rel=1e-6)
+
+
+def test_recipe24_effect_measure_decides_scale_before_column_name(recipes):
+    from medstat.meta.models import run_meta_analysis
+
+    rng = np.random.default_rng(6)
+    se = rng.uniform(0.2, 0.6, 6)
+    base = pd.DataFrame(
+        {"study": [f"s{i}" for i in range(6)], "log_effect": 1.5 + rng.normal(0, se), "se": se}
+    )
+    md = base.assign(effect_measure="MD")
+    rec_md = recipes["run_meta_analysis"](md)
+    assert rec_md["is_ratio"] is False
+    assert rec_md["random_effects"]["effect_disp"] == pytest.approx(
+        rec_md["random_effects"]["log_effect"]
+    )
+    assert rec_md["random_effects"]["effect_disp"] == pytest.approx(
+        run_meta_analysis(md)["random_effects"]["effect_disp"]
+    )
+    rec_or = recipes["run_meta_analysis"](base.assign(effect_measure="OR"))
+    assert rec_or["is_ratio"] is True
+    assert rec_or["random_effects"]["effect_disp"] == pytest.approx(
+        np.exp(rec_or["random_effects"]["log_effect"])
+    )

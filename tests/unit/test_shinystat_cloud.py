@@ -211,7 +211,10 @@ def test_delong_nan_safety_in_series(recipes):
     paired_res = paired_test(y_series, score1, score2)
     assert "difference" in paired_res
     assert "p_value" in paired_res
-    assert not np.isnan(paired_res["p_value"])
+    # Both scores separate the 4 complete cases perfectly (identical rankings): the DeLong
+    # variance is zero, so inference is unavailable rather than P = 1 (ADR 76 round 4).
+    assert paired_res["difference"] == 0.0
+    assert np.isnan(paired_res["p_value"]) and paired_res["warning"]
 
 
 # -----------------------------------------------------------------------------

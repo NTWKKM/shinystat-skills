@@ -268,16 +268,13 @@ def delong_paired_test(y_true, score1, score2, alpha: float = 0.05) -> dict:
         z_stat = diff / se_diff
         p_val = float(2.0 * stats.norm.sf(abs(z_stat)))
         ci_l, ci_u = float(diff - z_crit * se_diff), float(diff + z_crit * se_diff)
-    elif abs(diff) <= 1e-12:
-        # Identical rankings: no difference to test.
-        se_diff, z_stat, p_val, ci_l, ci_u = 0.0, 0.0, 1.0, float(diff), float(diff)
     else:
-        # Degenerate placements (e.g. perfect separation): asymptotic variance is zero,
-        # so the normal test is undefined. Report inference as unavailable.
+        # Zero asymptotic variance (identical rankings or degenerate placements, e.g.
+        # perfect separation): the normal test is undefined, whatever the difference.
         se_diff, z_stat, p_val, ci_l, ci_u = (np.nan,) * 5
         warning = (
-            "DeLong variance of the AUC difference is zero (degenerate placements); "
-            "z-test and CI unavailable. Use a bootstrap or exact method."
+            "DeLong variance of the AUC difference is zero (identical rankings or "
+            "degenerate placements); z-test and CI unavailable. Use a bootstrap or exact method."
         )
 
     return {
