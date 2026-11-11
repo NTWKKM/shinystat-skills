@@ -760,7 +760,13 @@ def fit_survival_analysis_suite(
 
 @dataclass
 class CompetingRisksCIFResult:
-    """Container for Competing Risks Cumulative Incidence Function (CIF) results."""
+    """Container for Competing Risks Cumulative Incidence Function (CIF) results.
+
+    `cif_table` and `horizon_summary` hold the exact Aalen-Johansen values from the original
+    event times. `ajf_primary` / `ajf_competing` are lifelines fits kept for plotting and API
+    compatibility; with tied event times lifelines jitters them, so their curves can differ
+    slightly from the exact values. Report CIFs from `cif_table` / `horizon_summary`.
+    """
 
     ajf_primary: AalenJohansenFitter
     ajf_competing: AalenJohansenFitter
@@ -784,16 +790,20 @@ def _cif_loglog_ci(
     """Asymmetric log(-log) CI for a cumulative incidence F(t) (Kalbfleisch-Prentice; cmprsk convention).
 
     theta = log(-log F), SE(theta) = SE(F) / |F log F|; bounds are F**exp(+/- z SE(theta)),
-    so they stay inside (0, 1) without clipping. F in {0, 1} returns a degenerate interval.
+    so they stay inside (0, 1) without clipping. F in {0, 1} (or zero variance) returns a
+    degenerate interval; an undefined (non-finite) variance with 0 < F < 1 returns NaN bounds.
     """
     cif = np.asarray(cif, dtype=float)
     se = np.sqrt(np.maximum(np.asarray(var, dtype=float), 0.0))
     lower, upper = cif.copy(), cif.copy()
-    ok = (cif > 0.0) & (cif < 1.0) & (se > 0.0)
+    interior = (cif > 0.0) & (cif < 1.0)
+    ok = interior & np.isfinite(se) & (se > 0.0)
     f = cif[ok]
     sd_theta = se[ok] / np.abs(f * np.log(f))
     lower[ok] = f ** np.exp(z * sd_theta)
     upper[ok] = f ** np.exp(-z * sd_theta)
+    undefined = interior & ~np.isfinite(se)
+    lower[undefined] = upper[undefined] = np.nan
     return lower, upper
 
 
@@ -817,7 +827,9 @@ def _aalen_johansen_exact(
     with np.errstate(divide="ignore", invalid="ignore"):
         s_lag = np.r_[1.0, np.cumprod(1.0 - d_i / n_i)[:-1]]
         f_i = np.cumsum(s_lag * d_k / n_i)
-        a = d_i / (n_i * (n_i - d_i))  # inf when every subject at risk fails (n_i == d_i)
+        # Terminal risk set (every subject at risk fails, n_i == d_i): F cannot change after t_i
+        # and (F(t) - F_i) = 0 there, so its Greenwood term contributes 0, not 0 * inf.
+        a = np.where(n_i > d_i, d_i / (n_i * np.maximum(n_i - d_i, 1)), 0.0)
         b = s_lag**2 * d_k * (n_i - d_k) / n_i**3
         c = s_lag * d_k / n_i**2
         # Expand (F - F_i)^2 and (F - F_i) so each term is a running sum.

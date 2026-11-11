@@ -1008,7 +1008,8 @@ def test_engine_cif_uses_original_event_times():
     assert res.horizon_summary["cif_primary"].iloc[0] == pytest.approx(
         round(_aj_bruteforce(dur, evt, 1, 3.000015), 4)
     )
-    assert res.probability_conservation_max_error < 1e-9
+    conservation = res.cif_table["conservation_sum"].to_numpy()
+    assert np.max(np.abs(conservation - 1.0)) < 1e-9
 
 
 def test_recipe15_cif_uses_original_event_times(recipes):
@@ -1029,12 +1030,16 @@ def test_engine_aj_variance_equals_lifelines_without_ties():
     dur = rng.exponential(5, 300)
     evt = rng.choice([0, 1, 2], 300, p=[0.3, 0.4, 0.3])
     tl = np.sort(np.unique(np.r_[0.0, dur[evt > 0]]))
+    tl = tl[tl < dur.max()]  # lifelines' terminal-time variance is non-finite (0 * inf)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         aj = AalenJohansenFitter(calculate_variance=True).fit(dur, evt, event_of_interest=1)
     cif, var = _aalen_johansen_exact(dur, evt, 1, tl)
-    np.testing.assert_allclose(cif, aj.cumulative_density_.iloc[:, 0].reindex(tl, method="ffill"), atol=1e-12)
-    np.testing.assert_allclose(var, aj.variance_.reindex(tl, method="ffill"), atol=1e-12)
+    ref_cif = aj.cumulative_density_.iloc[:, 0].reindex(tl, method="ffill").to_numpy()
+    ref_var = aj.variance_.reindex(tl, method="ffill").to_numpy()
+    assert np.all(np.isfinite(ref_var)) and np.all(np.isfinite(var))
+    np.testing.assert_allclose(cif, ref_cif, atol=1e-12, equal_nan=False)
+    np.testing.assert_allclose(var, ref_var, atol=1e-12, equal_nan=False)
 
 
 def test_engine_meta_raw_effect_size_is_logged_or_rejected():
@@ -1058,3 +1063,90 @@ def test_engine_meta_raw_effect_size_is_logged_or_rejected():
     assert run_meta_analysis(logged, effect_measure="log_or")["random_effects"]["effect_disp"] == pytest.approx(
         via_log["random_effects"]["effect_disp"]
     )
+
+
+# ---------------------------------------------------------------------------
+# ADR 76 (round 6): terminal risk set, undefined CIF variance, measure aliases
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("source", ["engine", "recipe"])
+def test_aj_terminal_risk_set_variance(recipes, source):
+    from medstat.models.survival import _aalen_johansen_exact
+
+    fn = _aalen_johansen_exact if source == "engine" else recipes["_aalen_johansen_exact"]
+    # Five simultaneous events, two primary: F = 2/5, Var = S^2 d_k (n - d_k) / n^3 = 0.048.
+    cif, var = fn(np.full(5, 2.0), np.array([1, 1, 2, 2, 2]), 1, np.array([0.0, 2.0]))
+    assert cif[-1] == pytest.approx(0.4) and var[-1] == pytest.approx(0.048)
+
+
+def test_cif_terminal_event_keeps_a_proper_interval(recipes):
+    from medstat.models.survival import fit_competing_risks_cif
+
+    dur, evt = np.array([1.0, 2.0, 3.0, 4.0, 5.0]), np.array([1, 2, 2, 1, 2])
+    for tab in (
+        fit_competing_risks_cif(dur, evt).cif_table,
+        recipes["fit_competing_risks_cif"](dur, evt)["cif_table"],
+    ):
+        last = tab.iloc[-1]
+        assert last["time"] == 5.0 and last["cif_primary"] == pytest.approx(0.4)
+        assert np.isfinite(last["cif_primary_ci_lower"]) and np.isfinite(last["cif_primary_ci_upper"])
+        assert last["cif_primary_ci_upper"] - last["cif_primary_ci_lower"] > 0.1
+
+
+def test_cif_loglog_ci_is_nan_for_undefined_variance():
+    from medstat.models.survival import _cif_loglog_ci
+
+    lo, hi = _cif_loglog_ci(np.array([0.0, 0.3, 0.3, 1.0]), np.array([0.0, np.inf, 0.0, np.nan]), 1.96)
+    assert np.isnan(lo[1]) and np.isnan(hi[1])  # undefined variance -> unavailable
+    assert lo[2] == hi[2] == 0.3  # zero variance keeps the degenerate interval
+    assert (lo[0], hi[0], lo[3], hi[3]) == (0.0, 0.0, 1.0, 1.0)  # boundary values unchanged
+
+
+@pytest.mark.parametrize(
+    "label, family, logged",
+    [("odds_ratio", "OR", False), ("OR", "OR", False), ("lnor", "OR", True), ("log_or", "OR", True),
+     ("log odds ratio", "OR", True), ("risk_ratio", "RR", False), ("wmd", "MD", False), ("foo", None, False)],
+)
+def test_resolve_effect_measure_aliases(label, family, logged):
+    from medstat.meta.models import resolve_effect_measure
+
+    assert resolve_effect_measure(label) == (family, logged)
+
+
+def test_engine_meta_measure_aliases_raw_and_prelogged():
+    from medstat.meta.models import compute_binary_effect_sizes, run_meta_analysis
+
+    counts = pd.DataFrame(
+        {"study": list("abcd"), "et": [3, 5, 8, 4], "nt": [20] * 4, "ec": [6, 9, 10, 7], "nc": [20] * 4}
+    )
+    es = compute_binary_effect_sizes(counts, "et", "nt", "ec", "nc", "study")
+    target = run_meta_analysis(es)["random_effects"]["effect_disp"]
+    raw = es[["study", "effect_size", "se"]]
+    logged = es[["study", "se"]].assign(effect_size=es["log_effect"])
+    assert run_meta_analysis(raw, effect_measure="odds_ratio")["random_effects"]["effect_disp"] == pytest.approx(target)
+    assert run_meta_analysis(logged, effect_measure="lnor")["random_effects"]["effect_disp"] == pytest.approx(target)
+
+
+def _meta_csv(tmp_path, effect):
+    path = tmp_path / "meta.csv"
+    pd.DataFrame(
+        {"study": [f"S{i}" for i in range(4)], "effect_size": effect, "se": [0.2, 0.3, 0.25, 0.2]}
+    ).to_csv(path, index=False)
+    return path
+
+
+def test_meta_cli_routes_only_scale_errors_to_measure(tmp_path):
+    from click.testing import CliRunner
+
+    from medstat.cli.main import cli
+
+    base = ["meta", "--effect-col", "effect_size", "--se-col", "se", "--study-col", "study"]
+    scale = CliRunner().invoke(cli, base + ["--data", str(_meta_csv(tmp_path, [1.2, 0.8, 1.5, 1.1]))])
+    assert scale.exit_code != 0 and "--measure" in scale.output and "scale of 'effect_size'" in scale.output
+    ok = CliRunner().invoke(
+        cli, base + ["--data", str(_meta_csv(tmp_path, [1.2, 0.8, 1.5, 1.1])), "--measure", "odds_ratio", "--method", "iv"]
+    )
+    assert ok.exit_code == 0, ok.output
+    bad_se = tmp_path / "bad.csv"
+    pd.DataFrame({"study": ["a", "b"], "effect_size": [0.1, 0.2], "se": [0.0, 0.2]}).to_csv(bad_se, index=False)
+    other = CliRunner().invoke(cli, base + ["--data", str(bad_se), "--measure", "md"])
+    assert other.exit_code != 0 and "strictly positive" in other.output and "--measure" not in other.output

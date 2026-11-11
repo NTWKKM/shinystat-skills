@@ -25,15 +25,39 @@ _DIFFERENCE_MEASURES = {"RD", "MD", "SMD", "CONTINUOUS"}
 _RAW_EFFECT_COLS = {"effect_size"}
 
 
-def _measure_key(effect_measure: Any) -> str:
-    """Normalise an effect-measure label ('log_or', 'OR', 'md') to its upper-case family key."""
-    return (
-        str(effect_measure or "")
-        .strip()
-        .upper()
-        .removeprefix("LOG_")
-        .removeprefix("LOG")
-    )
+# Accepted labels per measure family (CLI --measure, 'effect_measure' / 'measure' columns, forest titles).
+_MEASURE_ALIASES = {
+    "OR": {"OR", "ODDS_RATIO", "ODDSRATIO"},
+    "RR": {"RR", "RISK_RATIO", "RELATIVE_RISK"},
+    "HR": {"HR", "HAZARD_RATIO"},
+    "IRR": {"IRR", "INCIDENCE_RATE_RATIO", "RATE_RATIO"},
+    "SHR": {"SHR", "SUBDISTRIBUTION_HAZARD_RATIO"},
+    "DOR": {"DOR", "DIAGNOSTIC_ODDS_RATIO"},
+    "RD": {"RD", "RISK_DIFFERENCE"},
+    "MD": {"MD", "MEAN_DIFF", "MEAN_DIFFERENCE", "WMD"},
+    "SMD": {"SMD", "STANDARDIZED_MEAN_DIFFERENCE", "HEDGES_G"},
+    "CONTINUOUS": {"CONTINUOUS"},
+}
+_ALIAS_TO_FAMILY = {a: fam for fam, names in _MEASURE_ALIASES.items() for a in names}
+
+
+class EffectScaleError(ValueError):
+    """The input scale of the pooled effect column cannot be resolved (raw vs log, ratio vs difference)."""
+
+
+def resolve_effect_measure(label: Any) -> tuple[str | None, bool]:
+    """Map an effect-measure label to (family, log_input).
+
+    'OR', 'odds_ratio' -> ('OR', False); 'log_or', 'lnor', 'log odds ratio' -> ('OR', True);
+    'md', 'wmd', 'mean_difference' -> ('MD', False). Unknown or empty labels -> (None, False).
+    """
+    key = "_".join(str(label or "").strip().upper().replace("-", " ").split())
+    if key in _ALIAS_TO_FAMILY:
+        return _ALIAS_TO_FAMILY[key], False
+    for prefix in ("LOG_", "LN_", "LOG", "LN"):
+        if key.startswith(prefix) and key[len(prefix) :] in _ALIAS_TO_FAMILY:
+            return _ALIAS_TO_FAMILY[key[len(prefix) :]], True
+    return None, False
 
 
 def compute_binary_effect_sizes(
@@ -200,7 +224,8 @@ def run_meta_analysis(
             None resolves in order: 'is_ratio' column, effect_measure in {OR, RR, HR, IRR, SHR, DOR},
             an effect column named 'log_*', else False (same rule as cloud Recipe 24).
             A raw-scale 'effect_size' column with a ratio scale is log-transformed
-            before pooling; with no declared scale it raises, unless effect_measure starts with 'log'.
+            before pooling; with no declared scale it raises EffectScaleError, unless the measure
+            label declares log input ('log_or', 'lnor'; see resolve_effect_measure).
         alpha: Significance level (default 0.05 for 95% CIs).
     """
     valid_methods_re = ["DL", "DERSIMONIAN-LAIRD"]
@@ -218,12 +243,13 @@ def run_meta_analysis(
         "DL",
         "DERSIMONIAN-LAIRD",
         "FE",
+        "IV",
         "RE",
         "FIXED",
         "RANDOM",
     ]:
         raise ValueError(
-            f"Unsupported method '{method}'. Must be one of: DL, FE, RE, fixed, random."
+            f"Unsupported method '{method}'. Must be one of: DL, FE, IV, RE, fixed, random."
         )
 
     df_work = df.copy()
@@ -267,6 +293,7 @@ def run_meta_analysis(
     if np.any(se_arr <= 0) or np.any(np.isnan(se_arr)):
         raise ValueError("Standard error must be strictly positive.")
     se = se_arr
+    measure_family, log_labelled = resolve_effect_measure(effect_measure)
     if exponentiate is not None:
         is_ratio = bool(exponentiate)
     elif "is_ratio" in df_work.columns:
@@ -276,32 +303,30 @@ def run_meta_analysis(
                 "Column 'is_ratio' has missing or conflicting values across studies; pass 'exponentiate' explicitly."
             )
         is_ratio = bool(flags.iloc[0])
-    elif _measure_key(effect_measure) in _RATIO_MEASURES:
+    elif measure_family in _RATIO_MEASURES:
         is_ratio = True
-    elif _measure_key(effect_measure) in _DIFFERENCE_MEASURES:
+    elif measure_family in _DIFFERENCE_MEASURES:
         is_ratio = False
     else:
         is_ratio = bool(source_effect_col and source_effect_col.startswith("log_"))
 
     # A raw-scale 'effect_size' column holds ratios as OR / RR, not log values;
     # a measure label starting with 'log' declares log-scale input instead.
-    raw_input = source_effect_col in _RAW_EFFECT_COLS and not str(
-        effect_measure or ""
-    ).strip().upper().startswith("LOG")
+    raw_input = source_effect_col in _RAW_EFFECT_COLS and not log_labelled
     if raw_input:
         scale_declared = (
             exponentiate is not None
             or "is_ratio" in df_work.columns
-            or _measure_key(effect_measure) in _RATIO_MEASURES | _DIFFERENCE_MEASURES
+            or measure_family is not None
         )
         if not scale_declared:
-            raise ValueError(
+            raise EffectScaleError(
                 f"The scale of '{source_effect_col}' is unknown; pass exponentiate=True (ratio) or "
                 "exponentiate=False (difference), an effect_measure, or an 'is_ratio' column."
             )
         if is_ratio:
             if not np.all(np.isfinite(theta)) or np.any(theta <= 0):
-                raise ValueError(
+                raise EffectScaleError(
                     f"Ratio values in '{source_effect_col}' must be finite and > 0 to log-transform."
                 )
             theta = np.log(theta)

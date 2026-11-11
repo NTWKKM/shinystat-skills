@@ -596,7 +596,9 @@ def _aalen_johansen_exact(
     with np.errstate(divide="ignore", invalid="ignore"):
         s_lag = np.r_[1.0, np.cumprod(1.0 - d_i / n_i)[:-1]]
         f_i = np.cumsum(s_lag * d_k / n_i)
-        a = d_i / (n_i * (n_i - d_i))  # inf when every subject at risk fails (n_i == d_i)
+        # Terminal risk set (every subject at risk fails, n_i == d_i): F cannot change after t_i
+        # and (F(t) - F_i) = 0 there, so its Greenwood term contributes 0, not 0 * inf.
+        a = np.where(n_i > d_i, d_i / (n_i * np.maximum(n_i - d_i, 1)), 0.0)
         b = s_lag**2 * d_k * (n_i - d_k) / n_i**3
         c = s_lag * d_k / n_i**2
         # Expand (F - F_i)^2 and (F - F_i) so each term is a running sum.
@@ -620,7 +622,12 @@ def fit_competing_risks_cif(
     horizons: list[float] | None = None,
     alpha: float = 0.05,
 ) -> dict[str, Any]:
-    """Fit Aalen-Johansen CIF curves and audit Naive 1 - KM overestimation bias."""
+    """Fit Aalen-Johansen CIF curves and audit Naive 1 - KM overestimation bias.
+
+    `cif_table` / `horizon_summary` hold the exact CIFs from the original event times. The returned
+    `ajf_primary` / `ajf_competing` lifelines fits use jittered times when events are tied, so their
+    curves can differ slightly; report CIFs from `cif_table` / `horizon_summary`.
+    """
     if event_of_interest <= 0 or competing_event <= 0:
         raise ValueError(
             f"event_of_interest ({event_of_interest}) and competing_event ({competing_event}) must be positive integers (> 0); 0 is reserved for censoring."
@@ -693,12 +700,16 @@ def fit_competing_risks_cif(
 
     z = float(stats.norm.ppf(1.0 - alpha / 2.0))
     # Asymmetric log(-log) CI: F**exp(+/- z * SE(F) / |F log F|), stays inside (0, 1).
+    # Zero variance or F in {0, 1}: degenerate interval; undefined variance: NaN bounds.
     se1 = np.sqrt(var1)
     cif1_l, cif1_u = cif1.copy(), cif1.copy()
-    ok = (cif1 > 0.0) & (cif1 < 1.0) & (se1 > 0.0)
+    interior = (cif1 > 0.0) & (cif1 < 1.0)
+    ok = interior & np.isfinite(se1) & (se1 > 0.0)
     sd_theta = se1[ok] / np.abs(cif1[ok] * np.log(cif1[ok]))
     cif1_l[ok] = cif1[ok] ** np.exp(z * sd_theta)
     cif1_u[ok] = cif1[ok] ** np.exp(-z * sd_theta)
+    undefined = interior & ~np.isfinite(se1)
+    cif1_l[undefined] = cif1_u[undefined] = np.nan
 
     cif_table = pd.DataFrame({
         "time": timeline,

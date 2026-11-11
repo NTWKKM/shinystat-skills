@@ -65,7 +65,11 @@ from medstat.diagnostic.validation import (
 from medstat.figures.survival import plot_cif
 from medstat.meta.bias import eggers_test
 from medstat.meta.forest import generate_forest_data
-from medstat.meta.models import run_meta_analysis
+from medstat.meta.models import (
+    EffectScaleError,
+    resolve_effect_measure,
+    run_meta_analysis,
+)
 from medstat.models.firth import fit_firth_cox, fit_firth_logistic
 from medstat.models.glm import fit_linear_regression, fit_standard_logistic
 from medstat.models.multilevel import (
@@ -2313,7 +2317,8 @@ def iptw_cmd(
 @click.option(
     "--method",
     default="dl",
-    help="Estimation method (dl=DerSimonian-Laird, iv=Inverse Variance).",
+    type=click.Choice(["dl", "fe", "iv", "re"], case_sensitive=False),
+    help="Estimation method (dl/re = DerSimonian-Laird random effects, fe/iv = inverse-variance fixed effect). Both models are always reported.",
 )
 @click.option(
     "--forest-plot", type=click.Path(), help="Output path for Forest plot JSON."
@@ -2399,23 +2404,9 @@ def meta_cmd(
         else:
             measure_type = None
 
-        SUPPORTED_CONTINUOUS = (
-            "continuous",
-            "md",
-            "mean_diff",
-            "mean_difference",
-            "wmd",
-        )
-        BINARY_RATIO_MEASURES = (
-            "log_or",
-            "log_odds_ratio",
-            "or",
-            "odds_ratio",
-            "rr",
-            "log_rr",
-            "risk_ratio",
-            "relative_risk",
-        )
+        # Same alias table as the engine and forest plot (resolve_effect_measure).
+        SUPPORTED_CONTINUOUS = ("MD", "CONTINUOUS")
+        measure_family, _ = resolve_effect_measure(measure_type)
 
         if not measure_type:
             raise click.BadParameter(
@@ -2423,19 +2414,19 @@ def meta_cmd(
                 param_hint="--egger",
             )
 
-        if measure_type in BINARY_RATIO_MEASURES:
+        if measure_family in ("OR", "RR"):
             raise click.BadParameter(
                 "Egger's test is invalid for binary log odds ratios due to artifactual correlation between log OR and standard error. Use continuous effect sizes or alternative tests.",
                 param_hint="--egger",
             )
-        if measure_type == "smd":
+        if measure_family == "SMD":
             raise click.BadParameter(
                 "Egger's test is invalid for standardized mean differences (SMD) due to artifactual correlation between effect size and standard error. Consider using sample-size-based precision or an alternative small-study effect test.",
                 param_hint="--egger",
             )
-        if measure_type not in SUPPORTED_CONTINUOUS:
+        if measure_family not in SUPPORTED_CONTINUOUS:
             raise click.BadParameter(
-                f"Unsupported effect measure '{measure_type}' for Egger's test. Egger's test requires a supported continuous measure ({', '.join(SUPPORTED_CONTINUOUS)}).",
+                f"Unsupported effect measure '{measure_type}' for Egger's test. Egger's test requires a supported continuous measure (continuous, md, mean_diff, mean_difference, wmd).",
                 param_hint="--egger",
             )
         egger_res = eggers_test(df[effect_col], df[se_col])
@@ -2451,8 +2442,11 @@ def meta_cmd(
             method=method,
             effect_measure=measure,
         )
-    except ValueError as err:
+    except EffectScaleError as err:
+        # Scale-resolution failures are fixed by declaring the measure.
         raise click.BadParameter(str(err), param_hint="--measure") from err
+    except ValueError as err:
+        raise click.ClickException(str(err)) from err
     if egger_res is not None:
         res["egger_test"] = egger_res
 
