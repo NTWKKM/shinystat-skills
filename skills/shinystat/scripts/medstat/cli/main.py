@@ -2345,16 +2345,7 @@ def meta_cmd(
     df = load_clinical_data(data)
     validate_columns(df, [effect_col, se_col, study_col], "meta")
     check_data_missingness(df, [effect_col, se_col, study_col], "meta")
-    res = run_meta_analysis(
-        df,
-        effect_col=effect_col,
-        se_col=se_col,
-        study_col=study_col,
-        model=model,
-        method=method,
-        effect_measure=measure,
-    )
-
+    egger_res = None
     if egger:
         if study_col and study_col in df.columns:
             study_series = df[study_col].dropna()
@@ -2447,7 +2438,23 @@ def meta_cmd(
                 f"Unsupported effect measure '{measure_type}' for Egger's test. Egger's test requires a supported continuous measure ({', '.join(SUPPORTED_CONTINUOUS)}).",
                 param_hint="--egger",
             )
-        res["egger_test"] = eggers_test(df[effect_col], df[se_col])
+        egger_res = eggers_test(df[effect_col], df[se_col])
+
+    # Egger guards run first so their specific messages are not masked by pooling errors.
+    try:
+        res = run_meta_analysis(
+            df,
+            effect_col=effect_col,
+            se_col=se_col,
+            study_col=study_col,
+            model=model,
+            method=method,
+            effect_measure=measure,
+        )
+    except ValueError as err:
+        raise click.BadParameter(str(err), param_hint="--measure") from err
+    if egger_res is not None:
+        res["egger_test"] = egger_res
 
     if forest_plot:
         Path(forest_plot).parent.mkdir(parents=True, exist_ok=True)

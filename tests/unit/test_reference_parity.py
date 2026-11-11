@@ -970,3 +970,91 @@ def test_recipe24_effect_measure_decides_scale_before_column_name(recipes):
     assert rec_or["random_effects"]["effect_disp"] == pytest.approx(
         np.exp(rec_or["random_effects"]["log_effect"])
     )
+
+
+# ---------------------------------------------------------------------------
+# ADR 76 (round 5): exact Aalen-Johansen at original event times; raw effect_size scale
+# ---------------------------------------------------------------------------
+def _aj_bruteforce(dur, evt, cause, t):
+    """Textbook Aalen-Johansen CIF at time t from the original (untied) risk sets."""
+    s, f = 1.0, 0.0
+    for tj in np.unique(dur[(evt > 0) & (dur <= t)]):
+        n = np.sum(dur >= tj)
+        d = np.sum((dur == tj) & (evt > 0))
+        f += s * np.sum((dur == tj) & (evt == cause)) / n
+        s *= 1.0 - d / n
+    return f
+
+
+def _close_and_tied_events():
+    rng = np.random.default_rng(3)
+    n = 200
+    dur = np.round(rng.exponential(5, n), 1) + 0.1  # heavy ties -> lifelines jitters
+    evt = rng.choice([0, 1, 2], n, p=[0.3, 0.4, 0.3])
+    # Two distinct events 1e-5 apart, closer than lifelines' 1e-4 jitter.
+    dur[:2], evt[:2] = [3.00001, 3.00002], [2, 1]
+    return dur, evt
+
+
+def test_engine_cif_uses_original_event_times():
+    from medstat.models.survival import fit_competing_risks_cif
+
+    dur, evt = _close_and_tied_events()
+    tab = fit_competing_risks_cif(dur, evt).cif_table.set_index("time")
+    for t in [3.0, 3.00001, 3.00002, 5.1]:
+        assert tab.loc[t, "cif_primary"] == pytest.approx(_aj_bruteforce(dur, evt, 1, t), abs=1e-12)
+        assert tab.loc[t, "cif_competing"] == pytest.approx(_aj_bruteforce(dur, evt, 2, t), abs=1e-12)
+    res = fit_competing_risks_cif(dur, evt, horizons=[3.000015])
+    assert res.horizon_summary["cif_primary"].iloc[0] == pytest.approx(
+        round(_aj_bruteforce(dur, evt, 1, 3.000015), 4)
+    )
+    assert res.probability_conservation_max_error < 1e-9
+
+
+def test_recipe15_cif_uses_original_event_times(recipes):
+    dur, evt = _close_and_tied_events()
+    tab = recipes["fit_competing_risks_cif"](dur, evt)["cif_table"].set_index("time")
+    for t in [3.0, 3.00001, 3.00002]:
+        assert tab.loc[t, "cif_primary"] == pytest.approx(_aj_bruteforce(dur, evt, 1, t), abs=1e-12)
+
+
+def test_engine_aj_variance_equals_lifelines_without_ties():
+    import warnings
+
+    from lifelines import AalenJohansenFitter
+
+    from medstat.models.survival import _aalen_johansen_exact
+
+    rng = np.random.default_rng(1)
+    dur = rng.exponential(5, 300)
+    evt = rng.choice([0, 1, 2], 300, p=[0.3, 0.4, 0.3])
+    tl = np.sort(np.unique(np.r_[0.0, dur[evt > 0]]))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        aj = AalenJohansenFitter(calculate_variance=True).fit(dur, evt, event_of_interest=1)
+    cif, var = _aalen_johansen_exact(dur, evt, 1, tl)
+    np.testing.assert_allclose(cif, aj.cumulative_density_.iloc[:, 0].reindex(tl, method="ffill"), atol=1e-12)
+    np.testing.assert_allclose(var, aj.variance_.reindex(tl, method="ffill"), atol=1e-12)
+
+
+def test_engine_meta_raw_effect_size_is_logged_or_rejected():
+    from medstat.meta.models import compute_binary_effect_sizes, run_meta_analysis
+
+    counts = pd.DataFrame(
+        {"study": list("abcd"), "et": [3, 5, 8, 4], "nt": [20] * 4, "ec": [6, 9, 10, 7], "nc": [20] * 4}
+    )
+    es = compute_binary_effect_sizes(counts, "et", "nt", "ec", "nc", "study")
+    via_log = run_meta_analysis(es)
+    via_raw = run_meta_analysis(es, effect_col="effect_size")
+    assert via_raw["random_effects"]["effect_disp"] == pytest.approx(via_log["random_effects"]["effect_disp"])
+    raw_only = es[["study", "effect_size", "se"]]
+    with pytest.raises(ValueError, match="scale of 'effect_size' is unknown"):
+        run_meta_analysis(raw_only)
+    assert run_meta_analysis(raw_only, effect_measure="OR")["random_effects"]["effect_disp"] == pytest.approx(
+        via_log["random_effects"]["effect_disp"]
+    )
+    # A 'log_*' measure label declares log-scale input: no second log transform.
+    logged = es[["study", "se"]].assign(effect_size=es["log_effect"])
+    assert run_meta_analysis(logged, effect_measure="log_or")["random_effects"]["effect_disp"] == pytest.approx(
+        via_log["random_effects"]["effect_disp"]
+    )

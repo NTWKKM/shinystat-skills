@@ -20,6 +20,9 @@ logger = get_logger(__name__)
 
 _RATIO_MEASURES = {"OR", "RR", "HR", "IRR", "SHR", "DOR"}
 _DIFFERENCE_MEASURES = {"RD", "MD", "SMD", "CONTINUOUS"}
+# Column that carries effects on their natural (display) scale, e.g. raw OR / RR, as written by
+# compute_binary_effect_sizes / compute_continuous_effect_sizes (same rule as cloud Recipe 24).
+_RAW_EFFECT_COLS = {"effect_size"}
 
 
 def _measure_key(effect_measure: Any) -> str:
@@ -196,6 +199,8 @@ def run_meta_analysis(
         exponentiate: Whether pooled effects are displayed on the ratio scale (exp of the log effect).
             None resolves in order: 'is_ratio' column, effect_measure in {OR, RR, HR, IRR, SHR, DOR},
             an effect column named 'log_*', else False (same rule as cloud Recipe 24).
+            A raw-scale 'effect_size' column with a ratio scale is log-transformed
+            before pooling; with no declared scale it raises, unless effect_measure starts with 'log'.
         alpha: Significance level (default 0.05 for 95% CIs).
     """
     valid_methods_re = ["DL", "DERSIMONIAN-LAIRD"]
@@ -227,6 +232,10 @@ def run_meta_analysis(
     )
     if source_effect_col is None and "log_effect" in df.columns:
         source_effect_col = "log_effect"
+    if source_effect_col is None:
+        source_effect_col = next(
+            (c for c in ["effect", "effect_size", "es"] if c in df.columns), None
+        )
     effect_measure = kwargs.get("effect_measure") or kwargs.get("measure")
     if not effect_measure:
         for c in ["effect_measure", "measure"]:
@@ -273,6 +282,29 @@ def run_meta_analysis(
         is_ratio = False
     else:
         is_ratio = bool(source_effect_col and source_effect_col.startswith("log_"))
+
+    # A raw-scale 'effect_size' column holds ratios as OR / RR, not log values;
+    # a measure label starting with 'log' declares log-scale input instead.
+    raw_input = source_effect_col in _RAW_EFFECT_COLS and not str(
+        effect_measure or ""
+    ).strip().upper().startswith("LOG")
+    if raw_input:
+        scale_declared = (
+            exponentiate is not None
+            or "is_ratio" in df_work.columns
+            or _measure_key(effect_measure) in _RATIO_MEASURES | _DIFFERENCE_MEASURES
+        )
+        if not scale_declared:
+            raise ValueError(
+                f"The scale of '{source_effect_col}' is unknown; pass exponentiate=True (ratio) or "
+                "exponentiate=False (difference), an effect_measure, or an 'is_ratio' column."
+            )
+        if is_ratio:
+            if not np.all(np.isfinite(theta)) or np.any(theta <= 0):
+                raise ValueError(
+                    f"Ratio values in '{source_effect_col}' must be finite and > 0 to log-transform."
+                )
+            theta = np.log(theta)
 
     # 1. Fixed-Effect Model (Inverse Variance)
     w_fe = 1.0 / (se**2)

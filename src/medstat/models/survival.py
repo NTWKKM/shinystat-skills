@@ -797,6 +797,42 @@ def _cif_loglog_ci(
     return lower, upper
 
 
+def _aalen_johansen_exact(
+    dur: np.ndarray, evt: np.ndarray, cause: int, timeline: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Aalen-Johansen CIF and its Greenwood-type variance at `timeline`, from untied risk sets.
+
+    Uses the original event times (no jittering), so all events tied at t are counted at t and
+    no later event leaks in. Variance is the Collett (2015, p. 411) formula used by lifelines:
+    Var F(t) = sum_i (F(t) - F_i)^2 d_i / (n_i (n_i - d_i)) + S_{i-1}^2 d_ki (n_i - d_ki) / n_i^3
+               - 2 (F(t) - F_i) S_{i-1} d_ki / n_i^2, summed over event times t_i <= t.
+    Without ties it equals lifelines' AalenJohansenFitter exactly.
+    """
+    t_ev = np.unique(dur[evt > 0])
+    n_i = len(dur) - np.searchsorted(np.sort(dur), t_ev, side="left")
+    d_i = np.bincount(np.searchsorted(t_ev, dur[evt > 0]), minlength=len(t_ev))
+    d_k = np.bincount(
+        np.searchsorted(t_ev, dur[evt == cause]), minlength=len(t_ev)
+    ).astype(float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        s_lag = np.r_[1.0, np.cumprod(1.0 - d_i / n_i)[:-1]]
+        f_i = np.cumsum(s_lag * d_k / n_i)
+        a = d_i / (n_i * (n_i - d_i))  # inf when every subject at risk fails (n_i == d_i)
+        b = s_lag**2 * d_k * (n_i - d_k) / n_i**3
+        c = s_lag * d_k / n_i**2
+        # Expand (F - F_i)^2 and (F - F_i) so each term is a running sum.
+        ca, caf, caf2 = np.cumsum(a), np.cumsum(a * f_i), np.cumsum(a * f_i**2)
+        cb, cc, ccf = np.cumsum(b), np.cumsum(c), np.cumsum(c * f_i)
+        var_i = (
+            f_i**2 * ca - 2.0 * f_i * caf + caf2 + cb - 2.0 * (f_i * cc - ccf)
+        )
+    # Callers guarantee at least one event, so t_ev is non-empty.
+    idx = np.searchsorted(t_ev, timeline, side="right") - 1
+    cif = np.where(idx >= 0, f_i[np.maximum(idx, 0)], 0.0)
+    var = np.where(idx >= 0, var_i[np.maximum(idx, 0)], 0.0)
+    return cif, np.where(np.isfinite(var), np.maximum(var, 0.0), np.nan)
+
+
 def fit_competing_risks_cif(
     durations: pd.Series | np.ndarray,
     event_observed: pd.Series | np.ndarray,
@@ -895,16 +931,11 @@ def fit_competing_risks_cif(
     # Timeline of all failure times
     timeline = np.sort(np.unique(np.concatenate([[0.0], dur[evt > 0]])))
 
-    # lifelines' Aalen-Johansen jitters tied event times by ~1e-4, so its curve at an observed time t may
-    # not yet include every event recorded at t. Read each AJ step midway to the next distinct event time,
-    # where all events at t are counted; identical to reading at t when there are no ties.
-    aj_eval = np.r_[(timeline[:-1] + timeline[1:]) / 2.0, np.inf]
-
-    cif1 = _step_lookup(ajf_primary.cumulative_density_, aj_eval)
-    var1 = np.maximum(_step_lookup(ajf_primary.variance_, aj_eval), 0.0)
-
-    cif2 = _step_lookup(ajf_competing.cumulative_density_, aj_eval)
-    var2 = np.maximum(_step_lookup(ajf_competing.variance_, aj_eval), 0.0)
+    # lifelines' Aalen-Johansen jitters tied event times by up to 1e-4, which can split ties or
+    # reorder events closer than that; CIF and variance are therefore computed from the original
+    # risk sets (identical to lifelines when there are no ties). The fitted objects stay available.
+    cif1, var1 = _aalen_johansen_exact(dur, evt, event_of_interest, timeline)
+    cif2, var2 = _aalen_johansen_exact(dur, evt, competing_event, timeline)
 
     s_naive = _step_lookup(km_naive.survival_function_, timeline)
     naive_cif = np.clip(1.0 - s_naive, 0.0, 1.0)
@@ -939,7 +970,7 @@ def fit_competing_risks_cif(
     clinical_warnings = []
     if horizons is not None and len(horizons) > 0:
         h_arr = np.asarray(horizons, dtype=float)
-        # Horizon value = last timeline step at or before the horizon (tie-safe, see aj_eval above)
+        # Horizon value = last timeline step at or before the horizon (exact risk-set values above)
         h_idx = np.maximum(np.searchsorted(timeline, h_arr, side="right") - 1, 0)
         h_cif1, h_var1 = cif1[h_idx], var1[h_idx]
         h_cif2, h_var2 = cif2[h_idx], var2[h_idx]

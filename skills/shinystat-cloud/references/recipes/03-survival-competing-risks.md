@@ -564,7 +564,7 @@ def fit_survival_analysis_suite(
 
 ## 15. Competing Risks Survival Analysis (Aalen-Johansen CIF & Fine-Gray Model)
 
-Aalen-Johansen CIF with a naive \$1 - \text{KM}\$ overestimation audit, Cause-Specific Cox (etiological rate ratio), and Fine-Gray Subdistribution Hazard (clinical prognosis) via IPCW counting-process expansion. Fine-Gray standard errors come from an *entry-aware* cluster sandwich or a patient bootstrap.
+Aalen-Johansen CIF (computed from the original risk sets, so tied event times are exact) with a naive \$1 - \text{KM}\$ overestimation audit, Cause-Specific Cox (etiological rate ratio), and Fine-Gray Subdistribution Hazard (clinical prognosis) via IPCW counting-process expansion. Fine-Gray standard errors come from an *entry-aware* cluster sandwich or a patient bootstrap.
 
 ```python
 import warnings
@@ -574,6 +574,42 @@ import pandas as pd
 import scipy.stats as stats
 from lifelines import AalenJohansenFitter, CoxPHFitter, KaplanMeierFitter
 from lifelines.exceptions import StatisticalWarning
+
+
+def _aalen_johansen_exact(
+    dur: np.ndarray, evt: np.ndarray, cause: int, timeline: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Aalen-Johansen CIF and its Greenwood-type variance at `timeline`, from untied risk sets.
+
+    Uses the original event times (no jittering), so all events tied at t are counted at t and
+    no later event leaks in. Variance is the Collett (2015, p. 411) formula used by lifelines:
+    Var F(t) = sum_i (F(t) - F_i)^2 d_i / (n_i (n_i - d_i)) + S_{i-1}^2 d_ki (n_i - d_ki) / n_i^3
+               - 2 (F(t) - F_i) S_{i-1} d_ki / n_i^2, summed over event times t_i <= t.
+    Without ties it equals lifelines' AalenJohansenFitter exactly.
+    """
+    t_ev = np.unique(dur[evt > 0])
+    n_i = len(dur) - np.searchsorted(np.sort(dur), t_ev, side="left")
+    d_i = np.bincount(np.searchsorted(t_ev, dur[evt > 0]), minlength=len(t_ev))
+    d_k = np.bincount(
+        np.searchsorted(t_ev, dur[evt == cause]), minlength=len(t_ev)
+    ).astype(float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        s_lag = np.r_[1.0, np.cumprod(1.0 - d_i / n_i)[:-1]]
+        f_i = np.cumsum(s_lag * d_k / n_i)
+        a = d_i / (n_i * (n_i - d_i))  # inf when every subject at risk fails (n_i == d_i)
+        b = s_lag**2 * d_k * (n_i - d_k) / n_i**3
+        c = s_lag * d_k / n_i**2
+        # Expand (F - F_i)^2 and (F - F_i) so each term is a running sum.
+        ca, caf, caf2 = np.cumsum(a), np.cumsum(a * f_i), np.cumsum(a * f_i**2)
+        cb, cc, ccf = np.cumsum(b), np.cumsum(c), np.cumsum(c * f_i)
+        var_i = (
+            f_i**2 * ca - 2.0 * f_i * caf + caf2 + cb - 2.0 * (f_i * cc - ccf)
+        )
+    # Callers guarantee at least one event, so t_ev is non-empty.
+    idx = np.searchsorted(t_ev, timeline, side="right") - 1
+    cif = np.where(idx >= 0, f_i[np.maximum(idx, 0)], 0.0)
+    var = np.where(idx >= 0, var_i[np.maximum(idx, 0)], 0.0)
+    return cif, np.where(np.isfinite(var), np.maximum(var, 0.0), np.nan)
 
 
 def fit_competing_risks_cif(
@@ -648,12 +684,10 @@ def fit_competing_risks_cif(
         return np.where(idx >= 0, s.iloc[np.maximum(idx, 0)].to_numpy(dtype=float), 0.0)
 
     timeline = np.sort(np.unique(np.concatenate([[0.0], dur[evt > 0]])))
-    # lifelines jitters tied event times by ~1e-4: read each AJ step midway to the next distinct event
-    # time so every event recorded at t is counted (identical to reading at t when there are no ties).
-    aj_eval = np.r_[(timeline[:-1] + timeline[1:]) / 2.0, np.inf]
-    cif1 = _lookup(ajf1.cumulative_density_, aj_eval)
-    var1 = np.maximum(_lookup(ajf1.variance_, aj_eval), 0.0)
-    cif2 = _lookup(ajf2.cumulative_density_, aj_eval)
+    # lifelines jitters tied event times by up to 1e-4, which can split ties or reorder events closer
+    # than that: CIF and variance come from the original risk sets (equal to lifelines without ties).
+    cif1, var1 = _aalen_johansen_exact(dur, evt, event_of_interest, timeline)
+    cif2, _ = _aalen_johansen_exact(dur, evt, competing_event, timeline)
     s_naive = _lookup(km_naive.survival_function_, timeline)
     naive = np.clip(1.0 - s_naive, 0.0, 1.0)
 
