@@ -67,7 +67,8 @@ def fit_firth_logistic(
             - 'summary_df': pd.DataFrame with estimate, odds_ratio, ci_lower, ci_upper, p_value
             - 'loglik': penalized log-likelihood
             - 'aic', 'bic': model fit information criteria
-            - 'ci_fallback': boolean indicating if PL fell back to Wald
+            - 'ci_fallback': boolean indicating if PL fell back to Wald for any term
+            - 'ci_methods': {term: 'profile' | 'wald'}, the interval method per term
     """
     y_arr = np.asarray(y, dtype=float).ravel()
     if isinstance(X, pd.DataFrame):
@@ -131,6 +132,8 @@ def fit_firth_logistic(
 
     # 2. Confidence intervals (Profile Likelihood first, fallback to Wald)
     ci_fallback = False
+    # Per-term interval method: a model-wide fallback flag does not say which terms fell back.
+    term_is_wald = np.full(len(coefs), ci_method != "pl")
     wald_low = coefs - stats.norm.ppf(1.0 - alpha / 2.0) * se
     wald_high = coefs + stats.norm.ppf(1.0 - alpha / 2.0) * se
 
@@ -145,12 +148,15 @@ def fit_firth_logistic(
                     low = np.where(non_finite, wald_low, low)
                     high = np.where(non_finite, wald_high, high)
                     ci_fallback = True
+                    term_is_wald = non_finite
             else:
                 low, high = wald_low, wald_high
                 ci_fallback = True
+                term_is_wald[:] = True
         except Exception:
             low, high = wald_low, wald_high
             ci_fallback = True
+            term_is_wald[:] = True
     else:
         low, high = wald_low, wald_high
 
@@ -188,6 +194,9 @@ def fit_firth_logistic(
         "aic": float(aic) if np.isfinite(aic) else np.nan,
         "bic": float(bic) if np.isfinite(bic) else np.nan,
         "ci_fallback": ci_fallback,
+        "ci_methods": {
+            str(n): ("wald" if w else "profile") for n, w in zip(names, term_is_wald)
+        },
         "lrt_fallback_vars": lrt_fallback_vars,
     }
 
@@ -278,6 +287,8 @@ def fit_firth_cox(
 
     # Confidence Intervals
     ci_fallback = False
+    # Per-term interval method: a model-wide fallback flag does not say which terms fell back.
+    term_is_wald = np.full(len(coefs), ci_method != "pl")
     wald_low = coefs - stats.norm.ppf(1.0 - alpha / 2.0) * se
     wald_high = coefs + stats.norm.ppf(1.0 - alpha / 2.0) * se
 
@@ -292,12 +303,15 @@ def fit_firth_cox(
                     low = np.where(non_finite, wald_low, low)
                     high = np.where(non_finite, wald_high, high)
                     ci_fallback = True
+                    term_is_wald = non_finite
             else:
                 low, high = wald_low, wald_high
                 ci_fallback = True
+                term_is_wald[:] = True
         except Exception:
             low, high = wald_low, wald_high
             ci_fallback = True
+            term_is_wald[:] = True
     else:
         low, high = wald_low, wald_high
 
@@ -325,5 +339,8 @@ def fit_firth_cox(
         "summary_df": summary_df,
         "converged": bool(getattr(model, "converged_", True)),
         "ci_fallback": ci_fallback,
+        "ci_methods": {
+            str(n): ("wald" if w else "profile") for n, w in zip(names, term_is_wald)
+        },
         "lrt_fallback_vars": lrt_fallback_vars,
     }

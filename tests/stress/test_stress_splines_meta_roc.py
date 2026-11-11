@@ -395,6 +395,16 @@ class TestCompetingRisksCIFDeterministic:
             )
         pd.testing.assert_frame_equal(res1["horizon_summary"], res2["horizon_summary"])
 
+        # Interval validity: finite bounds bracketing each CIF inside [0, 1]
+        for table in (table1, table2):
+            for curve in ("cif_primary", "cif_competing"):
+                est = table[curve].to_numpy(dtype=float)
+                lo = table[f"{curve}_ci_lower"].to_numpy(dtype=float)
+                hi = table[f"{curve}_ci_upper"].to_numpy(dtype=float)
+                assert np.all(np.isfinite(lo)) and np.all(np.isfinite(hi)), curve
+                assert np.all((lo >= 0.0) & (hi <= 1.0)), curve
+                assert np.all((lo <= est + 1e-12) & (est <= hi + 1e-12)), curve
+
 
 class TestMetaAnalysisAlphaScaling:
     """Regression test for S-2: Per-study CIs respect alpha parameter in run_meta_analysis."""

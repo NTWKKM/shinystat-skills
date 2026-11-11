@@ -107,25 +107,45 @@ def bootstrap_internal_validation(
     def _fit_logit(y: np.ndarray, X_c: np.ndarray) -> tuple[np.ndarray | None, str | None]:
         """Fitting procedure shared by the original model and every bootstrap resample.
 
-        Returns (params, fallback_reason). MLE is used when it converges without
-        separation (|beta| <= 50); otherwise a lightly L1-regularized logit is fitted.
-        params is None when neither fit converges to finite estimates.
+        Predictors are standardized before fitting, so the separation check and the L1
+        penalty do not depend on measurement units; coefficients are returned on the
+        original scale (identical predictions for rescaled inputs).
+        Returns (params, fallback_reason). MLE is used when it converges with no perfect-
+        separation warning and every standardized |beta| <= 10 (a 1-SD change multiplying
+        the odds by > e^10 indicates quasi-separation); otherwise a lightly L1-regularized
+        logit is fitted. params is None when neither fit converges to finite estimates.
         """
+        import warnings as _warnings
+
+        from statsmodels.tools.sm_exceptions import PerfectSeparationWarning
+
+        mu = X_c[:, 1:].mean(axis=0)
+        sd = X_c[:, 1:].std(axis=0)
+        sd = np.where(sd > 0, sd, 1.0)
+        Z_c = np.column_stack([np.ones(len(y)), (X_c[:, 1:] - mu) / sd])
+
+        def _to_original(gamma: np.ndarray) -> np.ndarray:
+            beta = gamma[1:] / sd
+            return np.concatenate([[gamma[0] - float(np.sum(beta * mu))], beta])
+
         try:
-            mle = sm.Logit(y, X_c).fit(disp=False)
+            with _warnings.catch_warnings():
+                _warnings.simplefilter("error", PerfectSeparationWarning)
+                mle = sm.Logit(y, Z_c).fit(disp=False)
             converged = getattr(mle, "mle_retvals", {}).get("converged", True)
-            if not converged or np.any(np.abs(mle.params) > 50.0):
+            gamma = np.asarray(mle.params, dtype=float)
+            if not converged or np.any(np.abs(gamma[1:]) > 10.0):
                 raise RuntimeError("Model separation or non-convergence detected.")
-            return np.asarray(mle.params, dtype=float), None
+            return _to_original(gamma), None
         except Exception as e:
             reason = str(e)
         try:
-            reg = sm.Logit(y, X_c).fit_regularized(method="l1", alpha=1e-4, disp=False)
+            reg = sm.Logit(y, Z_c).fit_regularized(method="l1", alpha=1e-4, disp=False)
             converged = getattr(reg, "mle_retvals", {}).get("converged", True)
-            params = np.asarray(reg.params, dtype=float)
-            if not converged or not np.all(np.isfinite(params)):
+            gamma = np.asarray(reg.params, dtype=float)
+            if not converged or not np.all(np.isfinite(gamma)):
                 return None, reason
-            return params, reason
+            return _to_original(gamma), reason
         except Exception:
             return None, reason
 
@@ -287,12 +307,14 @@ def bootstrap_internal_validation(
     orig_intercept = float(orig_params[0])
     orig_betas = [float(b) for b in orig_params[1:]]
 
-    if n_successful == 0 or not test_slopes:
+    # Uniform shrinkage = optimism-corrected calibration slope (apparent minus mean paired
+    # bootstrap optimism). Equals the mean test slope only when the apparent slope is 1 (MLE).
+    raw_s = metrics_summary["calibration_slope"]["optimism_corrected"]
+    if n_successful == 0 or not test_slopes or not np.isfinite(raw_s):
         shrinkage_factor = np.nan
         shrunk_intercept = np.nan
         shrunk_betas = [np.nan for _ in orig_betas]
     else:
-        raw_s = float(np.mean(test_slopes))
         shrinkage_factor = float(np.clip(raw_s, 0.01, 1.0))
         shrunk_betas = [shrinkage_factor * b for b in orig_betas]
         lp_shrunk_no_inter = np.dot(X_orig, shrunk_betas)

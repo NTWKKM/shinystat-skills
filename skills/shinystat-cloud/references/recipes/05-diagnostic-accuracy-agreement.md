@@ -245,18 +245,19 @@ def delong_paired_test(y_true, score1, score2, alpha: float = 0.05) -> dict:
     v10_1, v01_1, auc1 = _delong_placements(y_t, s1)
     v10_2, v01_2, auc2 = _delong_placements(y_t, s2)
 
-    var1 = (np.var(v10_1, ddof=1) / n_pos) + (np.var(v01_1, ddof=1) / n_neg)
-    var2 = (np.var(v10_2, ddof=1) / n_pos) + (np.var(v01_2, ddof=1) / n_neg)
-    cov12 = (np.cov(v10_1, v10_2, ddof=1)[0, 1] / n_pos) + (
-        np.cov(v01_1, v01_2, ddof=1)[0, 1] / n_neg
-    )
+    # Var(AUC1 - AUC2) from paired placement differences: algebraically equal to
+    # var1 + var2 - 2*cov12, without the cancellation that makes small variances look zero.
+    d10 = v10_1 - v10_2
+    d01 = v01_1 - v01_2
+    var_diff = float(np.var(d10, ddof=1) / n_pos + np.var(d01, ddof=1) / n_neg)
+    # Genuinely zero only when every paired placement difference is identical.
+    zero_variance = bool(np.ptp(d10) == 0.0 and np.ptp(d01) == 0.0)
 
     diff = auc1 - auc2
-    var_diff = float(var1 + var2 - 2.0 * cov12)
     z_crit = stats.norm.ppf(1.0 - alpha / 2.0)
     warning = None
 
-    if var_diff > 1e-12:
+    if not zero_variance and var_diff > 0.0:
         se_diff = float(np.sqrt(var_diff))
         z_stat = diff / se_diff
         p_val = float(2.0 * stats.norm.sf(abs(z_stat)))

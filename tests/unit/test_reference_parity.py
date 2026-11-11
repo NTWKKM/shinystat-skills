@@ -692,3 +692,110 @@ def test_riley_rejects_invalid_mape_target():
 
     with pytest.raises(ValueError, match="mape_target"):
         calculate_riley_sample_size(10, 0.3, cox_snell_r2=0.15, mape_target=0.0)
+
+
+# ---------------------------------------------------------------------------
+# ADR 76 (round 2): DeLong variance, unit-invariant fitting, Firth per-term CI
+# ---------------------------------------------------------------------------
+def test_recipe3_paired_delong_small_positive_variance_keeps_inference(recipes):
+    rng = np.random.default_rng(8)
+    n = 4000
+    y = rng.binomial(1, 0.5, n)
+    s1 = rng.normal(y * 1.0, 1.0)
+    # Move one positive just below the adjacent lower negative: exactly one pair flips,
+    # so Var(AUC1 - AUC2) is positive but ~1e-13, below the old 1e-12 floor.
+    order = np.argsort(s1)
+    k = next(
+        i for i in range(1, n) if y[order[i]] == 1 and y[order[i - 1]] == 0
+    )
+    s2 = s1.copy()
+    s2[order[k]] = s1[order[k - 1]] - 1e-9
+    v10_1, v01_1, _ = recipes["_delong_placements"](y, s1)
+    v10_2, v01_2, _ = recipes["_delong_placements"](y, s2)
+    true_var = np.var(v10_1 - v10_2, ddof=1) / y.sum() + np.var(
+        v01_1 - v01_2, ddof=1
+    ) / (n - y.sum())
+    assert 0 < true_var < 1e-12
+    res = recipes["delong_paired_test"](y, s1, s2)
+    assert res["warning"] is None
+    assert res["se_difference"] == pytest.approx(np.sqrt(true_var), rel=1e-9)
+    assert np.isfinite(res["p_value"])
+
+
+def test_recipe18_predictions_invariant_to_predictor_units(recipes):
+    rng = np.random.default_rng(4)
+    n = 300
+    x = rng.normal(size=n)
+    y = rng.binomial(1, 1 / (1 + np.exp(-(0.3 + 1.2 * x))))
+    df = pd.DataFrame({"y": y, "x": x, "x_milli": x * 1000.0})
+    a = recipes["bootstrap_internal_validation"](df, "y", ["x"], n_bootstrap=20)
+    b = recipes["bootstrap_internal_validation"](df, "y", ["x_milli"], n_bootstrap=20)
+    assert a["metrics"]["auroc"]["apparent"] == pytest.approx(b["metrics"]["auroc"]["apparent"])
+    assert a["shrinkage_factor"] == pytest.approx(b["shrinkage_factor"], rel=1e-6)
+    m = a["metrics"]["calibration_slope"]
+    assert a["shrinkage_factor"] == pytest.approx(
+        float(np.clip(m["apparent"] - m["optimism"], 0.01, 1.0))
+    )
+
+
+def test_firth_reports_interval_method_per_term():
+    from medstat.models.firth import fit_firth_cox, fit_firth_logistic
+
+    d = pd.read_csv(BENCH / "dataset_sex2.csv")
+    res = fit_firth_logistic(d["case"], d[["age", "oc", "vic"]])
+    assert set(res["ci_methods"]) == {"(Intercept)", "age", "oc", "vic"}
+    assert set(res["ci_methods"].values()) <= {"profile", "wald"}
+    assert res["ci_fallback"] == ("wald" in res["ci_methods"].values())
+    w = fit_firth_logistic(d["case"], d[["age", "oc", "vic"]], ci_method="wald")
+    assert set(w["ci_methods"].values()) == {"wald"}
+    b = pd.read_csv(BENCH / "dataset_breast.csv")
+    c = fit_firth_cox(b["TIME"], b["CENS"], b[["T", "N"]])
+    assert set(c["ci_methods"]) == {"T", "N"}
+    assert c["ci_fallback"] == ("wald" in c["ci_methods"].values())
+
+
+def test_engine_bootstrap_validation_unit_invariant_and_corrected_slope():
+    from medstat.diagnostic.validation import bootstrap_internal_validation
+
+    rng = np.random.default_rng(4)
+    n = 300
+    x = rng.normal(size=n)
+    y = rng.binomial(1, 1 / (1 + np.exp(-(0.3 + 1.2 * x))))
+    df = pd.DataFrame({"y": y, "x": x, "x_milli": x * 1000.0})
+    a = bootstrap_internal_validation(df, "y", ["x"], n_bootstrap=30)
+    b = bootstrap_internal_validation(df, "y", ["x_milli"], n_bootstrap=30)
+    assert a["shrinkage_factor"] == pytest.approx(b["shrinkage_factor"], rel=1e-6)
+    assert a["shrunk_coefficients"]["shrunk"]["x"] == pytest.approx(
+        1000.0 * b["shrunk_coefficients"]["shrunk"]["x_milli"], rel=1e-6
+    )
+    m = a["metrics"]["calibration_slope"]
+    assert a["shrinkage_factor"] == pytest.approx(
+        float(np.clip(m["optimism_corrected"], 0.01, 1.0))
+    )
+
+
+def test_engine_bootstrap_validation_matches_recipe18(recipes):
+    from medstat.diagnostic.validation import bootstrap_internal_validation
+
+    df = _adr75_cohort()
+    eng = bootstrap_internal_validation(df, "y", ["x1", "x2"], n_bootstrap=40)
+    rec = recipes["bootstrap_internal_validation"](df, "y", ["x1", "x2"], n_bootstrap=40)
+    for term, coef in eng["shrunk_coefficients"]["original"].items():
+        assert coef == pytest.approx(rec["shrunk_coefficients"]["original"][term], rel=1e-6)
+    assert eng["shrinkage_factor"] == pytest.approx(rec["shrinkage_factor"], abs=1e-6)
+
+
+def test_engine_shared_fit_separation_falls_back_and_is_unit_free():
+    from medstat.diagnostic.validation import _fit_logit_shared
+
+    rng = np.random.default_rng(2)
+    x = rng.normal(size=120)
+    y = (x > 0).astype(float)  # perfect separation
+    X = np.column_stack([x, rng.normal(size=120)])
+    params, reason = _fit_logit_shared(y, X, "none")
+    assert reason is not None and params is not None and np.all(np.isfinite(params))
+    # Rescaling a predictor rescales its coefficient and leaves predictions unchanged.
+    params_k, _ = _fit_logit_shared(y, X * [1000.0, 1.0], "none")
+    lp = params[0] + X @ params[1:]
+    lp_k = params_k[0] + (X * [1000.0, 1.0]) @ params_k[1:]
+    np.testing.assert_allclose(lp, lp_k, rtol=1e-6, atol=1e-6)
