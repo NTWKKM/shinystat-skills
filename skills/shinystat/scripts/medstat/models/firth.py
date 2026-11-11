@@ -20,6 +20,15 @@ from medstat.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _ci_methods_by_term(names: list[Any], term_is_wald: np.ndarray) -> dict[Any, str]:
+    """Map each term label (as in ``summary_df.index``) to its interval method."""
+    if len(set(names)) != len(names):
+        raise ValueError(
+            "Term labels must be unique so each term's interval method is reported."
+        )
+    return {n: ("wald" if w else "profile") for n, w in zip(names, term_is_wald)}
+
+
 def check_separation(
     y: pd.Series | np.ndarray,
     X: pd.DataFrame | np.ndarray,
@@ -194,9 +203,7 @@ def fit_firth_logistic(
         "aic": float(aic) if np.isfinite(aic) else np.nan,
         "bic": float(bic) if np.isfinite(bic) else np.nan,
         "ci_fallback": ci_fallback,
-        "ci_methods": {
-            str(n): ("wald" if w else "profile") for n, w in zip(names, term_is_wald)
-        },
+        "ci_methods": _ci_methods_by_term(names, term_is_wald),
         "lrt_fallback_vars": lrt_fallback_vars,
     }
 
@@ -339,8 +346,6 @@ def fit_firth_cox(
         "summary_df": summary_df,
         "converged": bool(getattr(model, "converged_", True)),
         "ci_fallback": ci_fallback,
-        "ci_methods": {
-            str(n): ("wald" if w else "profile") for n, w in zip(names, term_is_wald)
-        },
+        "ci_methods": _ci_methods_by_term(names, term_is_wald),
         "lrt_fallback_vars": lrt_fallback_vars,
     }

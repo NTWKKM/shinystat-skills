@@ -96,6 +96,12 @@ def calculate_2x2_metrics(tp: int, fp: int, fn: int, tn: int, ci: float = 0.95) 
         float(np.exp(np.log(dor) + z * se_log_dor)),
     )
 
+    # A ratio needs both reference-standard classes; the Haldane correction would
+    # otherwise fabricate an LR / DOR from an absent class.
+    if n_pos == 0 or n_neg == 0:
+        lr_pos = lr_neg = dor = np.nan
+        lr_pos_ci = lr_neg_ci = dor_ci = (np.nan, np.nan)
+
     def _wilson_or_nan(k: int, n: int) -> tuple[float, float]:
         # Undefined proportion (zero denominator): no interval.
         return calculate_ci_wilson_score(k, n, ci) if n > 0 else (np.nan, np.nan)

@@ -375,9 +375,8 @@ def compute_reclassification_metrics(
         if se_idi > 0.0:
             z_idi = float(idi_val / se_idi)
             p_val_idi = float(2.0 * stats.norm.sf(abs(z_idi)))
-        elif idi_val == 0.0:
-            z_idi, p_val_idi = 0.0, 1.0
         else:
+            # Zero SE (including zero IDI): the normal test is undefined, so no inference.
             se_idi = z_idi = p_val_idi = float("nan")
 
     res_idi = {

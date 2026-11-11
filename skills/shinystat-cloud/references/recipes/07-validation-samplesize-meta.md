@@ -708,8 +708,10 @@ def calculate_riley_sample_size(
         raise ValueError(
             f"optimism_margin must be finite and > 0, got {optimism_margin}"
         )
-    if mape_target is not None and not (math.isfinite(mape_target) and mape_target > 0.0):
-        raise ValueError(f"mape_target must be finite and > 0, got {mape_target}")
+    if mape_target is not None and not (
+        math.isfinite(mape_target) and 0.0 < mape_target < 1.0
+    ):
+        raise ValueError(f"mape_target must be strictly in (0, 1), got {mape_target}")
 
     phi = float(prevalence)
     p_params = int(n_parameters)

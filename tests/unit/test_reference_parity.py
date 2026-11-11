@@ -799,3 +799,110 @@ def test_engine_shared_fit_separation_falls_back_and_is_unit_free():
     lp = params[0] + X @ params[1:]
     lp_k = params_k[0] + (X * [1000.0, 1.0]) @ params_k[1:]
     np.testing.assert_allclose(lp, lp_k, rtol=1e-6, atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# ADR 76 (round 3): CodeRabbit re-review
+# ---------------------------------------------------------------------------
+def _nan_profile_row(monkeypatch, cls, row):
+    """Make the profile interval of one term non-finite, leaving the others intact."""
+    original = cls.conf_int
+
+    def patched(self, *args, **kwargs):
+        ci = np.array(original(self, *args, **kwargs), dtype=float, copy=True)
+        if kwargs.get("method") == "pl":
+            ci[row, 0] = np.nan
+        return ci
+
+    monkeypatch.setattr(cls, "conf_int", patched)
+
+
+def test_firth_logistic_mixed_fallback_marks_the_right_term(monkeypatch):
+    from medstat.models import firth
+
+    d = pd.read_csv(BENCH / "dataset_sex2.csv")
+    X = d[["age", "oc"]]
+    profile = firth.fit_firth_logistic(d["case"], X)["summary_df"]
+    wald = firth.fit_firth_logistic(d["case"], X, ci_method="wald")["summary_df"]
+    _nan_profile_row(monkeypatch, firth.FirthLogisticRegression, row=1)  # "age"
+    res = firth.fit_firth_logistic(d["case"], X)
+    s = res["summary_df"]
+    assert res["ci_fallback"] is True
+    assert res["ci_methods"] == {"(Intercept)": "profile", "age": "wald", "oc": "profile"}
+    np.testing.assert_allclose(s.loc["age", ["ci_lower", "ci_upper"]], wald.loc["age", ["ci_lower", "ci_upper"]])
+    for term in ("(Intercept)", "oc"):
+        np.testing.assert_allclose(
+            s.loc[term, ["ci_lower", "ci_upper"]], profile.loc[term, ["ci_lower", "ci_upper"]]
+        )
+
+
+def test_firth_cox_mixed_fallback_marks_the_right_term(monkeypatch):
+    from medstat.models import firth
+
+    b = pd.read_csv(BENCH / "dataset_breast.csv")
+    X = b[["T", "N"]]
+    profile = firth.fit_firth_cox(b["TIME"], b["CENS"], X)["summary_df"]
+    wald = firth.fit_firth_cox(b["TIME"], b["CENS"], X, ci_method="wald")["summary_df"]
+    _nan_profile_row(monkeypatch, firth.FirthCoxPH, row=0)  # "T"
+    res = firth.fit_firth_cox(b["TIME"], b["CENS"], X)
+    s = res["summary_df"]
+    assert res["ci_fallback"] is True
+    assert res["ci_methods"] == {"T": "wald", "N": "profile"}
+    np.testing.assert_allclose(s.loc["T", ["ci_lower", "ci_upper"]], wald.loc["T", ["ci_lower", "ci_upper"]])
+    np.testing.assert_allclose(s.loc["N", ["ci_lower", "ci_upper"]], profile.loc["N", ["ci_lower", "ci_upper"]])
+
+
+def test_firth_ci_methods_keep_original_labels_and_reject_duplicates():
+    from medstat.models.firth import fit_firth_logistic
+
+    d = pd.read_csv(BENCH / "dataset_sex2.csv")
+    X = d[["age", "oc"]].copy()
+    X.columns = [1, 2]
+    res = fit_firth_logistic(d["case"], X)
+    assert set(res["ci_methods"]) == set(res["summary_df"].index) == {"(Intercept)", 1, 2}
+    X.columns = ["age", "age"]
+    with pytest.raises(ValueError, match="unique"):
+        fit_firth_logistic(d["case"], X)
+
+
+def test_recipe16_zero_idi_with_zero_se_is_unavailable(recipes):
+    y = np.array([1, 1, 1, 0, 0, 0, 0, 0])
+    p0 = np.arange(1, 9) / 16.0  # dyadic: the shift is exact, so Var(delta_p) == 0
+    res = recipes["compute_reclassification_metrics"](y, p0, p0 + 0.25)
+    idi = res["idi"]
+    assert idi["estimate"] == pytest.approx(0.0, abs=1e-12)
+    assert np.isnan(idi["se"]) and np.isnan(idi["p_value"]) and np.isnan(idi["ci_lower"])
+
+
+@pytest.mark.parametrize("cells", [(0, 4, 0, 6), (3, 0, 2, 0)])
+def test_recipe2_ratios_unavailable_when_a_class_is_absent(recipes, cells):
+    tp, fp, fn, tn = cells
+    res = recipes["calculate_2x2_metrics"](tp=tp, fp=fp, fn=fn, tn=tn)
+    for key in ("LR_pos", "LR_neg", "DOR"):
+        assert np.isnan(res[key][0]) and all(np.isnan(res[key][1]))
+    full = recipes["calculate_2x2_metrics"](tp=8, fp=3, fn=2, tn=12)
+    assert np.isfinite(full["LR_pos"][0]) and np.isfinite(full["DOR"][1][0])
+
+
+@pytest.mark.parametrize("target", [1.0, 1.5])
+def test_recipe20_rejects_mape_target_at_or_above_one(recipes, target):
+    with pytest.raises(ValueError, match="mape_target"):
+        recipes["calculate_riley_sample_size"](10, 0.3, cox_snell_r2=0.15, mape_target=target)
+
+
+def test_engine_bootstrap_skips_replicates_with_failed_boot_slope(monkeypatch):
+    from medstat.diagnostic import validation
+
+    df = _adr75_cohort()
+    calls = {"n": 0}
+    real = validation._compute_calibration_slope
+
+    def flaky(y, lp):
+        calls["n"] += 1
+        # Call order: apparent, then (boot, test) per replicate; fail the first boot slope.
+        return float("nan") if calls["n"] == 2 else real(y, lp)
+
+    monkeypatch.setattr(validation, "_compute_calibration_slope", flaky)
+    res = validation.bootstrap_internal_validation(df, "y", ["x1", "x2"], n_bootstrap=10)
+    assert res["n_successful_replicates"] == 9
+    assert np.isfinite(res["metrics"]["calibration_slope"]["optimism"])

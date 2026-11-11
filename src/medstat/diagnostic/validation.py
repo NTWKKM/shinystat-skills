@@ -386,7 +386,11 @@ def bootstrap_internal_validation(
         t_inter = _compute_calibration_intercept_offset(y_orig, lp_test)
         t_slope = _compute_calibration_slope(y_orig, lp_test)
 
-        if not np.isfinite(t_slope) or not np.isfinite(t_inter):
+        if (
+            not np.isfinite(b_slope)
+            or not np.isfinite(t_slope)
+            or not np.isfinite(t_inter)
+        ):
             continue
 
         if b_reason is not None:
