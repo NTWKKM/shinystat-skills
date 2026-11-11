@@ -274,7 +274,12 @@ def delong_paired_test(y_true, score1, score2, alpha: float = 0.05) -> dict:
         se_diff, z_stat, p_val, ci_l, ci_u = (np.nan,) * 5
         warning = (
             "DeLong variance of the AUC difference is zero (identical rankings or "
-            "degenerate placements); z-test and CI unavailable. Use a bootstrap or exact method."
+            "degenerate placements); z-test and CI unavailable. A paired class-stratified "
+            "bootstrap can be degenerate too: when both scores perfectly separate cases from "
+            "controls every replicate gives the same difference, and the zero-width interval "
+            "does not establish population equality. Check the replicates for degeneracy and "
+            "use a justified alternative (e.g. an exact permutation test or a larger sample) "
+            "when they are."
         )
 
     return {
