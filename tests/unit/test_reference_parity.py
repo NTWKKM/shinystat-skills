@@ -1150,3 +1150,29 @@ def test_meta_cli_routes_only_scale_errors_to_measure(tmp_path):
     pd.DataFrame({"study": ["a", "b"], "effect_size": [0.1, 0.2], "se": [0.0, 0.2]}).to_csv(bad_se, index=False)
     other = CliRunner().invoke(cli, base + ["--data", str(bad_se), "--measure", "md"])
     assert other.exit_code != 0 and "strictly positive" in other.output and "--measure" not in other.output
+
+
+def test_meta_cli_egger_runs_after_se_validation(tmp_path):
+    from click.testing import CliRunner
+
+    from medstat.cli.main import cli
+
+    rng = np.random.default_rng(9)
+    se = rng.uniform(0.1, 0.4, 12)
+    se[0] = 0.0  # invalid: pooling must reject it before Egger is estimated
+    path = tmp_path / "egger.csv"
+    pd.DataFrame(
+        {"study": [f"S{i}" for i in range(12)], "effect_size": rng.normal(0.3, 0.2, 12), "se": se}
+    ).to_csv(path, index=False)
+    args = ["meta", "--data", str(path), "--effect-col", "effect_size", "--se-col", "se",
+            "--study-col", "study", "--measure", "md", "--egger"]
+    bad = CliRunner().invoke(cli, args)
+    assert bad.exit_code == 1 and "strictly positive" in bad.output
+    assert bad.exception is None or isinstance(bad.exception, SystemExit)
+    pd.read_csv(path).assign(se=np.abs(se) + 0.1).to_csv(path, index=False)
+    out = tmp_path / "res.json"
+    ok = CliRunner().invoke(cli, args + ["--output", str(out)])
+    assert ok.exit_code == 0, ok.output
+    import json
+
+    assert "p_value" in json.loads(out.read_text())["egger_test"]
