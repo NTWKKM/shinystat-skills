@@ -121,7 +121,7 @@ System architecture and structural specifications for `medstat-core` and the `me
   - `docx.py`: Native Microsoft Word `.docx` with OpenXML `<w:tblBorders>` 3-rule borders, 6.5 in figures, hanging-indent reference list formatting, and native superscript runs (`run.font.superscript = True`; `render_docx`).
   - `pptx.py`: Native PowerPoint 16:9 widescreen presentation with 1 figure per slide layout, structured takeaway cards, and clean Unicode superscript citation formatting (`render_pptx`).
   - `pdf.py`: High-fidelity PDF rendering via Playwright headless Chromium with LibreOffice fallback (`render_pdf`).
-- **`integrity.py`**: Pillar 5 Reporting Integrity audit (`verify_report_integrity`): numerical traceability to `results_dict` ($\pm 0.02$), Zero-PHI regex scan (HN, Thai citizen ID, phone, names), observational causal inference / E-value caveat enforcement, and structural citation / reference marker recognition (`_is_structural_context`). `delivered_text` (an In-Chat Summary reply) is audited with the document, and `exported_files` are scanned for identifier columns and PHI (ADR 81).
+- **`integrity.py`**: Pillar 5 Reporting Integrity audit (`verify_report_integrity`): numerical traceability to `results_dict` ($\pm 0.02$), Zero-PHI regex scan (HN, Thai citizen ID, phone, names), observational causal inference / E-value caveat enforcement, and structural citation / reference marker recognition (`_is_structural_context`). `delivered_text` (an In-Chat Summary reply) is audited with the document, and `exported_files` (CSV, TSV, XLSX, Parquet; any other format fails closed) are scanned for identifier columns and PHI (ADR 81).
 
 ---
 

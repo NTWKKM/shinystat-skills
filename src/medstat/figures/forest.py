@@ -30,16 +30,20 @@ _STANDARD_RATIO_TICKS = (0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 10.0)
 
 
 def _ratio_axis_limits(
-    ci_lower: np.ndarray, ci_upper: np.ndarray
+    ci_lower: np.ndarray,
+    ci_upper: np.ndarray,
+    estimates: np.ndarray | None = None,
 ) -> tuple[float, float, list[float]]:
-    """Log-axis limits and ticks that contain every finite confidence interval.
+    """Log-axis limits and ticks that contain every finite interval and point estimate.
 
     Intervals inside [0.05, 20] keep the standard clinical ticks. Wider intervals,
     such as Firth estimates under separation, switch to decade ticks so no point
-    estimate or interval falls outside the axis.
+    estimate or interval falls outside the axis. ``estimates`` keeps a point whose
+    interval is unavailable (NaN bounds) on the axis.
     """
-    lo = np.asarray(ci_lower, dtype=float)
-    hi = np.asarray(ci_upper, dtype=float)
+    est = np.asarray(estimates if estimates is not None else [], dtype=float)
+    lo = np.concatenate([np.asarray(ci_lower, dtype=float), est])
+    hi = np.concatenate([np.asarray(ci_upper, dtype=float), est])
     lo = lo[np.isfinite(lo) & (lo > 0)]
     hi = hi[np.isfinite(hi) & (hi > 0)]
     xmin = float(lo.min()) * 0.8 if lo.size else 0.25
@@ -315,6 +319,7 @@ def plot_forest(
             xmin, xmax, ticks = _ratio_axis_limits(
                 pd.to_numeric(df["ci_lower"], errors="coerce").to_numpy(),
                 pd.to_numeric(df["ci_upper"], errors="coerce").to_numpy(),
+                pd.to_numeric(df["estimate"], errors="coerce").to_numpy(),
             )
             ax_mid.set_xlim(xmin, xmax)
             ax_mid.set_xticks(ticks)
@@ -437,7 +442,7 @@ def plot_forest(
     # X-axis configuration
     if is_ratio:
         ax_plot.set_xscale("log")
-        xmin, xmax, ticks = _ratio_axis_limits(ci_lowers, ci_uppers)
+        xmin, xmax, ticks = _ratio_axis_limits(ci_lowers, ci_uppers, estimates)
         ax_plot.set_xlim(xmin, xmax)
         ax_plot.set_xticks(ticks)
         ax_plot.xaxis.set_minor_formatter(mpl.ticker.NullFormatter())
@@ -482,7 +487,10 @@ def plot_forest(
         )
 
     for idx, y in enumerate(y_positions):
-        est_str = f"{estimates[idx]:.2f} [{ci_lowers[idx]:.2f}, {ci_uppers[idx]:.2f}]"
+        # Whole numbers from 100 upward keep a separated-data interval clear of the P column.
+        est_str = "{} [{}, {}]".format(
+            *(f"{v:.{_ci_decimals(v)}f}" for v in (estimates[idx], ci_lowers[idx], ci_uppers[idx]))
+        )
         ax_text.text(
             0.0,
             y,

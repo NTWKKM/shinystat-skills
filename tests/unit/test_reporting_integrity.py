@@ -10,6 +10,7 @@ import re
 import sys
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -2113,3 +2114,28 @@ def test_exported_files_with_identifier_columns_fail(tmp_path):
     assert any("patient_id" in v and "matched_ids.csv" in v for v in audit.phi_violations)
     with pytest.raises(FileNotFoundError):
         verify_report_integrity(_audit_doc(), exported_files=[tmp_path / "absent.csv"])
+
+
+def test_exported_files_bom_tsv_xlsx_parquet_and_unsupported(tmp_path):
+    """ADR 81 Round 2: a BOM, a tab delimiter or a binary format cannot hide patient_id."""
+    bom = tmp_path / "bom.csv"
+    bom.write_bytes("\ufeffpatient_id,statin_rx\nPATIENT_MOCK_CVD_0001,1\n".encode("utf-8"))
+    tsv = tmp_path / "ids.tsv"
+    tsv.write_text("hn\tstatin_rx\n123\t1\n", encoding="utf-8")
+    frame = pd.DataFrame({"patient_id": ["PATIENT_MOCK_CVD_0001"], "statin_rx": [1]})
+    xlsx = tmp_path / "ids.xlsx"
+    frame.to_excel(xlsx, index=False)
+    parquet = tmp_path / "ids.parquet"
+    frame.to_parquet(parquet)
+    for fp, col in ((bom, "patient_id"), (tsv, "hn"), (xlsx, "patient_id"), (parquet, "patient_id")):
+        audit = verify_report_integrity(_audit_doc(), exported_files=[fp])
+        assert audit.passed is False, fp.name
+        assert any(f"'{col}'" in v and fp.name in v for v in audit.phi_violations), fp.name
+    clean_tsv = tmp_path / "clean.tsv"
+    clean_tsv.write_text("pair_id\tstatin_rx\n1\t1\n", encoding="utf-8")
+    assert verify_report_integrity(_audit_doc(), exported_files=[clean_tsv]).passed
+    unknown = tmp_path / "ids.json"
+    unknown.write_text('{"patient_id": "PATIENT_MOCK_CVD_0001"}', encoding="utf-8")
+    audit = verify_report_integrity(_audit_doc(), exported_files=[unknown])
+    assert audit.passed is False
+    assert any("could not be audited" in v for v in audit.phi_violations)

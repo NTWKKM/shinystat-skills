@@ -89,6 +89,12 @@ def build_harrell_rcs_basis(
             raise ValueError("knots must be >= 3 for Restricted Cubic Splines.")
         q = _HARRELL_QUANTILES.get(k, tuple(np.linspace(0.05, 0.95, k)))
         knot_vals = np.quantile(x_arr[~np.isnan(x_arr)], q)
+        if len(np.unique(knot_vals)) < k:
+            # Merging tied quantiles would silently fit fewer knots and fewer df.
+            raise ValueError(
+                f"{k} Harrell knots requested but only {len(np.unique(knot_vals))} quantile "
+                "locations are distinct; lower `knots` or pass explicit knot locations."
+            )
     else:
         knot_vals = np.sort(np.asarray(knots, dtype=float))
         if len(knot_vals) < 3:
@@ -148,6 +154,35 @@ def _nonlinearity_test(
         )
     lr = max(0.0, lr)
     return lr, float(stats.chi2.sf(lr, df=df_diff)), None
+
+
+def _assert_full_rank(design: pd.DataFrame, label: str) -> None:
+    """Fail closed on a collinear design (e.g. a covariate duplicating the spline variable)."""
+    arr = design.to_numpy(dtype=float)
+    if np.linalg.matrix_rank(arr) < arr.shape[1]:
+        raise ValueError(
+            f"{label} design matrix is rank deficient: drop collinear covariates before the RCS fit."
+        )
+
+
+def _fit_binomial_glm(y: np.ndarray, X: pd.DataFrame) -> tuple[Any, str | None]:
+    """Binomial GLM (IRLS) plus a reason when its inference is undefined.
+
+    statsmodels warns on perfect separation yet still reports ``converged=True``,
+    so both signals are checked.
+    """
+    import warnings
+
+    import statsmodels.api as sm
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        res = sm.GLM(y, X, family=sm.families.Binomial()).fit()
+    if any("PerfectSeparation" in type(w.message).__name__ for w in caught):
+        return res, "perfect or quasi-complete separation in the binomial GLM"
+    if not bool(getattr(res, "converged", True)):
+        return res, "binomial GLM did not converge"
+    return res, None
 
 
 def _contrast_curve(
@@ -375,6 +410,8 @@ def fit_logistic_rcs(
     Returns:
         dict containing model, summary_df, contrast_df, knots, knot_locations,
         non_linear_pvalue (with non_linear_reason), p_overall and log_likelihood.
+        Under separation or non-convergence every estimate, P value and contrast is
+        NaN and ``fit_failure_reason`` says why; a rank-deficient design raises.
     """
     import statsmodels.api as sm
 
@@ -406,13 +443,19 @@ def fit_logistic_rcs(
 
     z_df = pd.DataFrame(z, index=clean_df.index, columns=[f"_z{i}" for i in range(z.shape[1])])
     X = sm.add_constant(pd.concat([z_df, cov_df], axis=1), has_constant="add")
-    # GLM Binomial (IRLS) as in Recipe 22, so Wald and LR statistics match it exactly.
-    logit_model = sm.GLM(y, X, family=sm.families.Binomial()).fit()
     X_linear = sm.add_constant(
         pd.concat([pd.DataFrame({spline_var: x}, index=clean_df.index), cov_df], axis=1),
         has_constant="add",
     )
-    linear_model = sm.GLM(y, X_linear, family=sm.families.Binomial()).fit()
+    _assert_full_rank(X, "Spline")
+    _assert_full_rank(X_linear, "Linear")
+    # GLM Binomial (IRLS) as in Recipe 22, so Wald and LR statistics match it exactly.
+    logit_model, spline_fail = _fit_binomial_glm(y, X)
+    linear_model, linear_fail = _fit_binomial_glm(y, X_linear)
+    fit_failure_reason = (
+        f"spline model: {spline_fail}" if spline_fail
+        else (f"linear model: {linear_fail}" if linear_fail else None)
+    )
 
     # Affine map back to [Intercept, Harrell basis, covariates]:
     # a + (B - c) T b_z = (a - c . T b_z) + B (T b_z).
@@ -423,6 +466,10 @@ def fit_logistic_rcs(
     names = ["Intercept"] + spline_cols + list(cov_df.columns)
     coef = m @ logit_model.params.to_numpy()
     cov_full = m @ logit_model.cov_params().to_numpy() @ m.T
+    if fit_failure_reason is not None:
+        # Fail closed: estimates from a separated or non-converged fit are not reported.
+        coef = np.full_like(coef, np.nan)
+        cov_full = np.full_like(cov_full, np.nan)
     se = np.sqrt(np.maximum(np.diag(cov_full), 0.0))
     with np.errstate(divide="ignore", invalid="ignore"):
         zstat = coef / se
@@ -446,11 +493,15 @@ def fit_logistic_rcs(
     )
     beta_b, cov_b = coef[1 : 1 + n_s], cov_full[1 : 1 + n_s, 1 : 1 + n_s]
 
-    lr_stat, non_linear_p, non_linear_reason = _nonlinearity_test(
-        float(logit_model.llf), float(linear_model.llf), n_s - 1
-    )
-    wald = float(beta_b @ np.linalg.pinv(cov_b) @ beta_b)
-    p_overall = float(stats.chi2.sf(wald, df=n_s))
+    if fit_failure_reason is not None:
+        lr_stat = non_linear_p = p_overall = float("nan")
+        non_linear_reason = fit_failure_reason
+    else:
+        lr_stat, non_linear_p, non_linear_reason = _nonlinearity_test(
+            float(logit_model.llf), float(linear_model.llf), n_s - 1
+        )
+        wald = float(beta_b @ np.linalg.pinv(cov_b) @ beta_b)
+        p_overall = float(stats.chi2.sf(wald, df=n_s))
 
     grid_vals, log_or, se_log_or = _contrast_curve(x, knot_vals, beta_b, cov_b, ref_value)
     contrast_df = pd.DataFrame(
@@ -476,7 +527,8 @@ def fit_logistic_rcs(
         "non_linear_pvalue": non_linear_p,
         "non_linear_reason": non_linear_reason,
         "p_overall": p_overall,
-        "log_likelihood": float(logit_model.llf),
+        "fit_failure_reason": fit_failure_reason,
+        "log_likelihood": float("nan") if fit_failure_reason else float(logit_model.llf),
     }
 
 

@@ -267,6 +267,27 @@ INTEGRITY_PARITY_CASES: list[IntegrityParityCase] = [
         expected_untraced=[1987.0],
     ),
     IntegrityParityCase(
+        id="fail_sentence_final_capitalised_count_is_not_a_citation",
+        narrative=f"{BASE_NARRATIVE} Patients screened: Total 1987.",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=False,
+        expected_untraced=[1987.0],
+    ),
+    IntegrityParityCase(
+        id="pass_sentence_final_citation_with_author_context",
+        narrative=f"{BASE_NARRATIVE} Matching followed VanderWeele & Ding 2017. Pooling followed Rubin, 1987.",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=True,
+        expected_untraced=[],
+    ),
+    IntegrityParityCase(
+        id="fail_line_initial_percentage_is_not_a_section_number",
+        narrative=f"{BASE_NARRATIVE}\n45%. Mortality was lower after matching.",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=False,
+        expected_untraced=[45.0],
+    ),
+    IntegrityParityCase(
         id="pass_section_numbers",
         narrative=f"## 4. Results\n{BASE_NARRATIVE}\n7. Discussion\n### 6.1 Sensitivity Analysis\nNo further estimates are reported.",
         results_dict=BASE_RESULTS_DICT,

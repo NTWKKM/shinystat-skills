@@ -4333,3 +4333,15 @@ def test_cloud_verifier_flags_identifier_columns_in_exported_files(
     assert res["passed"] is False and any("'hn'" in v for v in res["phi_violations"])
     with pytest.raises(FileNotFoundError):
         verify(narrative, results, exported_files=[tmp_path / "absent.csv"])
+    # ADR 81 Round 2: BOM, TSV and unsupported formats fail closed like the engine.
+    bom = tmp_path / "bom.csv"
+    bom.write_bytes("\ufeffpatient_id,statin_rx\nPATIENT_MOCK_CVD_0001,1\n".encode("utf-8"))
+    tsv = tmp_path / "ids.tsv"
+    tsv.write_text("hn\tstatin_rx\n123\t1\n", encoding="utf-8")
+    for fp, col in ((bom, "patient_id"), (tsv, "hn")):
+        res = verify(narrative, results, exported_files=[fp])
+        assert res["passed"] is False and any(f"'{col}'" in v for v in res["phi_violations"])
+    unknown = tmp_path / "ids.json"
+    unknown.write_text("{}", encoding="utf-8")
+    res = verify(narrative, results, exported_files=[unknown])
+    assert res["passed"] is False and any("could not be audited" in v for v in res["phi_violations"])

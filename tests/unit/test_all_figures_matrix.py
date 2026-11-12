@@ -285,6 +285,76 @@ def test_forest_ratio_axis_covers_every_interval(lo, hi, expect_ticks):
     assert all(xmin <= t <= xmax for t in ticks)
 
 
+def test_forest_ratio_axis_keeps_estimate_without_interval(tmp_path: Path):
+    """A point estimate whose CI is unavailable still sits on the axis."""
+    from medstat.figures.forest import _ratio_axis_limits
+
+    xmin, xmax, _ = _ratio_axis_limits(
+        np.array([0.9, np.nan]), np.array([1.4, np.nan]), np.array([1.1, 50.0])
+    )
+    assert xmin <= 0.9 and xmax >= 50.0
+    df = pd.DataFrame(
+        {"term": ["Age", "Rare exposure"], "estimate": [1.1, 50.0],
+         "ci_lower": [0.9, np.nan], "ci_upper": [1.4, np.nan]}
+    )
+    for jnl in (None, "NEJM"):
+        _assert_bundle_intact(
+            plot_forest(df, scale="OR", journal=jnl, out_path=str(tmp_path / f"n_{jnl}.png"))
+        )
+
+
+def test_dual_forest_plotly_carries_favour_labels(tmp_path: Path):
+    df = pd.DataFrame(
+        {"term": ["Overall"], "estimate": [0.8], "ci_lower": [0.6], "ci_upper": [1.1]}
+    )
+    plain = plot_dual_forest(df, scale="HR", out_path=str(tmp_path / "a.png"))
+    assert not plain.plotly_fig.layout.annotations
+    res = plot_dual_forest(
+        df, scale="HR", out_path=str(tmp_path / "b.png"),
+        favor_left_label="Favors Drug", favor_right_label="Favors Placebo",
+    )
+    texts = [a.text for a in res.plotly_fig.layout.annotations]
+    assert any("Favors Drug" in t for t in texts) and any("Favors Placebo" in t for t in texts)
+
+
+def _risk_label_gaps(monkeypatch, **kwargs) -> list[float]:
+    """Pixel gap between each risk-table group label and the first count in its row."""
+    import medstat.figures.survival as surv
+
+    groups = list(kwargs["risk_table"]["Group"])
+    first = str(kwargs["risk_table"].iloc[0, 1])
+    gaps: list[float] = []
+    real_qa = surv.qa_layout
+
+    def spy(fig, *a, **k):
+        out = real_qa(fig, *a, **k)  # draws the figure, so extents are final
+        rend = fig.canvas.get_renderer()
+        for ax in fig.axes:
+            boxes = [(t.get_text(), t.get_window_extent(rend)) for t in ax.texts]
+            for txt, lbl in boxes:
+                if txt in groups:
+                    row = [b for t2, b in boxes if t2 == first and abs(b.y0 - lbl.y0) < 2]
+                    gaps.append(min(b.x0 for b in row) - lbl.x1)
+        return out
+
+    monkeypatch.setattr(surv, "qa_layout", spy)
+    plot_kaplan_meier(**kwargs)
+    return gaps
+
+
+@pytest.mark.parametrize("jnl", [None, "NEJM"])
+def test_km_risk_table_labels_clear_first_count(tmp_path: Path, monkeypatch, jnl):
+    km = {
+        "Active": {"timeline": np.array([0, 30, 60, 90]), "survival": np.array([1.0, 0.9, 0.8, 0.75])},
+        "Placebo": {"timeline": np.array([0, 30, 60, 90]), "survival": np.array([1.0, 0.8, 0.65, 0.55])},
+    }
+    risk = pd.DataFrame({"Group": ["Active", "Placebo"], "t=0": [10000, 10000], "t=90": [75, 55]})
+    gaps = _risk_label_gaps(
+        monkeypatch, km_curves=km, risk_table=risk, journal=jnl, out_path=str(tmp_path / "km.png")
+    )
+    assert len(gaps) == 2 and min(gaps) > 4.0, gaps
+
+
 def test_forest_separated_firth_estimate_passes_layout(tmp_path: Path):
     sep = pd.DataFrame(
         {

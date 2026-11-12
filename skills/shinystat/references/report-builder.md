@@ -679,6 +679,8 @@ def generate_pdf_report(
 Before releasing any report, run the standalone verification routine:
 
 ```python
+import csv
+import io
 import math
 import re
 from pathlib import Path
@@ -748,9 +750,28 @@ def verify_standalone_integrity(
         fp = Path(path)
         if not fp.is_file():
             raise FileNotFoundError(f"Exported file not found for integrity audit: {fp}")
-        content = fp.read_text(encoding="utf-8", errors="replace")
-        header = content.splitlines()[0] if content else ""
-        for col in (c.strip().strip('"') for c in header.split(",")):
+        # Read by format; utf-8-sig drops a BOM that would hide a patient_id header (ADR 81).
+        suffix = fp.suffix.lower()
+        try:
+            if suffix in (".csv", ".tsv", ".tab"):
+                content = fp.read_text(encoding="utf-8-sig", errors="replace")
+                delim = "," if suffix == ".csv" else "\t"
+                cols = [c.strip() for c in next(csv.reader(io.StringIO(content), delimiter=delim), [])]
+            elif suffix in (".xlsx", ".parquet"):
+                frames = (
+                    pd.read_excel(fp, sheet_name=None, dtype=str)
+                    if suffix == ".xlsx"
+                    else {"": pd.read_parquet(fp)}
+                )
+                cols = [str(c) for f in frames.values() for c in f.columns]
+                content = "\n".join(f.astype(str).to_csv(index=False) for f in frames.values())
+            else:
+                raise ValueError(f"unsupported format '{suffix or fp.name}' (use .csv, .tsv, .xlsx or .parquet)")
+        except (ValueError, ImportError) as exc:
+            # Fail closed: a file the audit cannot read is never passed unchecked.
+            violations.append(f"Exported file '{fp.name}' could not be audited: {exc}")
+            continue
+        for col in cols:
             if id_col_pattern.match(col):
                 violations.append(f"Identifier column '{col}' in exported file '{fp.name}'")
         for pat, label in phi_patterns:
@@ -1427,12 +1448,20 @@ def verify_standalone_integrity(
                 1900.0 <= val <= 2035.0
                 and "." not in raw_str
                 and bool(re.search(r"\b[A-Z][a-zA-Z'’\-]+(?:\s+(?:&|and)\s+[A-Z][a-zA-Z'’\-]+)?,?\s*\(?$", window_before))
-                and bool(re.match(r"^[a-z]?(?:\s*(?:[)\];,.:]|$)|\s+(?:and|&)\s+[A-Z])", window_after))
+                and (
+                    # Bracket or next author closes a citation; ; , . : or line end only after
+                    # "(", "Surname," or a second author, so "Total 1987." stays untraced (ADR 79)
+                    bool(re.match(r"^[a-z]?(?:\s*[)\]]|\s+(?:and|&)\s+[A-Z])", window_after))
+                    or (
+                        bool(re.match(r"^[a-z]?\s*(?:[;,.:]|$)", window_after))
+                        and bool(re.search(r"(?:\(|,|(?:&|\band)\s+[A-Z][a-zA-Z'’\-]+)\s*\(?$", window_before))
+                    )
+                )
             )
             # Analysis scale constants: "per 10 years", "caliper 0.2 SD" (engine parity, ADR 81)
             is_scale_unit = bool(re.search(r"\b(?:per|caliper(?:\s+(?:of|width))?)\s*$", window_before, re.IGNORECASE))
             # Section number opening a line or Markdown heading (## 4. Results, 6.1 Sensitivity Analysis)
-            is_section = bool(re.match(r"^\s*(?:#{1,6}\s*)?$", window_before)) and (
+            is_section = not has_pct and bool(re.match(r"^\s*(?:#{1,6}\s*)?$", window_before)) and (
                 (bool(re.fullmatch(r"\d{1,2}", raw_str)) and 1.0 <= val <= 50.0 and bool(re.match(r"^[.)]\s+[A-Z]", window_after)))
                 or (bool(re.fullmatch(r"\d{1,2}\.\d{1,2}", raw_str)) and bool(re.match(r"^\.?\s+[A-Z]", window_after)))
             )

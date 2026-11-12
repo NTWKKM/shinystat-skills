@@ -1284,3 +1284,43 @@ def test_recipe22_reports_nonconvergence_as_nan_with_reason(recipes, monkeypatch
         df, "time", "biomarker", knots=4, family="cox", event_col="status"
     )
     assert np.isnan(res["p_nonlinearity"]) and "non-convergence" in res["nonlinearity_reason"]
+
+
+def test_rcs_tied_quantile_knots_raise_in_engine_and_recipe22(recipes):
+    """Tied Harrell quantiles keep the requested k: both implementations raise."""
+    from medstat.models.splines import build_harrell_rcs_basis
+
+    x = np.r_[np.zeros(60), np.arange(1.0, 41.0)]  # 5th-35th percentiles all 0
+    with pytest.raises(ValueError, match="distinct"):
+        build_harrell_rcs_basis(x, knots=4)
+    with pytest.raises(ValueError, match="distinct"):
+        recipes["build_harrell_rcs_basis"](x, 4)
+
+
+def test_logistic_rcs_rank_deficient_design_raises(recipes):
+    from medstat.models.splines import fit_logistic_rcs
+
+    df = pd.read_csv(_FIXTURES / "cardiovascular_cohort.csv")
+    df["age_copy"] = df["age"]
+    with pytest.raises(ValueError, match="rank deficient"):
+        fit_logistic_rcs(df, "cv_event", "ldl", covariates=["age", "age_copy"], n_knots=4)
+    with pytest.raises(ValueError, match="rank deficient"):
+        recipes["fit_rcs_spline_model"](
+            df, "cv_event", "ldl", adjust_cols=["age", "age_copy"], knots=4, family="binomial"
+        )
+
+
+def test_logistic_rcs_separation_returns_nan_with_reason(recipes):
+    """Perfect separation: statsmodels says converged=True, so nothing may be reported."""
+    from medstat.models.splines import fit_logistic_rcs
+
+    rng = np.random.default_rng(7)
+    df = pd.DataFrame({"x": rng.normal(size=80), "age": rng.normal(60, 8, 80)})
+    df["y"] = (df["x"] > 0.3).astype(int)
+    eng = fit_logistic_rcs(df, "y", "x", covariates=["age"], n_knots=4)
+    rec = recipes["fit_rcs_spline_model"](df, "y", "x", adjust_cols=["age"], knots=4, family="binomial")
+    for p_eng, p_rec in (("non_linear_pvalue", "p_nonlinearity"), ("p_overall", "p_overall")):
+        assert np.isnan(eng[p_eng]) and np.isnan(rec[p_rec])
+    assert "separation" in eng["fit_failure_reason"] and "separation" in rec["fit_failure_reason"]
+    assert eng["contrast_df"]["OR"].isna().all() and rec["contrast_df"]["estimate"].isna().all()
+    assert eng["summary_df"]["coef"].isna().all() and rec["converged"] is False

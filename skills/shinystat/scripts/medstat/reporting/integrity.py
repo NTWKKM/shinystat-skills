@@ -10,6 +10,8 @@ Invariants enforced:
 
 from __future__ import annotations
 
+import csv
+import io
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -217,12 +219,21 @@ class TextToken(NamedTuple):
 _AUTHOR_BEFORE_YEAR = re.compile(
     r"\b[A-Z][a-zA-Z'’\-]+(?:\s+(?:&|and)\s+[A-Z][a-zA-Z'’\-]+)?,?\s*\(?$"
 )
-_CITATION_AFTER_YEAR = re.compile(r"^[a-z]?(?:\s*(?:[)\];,.:]|$)|\s+(?:and|&)\s+[A-Z])")
+# A closing bracket or a next author is a citation boundary on its own. Sentence or list
+# punctuation (and a line end) counts only after explicit author context: an opening
+# parenthesis, a comma after the surname, or a second author ("Total 1987." stays untraced).
+_CITATION_CLOSE_AFTER_YEAR = re.compile(r"^[a-z]?(?:\s*[)\]]|\s+(?:and|&)\s+[A-Z])")
+_CITATION_SOFT_AFTER_YEAR = re.compile(r"^[a-z]?\s*(?:[;,.:]|$)")
+_AUTHOR_CONTEXT_BEFORE_YEAR = re.compile(
+    r"(?:\(|,|(?:&|\band)\s+[A-Z][a-zA-Z'’\-]+)\s*\(?$"
+)
 
 
 def _is_section_number(
-    val: float, raw_str: str, window_before: str, window_after: str
+    val: float, raw_str: str, window_before: str, window_after: str, has_pct: bool = False
 ) -> bool:
+    if has_pct:
+        return False
     if not re.match(r"^\s*(?:#{1,6}\s*)?$", window_before):
         return False
     if re.fullmatch(r"\d{1,2}", raw_str) and 1.0 <= val <= 50.0:
@@ -238,6 +249,7 @@ def _is_structural_context(
     window_before: str,
     window_after: str,
     doc_has_references: bool = False,
+    has_pct: bool = False,
 ) -> bool:
     """Checks whether an unmatched numeric token is an uninformative structural constant.
 
@@ -308,12 +320,18 @@ def _is_structural_context(
 
     # 3b. Author-year citations without "et al." (Austin (2011), VanderWeele & Ding 2017,
     # (Rubin, 1987)): a capitalised surname right before the year and a citation
-    # closer, list separator or next author right after it. "Total 1987 patients" stays untraced.
+    # boundary after it. "Total 1987 patients" and "Total 1987." stay untraced.
     if (
         1900.0 <= val <= 2035.0
         and "." not in raw_str
         and _AUTHOR_BEFORE_YEAR.search(window_before)
-        and _CITATION_AFTER_YEAR.match(window_after)
+        and (
+            _CITATION_CLOSE_AFTER_YEAR.match(window_after)
+            or (
+                _CITATION_SOFT_AFTER_YEAR.match(window_after)
+                and _AUTHOR_CONTEXT_BEFORE_YEAR.search(window_before)
+            )
+        )
     ):
         return True
 
@@ -323,7 +341,7 @@ def _is_structural_context(
 
     # 3c. Section numbers at the start of a line or Markdown heading (## 4. Results, 7. Discussion,
     # 6.1 Sensitivity Analysis). A count that opens a sentence ("12 patients died") stays untraced.
-    if _is_section_number(val, raw_str, window_before, window_after):
+    if _is_section_number(val, raw_str, window_before, window_after, has_pct=has_pct):
         return True
 
     # 4. Structural headings and table/figure/step counters (e.g., Table 1, Figure 2, Tier 1, Step 3, v.1)
@@ -447,6 +465,7 @@ def _extract_text_tokens(text: str) -> list[TextToken]:
             window_before,
             window_after,
             doc_has_references=doc_has_references,
+            has_pct=has_pct,
         )
         p_ineq_match = re.search(
             r"(?:((?:[a-zA-Z_-]+(?:\s+(?:ratio\s+)?(?:test|score|statistic))?|[a-zA-Z_-]+))\s*,?\s+)?\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+([a-zA-Z_-]+)\)?|\(?([a-zA-Z_-]+)\)?))?\s*([<>]=?|[≤≥])\s*$",
@@ -484,6 +503,38 @@ def _extract_text_tokens(text: str) -> list[TextToken]:
 def _extract_text_numbers(text: str) -> list[float]:
     """Extracts candidate float numbers from narrative text."""
     return [token.val for token in _extract_text_tokens(text)]
+
+
+_DELIMITED_EXPORTS = {".csv": ",", ".tsv": "\t", ".tab": "\t"}
+
+
+def _read_exported_table(fp: Path) -> tuple[list[str], str]:
+    """Header columns and scannable text of an exported data file.
+
+    CSV and TSV are decoded as ``utf-8-sig`` so a leading BOM cannot hide a
+    ``patient_id`` header; XLSX and Parquet are read through pandas. Any other
+    format raises ``ValueError`` so the caller records it as unaudited.
+    """
+    suffix = fp.suffix.lower()
+    if suffix in _DELIMITED_EXPORTS:
+        content = fp.read_text(encoding="utf-8-sig", errors="replace")
+        first = next(csv.reader(io.StringIO(content), delimiter=_DELIMITED_EXPORTS[suffix]), [])
+        return [c.strip() for c in first], content
+    try:
+        if suffix == ".xlsx":
+            frames = pd.read_excel(fp, sheet_name=None, dtype=str)
+        elif suffix == ".parquet":
+            frames = {"": pd.read_parquet(fp)}
+        else:
+            raise ValueError(f"unsupported format '{suffix or fp.name}' (use .csv, .tsv, .xlsx or .parquet)")
+    except ImportError as exc:
+        raise ValueError(f"no reader for '{suffix}' ({exc})") from exc
+    cols: list[str] = []
+    parts: list[str] = []
+    for frame in frames.values():
+        cols.extend(str(c) for c in frame.columns)
+        parts.append(frame.astype(str).to_csv(index=False))
+    return cols, "\n".join(parts)
 
 
 def verify_report_integrity(
@@ -539,9 +590,12 @@ def verify_report_integrity(
         fp = Path(path)
         if not fp.is_file():
             raise FileNotFoundError(f"Exported file not found for integrity audit: {fp}")
-        content = fp.read_text(encoding="utf-8", errors="replace")
-        header = content.splitlines()[0] if content else ""
-        cols = [c.strip().strip('"') for c in header.split(",")]
+        try:
+            cols, content = _read_exported_table(fp)
+        except ValueError as exc:
+            # Fail closed: a file the audit cannot read is never passed unchecked.
+            phi_violations.append(f"Exported file '{fp.name}' could not be audited: {exc}")
+            continue
         for col in scan_identifier_columns(cols):
             phi_violations.append(f"Identifier column '{col}' in exported file '{fp.name}'")
         for pattern, label in PHI_PATTERNS:

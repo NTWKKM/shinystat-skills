@@ -221,6 +221,14 @@ def plot_kaplan_meier(
             except ValueError:
                 milestone_vals.append(0.0)
 
+        # Group labels sit right of a gap that clears half the widest centred count,
+        # so "Placebo" never touches the first column ("Placebo100").
+        max_count_chars = max(
+            (len(str(v)) for col in time_cols for v in risk_table[col]), default=1
+        )
+        label_gap_in = 0.10 + 0.04 * max_count_chars
+        label_offset = mpl.transforms.ScaledTranslation(-label_gap_in, 0, fig.dpi_scale_trans)
+
         if journal is not None:
             ax_risk.text(
                 0.0,
@@ -243,7 +251,9 @@ def plot_kaplan_meier(
                     y_pos,
                     grp_label,
                     transform=ax_risk.get_yaxis_transform()
-                    + mpl.transforms.ScaledTranslation(-0.24, 0, fig.dpi_scale_trans),
+                    + mpl.transforms.ScaledTranslation(
+                        -max(0.24, label_gap_in), 0, fig.dpi_scale_trans
+                    ),
                     fontsize=8.0,
                     fontweight="bold",
                     color=grp_color,
@@ -277,9 +287,10 @@ def plot_kaplan_meier(
                 grp_label = str(r["Group"])
                 y_pos = n_grps - 1 - g_idx
                 ax_risk.text(
-                    -max_t * 0.02,
+                    0,
                     y_pos,
                     grp_label,
+                    transform=ax_risk.get_yaxis_transform() + label_offset,
                     fontsize=9,
                     fontweight="500",
                     ha="right",

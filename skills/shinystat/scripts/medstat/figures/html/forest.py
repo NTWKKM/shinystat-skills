@@ -101,6 +101,26 @@ def plot_dual_forest(
         )
     )
 
+    if favor_left_label is not None and favor_right_label is not None:
+        # Same effect-direction labels as the static figure, either side of the null line.
+        for text, anchor in (
+            (f"\u2190 {favor_left_label}", "right"),
+            (f"{favor_right_label} \u2192", "left"),
+        ):
+            fig.add_annotation(
+                x=np.log10(null_val) if is_log else null_val,
+                y=0,
+                xref="x",
+                yref="paper",
+                yshift=-48,
+                xshift=-6 if anchor == "right" else 6,
+                text=text,
+                showarrow=False,
+                xanchor=anchor,
+                yanchor="top",
+                font=dict(size=11, color="#334155"),
+            )
+
     fig.update_layout(
         title=dict(text=title, font=dict(size=15, color="#0F172A")),
         xaxis=dict(
@@ -116,7 +136,9 @@ def plot_dual_forest(
             autorange=True,
         ),
         template="plotly_white",
-        margin=dict(l=120, r=40, t=50, b=50),
+        margin=dict(
+            l=120, r=40, t=50, b=90 if favor_left_label is not None and favor_right_label is not None else 50
+        ),
         height=max(400, len(terms) * 35 + 120),
     )
 
