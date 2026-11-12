@@ -300,12 +300,13 @@ def plot_kaplan_meier(
 
     source_df = pd.DataFrame(curve_rows)
     if export_vector:
-        png_path, vec_path, _ = save_figure_bundle(
+        png_path, vec_path, svg_path = save_figure_bundle(
             fig, out_path, dpi=dpi, export_vector=True
         )
     else:
         png_path = save_publication_figure(fig, out_path, dpi=dpi)
         vec_path = None
+        svg_path = None
     csv_path = export_source_data(source_df, png_path)
 
     if has_risk_table:
@@ -328,6 +329,7 @@ def plot_kaplan_meier(
         source_df=source_df,
         csv_path=csv_path,
         vector_path=vec_path,
+        svg_path=svg_path,
         qa=qa,
     )
 
@@ -481,12 +483,13 @@ def plot_cif(
 
     source_df = df.copy()
     if export_vector:
-        png_path, vec_path, _ = save_figure_bundle(
+        png_path, vec_path, svg_path = save_figure_bundle(
             fig, out_path, dpi=dpi, export_vector=True
         )
     else:
         png_path = save_publication_figure(fig, out_path, dpi=dpi)
         vec_path = None
+        svg_path = None
     csv_path = export_source_data(source_df, png_path)
 
     alt_text = f"Cumulative Incidence Function curve showing {primary_label} and {competing_label}."
@@ -501,5 +504,6 @@ def plot_cif(
         source_df=source_df,
         csv_path=csv_path,
         vector_path=vec_path,
+        svg_path=svg_path,
         qa=qa,
     )

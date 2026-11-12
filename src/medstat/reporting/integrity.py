@@ -11,12 +11,14 @@ Invariants enforced:
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, NamedTuple
 
 import pandas as pd
 
-from medstat._phi import PHI_PATTERNS
+from medstat._phi import PHI_PATTERNS, scan_identifier_columns
 from medstat.reporting.ir import (
     ReportDocument,
     TableBlock,
@@ -212,6 +214,24 @@ class TextToken(NamedTuple):
     p_qualifier: str | None = None
 
 
+_AUTHOR_BEFORE_YEAR = re.compile(
+    r"\b[A-Z][a-zA-Z'’\-]+(?:\s+(?:&|and)\s+[A-Z][a-zA-Z'’\-]+)?,?\s*\(?$"
+)
+_CITATION_AFTER_YEAR = re.compile(r"^[a-z]?(?:\s*(?:[)\];,.:]|$)|\s+(?:and|&)\s+[A-Z])")
+
+
+def _is_section_number(
+    val: float, raw_str: str, window_before: str, window_after: str
+) -> bool:
+    if not re.match(r"^\s*(?:#{1,6}\s*)?$", window_before):
+        return False
+    if re.fullmatch(r"\d{1,2}", raw_str) and 1.0 <= val <= 50.0:
+        return bool(re.match(r"^[.)]\s+[A-Z]", window_after))
+    if re.fullmatch(r"\d{1,2}\.\d{1,2}", raw_str):
+        return bool(re.match(r"^\.?\s+[A-Z]", window_after))
+    return False
+
+
 def _is_structural_context(
     val: float,
     raw_str: str,
@@ -285,6 +305,26 @@ def _is_structural_context(
             re.IGNORECASE,
         ):
             return True
+
+    # 3b. Author-year citations without "et al." (Austin (2011), VanderWeele & Ding 2017,
+    # (Rubin, 1987)): a capitalised surname right before the year and a citation
+    # closer, list separator or next author right after it. "Total 1987 patients" stays untraced.
+    if (
+        1900.0 <= val <= 2035.0
+        and "." not in raw_str
+        and _AUTHOR_BEFORE_YEAR.search(window_before)
+        and _CITATION_AFTER_YEAR.match(window_after)
+    ):
+        return True
+
+    # 3d. Analysis scale constants: "per 10 years", "per 0.5 mg/dL", "caliper 0.2 SD".
+    if re.search(r"\b(?:per|caliper(?:\s+(?:of|width))?)\s*$", window_before, re.IGNORECASE):
+        return True
+
+    # 3c. Section numbers at the start of a line or Markdown heading (## 4. Results, 7. Discussion,
+    # 6.1 Sensitivity Analysis). A count that opens a sentence ("12 patients died") stays untraced.
+    if _is_section_number(val, raw_str, window_before, window_after):
+        return True
 
     # 4. Structural headings and table/figure/step counters (e.g., Table 1, Figure 2, Tier 1, Step 3, v.1)
     is_version = re.search(r"\b(?:Version|v\.)\s*$", window_before, re.IGNORECASE)
@@ -450,6 +490,8 @@ def verify_report_integrity(
     doc: ReportDocument,
     allowed_untraced: set[float] | list[float] | tuple[float, ...] | None = None,
     study_design: str | None = None,
+    delivered_text: str | None = None,
+    exported_files: Sequence[str | Path] | None = None,
 ) -> IntegrityReport:
     """
     Audits a ReportDocument and returns an IntegrityReport:
@@ -474,8 +516,16 @@ def verify_report_integrity(
     ``citations_count`` counts matched citation groups, not unique references;
     bracketed bibliography labels can also count. Citation sources and their
     agreement with the narrative are not verified.
+
+    ``delivered_text`` is text given to the reader outside the rendered document
+    (an In-Chat Summary reply); it is audited together with the document, so every
+    number in it must trace to ``results_dict`` as well. ``exported_files`` are data
+    files written beside the report: a missing file raises, and an identifier column
+    (``patient_id``, ``hn``, ``mrn``, ...) or a PHI pattern in one is a PHI violation.
     """
     all_text = doc.extract_all_text()
+    if delivered_text:
+        all_text = f"{all_text}\n\n{delivered_text}"
 
     # 1. Zero-PHI Scan
     phi_violations: list[str] = []
@@ -483,6 +533,20 @@ def verify_report_integrity(
         matches = pattern.findall(all_text)
         for m in matches:
             phi_violations.append(f"{label}: '{m}'")
+
+    # Data files exported beside the report (ADR 81)
+    for path in exported_files or []:
+        fp = Path(path)
+        if not fp.is_file():
+            raise FileNotFoundError(f"Exported file not found for integrity audit: {fp}")
+        content = fp.read_text(encoding="utf-8", errors="replace")
+        header = content.splitlines()[0] if content else ""
+        cols = [c.strip().strip('"') for c in header.split(",")]
+        for col in scan_identifier_columns(cols):
+            phi_violations.append(f"Identifier column '{col}' in exported file '{fp.name}'")
+        for pattern, label in PHI_PATTERNS:
+            for m in pattern.findall(content):
+                phi_violations.append(f"{label} in exported file '{fp.name}': '{m}'")
 
     # Also scan table cells and headers
     for block in doc.blocks:

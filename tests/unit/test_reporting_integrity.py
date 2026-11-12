@@ -2085,3 +2085,31 @@ def test_integrity_study_design_regression_suite(case):
         assert audit.passed is case.expected_passed, (
             f"Case '{case.id}' expected passed={case.expected_passed}, got {audit.passed} (warnings={audit.warnings}, untraced={audit.untraced_numbers})"
         )
+
+
+def _audit_doc():
+    doc = ReportDocument(title="Audit", results_dict={"or": 1.45, "n": 412})
+    doc.add_paragraph("Methods: logistic regression; 412 patients were analysed (retention flow).")
+    doc.add_paragraph("The odds ratio was 1.45.")
+    return doc
+
+
+def test_delivered_text_is_audited_with_the_document():
+    """ADR 81: an In-Chat reply is audited, so a number added only in chat fails."""
+    assert verify_report_integrity(_audit_doc(), delivered_text="OR 1.45 in 412 patients.").passed
+    audit = verify_report_integrity(_audit_doc(), delivered_text="OR 1.45; risk fell by 17.3 points.")
+    assert audit.passed is False and audit.untraced_numbers == [17.3]
+
+
+def test_exported_files_with_identifier_columns_fail(tmp_path):
+    """ADR 81: a data file written beside the report carries no identifier column."""
+    clean = tmp_path / "matched.csv"
+    clean.write_text("pair_id,statin_rx,cv_event\n1,1,0\n", encoding="utf-8")
+    leaked = tmp_path / "matched_ids.csv"
+    leaked.write_text("patient_id,statin_rx,cv_event\nPATIENT_MOCK_CVD_0001,1,0\n", encoding="utf-8")
+    assert verify_report_integrity(_audit_doc(), exported_files=[clean]).passed
+    audit = verify_report_integrity(_audit_doc(), exported_files=[clean, leaked])
+    assert audit.passed is False
+    assert any("patient_id" in v and "matched_ids.csv" in v for v in audit.phi_violations)
+    with pytest.raises(FileNotFoundError):
+        verify_report_integrity(_audit_doc(), exported_files=[tmp_path / "absent.csv"])

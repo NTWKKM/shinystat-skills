@@ -741,7 +741,7 @@ def fit_multinomial_logistic(
 
 ## 22. Restricted Cubic Splines (Harrell RCS) for Non-Linear Continuous Predictors
 
-Constructs a standalone **Harrell Restricted Cubic Spline (RCS)** basis with $k \in \{3, 4, 5\}$ quantile knots (Harrell 2015 canonical quantiles: $[0.10, 0.50, 0.90]$ for $k=3$; $[0.05, 0.35, 0.65, 0.95]$ for $k=4$; $[0.05, 0.275, 0.50, 0.725, 0.95]$ for $k=5$), fits either a logistic regression (`family="binomial"`), linear model (`family="gaussian"`), or Cox PH model (`family="cox"`), and computes the **Likelihood Ratio Test for non-linearity (`p_nonlinearity`)**, overall spline association (`p_overall`), and reference-centered dose-response contrast curve ($\text{OR}(x)$ or $\text{HR}(x)$ vs `ref_value`).
+Constructs a standalone **Harrell Restricted Cubic Spline (RCS)** basis with $k \in \{3, 4, 5\}$ quantile knots (Harrell 2015 canonical quantiles: $[0.10, 0.50, 0.90]$ for $k=3$; $[0.05, 0.35, 0.65, 0.95]$ for $k=4$; $[0.05, 0.275, 0.50, 0.725, 0.95]$ for $k=5$), fits either a logistic regression (`family="binomial"`), linear model (`family="gaussian"`), or Cox PH model (`family="cox"`), and computes the **Likelihood Ratio Test for non-linearity (`p_nonlinearity`)**, overall spline association (`p_overall`), and reference-centered dose-response contrast curve ($\text{OR}(x)$ or $\text{HR}(x)$ vs `ref_value`). Models are fitted on centred, QR-orthonormalised spline columns (same likelihood, stable Newton-Raphson at $k=5$) and coefficients are mapped back to the Harrell basis; `model` therefore holds the orthonormal fit. A spline fit whose log-likelihood falls below the nested linear fit returns `p_nonlinearity = NaN` with `nonlinearity_reason`.
 
 ```python
 from typing import Any, Literal
@@ -801,6 +801,20 @@ def build_harrell_rcs_basis(
     return np.column_stack(cols), knot_vals
 
 
+def _orthonormalize_rcs(basis: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Centred, QR-orthonormalised columns Z = (B - c) @ T; beta_B = T @ beta_Z.
+
+    Harrell columns are nearly collinear (r > 0.99 at k = 5) and stall Newton-Raphson;
+    fitting on Z gives the same likelihood (engine parity, ADR 78).
+    """
+    center = basis.mean(axis=0)
+    q, r = np.linalg.qr(basis - center)
+    if np.any(np.abs(np.diag(r)) <= 1e-10 * max(1.0, float(np.abs(r).max()))):
+        raise ValueError("RCS basis is rank deficient: too few distinct values of the spline variable.")
+    t = np.linalg.inv(r) * np.sqrt(basis.shape[0])
+    return (basis - center) @ t, t, center
+
+
 def fit_rcs_spline_model(
     df: pd.DataFrame,
     outcome_col: str,
@@ -837,8 +851,10 @@ def fit_rcs_spline_model(
     basis_mat, knot_vals = build_harrell_rcs_basis(x_vals, knots=knots)
     n_spline_cols = basis_mat.shape[1]
     spline_names = [f"{rcs_var}_rcs{i}" for i in range(n_spline_cols)]
+    z_mat, t_mat, _ = _orthonormalize_rcs(basis_mat)
+    z_names = [f"_z{i}" for i in range(n_spline_cols)]
 
-    X_spline_df = pd.DataFrame(basis_mat, index=clean.index, columns=spline_names)
+    X_spline_df = pd.DataFrame(z_mat, index=clean.index, columns=z_names)
     X_lin_df = pd.DataFrame({f"{rcs_var}_rcs0": x_vals}, index=clean.index)
     if adjust:
         for c in adjust:
@@ -866,9 +882,9 @@ def fit_rcs_spline_model(
 
         cph_full = CoxPHFitter().fit(df_full_cox, duration_col="_dur", event_col="_ev")
         cph_lin = CoxPHFitter().fit(df_lin_cox, duration_col="_dur", event_col="_ev")
-        lr_nonlin = max(0.0, float(2.0 * (cph_full.log_likelihood_ - cph_lin.log_likelihood_)))
-        b_spline = cph_full.params_.loc[spline_names].to_numpy(dtype=float)
-        cov_spline = cph_full.variance_matrix_.loc[spline_names, spline_names].to_numpy(dtype=float)
+        ll_full, ll_lin = float(cph_full.log_likelihood_), float(cph_lin.log_likelihood_)
+        b_z = cph_full.params_.loc[z_names].to_numpy(dtype=float)
+        cov_z = cph_full.variance_matrix_.loc[z_names, z_names].to_numpy(dtype=float)
         res_full = cph_full
         aic_val = float(cph_full.AIC_partial_)
     else:
@@ -878,13 +894,25 @@ def fit_rcs_spline_model(
 
         res_full = sm.GLM(y_vals, X_full, family=fam).fit()
         res_lin = sm.GLM(y_vals, X_lin, family=fam).fit()
-        lr_nonlin = max(0.0, float(2.0 * (res_full.llf - res_lin.llf)))
-        b_spline = res_full.params[spline_names].to_numpy(dtype=float)
-        cov_spline = res_full.cov_params().loc[spline_names, spline_names].to_numpy(dtype=float)
+        ll_full, ll_lin = float(res_full.llf), float(res_lin.llf)
+        b_z = res_full.params[z_names].to_numpy(dtype=float)
+        cov_z = res_full.cov_params().loc[z_names, z_names].to_numpy(dtype=float)
         aic_val = float(res_full.aic)
 
+    # Back-transform to the Harrell basis.
+    b_spline = t_mat @ b_z
+    cov_spline = t_mat @ cov_z @ t_mat.T
+
     df_nonlin = max(1, n_spline_cols - 1)
-    p_nonlinearity = float(stats.chi2.sf(lr_nonlin, df=df_nonlin))
+    lr_raw = 2.0 * (ll_full - ll_lin)
+    if lr_raw < -1e-6 * max(1.0, abs(ll_lin)):
+        # Spline fit below its nested linear fit = non-convergence, not P = 1.
+        lr_nonlin, p_nonlinearity = float("nan"), float("nan")
+        nonlinearity_reason = "spline model log-likelihood below the nested linear model (non-convergence)"
+    else:
+        lr_nonlin = max(0.0, lr_raw)
+        p_nonlinearity = float(stats.chi2.sf(lr_nonlin, df=df_nonlin))
+        nonlinearity_reason = None
     wald_overall = float(b_spline.T @ np.linalg.pinv(cov_spline) @ b_spline)
     p_overall = float(stats.chi2.sf(wald_overall, df=n_spline_cols))
 
@@ -937,6 +965,7 @@ def fit_rcs_spline_model(
         "ref_value": float(ref_value),
         "p_overall": p_overall,
         "p_nonlinearity": p_nonlinearity,
+        "nonlinearity_reason": nonlinearity_reason,
         "lr_nonlinearity": lr_nonlin,
         "df_nonlinearity": df_nonlin,
         "contrast_df": contrast_df,

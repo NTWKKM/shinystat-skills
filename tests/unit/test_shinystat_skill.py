@@ -70,6 +70,7 @@ def test_shinystat_canonical_skill_exists_and_valid():
         "python-pptx",
         "click",
         "pyyaml",
+        "tabulate",  # render_md -> DataFrame.to_markdown
     }
 
     import re
@@ -1146,3 +1147,70 @@ def test_skill_process_audit_f1_to_f7_and_q3():
     assert "references/evidence-pipeline.md" in cloud_text
     assert "medstat.reporting.renderers" in local_text
     assert "render_html" in local_text and "render_docx" in local_text
+
+
+def test_live_eval_wording_rules_adr80():
+    """ADR 80: gate and reporting rules that live-agent runs applied inconsistently."""
+    root = Path(__file__).resolve().parents[2] / "skills"
+    local = (root / "shinystat" / "SKILL.md").read_text(encoding="utf-8")
+    cloud = (root / "shinystat-cloud" / "SKILL.md").read_text(encoding="utf-8")
+    heur = (root / "_shared" / "references" / "decision-heuristics.md").read_text(encoding="utf-8")
+    for text in (local, cloud):
+        assert "≥2 distinct estimands (a primary model and its sensitivity re-fits count as one)" in text  # 5d trigger
+        assert "biomarker direction not fixed by" in text  # Gate #1
+        assert "primary, Complete-Case sensitivity" in text  # MICE triage
+        assert "**Effect Scale**" in text
+    # ADR 81: audit the delivered reply and exported data files; a figure per primary estimate.
+    assert "on that same `ReportDocument` with `exported_files`" in local
+    assert "`delivered_text` (In-Chat Summary reply)" in local
+    assert "(In-Chat Summary reply) with every data file written as `exported_files`" in cloud
+    assert "each primary estimate is plotted" in local and "each primary estimate is plotted" in cloud
+    assert "**Identifier-Free Exports**" in cloud
+    for text in (local, cloud):
+        assert "spline df; no intercept)" in text
+    assert "GEE logistic clustered on pair ID" in heur
+    assert "`medstat.models.firth.check_separation` on every logistic design (outcome and propensity models)" in local  # Gate #3 detector
+    assert "`plot_dual_*` figures" in local  # 5a dual view
+    assert "pandas/scipy" not in cloud.split("---")[1]  # description names no library subset (ADR 81 Round 1)
+    assert "fit_iptw_outcome_model" in heur and "fit_weighted_outcome_model" in heur
+    assert "MICE is the primary analysis" in heur and "the retention flow ends at the primary analytic N" in heur
+
+
+def test_api_quickref_matches_engine():
+    """Every signature line in api-quickref.md equals inspect.signature of the engine (ADR 80)."""
+    import importlib
+    import inspect
+
+    sheet = (
+        Path(__file__).resolve().parents[2] / "skills" / "shinystat" / "references" / "api-quickref.md"
+    ).read_text(encoding="utf-8")
+    block = re.search(r"```text\n(.*?)\n```", sheet, re.DOTALL).group(1)
+    lines = [ln for ln in block.splitlines() if ln.strip()]
+    assert len(lines) >= 10
+
+    def _resolve(qual: str):
+        parts = qual.split(".")
+        for i in range(len(parts), 0, -1):
+            try:
+                obj = importlib.import_module(".".join(parts[:i]))
+                break
+            except ModuleNotFoundError:
+                continue
+        for attr in parts[i:]:
+            obj = getattr(obj, attr)
+        return obj
+
+    for ln in lines:
+        qual = ln.split("(", 1)[0]
+        sig = inspect.signature(_resolve(qual))
+        params = []
+        for p in sig.parameters.values():
+            if p.name == "self":
+                continue
+            if p.kind is p.VAR_KEYWORD:
+                params.append(f"**{p.name}")
+                continue
+            params.append(p.name if p.default is p.empty else f"{p.name}={p.default!r}")
+        ret = sig.return_annotation
+        ret_s = "" if ret is sig.empty or ret in ("None", None) else f" -> {ret}"
+        assert ln == f"{qual}({', '.join(params)}){ret_s}", f"Stale quick-reference line: {ln}"

@@ -18,11 +18,15 @@ def plot_dual_bland_altman(
     title: str = "Bland-Altman Limits of Agreement",
     out_path: str | Path = "figures/bland_altman.png",
     target: Literal["docx", "pptx", "web"] = "docx",
+    journal: str | None = None,
+    canvas: str = "manuscript",
 ) -> DualFigureResult:
     """
     Renders both publication-grade 300 DPI Matplotlib figure and interactive Plotly Bland-Altman plot.
     """
     res = plot_bland_altman(
+        journal=journal,
+        canvas=canvas,
         ba_data=ba_data,
         units=units,
         title=title,
@@ -66,6 +70,9 @@ def plot_dual_bland_altman(
 
     return DualFigureResult(
         png_path=res.png_path,
+        vector_path=res.vector_path,
+        svg_path=res.svg_path,
+        qa=res.qa,
         alt_text=res.alt_text,
         caption=res.caption,
         source_df=res.source_df,

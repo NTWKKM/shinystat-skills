@@ -99,12 +99,13 @@ def plot_dca(
     qa = qa_layout(fig, check_outside=False)
 
     if export_vector:
-        png_path, vec_path, _ = save_figure_bundle(
+        png_path, vec_path, svg_path = save_figure_bundle(
             fig, out_path, dpi=dpi, export_vector=True
         )
     else:
         png_path = save_publication_figure(fig, out_path, dpi=dpi)
         vec_path = None
+        svg_path = None
     csv_path = export_source_data(df, png_path)
 
     alt_text = "Decision curve analysis demonstrating net clinical benefit across threshold probabilities."
@@ -117,5 +118,6 @@ def plot_dca(
         source_df=df,
         csv_path=csv_path,
         vector_path=vec_path,
+        svg_path=svg_path,
         qa=qa,
     )

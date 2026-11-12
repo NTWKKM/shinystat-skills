@@ -174,12 +174,13 @@ def plot_bland_altman(
     if export_vector:
         from medstat.figures.styles import save_figure_bundle
 
-        png_path, vec_path, _ = save_figure_bundle(
+        png_path, vec_path, svg_path = save_figure_bundle(
             fig, out_path, dpi=dpi, export_vector=True
         )
     else:
         png_path = save_publication_figure(fig, out_path, dpi=dpi)
         vec_path = None
+        svg_path = None
     csv_path = export_source_data(source_df, png_path)
 
     alt_text = f"Bland-Altman plot indicating mean bias of {mean_diff:+.2f} with limits of agreement."
@@ -192,5 +193,6 @@ def plot_bland_altman(
         source_df=source_df,
         csv_path=csv_path,
         vector_path=vec_path,
+        svg_path=svg_path,
         qa=qa,
     )

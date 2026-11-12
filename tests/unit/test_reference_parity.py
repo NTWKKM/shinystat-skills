@@ -1176,3 +1176,111 @@ def test_meta_cli_egger_runs_after_se_validation(tmp_path):
     import json
 
     assert "p_value" in json.loads(out.read_text())["egger_test"]
+
+
+# ---------------------------------------------------------------------------
+# ADR 78: one ICI smoother (Austin & Steyerberg 2019 LOWESS, frac=2/3, it=0)
+# ---------------------------------------------------------------------------
+def _ici_frame(n: int = 400, seed: int = 78):
+    rng = np.random.default_rng(seed)
+    lp = rng.normal(-0.6, 1.1, n)
+    y = rng.binomial(1, 1 / (1 + np.exp(-(0.2 + 0.8 * lp)))).astype(float)
+    p = 1 / (1 + np.exp(-lp))
+    return y, p
+
+
+def test_ici_is_identical_in_engine_and_both_recipes(recipes):
+    from medstat.diagnostic.calibration import calculate_ici
+    from medstat.diagnostic.validation import recalibrate_prediction_model
+
+    y, p = _ici_frame()
+    eng = calculate_ici(y, p)
+    eng_recal = recalibrate_prediction_model(y, p, method="logistic")["pre"]
+    rec05 = recipes["evaluate_calibration"](y, p)
+    rec19 = recipes["recalibrate_prediction_model"](y, p, method="logistic")["pre"]
+    for other in (eng_recal["ici"], rec05["ici"], rec19["ici"]):
+        assert other == pytest.approx(eng["ici"], abs=1e-12)
+    for other in (eng_recal["emax"], rec05["emax"], rec19["emax"]):
+        assert other == pytest.approx(eng["emax"], abs=1e-12)
+
+
+def test_ici_has_no_silent_smoother_fallback(monkeypatch):
+    """A LOWESS failure propagates; no undisclosed rolling-mean substitute."""
+    import statsmodels.nonparametric.smoothers_lowess as sl
+
+    from medstat.diagnostic.calibration import calculate_ici
+
+    def _boom(*a, **k):
+        raise RuntimeError("lowess unavailable")
+
+    monkeypatch.setattr(sl, "lowess", _boom)
+    y, p = _ici_frame()
+    with pytest.raises(RuntimeError, match="lowess unavailable"):
+        calculate_ici(y, p)
+
+
+# ---------------------------------------------------------------------------
+# ADR 78: one restricted cubic spline (Harrell basis, quantile knots)
+# ---------------------------------------------------------------------------
+_FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
+
+
+@pytest.mark.parametrize("k", [3, 4, 5])
+def test_cox_rcs_matches_recipe22(recipes, k):
+    from medstat.models.splines import fit_cox_rcs
+
+    df = pd.read_csv(_FIXTURES / "oncology_survival.csv")
+    eng = fit_cox_rcs(df, "time", "status", rcs_var="biomarker", adjust_cols=["age"], knots=k)
+    rec = recipes["fit_rcs_spline_model"](
+        df, "time", "biomarker", adjust_cols=["age"], knots=k, family="cox", event_col="status"
+    )
+    np.testing.assert_allclose(eng["knot_locations"], rec["knots"], rtol=1e-12)
+    assert eng["non_linear_pvalue"] == pytest.approx(rec["p_nonlinearity"], abs=1e-8)
+    assert eng["p_overall"] == pytest.approx(rec["p_overall"], abs=1e-8)
+    np.testing.assert_allclose(eng["contrast_df"]["HR"], rec["contrast_df"]["estimate"], rtol=1e-6)
+    np.testing.assert_allclose(eng["contrast_df"]["HR_upper"], rec["contrast_df"]["ci_upper"], rtol=1e-6)
+    # Nested models: the spline fit can never be worse than the linear fit.
+    assert np.isfinite(eng["non_linear_pvalue"]) and eng["lr_nonlinearity"] >= 0
+
+
+@pytest.mark.parametrize("k", [3, 4, 5])
+def test_logistic_rcs_matches_recipe22(recipes, k):
+    from medstat.models.splines import fit_logistic_rcs
+
+    df = pd.read_csv(_FIXTURES / "cardiovascular_cohort.csv")
+    eng = fit_logistic_rcs(df, "cv_event", "ldl", covariates=["age", "statin_rx"], n_knots=k)
+    rec = recipes["fit_rcs_spline_model"](
+        df, "cv_event", "ldl", adjust_cols=["age", "statin_rx"], knots=k, family="binomial"
+    )
+    assert eng["non_linear_pvalue"] == pytest.approx(rec["p_nonlinearity"], abs=1e-8)
+    assert eng["p_overall"] == pytest.approx(rec["p_overall"], abs=1e-8)
+    np.testing.assert_allclose(eng["contrast_df"]["OR"], rec["contrast_df"]["estimate"], rtol=1e-6)
+    # Back-transformed covariate effects equal a direct fit on the raw Harrell basis.
+    import statsmodels.api as sm
+
+    basis, _ = recipes["build_harrell_rcs_basis"](df["ldl"].to_numpy(float), k)
+    raw = sm.Logit(
+        df["cv_event"].to_numpy(float),
+        sm.add_constant(np.column_stack([basis, df[["age", "statin_rx"]].to_numpy(float)])),
+    ).fit(disp=False)
+    np.testing.assert_allclose(eng["summary_df"]["coef"].to_numpy(), raw.params, rtol=1e-5, atol=1e-8)
+
+
+def test_recipe22_reports_nonconvergence_as_nan_with_reason(recipes, monkeypatch):
+    """A spline log-likelihood below the nested linear fit is a failure, not P = 1."""
+    from lifelines import CoxPHFitter
+
+    df = pd.read_csv(_FIXTURES / "oncology_survival.csv")
+    real_fit = CoxPHFitter.fit
+
+    def _bad_fit(self, data, *a, **k):
+        out = real_fit(self, data, *a, **k)
+        if "_z1" in data.columns:
+            self.log_likelihood_ = self.log_likelihood_ - 50.0
+        return out
+
+    monkeypatch.setattr(CoxPHFitter, "fit", _bad_fit)
+    res = recipes["fit_rcs_spline_model"](
+        df, "time", "biomarker", knots=4, family="cox", event_col="status"
+    )
+    assert np.isnan(res["p_nonlinearity"]) and "non-convergence" in res["nonlinearity_reason"]

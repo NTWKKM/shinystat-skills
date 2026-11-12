@@ -1,8 +1,10 @@
 """
 Restricted Cubic Splines (RCS) for Non-linear Clinical Relationships.
 
-Uses patsy's natural cubic spline basis `cr()` to model non-linear effects
-in survival analysis (Cox PH) and generate Hazard Ratio contrast curves.
+Builds Harrell's restricted cubic spline basis (Harrell 2015, quantile knots)
+for Cox PH and logistic models, tests non-linearity by likelihood ratio, and
+returns reference-centred HR / OR contrast curves. Recipe 22 in shinystat-cloud
+uses the same basis and fitting procedure (ADR 78).
 """
 
 from __future__ import annotations
@@ -17,10 +19,8 @@ import plotly.graph_objects as go
 from lifelines import CoxPHFitter
 from scipy import stats
 
-from medstat.logging import get_logger
 from medstat.theme.palette import get_color_palette
 
-logger = get_logger(__name__)
 COLORS = get_color_palette()
 
 
@@ -66,6 +66,116 @@ class CoxRCSResult(tuple):
         return self._dict.get(key, default)
 
 
+_HARRELL_QUANTILES = {
+    3: (0.10, 0.50, 0.90),
+    4: (0.05, 0.35, 0.65, 0.95),
+    5: (0.05, 0.275, 0.50, 0.725, 0.95),
+}
+
+
+def build_harrell_rcs_basis(
+    x: np.ndarray | pd.Series,
+    knots: int | list[float] | np.ndarray = 4,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Harrell restricted cubic spline basis (k - 1 columns, first = x) and knot vector.
+
+    An integer ``knots`` places k knots at Harrell's quantiles (k = 3, 4, 5; evenly
+    spaced 5th-95th percentiles otherwise); an array gives the knot locations.
+    """
+    x_arr = np.asarray(x, dtype=float).ravel()
+    if isinstance(knots, (int, np.integer)):
+        k = int(knots)
+        if k < 3:
+            raise ValueError("knots must be >= 3 for Restricted Cubic Splines.")
+        q = _HARRELL_QUANTILES.get(k, tuple(np.linspace(0.05, 0.95, k)))
+        knot_vals = np.quantile(x_arr[~np.isnan(x_arr)], q)
+    else:
+        knot_vals = np.sort(np.asarray(knots, dtype=float))
+        if len(knot_vals) < 3:
+            raise ValueError("knots must be >= 3 for Restricted Cubic Splines.")
+
+    knot_vals = np.unique(knot_vals)
+    if len(knot_vals) < 3:
+        raise ValueError("Insufficient distinct knot locations for RCS basis.")
+    k = len(knot_vals)
+    t_k, t_km1 = knot_vals[-1], knot_vals[-2]
+    scale = (t_k - knot_vals[0]) ** 2
+    denom_tail = t_k - t_km1
+
+    def _pos3(u: np.ndarray) -> np.ndarray:
+        return np.maximum(0.0, u) ** 3
+
+    cols = [x_arr]
+    for j in range(k - 2):
+        t_j = knot_vals[j]
+        cols.append(
+            (
+                _pos3(x_arr - t_j)
+                - _pos3(x_arr - t_km1) * ((t_k - t_j) / denom_tail)
+                + _pos3(x_arr - t_k) * ((t_km1 - t_j) / denom_tail)
+            )
+            / scale
+        )
+    return np.column_stack(cols), knot_vals
+
+
+def _orthonormalize(basis: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Centred, QR-orthonormalised spline columns Z = (B - c) @ T.
+
+    The Harrell columns are nearly collinear (r > 0.99 at k = 5), which stalls
+    Newton-Raphson; fitting on Z and mapping back with beta_B = T @ beta_Z gives
+    the same likelihood and the coefficients on the original basis.
+    """
+    center = basis.mean(axis=0)
+    q, r = np.linalg.qr(basis - center)
+    if np.any(np.abs(np.diag(r)) <= 1e-10 * max(1.0, float(np.abs(r).max()))):
+        raise ValueError("RCS basis is rank deficient: too few distinct values of the spline variable.")
+    t = np.linalg.inv(r) * np.sqrt(basis.shape[0])
+    return (basis - center) @ t, t, center
+
+
+def _nonlinearity_test(
+    ll_spline: float, ll_linear: float, df_diff: int
+) -> tuple[float, float, str | None]:
+    """LR test of non-linearity; a spline fit worse than its nested linear fit is a
+    convergence failure, reported as NaN with a reason rather than P = 1."""
+    lr = 2.0 * (ll_spline - ll_linear)
+    if lr < -1e-6 * max(1.0, abs(ll_linear)):
+        return (
+            float("nan"),
+            float("nan"),
+            "spline model log-likelihood below the nested linear model (non-convergence)",
+        )
+    lr = max(0.0, lr)
+    return lr, float(stats.chi2.sf(lr, df=df_diff)), None
+
+
+def _contrast_curve(
+    x: np.ndarray,
+    knot_vals: np.ndarray,
+    beta_b: np.ndarray,
+    cov_b: np.ndarray,
+    ref_value: float,
+    n_grid: int = 100,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    grid = np.linspace(float(np.min(x)), float(np.max(x)), n_grid)
+    grid_b, _ = build_harrell_rcs_basis(grid, knots=knot_vals)
+    ref_b, _ = build_harrell_rcs_basis(np.array([ref_value]), knots=knot_vals)
+    diff = grid_b - ref_b
+    log_ratio = diff @ beta_b
+    se = np.sqrt(np.maximum(np.sum((diff @ cov_b) * diff, axis=1), 0.0))
+    return grid, log_ratio, se
+
+
+def _covariate_matrix(clean_df: pd.DataFrame, adjust: list[str]) -> pd.DataFrame:
+    """Adjustment covariates via patsy (categoricals dummy-coded), no intercept."""
+    if not adjust:
+        return pd.DataFrame(index=clean_df.index)
+    rhs = " + ".join(_quote_col(c) for c in adjust)
+    mat = patsy.dmatrix(rhs, clean_df, return_type="dataframe")
+    return mat.drop(columns=["Intercept"], errors="ignore")
+
+
 def fit_cox_rcs(
     df: pd.DataFrame,
     duration_col: str,
@@ -75,7 +185,6 @@ def fit_cox_rcs(
     knots: int | None = None,
     ref_value: float | None = None,
     n_knots: int | None = None,
-    constraints: str | None = "center",
     **kwargs: Any,
 ) -> CoxRCSResult:
     """
@@ -87,9 +196,9 @@ def fit_cox_rcs(
         event_col: Name of binary event column.
         rcs_var: Continuous variable to model with splines (alias: spline_var).
         adjust_cols: Optional list of additional covariates to adjust for (alias: covariates).
-        knots: Spline degrees of freedom passed to patsy.cr(df=...) (must be >= 3, default 4). Also accepts n_knots.
+        knots: Number of Harrell knots k (>= 3, default 4), placed at Harrell's quantiles;
+            the spline spends k - 1 degrees of freedom. Also accepts n_knots.
         ref_value: Reference value for hazard ratio comparisons (defaults to median of rcs_var).
-        constraints: Centering/orthogonality constraint passed to patsy.cr (default: 'center').
 
     Returns:
         CoxRCSResult: Tuple/dict supporting (plotly_figure, contrast_dataframe, model_stats_dict)
@@ -123,76 +232,59 @@ def fit_cox_rcs(
     if len(clean_df) < 10:
         raise ValueError("Insufficient data points for RCS Cox model (need >= 10).")
 
-    # Determine reference value
     if ref_value is None:
         ref_value = float(clean_df[rcs_var].median())
 
-    constraint_str = f", constraints='{constraints}'" if constraints else ""
-    formula_rhs = f"cr({_quote_col(rcs_var)}, df={num_knots}{constraint_str})"
-    if adjust:
-        formula_rhs += " + " + " + ".join(_quote_col(c) for c in adjust)
+    x = clean_df[rcs_var].to_numpy(dtype=float)
+    basis, knot_vals = build_harrell_rcs_basis(x, knots=num_knots)
+    spline_cols = [f"{rcs_var}_rcs{i}" for i in range(basis.shape[1])]
+    z, t_mat, _ = _orthonormalize(basis)
+    z_cols = [f"_z{i}" for i in range(z.shape[1])]
+    cov_df = _covariate_matrix(clean_df, adjust)
 
-    # Build design matrix with patsy
-    y, X = patsy.dmatrices(
-        f"{_quote_col(duration_col)} + {_quote_col(event_col)} ~ {formula_rhs}",
-        clean_df,
-        return_type="dataframe",
+    def _fit(design: pd.DataFrame) -> CoxPHFitter:
+        data = design.copy()
+        data["_dur"] = clean_df[duration_col].to_numpy(dtype=float)
+        data["_ev"] = clean_df[event_col].to_numpy(dtype=float)
+        return CoxPHFitter().fit(data, duration_col="_dur", event_col="_ev")
+
+    design = pd.concat(
+        [pd.DataFrame(z, index=clean_df.index, columns=z_cols), cov_df], axis=1
     )
-    design_info = X.design_info
+    cph = _fit(design)
+    lin_design = pd.concat(
+        [pd.DataFrame({rcs_var: x}, index=clean_df.index), cov_df], axis=1
+    )
+    cph_linear = _fit(lin_design)
 
-    # Drop intercept for CoxPHFitter
-    if "Intercept" in X.columns:
-        X = X.drop(columns=["Intercept"])
+    # Back-transform to the Harrell basis (covariates unchanged).
+    n_s, n_c = len(z_cols), cov_df.shape[1]
+    m = np.eye(n_s + n_c)
+    m[:n_s, :n_s] = t_mat
+    names = spline_cols + list(cov_df.columns)
+    coef = m @ cph.params_.to_numpy()
+    cov_full = m @ cph.variance_matrix_.to_numpy() @ m.T
+    se = np.sqrt(np.maximum(np.diag(cov_full), 0.0))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        zstat = coef / se
+    summary_df = pd.DataFrame(
+        {
+            "coef": coef,
+            "se(coef)": se,
+            "z": zstat,
+            "p": 2.0 * stats.norm.sf(np.abs(zstat)),
+        },
+        index=pd.Index(names, name="covariate"),
+    )
+    beta_b, cov_b = coef[:n_s], cov_full[:n_s, :n_s]
 
-    # Prepare DataFrame for lifelines CoxPHFitter
-    data_for_cph = X.copy()
-    data_for_cph[duration_col] = clean_df[duration_col].values
-    data_for_cph[event_col] = clean_df[event_col].values
+    lr_stat, non_linear_p, non_linear_reason = _nonlinearity_test(
+        float(cph.log_likelihood_), float(cph_linear.log_likelihood_), n_s - 1
+    )
+    wald = float(beta_b @ np.linalg.pinv(cov_b) @ beta_b)
+    p_overall = float(stats.chi2.sf(wald, df=n_s))
 
-    cph = CoxPHFitter()
-    cph.fit(data_for_cph, duration_col=duration_col, event_col=event_col)
-
-    # Generate prediction grid across range of rcs_var
-    var_min = float(clean_df[rcs_var].min())
-    var_max = float(clean_df[rcs_var].max())
-    grid_vals = np.linspace(var_min, var_max, 100)
-
-    # Create synthetic prediction dataset
-    pred_data = pd.DataFrame({rcs_var: grid_vals})
-    for c in adjust:
-        pred_data[c] = (
-            clean_df[c].mean()
-            if pd.api.types.is_numeric_dtype(clean_df[c])
-            else clean_df[c].mode()[0]
-        )
-
-    # Reference row
-    ref_data = pd.DataFrame({rcs_var: [ref_value]})
-    for c in adjust:
-        ref_data[c] = pred_data[c].iloc[0]
-
-    # Transform using saved design_info
-    X_pred = patsy.build_design_matrices([design_info], pred_data)[0]
-    X_ref = patsy.build_design_matrices([design_info], ref_data)[0]
-
-    X_pred_df = pd.DataFrame(X_pred, columns=design_info.column_names)
-    X_ref_df = pd.DataFrame(X_ref, columns=design_info.column_names)
-
-    if "Intercept" in X_pred_df.columns:
-        X_pred_df = X_pred_df.drop(columns=["Intercept"])
-        X_ref_df = X_ref_df.drop(columns=["Intercept"])
-
-    # Contrast matrix
-    contrast = X_pred_df.values - X_ref_df.values
-    coefs = cph.params_.values
-    cov_mat = cph.variance_matrix_.values
-
-    # log(HR) = contrast * beta
-    log_hr = contrast @ coefs
-    # Var(log HR) = diag(contrast * cov * contrast^T)
-    var_log_hr = np.sum((contrast @ cov_mat) * contrast, axis=1)
-    se_log_hr = np.sqrt(np.maximum(var_log_hr, 0.0))
-
+    grid_vals, log_hr, se_log_hr = _contrast_curve(x, knot_vals, beta_b, cov_b, ref_value)
     hr_est = np.exp(log_hr)
     hr_low = np.exp(log_hr - 1.96 * se_log_hr)
     hr_high = np.exp(log_hr + 1.96 * se_log_hr)
@@ -208,7 +300,6 @@ def fit_cox_rcs(
         }
     )
 
-    # Generate Plotly visualization
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
@@ -231,11 +322,9 @@ def fit_cox_rcs(
             name="95% CI",
         )
     )
-    # Reference line at HR=1
     fig.add_hline(
         y=1.0, line_dash="dash", line_color="gray", annotation_text="HR = 1.0"
     )
-
     fig.update_layout(
         title=f"Restricted Cubic Splines: Hazard Ratio by {rcs_var} (Ref = {ref_value:.2f})",
         xaxis_title=rcs_var,
@@ -244,43 +333,20 @@ def fit_cox_rcs(
         yaxis_type="log",
     )
 
-    # Fit linear Cox model to compare for non-linearity (Likelihood Ratio Test)
-    try:
-        linear_rhs = f"{_quote_col(rcs_var)}"
-        if adjust:
-            linear_rhs += " + " + " + ".join(_quote_col(c) for c in adjust)
-        X_linear = patsy.dmatrix(linear_rhs, clean_df, return_type="dataframe")
-        if "Intercept" in X_linear.columns:
-            X_linear = X_linear.drop(columns=["Intercept"])
-        data_for_linear = X_linear.copy()
-        data_for_linear[duration_col] = clean_df[duration_col].values
-        data_for_linear[event_col] = clean_df[event_col].values
-        cph_linear = CoxPHFitter()
-        cph_linear.fit(data_for_linear, duration_col=duration_col, event_col=event_col)
-
-        ll_spline = float(cph.log_likelihood_)
-        ll_linear = float(cph_linear.log_likelihood_)
-        df_diff = len(cph.params_) - len(cph_linear.params_)
-        if df_diff > 0:
-            lr_stat = max(0.0, 2.0 * (ll_spline - ll_linear))
-            non_linear_p = float(stats.chi2.sf(lr_stat, df=df_diff))
-        else:
-            non_linear_p = np.nan
-    except Exception as e:
-        logger.warning(f"Could not compute non-linear LR test for splines: {e}")
-        non_linear_p = np.nan
-
-    spline_cols = [c for c in X.columns if rcs_var in c]
     stats_meta = {
         "model": cph,
         "cph": cph,
-        "summary_df": cph.summary,
+        "summary_df": summary_df,
         "ref_value": ref_value,
         "knots": num_knots,
+        "knot_locations": knot_vals.tolist(),
         "spline_columns": spline_cols,
         "c_index": float(cph.concordance_index_),
         "log_likelihood": float(cph.log_likelihood_),
+        "lr_nonlinearity": lr_stat,
         "non_linear_pvalue": non_linear_p,
+        "non_linear_reason": non_linear_reason,
+        "p_overall": p_overall,
     }
 
     return CoxRCSResult(fig, contrast_df, stats_meta)
@@ -303,13 +369,20 @@ def fit_logistic_rcs(
         outcome: Binary outcome column.
         spline_var: Continuous variable to model with splines.
         covariates: Optional baseline confounders.
-        n_knots: Spline degrees of freedom passed to patsy.cr(df=...) (default: 4).
+        n_knots: Number of Harrell knots k (>= 3, default 4); k - 1 spline degrees of freedom.
         ref_value: Reference value for Odds Ratio comparisons (default: median).
 
     Returns:
-        dict containing model, summary_df, knots, non_linear_pvalue, and log_likelihood.
+        dict containing model, summary_df, contrast_df, knots, knot_locations,
+        non_linear_pvalue (with non_linear_reason), p_overall and log_likelihood.
     """
     import statsmodels.api as sm
+
+    if kwargs:
+        unexpected = ", ".join(repr(k) for k in kwargs)
+        raise TypeError(
+            f"fit_logistic_rcs got unexpected keyword argument(s): {unexpected}"
+        )
 
     adjust = covariates or []
     all_cols = [outcome, spline_var] + adjust
@@ -324,85 +397,62 @@ def fit_logistic_rcs(
     if ref_value is None:
         ref_value = float(clean_df[spline_var].median())
 
-    rhs = f"cr({_quote_col(spline_var)}, df={num_knots}, constraints='center')"
-    if adjust:
-        rhs += " + " + " + ".join(_quote_col(c) for c in adjust)
+    x = clean_df[spline_var].to_numpy(dtype=float)
+    y = clean_df[outcome].to_numpy(dtype=float)
+    basis, knot_vals = build_harrell_rcs_basis(x, knots=num_knots)
+    spline_cols = [f"{spline_var}_rcs{i}" for i in range(basis.shape[1])]
+    z, t_mat, center = _orthonormalize(basis)
+    cov_df = _covariate_matrix(clean_df, adjust)
 
-    X = patsy.dmatrix(rhs, clean_df, return_type="dataframe")
-    y = clean_df[outcome].values
+    z_df = pd.DataFrame(z, index=clean_df.index, columns=[f"_z{i}" for i in range(z.shape[1])])
+    X = sm.add_constant(pd.concat([z_df, cov_df], axis=1), has_constant="add")
+    # GLM Binomial (IRLS) as in Recipe 22, so Wald and LR statistics match it exactly.
+    logit_model = sm.GLM(y, X, family=sm.families.Binomial()).fit()
+    X_linear = sm.add_constant(
+        pd.concat([pd.DataFrame({spline_var: x}, index=clean_df.index), cov_df], axis=1),
+        has_constant="add",
+    )
+    linear_model = sm.GLM(y, X_linear, family=sm.families.Binomial()).fit()
 
-    logit_model = sm.Logit(y, X).fit(disp=False)
+    # Affine map back to [Intercept, Harrell basis, covariates]:
+    # a + (B - c) T b_z = (a - c . T b_z) + B (T b_z).
+    n_s, n_c = z.shape[1], cov_df.shape[1]
+    m = np.eye(1 + n_s + n_c)
+    m[1 : 1 + n_s, 1 : 1 + n_s] = t_mat
+    m[0, 1 : 1 + n_s] = -(center @ t_mat)
+    names = ["Intercept"] + spline_cols + list(cov_df.columns)
+    coef = m @ logit_model.params.to_numpy()
+    cov_full = m @ logit_model.cov_params().to_numpy() @ m.T
+    se = np.sqrt(np.maximum(np.diag(cov_full), 0.0))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        zstat = coef / se
+    pvals = 2.0 * stats.norm.sf(np.abs(zstat))
+    lo, hi = coef - 1.96 * se, coef + 1.96 * se
 
-    # Linear comparison for non-linearity test
-    linear_rhs = f"{_quote_col(spline_var)}"
-    if adjust:
-        linear_rhs += " + " + " + ".join(_quote_col(c) for c in adjust)
-    X_linear = patsy.dmatrix(linear_rhs, clean_df, return_type="dataframe")
-    linear_model = sm.Logit(y, X_linear).fit(disp=False)
-
-    lr_stat = max(0.0, 2.0 * (logit_model.llf - linear_model.llf))
-    df_diff = len(logit_model.params) - len(linear_model.params)
-    non_linear_p = float(stats.chi2.sf(lr_stat, df=df_diff)) if df_diff > 0 else np.nan
-
-    conf = logit_model.conf_int()
-    or_series = np.exp(logit_model.params)
-    ci_lower = np.exp(conf[0])
-    ci_upper = np.exp(conf[1])
-
-    # Exclude spline-basis terms and Intercept from OR columns because individual
-    # basis coefficients do not represent valid odds ratios
-    is_basis_or_intercept = [
-        ("cr(" in str(idx) or "Intercept" in str(idx))
-        for idx in logit_model.params.index
-    ]
-    or_series = or_series.mask(is_basis_or_intercept, np.nan)
-    ci_lower = ci_lower.mask(is_basis_or_intercept, np.nan)
-    ci_upper = ci_upper.mask(is_basis_or_intercept, np.nan)
-
+    # Individual basis coefficients and the intercept are not odds ratios.
+    is_basis_or_intercept = np.array([n in spline_cols or n == "Intercept" for n in names])
+    or_vals = np.where(is_basis_or_intercept, np.nan, np.exp(coef))
     summary_df = pd.DataFrame(
         {
-            "coef": logit_model.params,
-            "std_error": logit_model.bse,
-            "z_score": logit_model.tvalues,
-            "p_value": logit_model.pvalues,
-            "odds_ratio": or_series,
-            "ci_lower": ci_lower,
-            "ci_upper": ci_upper,
-        }
+            "coef": coef,
+            "std_error": se,
+            "z_score": zstat,
+            "p_value": pvals,
+            "odds_ratio": or_vals,
+            "ci_lower": np.where(is_basis_or_intercept, np.nan, np.exp(lo)),
+            "ci_upper": np.where(is_basis_or_intercept, np.nan, np.exp(hi)),
+        },
+        index=names,
     )
+    beta_b, cov_b = coef[1 : 1 + n_s], cov_full[1 : 1 + n_s, 1 : 1 + n_s]
 
-    # Construct contrast matrix relative to ref_value (analogous to fit_cox_rcs)
-    design_info = X.design_info
-    var_min = float(clean_df[spline_var].min())
-    var_max = float(clean_df[spline_var].max())
-    grid_vals = np.linspace(var_min, var_max, 100)
+    lr_stat, non_linear_p, non_linear_reason = _nonlinearity_test(
+        float(logit_model.llf), float(linear_model.llf), n_s - 1
+    )
+    wald = float(beta_b @ np.linalg.pinv(cov_b) @ beta_b)
+    p_overall = float(stats.chi2.sf(wald, df=n_s))
 
-    pred_data = pd.DataFrame({spline_var: grid_vals})
-    for c in adjust:
-        pred_data[c] = (
-            clean_df[c].mean()
-            if pd.api.types.is_numeric_dtype(clean_df[c])
-            else clean_df[c].mode()[0]
-        )
-
-    ref_data = pd.DataFrame({spline_var: [ref_value]})
-    for c in adjust:
-        ref_data[c] = pred_data[c].iloc[0]
-
-    X_pred = patsy.build_design_matrices([design_info], pred_data)[0]
-    X_ref = patsy.build_design_matrices([design_info], ref_data)[0]
-
-    X_pred_df = pd.DataFrame(X_pred, columns=design_info.column_names)
-    X_ref_df = pd.DataFrame(X_ref, columns=design_info.column_names)
-
-    contrast = X_pred_df.values - X_ref_df.values
-    coefs = logit_model.params.values
-    cov_mat = logit_model.cov_params().values
-
-    log_or = contrast @ coefs
-    var_log_or = np.sum((contrast @ cov_mat) * contrast, axis=1)
-    se_log_or = np.sqrt(np.maximum(var_log_or, 0.0))
-
+    grid_vals, log_or, se_log_or = _contrast_curve(x, knot_vals, beta_b, cov_b, ref_value)
     contrast_df = pd.DataFrame(
         {
             spline_var: grid_vals,
@@ -420,7 +470,12 @@ def fit_logistic_rcs(
         "contrast_df": contrast_df,
         "ref_value": ref_value,
         "knots": num_knots,
+        "knot_locations": knot_vals.tolist(),
+        "spline_columns": spline_cols,
+        "lr_nonlinearity": lr_stat,
         "non_linear_pvalue": non_linear_p,
+        "non_linear_reason": non_linear_reason,
+        "p_overall": p_overall,
         "log_likelihood": float(logit_model.llf),
     }
 

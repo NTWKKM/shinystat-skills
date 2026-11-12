@@ -15,7 +15,7 @@ from medstat.figures.base import FigureResult
 class DualFigureResult(FigureResult):
     """
     Subclasses FigureResult with optional Plotly interactive specification.
-    Preserves all existing attributes (png_path, alt_text, caption, source_df, csv_path).
+    Preserves all existing attributes (png_path, vector_path, svg_path, qa, alt_text, caption, source_df, csv_path).
     """
 
     plotly_json: str | None = None

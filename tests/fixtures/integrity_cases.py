@@ -251,6 +251,50 @@ INTEGRITY_PARITY_CASES: list[IntegrityParityCase] = [
         expected_untraced=[73.9],
         allowed_untraced=[73.4],
     ),
+    # --- ADR 79: author-year citations and section numbers are structural ---
+    IntegrityParityCase(
+        id="pass_author_year_citations",
+        narrative=f"{BASE_NARRATIVE} Matching followed Austin (2011), VanderWeele & Ding 2017 and Kerr and Pepe (2014a); see also (Rubin, 1987).",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=True,
+        expected_untraced=[],
+    ),
+    IntegrityParityCase(
+        id="fail_capitalised_count_is_not_a_citation",
+        narrative=f"Total 1987 patients were screened. {BASE_NARRATIVE}",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=False,
+        expected_untraced=[1987.0],
+    ),
+    IntegrityParityCase(
+        id="pass_section_numbers",
+        narrative=f"## 4. Results\n{BASE_NARRATIVE}\n7. Discussion\n### 6.1 Sensitivity Analysis\nNo further estimates are reported.",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=True,
+        expected_untraced=[],
+    ),
+    # --- ADR 81: analysis scale constants ---
+    IntegrityParityCase(
+        id="pass_per_unit_and_caliper_constants",
+        narrative=f"Matching used a caliper of 0.2 SD; age was scaled per 10 years and creatinine per 0.5 mg/dL. {BASE_NARRATIVE}",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=True,
+        expected_untraced=[],
+    ),
+    IntegrityParityCase(
+        id="fail_number_after_per_unit_still_traced",
+        narrative=f"The OR per 10 years was 1.37. {BASE_NARRATIVE}",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=False,
+        expected_untraced=[1.37],
+    ),
+    IntegrityParityCase(
+        id="fail_line_start_count_is_not_a_section",
+        narrative=f"12 patients died.\n{BASE_NARRATIVE}",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=False,
+        expected_untraced=[12.0],
+    ),
 ]
 
 # Task 2b: Statistical token mutations (+-1 last decimal digit, *10, *100, /100, and n+-3)

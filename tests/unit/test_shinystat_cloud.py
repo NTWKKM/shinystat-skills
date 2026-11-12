@@ -4315,3 +4315,21 @@ def test_consort_single_field_derivation_and_superscript_allowlist(
     assert "<sup>1</sup>" in html_content
     assert "<sup>2</sup>" in html_content
     assert "<sup>5</sup>" in html_content
+
+
+def test_cloud_verifier_flags_identifier_columns_in_exported_files(
+    tmp_path, ensure_packaged_cloud_skill
+):
+    """ADR 81: verify_standalone_integrity scans exported data files like the engine."""
+    verify = _extract_report_builder_namespace()["verify_standalone_integrity"]
+    narrative = "Methods: logistic regression. The odds ratio was 1.45 in 412 patients (retention flow)."
+    results = {"or": 1.45, "n": 412}
+    clean = tmp_path / "matched.csv"
+    clean.write_text("pair_id,statin_rx\n1,1\n", encoding="utf-8")
+    leaked = tmp_path / "ids.csv"
+    leaked.write_text("hn,statin_rx\n123,1\n", encoding="utf-8")
+    assert verify(narrative, results, exported_files=[clean])["passed"] is True
+    res = verify(narrative, results, exported_files=[leaked])
+    assert res["passed"] is False and any("'hn'" in v for v in res["phi_violations"])
+    with pytest.raises(FileNotFoundError):
+        verify(narrative, results, exported_files=[tmp_path / "absent.csv"])

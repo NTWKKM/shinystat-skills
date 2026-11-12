@@ -21,11 +21,19 @@ def plot_dual_forest(
     title: str = "Forest Plot of Effect Estimates",
     out_path: str | Path = "figures/forest_plot.png",
     target: Literal["docx", "pptx", "web"] = "docx",
+    journal: str | None = None,
+    canvas: str = "manuscript",
+    favor_left_label: str | None = None,
+    favor_right_label: str | None = None,
 ) -> DualFigureResult:
     """
     Renders both publication-grade 300 DPI Matplotlib figure and interactive Plotly forest plot.
     """
     res = plot_forest(
+        journal=journal,
+        canvas=canvas,
+        favor_left_label=favor_left_label,
+        favor_right_label=favor_right_label,
         data=data,
         scale=scale,
         title=title,
@@ -114,6 +122,9 @@ def plot_dual_forest(
 
     return DualFigureResult(
         png_path=res.png_path,
+        vector_path=res.vector_path,
+        svg_path=res.svg_path,
+        qa=res.qa,
         alt_text=res.alt_text,
         caption=res.caption,
         source_df=res.source_df,

@@ -163,12 +163,13 @@ def plot_calibration(
         }
     )
     if export_vector:
-        png_path, vec_path, _ = save_figure_bundle(
+        png_path, vec_path, svg_path = save_figure_bundle(
             fig, out_path, dpi=dpi, export_vector=True
         )
     else:
         png_path = save_publication_figure(fig, out_path, dpi=dpi)
         vec_path = None
+        svg_path = None
     csv_path = export_source_data(source_df, png_path)
 
     alt_text = "Model calibration curve comparing predicted risk deciles against observed event rates."
@@ -181,6 +182,7 @@ def plot_calibration(
         source_df=source_df,
         csv_path=csv_path,
         vector_path=vec_path,
+        svg_path=svg_path,
         qa=qa,
     )
 
@@ -367,12 +369,13 @@ def plot_recalibration_comparison(
     source_df = pd.DataFrame(df_rows)
 
     if export_vector:
-        png_path, vec_path, _ = save_figure_bundle(
+        png_path, vec_path, svg_path = save_figure_bundle(
             fig, save_target, dpi=dpi, export_vector=True
         )
     else:
         png_path = save_publication_figure(fig, save_target, dpi=dpi)
         vec_path = None
+        svg_path = None
     csv_path = export_source_data(source_df, png_path)
 
     alt_text = "Model recalibration comparison comparing pre- and post-recalibration calibration curves against ideal diagonal."
@@ -388,6 +391,7 @@ def plot_recalibration_comparison(
         source_df=source_df,
         csv_path=csv_path,
         vector_path=vec_path,
+        svg_path=svg_path,
         qa=qa,
     )
 
@@ -563,12 +567,13 @@ def plot_bootstrap_optimism(
     )
 
     if export_vector:
-        png_path, vec_path, _ = save_figure_bundle(
+        png_path, vec_path, svg_path = save_figure_bundle(
             fig, save_target, dpi=dpi, export_vector=True
         )
     else:
         png_path = save_publication_figure(fig, save_target, dpi=dpi)
         vec_path = None
+        svg_path = None
     csv_path = export_source_data(source_df, png_path)
 
     alt_text = "Grouped horizontal bar chart comparing apparent versus optimism-corrected prediction performance metrics."
@@ -584,5 +589,6 @@ def plot_bootstrap_optimism(
         source_df=source_df,
         csv_path=csv_path,
         vector_path=vec_path,
+        svg_path=svg_path,
         qa=qa,
     )

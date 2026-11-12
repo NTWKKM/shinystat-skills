@@ -43,7 +43,7 @@ Edit the canonical file, then run `./scripts/sync-skills.sh`. Mirrors are commit
 | `src/medstat/` | `skills/shinystat/scripts/medstat/` |
 | `skills/_shared/references/*.md` | `skills/shinystat/references/` and `skills/shinystat-cloud/references/` (cloud keeps its own `figures.md`) |
 
-Canonical in place, with no upstream: both `SKILL.md` files, `skills/shinystat-cloud/references/figures.md`, `skills/shinystat-cloud/references/recipes/`, `skills/shinystat/scripts/medstat_cli.py`, `skills/shinystat/requirements.txt`.
+Canonical in place, with no upstream: both `SKILL.md` files, `skills/shinystat-cloud/references/figures.md`, `skills/shinystat-cloud/references/recipes/`, `skills/shinystat/references/api-quickref.md` (pinned to engine signatures by a test), `skills/shinystat/scripts/medstat_cli.py`, `skills/shinystat/requirements.txt`.
 
 - pytest writes mirrors: several tests call `package-cloud-skill.sh`, which syncs first. A drifted tree returns from a test run with `skills/` modified.
 - CI pushes a sync commit onto a drifted same-repo branch, and fails a drifted fork PR or `v*` tag. Sync before pushing so CI has nothing to add.

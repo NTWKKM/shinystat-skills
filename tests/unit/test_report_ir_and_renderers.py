@@ -124,6 +124,18 @@ def test_render_markdown(sample_report_doc: ReportDocument, tmp_path: Path):
     assert (tmp_path / "figures" / "test_roc.png").exists()
 
 
+def test_render_markdown_has_pipe_table_and_no_placeholder_affiliation(tmp_path: Path):
+    """Tables render as Markdown pipe tables; an unset institution prints no affiliation."""
+    doc = ReportDocument(title="Minimal Report")
+    doc.add_table(
+        pd.DataFrame({"Variable": ["Age"], "Value": ["61.2"]}), caption="Table 1"
+    )
+    content = Path(render_markdown(doc, tmp_path / "r.md")).read_text(encoding="utf-8")
+    assert "| Variable" in content
+    assert "Affiliation" not in content
+    assert doc.institution == ""
+
+
 def test_render_html(sample_report_doc: ReportDocument, tmp_path: Path):
     """Verifies self-contained HTML generation with inline base64 image."""
     html_file = tmp_path / "report.html"

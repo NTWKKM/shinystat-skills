@@ -103,10 +103,10 @@ class TestSplinesCoxCollinearity:
             "singular" in err_msg or "collinear" in err_msg or "convergence" in err_msg
         )
 
-    def test_constrained_center_cr_converges_reliably(self, survival_data):
+    def test_harrell_rcs_cox_converges_reliably(self, survival_data):
         """
-        Empirically verify that constraints='center' breaks the partition of unity
-        and enables clean, stable Cox PH fitting across multiple seeds.
+        The Harrell basis, fitted on orthonormalised columns (ADR 78), gives a
+        stable Cox PH fit with a valid non-linearity test across seeds.
         """
         # Test across multiple random seeds
         for seed in [1, 7, 42, 99]:
@@ -123,7 +123,8 @@ class TestSplinesCoxCollinearity:
             )
             assert not cdf.empty
             assert meta["c_index"] > 0.0
-            assert "constraints='center'" in " ".join(meta["spline_columns"])
+            assert meta["spline_columns"] == ["age_rcs0", "age_rcs1", "age_rcs2"]
+            assert 0.0 <= meta["non_linear_pvalue"] <= 1.0
 
 
 # =============================================================================

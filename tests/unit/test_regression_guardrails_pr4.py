@@ -285,8 +285,9 @@ class TestSplinesFixes:
 
         sum_df = res["summary_df"]
         # Basis terms and Intercept must have NaN for OR and CIs
+        assert res["spline_columns"] == ["age_rcs0", "age_rcs1", "age_rcs2"]
         for idx in sum_df.index:
-            if "cr(" in str(idx) or "Intercept" in str(idx):
+            if idx in res["spline_columns"] or idx == "Intercept":
                 assert math.isnan(sum_df.loc[idx, "odds_ratio"])
                 assert math.isnan(sum_df.loc[idx, "ci_lower"])
                 assert math.isnan(sum_df.loc[idx, "ci_upper"])

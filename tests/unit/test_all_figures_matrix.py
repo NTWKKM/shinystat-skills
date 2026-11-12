@@ -58,7 +58,7 @@ JOURNALS = ["NEJM", "JAMA", "LANCET", "BMJ", "CLINICAL"]
 
 
 def _assert_bundle_intact(
-    res: FigureResult, expect_vector: bool = True, expect_svg: bool = False
+    res: FigureResult, expect_vector: bool = True, expect_svg: bool = True
 ):
     """Asserts that all expected files exist, are non-empty, and QA passed."""
     assert Path(res.png_path).exists(), f"PNG missing: {res.png_path}"
@@ -242,6 +242,62 @@ def test_forest_plot_matrix_all_scales_and_journals(tmp_path: Path):
         out_path=str(tmp_path / "forest_fg_lancet.png"),
     )
     _assert_bundle_intact(res_fg, expect_vector=True)
+
+
+def test_forest_default_has_no_favour_labels_and_custom_labels_render(tmp_path: Path):
+    """Association models carry no arms, so favour arrows appear only when passed."""
+    df = pd.DataFrame(
+        {"term": ["Age (per 10 y)"], "estimate": [1.3], "ci_lower": [1.1], "ci_upper": [1.6]}
+    )
+    res = plot_forest(df, scale="OR", journal="NEJM", out_path=str(tmp_path / "f.png"))
+    _assert_bundle_intact(res)
+    assert "Favors" not in Path(res.svg_path).read_text(encoding="utf-8")
+
+    res_arms = plot_forest(
+        df,
+        scale="HR",
+        journal="NEJM",
+        out_path=str(tmp_path / "g.png"),
+        favor_left_label="Favors Drug",
+        favor_right_label="Favors Placebo",
+    )
+    svg = Path(res_arms.svg_path).read_text(encoding="utf-8")
+    assert "Favors Drug" in svg and "Favors Placebo" in svg
+
+
+@pytest.mark.parametrize(
+    "lo, hi, expect_ticks",
+    [
+        ([1.1, 0.9], [1.8, 2.4], [1.0, 2.0]),
+        ([66.39, 0.99], [83527.68, 1.05], [1.0, 100.0, 10000.0]),
+        ([0.0004, 0.8], [0.002, 1.3], [0.001, 0.01, 0.1, 1.0]),
+    ],
+)
+def test_forest_ratio_axis_covers_every_interval(lo, hi, expect_ticks):
+    """Firth estimates under separation stay inside the axis instead of being clipped at 20."""
+    from medstat.figures.forest import _ratio_axis_limits
+
+    xmin, xmax, ticks = _ratio_axis_limits(np.array(lo), np.array(hi))
+    assert xmin <= min(lo) and xmax >= max(hi)
+    assert 1.0 in ticks
+    for t in expect_ticks:
+        assert t in ticks
+    assert all(xmin <= t <= xmax for t in ticks)
+
+
+def test_forest_separated_firth_estimate_passes_layout(tmp_path: Path):
+    sep = pd.DataFrame(
+        {
+            "term": ["Lactate > 4 mmol/L", "Age (per year)"],
+            "estimate": [617.56, 1.02],
+            "ci_lower": [66.39, 0.99],
+            "ci_upper": [83527.68, 1.05],
+            "p_value": [0.0001, 0.21],
+        }
+    )
+    for jnl in (None, "NEJM"):
+        res = plot_forest(sep, scale="OR", journal=jnl, out_path=str(tmp_path / f"s_{jnl}.png"))
+        _assert_bundle_intact(res)
 
 
 # ==============================================================================
@@ -678,7 +734,7 @@ def test_model_diagnostics_and_missingness(tmp_path: Path):
         df_missing,
         out_path=str(tmp_path / "missingness.png"),
     )
-    _assert_bundle_intact(res_miss, expect_vector=False)
+    _assert_bundle_intact(res_miss)
 
     # Schoenfeld Residuals
     times = np.array([5, 12, 18, 25, 34, 45, 60, 78, 90, 120])
@@ -690,7 +746,7 @@ def test_model_diagnostics_and_missingness(tmp_path: Path):
         p_value=0.45,
         out_path=str(tmp_path / "schoenfeld.png"),
     )
-    _assert_bundle_intact(res_schoen, expect_vector=False)
+    _assert_bundle_intact(res_schoen)
 
     # MICE Diagnostics
     observed = np.random.normal(10, 2, 80)
@@ -701,7 +757,7 @@ def test_model_diagnostics_and_missingness(tmp_path: Path):
         var_name="Serum Lactate (mmol/L)",
         out_path=str(tmp_path / "mice.png"),
     )
-    _assert_bundle_intact(res_mice, expect_vector=False)
+    _assert_bundle_intact(res_mice)
 
 
 # ==============================================================================
@@ -797,6 +853,11 @@ def test_dual_view_plotly_interactive_matrix(tmp_path: Path):
     )
     assert isinstance(res_dual_ba, DualFigureResult)
 
+    # Every dual wrapper forwards the static bundle (SKILL.md §3: png, vector, svg, qa).
+    for dual in (res_dual_km, res_dual_fr, res_dual_roc, res_dual_love, res_dual_ba):
+        _assert_bundle_intact(dual)
+        assert dual.qa is not None, "dual wrapper dropped qa"
+
 
 # ==============================================================================
 # 9. QA Layout Collision & CVD & PHI Gates
@@ -842,3 +903,50 @@ def test_qa_gates_comprehensive():
         assert_zero_phi_text(["Dr. Smith"])
     with pytest.raises(ValueError, match="Zero-PHI Violation"):
         assert_zero_phi_text(["นายสมชาย"])
+
+
+# ==============================================================================
+# ADR 81: house style reaches dual wrappers, retention flow and love-plot ticks
+# ==============================================================================
+
+
+def test_every_dual_wrapper_accepts_house_style():
+    import inspect
+
+    import medstat.figures.html as html_mod
+
+    duals = [n for n in dir(html_mod) if n.startswith("plot_dual_")]
+    assert len(duals) >= 12
+    for name in duals:
+        params = inspect.signature(getattr(html_mod, name)).parameters
+        assert "journal" in params and "canvas" in params, name
+
+
+@pytest.mark.parametrize("jnl", JOURNALS)
+def test_dual_forest_and_love_follow_journal(tmp_path: Path, jnl: str):
+    forest_df = pd.DataFrame(
+        {"term": ["Overall", "Subgroup A"], "estimate": [1.4, 1.6],
+         "ci_lower": [1.1, 1.2], "ci_upper": [1.8, 2.1], "p_value": [0.01, 0.005]}
+    )
+    fr = plot_dual_forest(forest_df, scale="HR", journal=jnl, out_path=str(tmp_path / "f.png"))
+    _assert_bundle_intact(fr)
+    love_df = pd.DataFrame(
+        {"Variable": ["Age", "SBP"], "smd_unadjusted": [0.35, 0.28], "smd_matched": [0.04, 0.02]}
+    )
+    lv = plot_dual_love(love_df, journal=jnl, out_path=str(tmp_path / "l.png"))
+    _assert_bundle_intact(lv)
+    if jnl == "LANCET":
+        assert "0·10" in Path(lv.svg_path).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("jnl", [None, *JOURNALS])
+def test_retention_flow_house_styles(tmp_path: Path, jnl):
+    from medstat.figures.retention import plot_retention_flow
+
+    res = plot_retention_flow(
+        {"n_initial": 1000, "n_excluded": 706, "n_analyzed": 294,
+         "exclusion_reasons": ["Unmatched treated (n=705)", "Unmatched control (n=1)"]},
+        journal=jnl,
+        out_path=str(tmp_path / f"r_{jnl}.png"),
+    )
+    _assert_bundle_intact(res)

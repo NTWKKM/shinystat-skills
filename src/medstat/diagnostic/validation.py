@@ -593,24 +593,13 @@ def recalibrate_prediction_model(
         inter = _compute_calibration_intercept_offset(y, lp)
         slope = _compute_calibration_slope(y, lp)
 
-        # ICI and Emax via LOWESS or sliding window
+        # ICI and Emax via LOWESS (frac=2/3, it=0), as in calculate_ici (ADR 78)
         order = np.argsort(p)
         p_s = p[order]
         y_s = y[order]
-        try:
-            from statsmodels.nonparametric.smoothers_lowess import lowess
+        from statsmodels.nonparametric.smoothers_lowess import lowess
 
-            smooth_obs = lowess(y_s, p_s, frac=2.0 / 3.0, it=0, return_sorted=False)
-        except Exception:
-            w = max(len(y) // 10, 5)
-            smooth_obs = (
-                pd.Series(y_s)
-                .rolling(window=w, center=True, min_periods=3)
-                .mean()
-                .bfill()
-                .ffill()
-                .to_numpy()
-            )
+        smooth_obs = lowess(y_s, p_s, frac=2.0 / 3.0, it=0, return_sorted=False)
         abs_err = np.abs(p_s - smooth_obs)
         ici = float(np.mean(abs_err))
         emax = float(np.max(abs_err))
