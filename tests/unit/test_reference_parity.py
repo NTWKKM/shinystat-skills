@@ -685,6 +685,27 @@ def test_recalibration_raises_when_the_intercept_has_no_root(recipes, monkeypatc
             fit(y, p, method="both")
 
 
+def test_logistic_recalibration_does_not_need_the_intercept_only_root(
+    recipes, monkeypatch
+):
+    """method="logistic" still recalibrates when only the intercept-only root is missing."""
+    import scipy.optimize as opt
+
+    from medstat.diagnostic.validation import recalibrate_prediction_model
+
+    rng = np.random.default_rng(3)
+    p = rng.uniform(0.05, 0.95, 200)
+    y = rng.binomial(1, p)
+    monkeypatch.setattr(opt, "brentq", _no_root)
+    for fit in (recalibrate_prediction_model, recipes["recalibrate_prediction_model"]):
+        res = fit(y, p, method="logistic")
+        assert np.all(np.isfinite(res["p_recalibrated_logistic"]))
+        assert np.all(np.isnan(res["p_recalibrated_intercept_only"]))
+        for method in ("intercept_only", "both"):
+            with pytest.raises(RuntimeError, match="no intercept in"):
+                fit(y, p, method=method)
+
+
 def test_bootstrap_validation_never_reports_a_substitute_intercept(
     recipes, monkeypatch
 ):

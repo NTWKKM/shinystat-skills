@@ -109,8 +109,9 @@ def calculate_propensity_score(
         if not firth_fit["converged"] or not np.all(np.isfinite(coef)):
             raise ValueError(
                 "Firth propensity score model did not converge to finite estimates: "
-                "the covariates determine treatment. Remove or collapse the separating "
-                "covariate."
+                "the covariates determine treatment. Review confounding and positivity, "
+                "and state the target estimand, before changing the adjustment set "
+                "(Grilling Gate #3)."
             )
         ps_clean = expit(coef[0] + X_arr @ coef[1:])
     else:
@@ -144,9 +145,10 @@ def calculate_propensity_score(
         if reason is not None:
             raise ValueError(
                 f"Propensity score model shows separation or did not converge ({reason}); "
-                "its fitted scores approach 0 or 1 and are not usable. Remove or collapse "
-                "the separating covariate, or pass method='firth' (ps_method='firth') for "
-                "Firth's penalized likelihood."
+                "its fitted scores approach 0 or 1 and are not usable. Review confounding "
+                "and positivity, and state the target estimand, before changing the "
+                "adjustment set (Grilling Gate #3), or pass method='firth' "
+                "(ps_method='firth') for Firth's penalized likelihood."
             )
         ps_clean = model.predict(X_const)
 

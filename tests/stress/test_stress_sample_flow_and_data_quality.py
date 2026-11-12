@@ -523,9 +523,15 @@ class TestDataQualityScoringStress:
         ]
         schema = DataQualitySchema(cross_variable_rules=rules)
         report = DataQualityReport(df, schema=schema)
-        # Does not crash; exceptions are swallowed
+        # Does not crash; each failing rule is recorded and, because it was not
+        # evaluated, consistency is undefined rather than a passing 100.
         score = report.consistency_score()
-        assert score == 100.0
+        assert np.isnan(score)
+        assert [e["rule"] for e in report.rule_errors] == [
+            "syntax_err",
+            "missing_col",
+            "div_zero",
+        ]
 
     def test_cross_variable_impossible_vitals_penalty_cap(self):
         """

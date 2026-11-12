@@ -107,6 +107,20 @@ def _check(node: ast.AST, expression: str, *, called: bool = False) -> None:
         if not isinstance(node.func, ast.Attribute):
             raise _reject(expression, "a function call (only method calls on a column)")
         _check(node.func, expression, called=True)
+        if node.func.attr == "contains":
+            # A pattern is data, not a regex: a backtracking pattern can stall a run.
+            literal = any(
+                kw.arg == "regex"
+                and isinstance(kw.value, ast.Constant)
+                and kw.value.value is False
+                for kw in node.keywords
+            )
+            if not literal or len(node.args) != 1:
+                raise _reject(
+                    expression,
+                    "'.str.contains' without a literal match "
+                    "(pass one pattern and regex=False)",
+                )
         for arg in node.args:
             _check(arg, expression)
         for keyword in node.keywords:
@@ -156,9 +170,23 @@ def validate_row_expression(expression: str) -> str:
 
 
 def query_rows(df: pd.DataFrame, expression: str) -> pd.DataFrame:
-    """``df.query`` for a validated row expression, with no access to caller variables."""
-    validate_row_expression(expression)
-    return df.query(expression, local_dict={}, global_dict={})
+    """
+    Rows of ``df`` selected by a validated row expression.
+
+    The expression must evaluate to a boolean mask aligned with ``df.index``; a numeric
+    or misaligned result raises instead of being read as row labels.
+    """
+    mask = eval_rows(df, expression)
+    if (
+        not isinstance(mask, pd.Series)
+        or not pd.api.types.is_bool_dtype(mask)
+        or not mask.index.equals(df.index)
+    ):
+        raise ValueError(
+            f"Row expression {expression!r} must evaluate to a boolean value for every "
+            "row (a comparison; add na=False to a .str method on a column with nulls)."
+        )
+    return df.loc[mask.to_numpy()]
 
 
 def eval_rows(df: pd.DataFrame, expression: str) -> Any:

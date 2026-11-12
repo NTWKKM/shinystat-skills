@@ -25,7 +25,7 @@ medstat.reporting.renderers.render_markdown(doc, out_path, assets_dir_name='figu
 
 - `detect_outliers` returns a tuple `(outlier_mask, info)`; unpack it.
 - `check_separation(y, X)` takes `X` without an intercept column (the detector adds one; a constant column raises "rank deficient") and returns `{"is_separated": bool, "recommendation": str}`.
-- `compute_iptw_weights` and `medstat.causal.psm.propensity_score_match` raise `ValueError` on a rank-deficient or separated propensity model and never substitute an estimator. After Gate #3 option A pass `ps_method="firth"`; the estimator used is in `diagnostics["ps_method"]` / `info["ps_method"]`.
+- `compute_iptw_weights` and `medstat.causal.psm.propensity_score_match` raise `ValueError` on a rank-deficient propensity design, and the default `ps_method="logistic"` also raises on separation or non-convergence; neither substitutes an estimator. The explicit `ps_method="firth"` may return scores, subject to its own convergence check. After Gate #3 option A pass `ps_method="firth"`; the estimator used is in `diagnostics["ps_method"]` / `info["ps_method"]`.
 - `SampleFlowTracker.final_n` is a property; `record_stage` records the N remaining after each exclusion step, ending at the primary analytic N.
 - `fit_cox_rcs` returns a tuple `(fig, contrast_df, stats)` that also supports `res["non_linear_pvalue"]`, `res["p_overall"]`, `res["knot_locations"]`; `fit_logistic_rcs` returns a dict with the same keys.
 - `verify_report_integrity`: `delivered_text` is the In-Chat Summary reply, audited with the document; `exported_files` lists data files written beside the report (.csv, .tsv, .xlsx or .parquet; an identifier column such as `patient_id` or any other format fails the audit).

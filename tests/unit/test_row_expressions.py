@@ -51,7 +51,7 @@ def _cohort() -> pd.DataFrame:
         "sbp.notna()",
         "sex.str.lower() == 'f'",
         "stage.str.startswith('I')",
-        "sex.str.contains('F', case=False)",
+        "sex.str.contains('F', case=False, regex=False)",
     ],
 )
 def test_predicates_pass_and_match_plain_query(expression):
@@ -83,6 +83,9 @@ def test_predicates_pass_and_match_plain_query(expression):
         ("total = age + sbp", "valid"),
         ("age > 1; age < 9", "valid"),
         ("age ==", "valid"),
+        ("sex.str.contains('(a+)+$')", "literal"),
+        ("sex.str.contains('F', regex=True)", "literal"),
+        ("sex.str.contains('F', False, 0, None, True)", "literal"),
         ("", "empty"),
         ("   ", "empty"),
     ],
@@ -94,6 +97,13 @@ def test_non_predicates_are_rejected_with_a_reason(expression, reason):
         query_rows(_cohort(), expression)
     with pytest.raises(ValueError, match=reason):
         eval_rows(_cohort(), expression)
+
+
+@pytest.mark.parametrize("expression", ["age", "age + 1", "age / age", "1 > 0"])
+def test_query_rows_requires_a_boolean_mask(expression):
+    """A numeric result is never read as row labels (it would select rows by index)."""
+    with pytest.raises(ValueError, match="boolean"):
+        query_rows(_cohort(), expression)
 
 
 def test_non_string_expression_raises():
@@ -144,6 +154,20 @@ def test_preflight_reports_an_unsafe_filter_with_remediation(tmp_path):
     assert not any("data.filters" in e for e in ok["errors"])
 
 
+def test_preflight_rejects_a_bare_string_filter(tmp_path):
+    spec = _plan_with_filter(tmp_path, "age >= 45")
+    spec.write_text(
+        spec.read_text(encoding="utf-8").replace(
+            "    - expression: 'age >= 45'\n      reason: \"test\"\n",
+            "    - 'age >= 45'\n",
+        ),
+        encoding="utf-8",
+    )
+    report = preflight_validate_spec(spec)
+    assert report["valid"] is False
+    assert any("data.filters[0]" in e and "mapping" in e for e in report["errors"])
+
+
 def test_quality_rule_string_is_validated_and_recorded_not_evaluated(tmp_path):
     marker = tmp_path / "created_by_rule"
     rules = [
@@ -159,7 +183,35 @@ def test_quality_rule_string_is_validated_and_recorded_not_evaluated(tmp_path):
     report = DataQualityReport(
         _cohort(), schema=DataQualitySchema(cross_variable_rules=rules)
     )
-    report.consistency_score()
+    score = report.consistency_score()
     assert not marker.exists()
     assert [e["rule"] for e in report.rule_errors] == ["unsafe"]
     assert "@" in report.rule_errors[0]["error"]
+    # An unevaluated rule leaves consistency undefined, never a passing score.
+    assert np.isnan(score)
+    summary = report.generate_report()
+    assert np.isnan(summary["overall_score"])
+    assert summary["grade"] == "Unavailable"
+    assert any("unsafe" in r for r in summary["recommendations"])
+
+
+def test_unsafe_rule_is_recorded_when_its_columns_are_all_null():
+    df = pd.DataFrame({"age": [np.nan, np.nan], "sbp": [1.0, 2.0]})
+    rule = CrossVariableRule(
+        name="unsafe", condition="age > @threshold", description="reference"
+    )
+    report = DataQualityReport(
+        df, schema=DataQualitySchema(cross_variable_rules=[rule])
+    )
+    assert np.isnan(report.consistency_score())
+    assert [e["rule"] for e in report.rule_errors] == ["unsafe"]
+
+
+def test_permitted_rule_violations_lower_the_consistency_score():
+    """`sbp < age` fails on all three rows with a systolic value: 100 - 25 (warning) = 75."""
+    rule = CrossVariableRule(name="bp", condition="sbp < age", description="violated")
+    report = DataQualityReport(
+        _cohort(), schema=DataQualitySchema(cross_variable_rules=[rule])
+    )
+    assert report.consistency_score() == pytest.approx(75.0)
+    assert report.rule_errors == []

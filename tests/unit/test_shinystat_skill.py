@@ -540,9 +540,11 @@ def test_ci_workflow_keeps_event_data_out_of_shell_and_pins_actions():
     )
     # A fork PR's head branch does not exist in this repository, so the head branch
     # is checked out only when the PR comes from this repository.
-    assert (
-        "github.event.pull_request.head.repo.full_name == github.repository"
-        in checkout["with"]["ref"]
+    # Same-repository PRs check out the head branch; fork PRs and non-PR events keep
+    # the default ref.
+    assert checkout["with"]["ref"] == (
+        "${{ github.event.pull_request.head.repo.full_name == github.repository "
+        "&& github.head_ref || github.ref }}"
     )
 
 

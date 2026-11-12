@@ -1519,9 +1519,12 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
     filters_cfg = data_cfg.get("filters") if isinstance(data_cfg, dict) else None
     for idx, flt in enumerate(filters_cfg if isinstance(filters_cfg, list) else []):
         try:
-            validate_row_expression(
-                flt.get("expression") if isinstance(flt, dict) else flt
-            )
+            if not isinstance(flt, dict):
+                raise ValueError(
+                    "a filter must be a mapping with an 'expression' key "
+                    f"(got {type(flt).__name__})"
+                )
+            validate_row_expression(flt.get("expression"))
         except ValueError as exc:
             report["valid"] = False
             report["errors"].append(f"data.filters[{idx}]: {exc}")

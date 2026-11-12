@@ -624,7 +624,13 @@ def recalibrate_prediction_model(
 
     # 1. Intercept-only recalibration
     alpha_inter = _compute_calibration_intercept_offset(y_arr, lp_orig)
-    if not np.isfinite(alpha_inter):
+    # Only a method that returns an intercept-only result needs the intercept; for
+    # "logistic" it is reported as NaN in p_recalibrated_intercept_only.
+    if not np.isfinite(alpha_inter) and norm_method in (
+        "intercept_only",
+        "calibration_in_the_large",
+        "both",
+    ):
         raise RuntimeError(
             f"Intercept-only recalibration is undefined: {_NO_INTERCEPT_ROOT}."
         )

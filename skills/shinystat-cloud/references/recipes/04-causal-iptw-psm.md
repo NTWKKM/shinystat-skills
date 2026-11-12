@@ -8,7 +8,7 @@
 
 ## 6. Propensity Score Matching (PSM) with Pair IDs & Covariate Balance
 
-Performs 1:1 nearest-neighbor matching without replacement bounded by Austin (2011) 0.2 caliper of logit propensity score. Returns the matched cohort with **`pair_id`** column (enabling paired t-test, conditional logistic regression, and cluster-robust standard errors) alongside pre- and post-match SMD balance diagnostics. The propensity model is fitted by maximum likelihood only (`ps_method: "logistic"` in the result): a rank-deficient or separated design raises `ValueError`, and the Grilling Gate #3 resolution for it is removing or collapsing the offending covariate.
+Performs 1:1 nearest-neighbor matching without replacement bounded by Austin (2011) 0.2 caliper of logit propensity score. Returns the matched cohort with **`pair_id`** column (enabling paired t-test, conditional logistic regression, and cluster-robust standard errors) alongside pre- and post-match SMD balance diagnostics. The propensity model is fitted by maximum likelihood only (`ps_method: "logistic"` in the result): a rank-deficient or separated design raises `ValueError`, and the Grilling Gate #3 resolution for it starts with reviewing confounding and positivity and stating the target estimand, before the adjustment set is changed.
 
 ```python
 import warnings
@@ -66,8 +66,9 @@ def _fit_propensity_logit(t: np.ndarray, X_raw: pd.DataFrame) -> np.ndarray:
     if reason is not None:
         raise ValueError(
             f"Propensity score model shows separation or did not converge ({reason}); "
-            "its fitted scores approach 0 or 1 and are not usable. Remove or collapse "
-            "the separating covariate (Grilling Gate #3)."
+            "its fitted scores approach 0 or 1 and are not usable. Review confounding "
+            "and positivity, and state the target estimand, before changing the "
+            "adjustment set (Grilling Gate #3)."
         )
     return np.asarray(model.predict(X), dtype=float)
 
@@ -246,7 +247,7 @@ def match_propensity_scores(
 
 ## 14. Inverse Probability of Treatment Weighting (IPTW) & Weighted Balance
 
-Standalone implementation for causal inference via propensity score weighting supporting ATE, ATT, ATC, and Overlap Weights (ATO; Li et al., 2018). Computes stabilized weights, quantile truncation, Kish's Effective Sample Size (\$N_{\text{eff}}\$), Bessel-corrected weighted SMD, and Huber-White sandwich variance estimation. The propensity model is fitted by maximum likelihood only (`diagnostics["ps_method"] == "logistic"`): a rank-deficient or separated design raises `ValueError`, and the Grilling Gate #3 resolution for it is removing or collapsing the offending covariate.
+Standalone implementation for causal inference via propensity score weighting supporting ATE, ATT, ATC, and Overlap Weights (ATO; Li et al., 2018). Computes stabilized weights, quantile truncation, Kish's Effective Sample Size (\$N_{\text{eff}}\$), Bessel-corrected weighted SMD, and Huber-White sandwich variance estimation. The propensity model is fitted by maximum likelihood only (`diagnostics["ps_method"] == "logistic"`): a rank-deficient or separated design raises `ValueError`, and the Grilling Gate #3 resolution for it starts with reviewing confounding and positivity and stating the target estimand, before the adjustment set is changed.
 
 ```python
 import warnings
@@ -305,8 +306,9 @@ def _fit_propensity_logit(t: np.ndarray, X_raw: pd.DataFrame) -> np.ndarray:
     if reason is not None:
         raise ValueError(
             f"Propensity score model shows separation or did not converge ({reason}); "
-            "its fitted scores approach 0 or 1 and are not usable. Remove or collapse "
-            "the separating covariate (Grilling Gate #3)."
+            "its fitted scores approach 0 or 1 and are not usable. Review confounding "
+            "and positivity, and state the target estimand, before changing the "
+            "adjustment set (Grilling Gate #3)."
         )
     return np.asarray(model.predict(X), dtype=float)
 

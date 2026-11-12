@@ -2030,7 +2030,7 @@ def psm_cmd(
         if love_plot:
             Path(love_plot).parent.mkdir(parents=True, exist_ok=True)
             with open(love_plot, "w") as f:
-                json.dump(love_data, f, indent=2)
+                json.dump({**love_data, "ps_method": info["ps_method"]}, f, indent=2)
 
         if balance_check:
             click.echo("\n--- Austin (2009) Covariate Balance Diagnostics ---")
@@ -2075,12 +2075,16 @@ def psm_cmd(
                     ],
                 }
             with open(output, "w") as f:
-                json.dump(love_data, f, indent=2)
-            click.echo(f"Causal balance diagnostics saved: {output}")
+                json.dump({**love_data, "ps_method": info["ps_method"]}, f, indent=2)
+            click.echo(
+                f"Causal balance diagnostics saved: {output} "
+                f"(propensity model: {info['ps_method']})"
+            )
         else:
             matched_df.to_csv(output, index=False)
             click.echo(
-                f"Matched cohort saved to: {output} (Matched pairs: {len(matched_df) // 2})"
+                f"Matched cohort saved to: {output} (Matched pairs: {len(matched_df) // 2}; "
+                f"propensity model: {info['ps_method']})"
             )
 
 

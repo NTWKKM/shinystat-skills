@@ -720,6 +720,31 @@ def test_cli_causal_ps_method_is_passed_and_disclosed(
         assert result.exit_code == 0, f"Error: {result.output}"
         assert json.loads(out_json.read_text())["diagnostics"]["ps_method"] == method
 
+    for method in ("logistic", "firth"):
+        for suffix in ("json", "csv"):
+            out = tmp_path / f"psm_{method}.{suffix}"
+            result = runner.invoke(
+                cli,
+                [
+                    "causal",
+                    "psm",
+                    "--data",
+                    str(sample_iptw_csv),
+                    "--treatment",
+                    "treatment",
+                    "--covariates",
+                    "age,bmi",
+                    "--ps-method",
+                    method,
+                    "--output",
+                    str(out),
+                ],
+            )
+            assert result.exit_code == 0, f"Error: {result.output}"
+            assert f"propensity model: {method}" in result.output
+            if suffix == "json":
+                assert json.loads(out.read_text())["ps_method"] == method
+
     result = runner.invoke(
         cli,
         [
