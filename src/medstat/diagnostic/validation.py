@@ -685,6 +685,12 @@ def recalibrate_prediction_model(
         }
     elif norm_method == "logistic":
         post_metrics = _calc_suite(y_arr, p_recal_log, lp_log)
+        warnings_list: list[str] = []
+        if not np.isfinite(alpha_inter):
+            warnings_list.append(
+                "Intercept-only recalibration is undefined (calibration_intercept and "
+                f"p_recalibrated_intercept_only are NaN): {_NO_INTERCEPT_ROOT}."
+            )
         params_info = {
             "method": "logistic",
             "alpha": alpha_log,
@@ -705,6 +711,7 @@ def recalibrate_prediction_model(
             "p_recalibrated": p_recal_log,
             "p_recalibrated_intercept_only": p_recal_int,
             "p_recalibrated_logistic": p_recal_log,
+            "warnings": warnings_list,
         }
     elif norm_method == "both":
         post_inter = _calc_suite(y_arr, p_recal_int, lp_inter)

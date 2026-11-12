@@ -106,6 +106,24 @@ def test_query_rows_requires_a_boolean_mask(expression):
         query_rows(_cohort(), expression)
 
 
+def test_query_rows_keeps_nullable_boolean_masks():
+    """A nullable Int64 comparison yields pd.NA for the missing age; that row is dropped."""
+    df = pd.DataFrame({"age": pd.array([30, 50, None, 70], dtype="Int64")})
+    out = query_rows(df, "age >= 45")
+    assert list(out.index) == [1, 3]
+    assert list(out["age"]) == [50, 70]
+
+
+def test_unsupported_rule_result_is_recorded_not_skipped():
+    rule = CrossVariableRule(name="none", condition=lambda d: None, description="x")
+    report = DataQualityReport(
+        _cohort(), schema=DataQualitySchema(cross_variable_rules=[rule])
+    )
+    assert np.isnan(report.consistency_score())
+    assert [e["rule"] for e in report.rule_errors] == ["none"]
+    assert "NoneType" in report.rule_errors[0]["error"]
+
+
 def test_non_string_expression_raises():
     with pytest.raises(ValueError, match="must be a string"):
         validate_row_expression(["age > 1"])  # type: ignore[arg-type]

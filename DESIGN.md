@@ -2303,6 +2303,7 @@ A repository audit found that the two places taking an expression as text evalua
 - The cloud recipes take no expression strings, so there is no recipe counterpart.
 - The allowlist is of syntax, not of cost: a predicate such as a very large power is still evaluated.
 - **Round 1 (CodeRabbit, PR 30)**: `contains` must be literal; `query_rows` requires a boolean mask; preflight rejects a filter that is not a mapping with an `expression`; an unevaluated quality rule makes consistency `NaN` / grade `Unavailable`. `generate_iptw_narrative` names Firth when `diagnostics["ps_method"]` is `firth`; `medstat causal psm` reports `ps_method` in its JSON outputs and save messages; `recalibrate_prediction_model(method="logistic")` no longer requires the intercept-only root (ADR 84 behaviour otherwise unchanged).
+- **Round 2 (CodeRabbit, PR 30)**: `query_rows` passes the aligned mask to `.loc` unchanged, so a nullable boolean `NA` (an `Int64` column with a missing value) selects no row instead of raising; a quality rule returning anything other than a boolean Series or scalar bool is recorded in `rule_errors` (consistency unavailable) instead of being skipped; `method="logistic"` without an intercept-only root states the reason in `warnings` (engine and Recipe 07), with a test on real data (`clip_eps=1e-70`).
 
 ## ADR 84: Undefined Statistics Carry a Reason (Calibration Intercept, Table 1, Cox PH Test)
 

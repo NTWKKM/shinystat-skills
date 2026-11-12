@@ -531,6 +531,7 @@ class TestDataQualityScoringStress:
             "syntax_err",
             "missing_col",
             "div_zero",
+            "returns_none",
         ]
 
     def test_cross_variable_impossible_vitals_penalty_cap(self):

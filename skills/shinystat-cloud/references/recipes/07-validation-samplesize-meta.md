@@ -395,7 +395,7 @@ def bootstrap_internal_validation(
 
 ## 19. Prediction Model Recalibration and Updating (Logistic & Intercept-Only)
 
-Adjusts existing prediction models to a new target population or cohort. Supports Intercept-Only updating (calibration-in-the-large, shifting mean predicted risk to the observed outcome incidence while fixing slope=1) and Logistic Recalibration (updating both calibration intercept $\alpha$ and calibration slope $\beta$). When no intercept in $[-50, 50]$ reproduces the observed event count, `intercept_only` and `both` raise `RuntimeError`, while `logistic` proceeds and reports `p_recalibrated_intercept_only` as `NaN`.
+Adjusts existing prediction models to a new target population or cohort. Supports Intercept-Only updating (calibration-in-the-large, shifting mean predicted risk to the observed outcome incidence while fixing slope=1) and Logistic Recalibration (updating both calibration intercept $\alpha$ and calibration slope $\beta$). When no intercept in $[-50, 50]$ reproduces the observed event count, `intercept_only` and `both` raise `RuntimeError`, while `logistic` proceeds, reports `p_recalibrated_intercept_only` as `NaN` and states the reason in `warnings`.
 
 ```python
 from typing import Any, Literal
@@ -589,6 +589,13 @@ def recalibrate_prediction_model(
         }
     elif norm_m == "logistic":
         reported_method = "intercept_only_fallback" if logistic_fallback else "logistic"
+        warnings_list = []
+        if not np.isfinite(alpha_inter):
+            warnings_list.append(
+                "Intercept-only recalibration is undefined (calibration_intercept and "
+                "p_recalibrated_intercept_only are NaN): no intercept in [-50, 50] "
+                "reproduces the observed event count."
+            )
         lp_recal = alpha_log + beta_log * lp_orig
         post_metrics = _calc_suite(y_arr, p_log, lp_recal)
         return {
@@ -607,6 +614,7 @@ def recalibrate_prediction_model(
             "p_recalibrated": p_log,
             "p_recalibrated_intercept_only": p_inter,
             "p_recalibrated_logistic": p_log,
+            "warnings": warnings_list,
         }
     else:  # both
         post_inter = _calc_suite(y_arr, p_inter, alpha_inter + lp_orig)

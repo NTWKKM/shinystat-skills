@@ -701,9 +701,27 @@ def test_logistic_recalibration_does_not_need_the_intercept_only_root(
         res = fit(y, p, method="logistic")
         assert np.all(np.isfinite(res["p_recalibrated_logistic"]))
         assert np.all(np.isnan(res["p_recalibrated_intercept_only"]))
+        assert any("no intercept in" in w for w in res["warnings"])
         for method in ("intercept_only", "both"):
             with pytest.raises(RuntimeError, match="no intercept in"):
                 fit(y, p, method=method)
+
+
+def test_logistic_recalibration_without_an_intercept_root_on_real_data(recipes):
+    """Predictions near 1e-58 put the intercept-only root near +130, outside [-50, 50]."""
+    from medstat.diagnostic.validation import recalibrate_prediction_model
+
+    rng = np.random.default_rng(0)
+    p = 10 ** -rng.uniform(56, 60, 40)
+    y = np.r_[np.ones(10), np.zeros(30)]
+    for fit in (recalibrate_prediction_model, recipes["recalibrate_prediction_model"]):
+        res = fit(y, p, method="logistic", clip_eps=1e-70)
+        assert np.all(np.isfinite(res["p_recalibrated_logistic"]))
+        assert np.all(np.isnan(res["p_recalibrated_intercept_only"]))
+        assert np.isnan(res["pre"]["calibration_intercept"])
+        assert any("no intercept in" in w for w in res["warnings"])
+        with pytest.raises(RuntimeError, match="no intercept in"):
+            fit(y, p, method="intercept_only", clip_eps=1e-70)
 
 
 def test_bootstrap_validation_never_reports_a_substitute_intercept(

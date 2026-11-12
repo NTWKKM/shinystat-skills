@@ -364,7 +364,10 @@ class DataQualityReport:
                     elif isinstance(raw_valid, (bool, np.bool_)):
                         valid_mask = pd.Series(bool(raw_valid), index=self.df.index)
                     else:
-                        continue
+                        raise TypeError(
+                            "rule must return a boolean Series or a scalar bool, got "
+                            f"{type(raw_valid).__name__}"
+                        )
 
                     violations = int(((~valid_mask) & non_null_mask).sum())
                     violation_rate = violations / evaluable_rows

@@ -186,7 +186,8 @@ def query_rows(df: pd.DataFrame, expression: str) -> pd.DataFrame:
             f"Row expression {expression!r} must evaluate to a boolean value for every "
             "row (a comparison; add na=False to a .str method on a column with nulls)."
         )
-    return df.loc[mask.to_numpy()]
+    # The aligned mask goes to .loc as is, so a nullable boolean NA selects no row.
+    return df.loc[mask]
 
 
 def eval_rows(df: pd.DataFrame, expression: str) -> Any:
