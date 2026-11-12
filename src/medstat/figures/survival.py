@@ -221,6 +221,14 @@ def plot_kaplan_meier(
             except ValueError:
                 milestone_vals.append(0.0)
 
+        # Group labels sit right of a gap that clears half the widest centred count,
+        # so "Placebo" never touches the first column ("Placebo100").
+        max_count_chars = max(
+            (len(str(v)) for col in time_cols for v in risk_table[col]), default=1
+        )
+        label_gap_in = 0.10 + 0.04 * max_count_chars
+        label_offset = mpl.transforms.ScaledTranslation(-label_gap_in, 0, fig.dpi_scale_trans)
+
         if journal is not None:
             ax_risk.text(
                 0.0,
@@ -243,7 +251,9 @@ def plot_kaplan_meier(
                     y_pos,
                     grp_label,
                     transform=ax_risk.get_yaxis_transform()
-                    + mpl.transforms.ScaledTranslation(-0.24, 0, fig.dpi_scale_trans),
+                    + mpl.transforms.ScaledTranslation(
+                        -max(0.24, label_gap_in), 0, fig.dpi_scale_trans
+                    ),
                     fontsize=8.0,
                     fontweight="bold",
                     color=grp_color,
@@ -277,9 +287,10 @@ def plot_kaplan_meier(
                 grp_label = str(r["Group"])
                 y_pos = n_grps - 1 - g_idx
                 ax_risk.text(
-                    -max_t * 0.02,
+                    0,
                     y_pos,
                     grp_label,
+                    transform=ax_risk.get_yaxis_transform() + label_offset,
                     fontsize=9,
                     fontweight="500",
                     ha="right",
@@ -300,12 +311,13 @@ def plot_kaplan_meier(
 
     source_df = pd.DataFrame(curve_rows)
     if export_vector:
-        png_path, vec_path, _ = save_figure_bundle(
+        png_path, vec_path, svg_path = save_figure_bundle(
             fig, out_path, dpi=dpi, export_vector=True
         )
     else:
         png_path = save_publication_figure(fig, out_path, dpi=dpi)
         vec_path = None
+        svg_path = None
     csv_path = export_source_data(source_df, png_path)
 
     if has_risk_table:
@@ -328,6 +340,7 @@ def plot_kaplan_meier(
         source_df=source_df,
         csv_path=csv_path,
         vector_path=vec_path,
+        svg_path=svg_path,
         qa=qa,
     )
 
@@ -481,12 +494,13 @@ def plot_cif(
 
     source_df = df.copy()
     if export_vector:
-        png_path, vec_path, _ = save_figure_bundle(
+        png_path, vec_path, svg_path = save_figure_bundle(
             fig, out_path, dpi=dpi, export_vector=True
         )
     else:
         png_path = save_publication_figure(fig, out_path, dpi=dpi)
         vec_path = None
+        svg_path = None
     csv_path = export_source_data(source_df, png_path)
 
     alt_text = f"Cumulative Incidence Function curve showing {primary_label} and {competing_label}."
@@ -501,5 +515,6 @@ def plot_cif(
         source_df=source_df,
         csv_path=csv_path,
         vector_path=vec_path,
+        svg_path=svg_path,
         qa=qa,
     )

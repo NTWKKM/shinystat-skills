@@ -10,6 +10,7 @@ import re
 import sys
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -2085,3 +2086,77 @@ def test_integrity_study_design_regression_suite(case):
         assert audit.passed is case.expected_passed, (
             f"Case '{case.id}' expected passed={case.expected_passed}, got {audit.passed} (warnings={audit.warnings}, untraced={audit.untraced_numbers})"
         )
+
+
+def _audit_doc():
+    doc = ReportDocument(title="Audit", results_dict={"or": 1.45, "n": 412})
+    doc.add_paragraph("Methods: logistic regression; 412 patients were analysed (retention flow).")
+    doc.add_paragraph("The odds ratio was 1.45.")
+    return doc
+
+
+def test_delivered_text_is_audited_with_the_document():
+    """ADR 81: an In-Chat reply is audited, so a number added only in chat fails."""
+    assert verify_report_integrity(_audit_doc(), delivered_text="OR 1.45 in 412 patients.").passed
+    audit = verify_report_integrity(_audit_doc(), delivered_text="OR 1.45; risk fell by 17.3 points.")
+    assert audit.passed is False and audit.untraced_numbers == [17.3]
+
+
+def test_exported_files_with_identifier_columns_fail(tmp_path):
+    """ADR 81: a data file written beside the report carries no identifier column."""
+    clean = tmp_path / "matched.csv"
+    clean.write_text("pair_id,statin_rx,cv_event\n1,1,0\n", encoding="utf-8")
+    leaked = tmp_path / "matched_ids.csv"
+    leaked.write_text("patient_id,statin_rx,cv_event\nPATIENT_MOCK_CVD_0001,1,0\n", encoding="utf-8")
+    assert verify_report_integrity(_audit_doc(), exported_files=[clean]).passed
+    audit = verify_report_integrity(_audit_doc(), exported_files=[clean, leaked])
+    assert audit.passed is False
+    assert any("patient_id" in v and "matched_ids.csv" in v for v in audit.phi_violations)
+    with pytest.raises(FileNotFoundError):
+        verify_report_integrity(_audit_doc(), exported_files=[tmp_path / "absent.csv"])
+
+
+def test_exported_files_bom_tsv_xlsx_parquet_and_unsupported(tmp_path):
+    """ADR 81 Round 2: a BOM, a tab delimiter or a binary format cannot hide patient_id."""
+    bom = tmp_path / "bom.csv"
+    bom.write_bytes("\ufeffpatient_id,statin_rx\nPATIENT_MOCK_CVD_0001,1\n".encode("utf-8"))
+    tsv = tmp_path / "ids.tsv"
+    tsv.write_text("hn\tstatin_rx\n123\t1\n", encoding="utf-8")
+    frame = pd.DataFrame({"patient_id": ["PATIENT_MOCK_CVD_0001"], "statin_rx": [1]})
+    xlsx = tmp_path / "ids.xlsx"
+    frame.rename(columns={"patient_id": " patient_id "}).to_excel(xlsx, index=False)
+    parquet = tmp_path / "ids.parquet"
+    frame.to_parquet(parquet)
+    for fp, col in ((bom, "patient_id"), (tsv, "hn"), (xlsx, "patient_id"), (parquet, "patient_id")):
+        audit = verify_report_integrity(_audit_doc(), exported_files=[fp])
+        assert audit.passed is False, fp.name
+        assert any(col in v and fp.name in v for v in audit.phi_violations), fp.name
+    clean_tsv = tmp_path / "clean.tsv"
+    clean_tsv.write_text("pair_id\tstatin_rx\n1\t1\n", encoding="utf-8")
+    assert verify_report_integrity(_audit_doc(), exported_files=[clean_tsv]).passed
+    unknown = tmp_path / "ids.json"
+    unknown.write_text('{"patient_id": "PATIENT_MOCK_CVD_0001"}', encoding="utf-8")
+    audit = verify_report_integrity(_audit_doc(), exported_files=[unknown])
+    assert audit.passed is False
+    assert any("could not be audited" in v for v in audit.phi_violations)
+
+
+def test_exported_files_unreadable_text_corrupt_xlsx_and_leading_blank_rows(tmp_path):
+    """ADR 81 Round 3: UTF-16, invalid UTF-8 and corrupt XLSX fail closed; blank rows
+    before the header cannot hide an identifier column."""
+    utf16 = tmp_path / "utf16.csv"
+    utf16.write_bytes("patient_id,statin_rx\nPATIENT_MOCK_CVD_0001,1\n".encode("utf-16-le"))
+    latin = tmp_path / "latin.csv"
+    latin.write_bytes(b"pair_id,site\n1,Sa\xefd\n")
+    broken = tmp_path / "broken.xlsx"
+    broken.write_bytes(b"PK\x03\x04 truncated")
+    oversized = tmp_path / "oversized.csv"  # csv.Error: field larger than field limit
+    oversized.write_text('"' + "x" * 200_000 + '",a\npatient_id,b\n', encoding="utf-8")
+    for fp in (utf16, latin, broken, oversized):
+        audit = verify_report_integrity(_audit_doc(), exported_files=[fp])
+        assert audit.passed is False, fp.name
+        assert any("could not be audited" in v and fp.name in v for v in audit.phi_violations), fp.name
+    blank = tmp_path / "blank_first.csv"
+    blank.write_text("\n , \npatient_id,statin_rx\nPATIENT_MOCK_CVD_0001,1\n", encoding="utf-8")
+    audit = verify_report_integrity(_audit_doc(), exported_files=[blank])
+    assert any("'patient_id'" in v for v in audit.phi_violations)

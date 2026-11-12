@@ -25,12 +25,16 @@ def plot_dual_kaplan_meier(
     title: str = "Kaplan-Meier Overall Survival",
     out_path: str | Path = "figures/kaplan_meier.png",
     target: Literal["docx", "pptx", "web"] = "docx",
+    journal: str | None = None,
+    canvas: str = "manuscript",
 ) -> DualFigureResult:
     """
     Renders both publication-grade 300 DPI Matplotlib figure (with risk table)
     and interactive Plotly step survival curves with confidence intervals.
     """
     res = plot_kaplan_meier(
+        journal=journal,
+        canvas=canvas,
         km_curves=km_curves,
         risk_table=risk_table,
         log_rank_p=log_rank_p,
@@ -126,6 +130,9 @@ def plot_dual_kaplan_meier(
 
     return DualFigureResult(
         png_path=res.png_path,
+        vector_path=res.vector_path,
+        svg_path=res.svg_path,
+        qa=res.qa,
         alt_text=res.alt_text,
         caption=res.caption,
         source_df=res.source_df,
@@ -143,12 +150,16 @@ def plot_dual_cif(
     title: str = "Cumulative Incidence Function Under Competing Risks",
     out_path: str | Path = "figures/cif_plot.png",
     target: Literal["docx", "pptx", "web"] = "docx",
+    journal: str | None = None,
+    canvas: str = "manuscript",
 ) -> DualFigureResult:
     """
     Renders both publication-grade 300 DPI Matplotlib figure and interactive Plotly CIF curves
     with confidence bands and Naive 1 - KM overestimation overlay.
     """
     res = plot_cif(
+        journal=journal,
+        canvas=canvas,
         cif_data=cif_data,
         primary_label=primary_label,
         competing_label=competing_label,
@@ -310,6 +321,9 @@ def plot_dual_cif(
 
     return DualFigureResult(
         png_path=res.png_path,
+        vector_path=res.vector_path,
+        svg_path=res.svg_path,
+        qa=res.qa,
         alt_text=res.alt_text,
         caption=res.caption,
         source_df=res.source_df,

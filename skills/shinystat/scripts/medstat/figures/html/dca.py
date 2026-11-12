@@ -20,6 +20,8 @@ def plot_dual_dca(
     title: str = "Decision Curve Analysis (Clinical Net Benefit)",
     out_path: str | Path = "figures/dca_curve.png",
     target: Literal["docx", "pptx", "web"] = "docx",
+    journal: str | None = None,
+    canvas: str = "manuscript",
 ) -> DualFigureResult:
     """
     Renders both publication-grade 300 DPI Matplotlib figure and interactive Plotly DCA curves.
@@ -29,6 +31,8 @@ def plot_dual_dca(
         raise ValueError("dca_data or dca_df must be provided")
 
     res = plot_dca(
+        journal=journal,
+        canvas=canvas,
         dca_data=df,
         title=title,
         out_path=out_path,
@@ -44,6 +48,9 @@ def plot_dual_dca(
 
     return DualFigureResult(
         png_path=res.png_path,
+        vector_path=res.vector_path,
+        svg_path=res.svg_path,
+        qa=res.qa,
         alt_text=res.alt_text,
         caption=res.caption,
         source_df=res.source_df,

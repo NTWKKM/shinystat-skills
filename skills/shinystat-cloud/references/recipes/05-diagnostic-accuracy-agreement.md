@@ -301,7 +301,7 @@ def delong_paired_test(y_true, score1, score2, alpha: float = 0.05) -> dict:
 
 ## 4. Model Calibration & Vickers Decision Curve Analysis (DCA)
 
-Evaluates clinical prediction model goodness-of-fit (Austin & Steyerberg 2019 ICI with span 0.75, logistic recalibration slope & intercept) and Vickers & Elkin (2006) decision curve analysis.
+Evaluates clinical prediction model goodness-of-fit (Austin & Steyerberg 2019 ICI with LOWESS span 2/3, logistic recalibration slope & intercept) and Vickers & Elkin (2006) decision curve analysis.
 
 ```python
 import numpy as np
@@ -357,10 +357,9 @@ def evaluate_calibration(y_true, y_pred) -> dict:
     except Exception:
         intercept = np.nan
 
-    # 3. Austin & Steyerberg (2019) ICI using LOWESS smoother (span = 0.75)
+    # 3. Austin & Steyerberg (2019) ICI: LOWESS frac=2/3, it=0, unclipped (engine parity, ADR 78)
     order = np.argsort(y_p)
-    smooth_obs = lowess(y_t[order], y_p[order], frac=0.75, it=0, return_sorted=False)
-    smooth_obs = np.clip(smooth_obs, 0.0, 1.0)
+    smooth_obs = lowess(y_t[order], y_p[order], frac=2.0 / 3.0, it=0, return_sorted=False)
     abs_err = np.abs(y_p[order] - smooth_obs)
 
     # 4. Decile calibration bins for plotting
@@ -412,7 +411,7 @@ def evaluate_calibration(y_true, y_pred) -> dict:
         },
         "calibration_curve": {
             "pred_smooth": y_p[order],
-            "obs_smooth": smooth_obs,
+            "obs_smooth": np.clip(smooth_obs, 0.0, 1.0),  # display curve only
         },
     }
 

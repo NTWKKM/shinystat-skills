@@ -39,9 +39,11 @@ def check_separation(
     y_arr = np.asarray(y, dtype=int).ravel()
     X_arr = np.asarray(X, dtype=float)
 
-    is_separated = detect_separation(X_arr, y_arr)
+    # detect_separation returns a SeparationResult dataclass; its truth value is
+    # always True, so read the flag itself.
+    is_separated = bool(detect_separation(X_arr, y_arr).separation)
     return {
-        "is_separated": bool(is_separated),
+        "is_separated": is_separated,
         "recommendation": "Use Firth penalized regression"
         if is_separated
         else "Standard MLE acceptable",

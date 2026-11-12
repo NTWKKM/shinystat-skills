@@ -500,16 +500,14 @@ def recalibrate_prediction_model(
             else 0.5
         )
 
-        try:
-            from statsmodels.nonparametric.smoothers_lowess import lowess
+        # ICI: LOWESS frac=2/3, it=0 (engine and Recipe 5 parity, ADR 78); failures raise.
+        from statsmodels.nonparametric.smoothers_lowess import lowess
 
-            smoothed = lowess(y, p, frac=0.67, return_sorted=False)
-            cal_err = np.abs(smoothed - p)
-            emax = float(np.max(cal_err))
-            ici = float(np.mean(cal_err))
-        except Exception:
-            emax = float("nan")
-            ici = float("nan")
+        order = np.argsort(p)
+        smoothed = lowess(y[order], p[order], frac=2.0 / 3.0, it=0, return_sorted=False)
+        cal_err = np.abs(smoothed - p[order])
+        emax = float(np.max(cal_err))
+        ici = float(np.mean(cal_err))
 
         return {
             "calibration_intercept": inter,

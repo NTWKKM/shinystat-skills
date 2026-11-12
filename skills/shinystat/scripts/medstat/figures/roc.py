@@ -263,12 +263,13 @@ def plot_roc_curve(
             }
         )
     if export_vector:
-        png_path, vec_path, _ = save_figure_bundle(
+        png_path, vec_path, svg_path = save_figure_bundle(
             fig, out_path, dpi=dpi, export_vector=True
         )
     else:
         png_path = save_publication_figure(fig, out_path, dpi=dpi)
         vec_path = None
+        svg_path = None
     csv_path = export_source_data(source_df, png_path)
 
     alt_text = f"ROC curve showing discrimination accuracy with AUC of {auc:.3f}."
@@ -281,6 +282,7 @@ def plot_roc_curve(
         source_df=source_df,
         csv_path=csv_path,
         vector_path=vec_path,
+        svg_path=svg_path,
         qa=qa,
     )
 
@@ -502,12 +504,13 @@ def plot_time_dependent_roc(
     qa = qa_layout(fig, check_outside=False)
 
     if export_vector:
-        png_path, vec_path, _ = save_figure_bundle(
+        png_path, vec_path, svg_path = save_figure_bundle(
             fig, out_path, dpi=dpi, export_vector=True
         )
     else:
         png_path = save_publication_figure(fig, out_path, dpi=dpi)
         vec_path = None
+        svg_path = None
     csv_path = export_source_data(source_df, png_path)
 
     return FigureResult(
@@ -517,6 +520,7 @@ def plot_time_dependent_roc(
         source_df=source_df,
         csv_path=csv_path,
         vector_path=vec_path,
+        svg_path=svg_path,
         qa=qa,
     )
 
@@ -695,12 +699,13 @@ def plot_reclassification(
         }
     )
     if export_vector:
-        png_path, vec_path, _ = save_figure_bundle(
+        png_path, vec_path, svg_path = save_figure_bundle(
             fig, out_path, dpi=dpi, export_vector=True
         )
     else:
         png_path = save_publication_figure(fig, out_path, dpi=dpi)
         vec_path = None
+        svg_path = None
     csv_path = export_source_data(source_df, png_path)
 
     alt_text = f"Risk reclassification scatter plot comparing p_old vs p_new across {len(p_0)} patients."
@@ -713,5 +718,6 @@ def plot_reclassification(
         source_df=source_df,
         csv_path=csv_path,
         vector_path=vec_path,
+        svg_path=svg_path,
         qa=qa,
     )

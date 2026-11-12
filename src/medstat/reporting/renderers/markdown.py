@@ -54,10 +54,9 @@ def render_markdown(
             lines.append(f"\n> [!NOTE]\n> {block.text}\n")
         elif isinstance(block, TableBlock):
             lines.append(f"\n**{block.caption}**\n")
-            try:
-                table_md = block.df.to_markdown(index=False)
-            except Exception:
-                table_md = block.df.to_string(index=False)
+            # Requires `tabulate` (pinned in requirements.txt); a missing package
+            # raises instead of silently degrading to a plain-text table.
+            table_md = block.df.to_markdown(index=False)
             lines.append(f"{table_md}\n")
             if block.footnote:
                 lines.append(f"*{block.footnote}*\n")

@@ -4315,3 +4315,59 @@ def test_consort_single_field_derivation_and_superscript_allowlist(
     assert "<sup>1</sup>" in html_content
     assert "<sup>2</sup>" in html_content
     assert "<sup>5</sup>" in html_content
+
+
+def test_cloud_verifier_flags_identifier_columns_in_exported_files(
+    tmp_path, ensure_packaged_cloud_skill
+):
+    """ADR 81: verify_standalone_integrity scans exported data files like the engine."""
+    verify = _extract_report_builder_namespace()["verify_standalone_integrity"]
+    narrative = "Methods: logistic regression. The odds ratio was 1.45 in 412 patients (retention flow)."
+    results = {"or": 1.45, "n": 412}
+    clean = tmp_path / "matched.csv"
+    clean.write_text("pair_id,statin_rx\n1,1\n", encoding="utf-8")
+    leaked = tmp_path / "ids.csv"
+    leaked.write_text("hn,statin_rx\n123,1\n", encoding="utf-8")
+    assert verify(narrative, results, exported_files=[clean])["passed"] is True
+    res = verify(narrative, results, exported_files=[leaked])
+    assert res["passed"] is False and any("'hn'" in v for v in res["phi_violations"])
+    with pytest.raises(FileNotFoundError):
+        verify(narrative, results, exported_files=[tmp_path / "absent.csv"])
+    # ADR 81 Round 2: BOM, TSV and unsupported formats fail closed like the engine.
+    bom = tmp_path / "bom.csv"
+    bom.write_bytes("\ufeffpatient_id,statin_rx\nPATIENT_MOCK_CVD_0001,1\n".encode("utf-8"))
+    tsv = tmp_path / "ids.tsv"
+    tsv.write_text("hn\tstatin_rx\n123\t1\n", encoding="utf-8")
+    for fp, col in ((bom, "patient_id"), (tsv, "hn")):
+        res = verify(narrative, results, exported_files=[fp])
+        assert res["passed"] is False and any(f"'{col}'" in v for v in res["phi_violations"])
+    # Padded headers in binary formats are stripped before matching, as in the engine.
+    padded = pd.DataFrame({" patient_id ": ["PATIENT_MOCK_CVD_0001"], "statin_rx": [1]})
+    xlsx = tmp_path / "ids.xlsx"
+    padded.to_excel(xlsx, index=False)
+    parquet = tmp_path / "ids.parquet"
+    padded.to_parquet(parquet)
+    for fp in (xlsx, parquet):
+        res = verify(narrative, results, exported_files=[fp])
+        assert res["passed"] is False and any("patient_id" in v for v in res["phi_violations"]), fp.name
+    unknown = tmp_path / "ids.json"
+    unknown.write_text("{}", encoding="utf-8")
+    res = verify(narrative, results, exported_files=[unknown])
+    assert res["passed"] is False and any("could not be audited" in v for v in res["phi_violations"])
+    # ADR 81 Round 3: UTF-16, invalid UTF-8 and corrupt XLSX fail closed; leading blank rows skipped.
+    utf16 = tmp_path / "utf16.csv"
+    utf16.write_bytes("patient_id,statin_rx\nPATIENT_MOCK_CVD_0001,1\n".encode("utf-16-le"))
+    latin = tmp_path / "latin.csv"
+    latin.write_bytes(b"pair_id,site\n1,Sa\xefd\n")
+    broken = tmp_path / "broken.xlsx"
+    broken.write_bytes(b"PK\x03\x04 truncated")
+    oversized = tmp_path / "oversized.csv"  # csv.Error: field larger than field limit
+    oversized.write_text('"' + "x" * 200_000 + '",a\npatient_id,b\n', encoding="utf-8")
+    for fp in (utf16, latin, broken, oversized):
+        res = verify(narrative, results, exported_files=[fp])
+        assert res["passed"] is False, fp.name
+        assert any("could not be audited" in v for v in res["phi_violations"]), fp.name
+    blank = tmp_path / "blank_first.csv"
+    blank.write_text("\n , \npatient_id,statin_rx\nPATIENT_MOCK_CVD_0001,1\n", encoding="utf-8")
+    res = verify(narrative, results, exported_files=[blank])
+    assert any("'patient_id'" in v for v in res["phi_violations"])

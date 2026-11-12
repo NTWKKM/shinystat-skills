@@ -46,6 +46,21 @@ PHI_PATTERNS: list[tuple[re.Pattern, str]] = [
 ]
 
 
+# Column names that hold a direct patient identifier (mock IDs included): a data
+# file written beside a report must not carry one (ADR 81).
+IDENTIFIER_COLUMN_PATTERN = re.compile(
+    r"^(?:patient|subject|participant|person|record)[_ ]?(?:id|no|number)$"
+    r"|^(?:mrn|hn|hospital[_ ]?(?:id|no|number)|national[_ ]?id|citizen[_ ]?id|cid"
+    r"|ssn|patient[_ ]?name|full[_ ]?name|name)$",
+    re.IGNORECASE,
+)
+
+
+def scan_identifier_columns(columns: Sequence[object]) -> list[str]:
+    """Returns the column names that hold a direct patient identifier."""
+    return [str(c) for c in columns if IDENTIFIER_COLUMN_PATTERN.match(str(c).strip())]
+
+
 def scan_phi_violations(text: str) -> list[str]:
     """Scans text against all PHI patterns and returns list of violation messages."""
     violations: list[str] = []

@@ -679,8 +679,11 @@ def generate_pdf_report(
 Before releasing any report, run the standalone verification routine:
 
 ```python
+import csv
+import io
 import math
 import re
+import zipfile
 from pathlib import Path
 import pandas as pd
 
@@ -691,8 +694,14 @@ def verify_standalone_integrity(
     table_dfs: list[pd.DataFrame] = None,
     allowed_untraced: list[float] | set[float] | tuple[float, ...] = None,
     study_design: str = None,
+    exported_files: list = None,
 ) -> dict:
-    """Verifies numerical traceability (len(untraced_numbers) == 0) and screens for PHI without importing medstat."""
+    """Verifies numerical traceability (len(untraced_numbers) == 0) and screens for PHI without importing medstat.
+
+    Pass the exact text delivered to the reader (for In-Chat Summary, the chat reply) as `narrative_text`,
+    and every data file written beside the report as `exported_files`: a missing file raises, and an
+    identifier column (patient_id, hn, mrn, ...) or PHI pattern in one is a violation (engine parity, ADR 81).
+    """
     violations = []
 
     # 1. PHI Scan
@@ -731,6 +740,49 @@ def verify_standalone_integrity(
     for pat, label in phi_patterns:
         for m in pat.findall(narrative_text):
             violations.append(f"{label}: '{m}'")
+
+    id_col_pattern = re.compile(
+        r"^(?:patient|subject|participant|person|record)[_ ]?(?:id|no|number)$"
+        r"|^(?:mrn|hn|hospital[_ ]?(?:id|no|number)|national[_ ]?id|citizen[_ ]?id|cid"
+        r"|ssn|patient[_ ]?name|full[_ ]?name|name)$",
+        re.IGNORECASE,
+    )
+    for path in exported_files or []:
+        fp = Path(path)
+        if not fp.is_file():
+            raise FileNotFoundError(f"Exported file not found for integrity audit: {fp}")
+        # Read by format; utf-8-sig drops a BOM that would hide a patient_id header (ADR 81).
+        suffix = fp.suffix.lower()
+        try:
+            if suffix in (".csv", ".tsv", ".tab"):
+                # Strict decode (UnicodeDecodeError is a ValueError); NUL bytes mean UTF-16 or binary.
+                content = fp.read_bytes().decode("utf-8-sig")
+                if "\x00" in content:
+                    raise ValueError("NUL bytes in text export (not UTF-8; UTF-16?)")
+                delim = "," if suffix == ".csv" else "\t"
+                rows = csv.reader(io.StringIO(content), delimiter=delim)
+                header = next((r for r in rows if any(c.strip() for c in r)), [])
+                cols = [c.strip() for c in header]
+            elif suffix in (".xlsx", ".parquet"):
+                frames = (
+                    pd.read_excel(fp, sheet_name=None, dtype=str)
+                    if suffix == ".xlsx"
+                    else {"": pd.read_parquet(fp)}
+                )
+                cols = [str(c).strip() for f in frames.values() for c in f.columns]
+                content = "\n".join(f.astype(str).to_csv(index=False) for f in frames.values())
+            else:
+                raise ValueError(f"unsupported format '{suffix or fp.name}' (use .csv, .tsv, .xlsx or .parquet)")
+        except (ValueError, ImportError, zipfile.BadZipFile, csv.Error) as exc:
+            # Fail closed: a file the audit cannot read is never passed unchecked.
+            violations.append(f"Exported file '{fp.name}' could not be audited: {exc}")
+            continue
+        for col in cols:
+            if id_col_pattern.match(col):
+                violations.append(f"Identifier column '{col}' in exported file '{fp.name}'")
+        for pat, label in phi_patterns:
+            for m in pat.findall(content):
+                violations.append(f"{label} in exported file '{fp.name}': '{m}'")
 
     if table_dfs:
         for df in table_dfs:
@@ -1397,6 +1449,28 @@ def verify_standalone_integrity(
             is_exponent = "." not in raw_str and bool(
                 re.search(r"[a-zA-Z\)]\^$", window_before)
             )
+            # Author-year citation without "et al." (Austin (2011), VanderWeele & Ding 2017); engine parity (ADR 79)
+            is_author_year = (
+                1900.0 <= val <= 2035.0
+                and "." not in raw_str
+                and bool(re.search(r"\b[A-Z][a-zA-Z'’\-]+(?:\s+(?:&|and)\s+[A-Z][a-zA-Z'’\-]+)?,?\s*\(?$", window_before))
+                and (
+                    # Bracket or next author closes a citation; ; , . : or line end only after
+                    # "(", "Surname," or a second author, so "Total 1987." stays untraced (ADR 79)
+                    bool(re.match(r"^[a-z]?(?:\s*[)\]]|\s+(?:and|&)\s+[A-Z])", window_after))
+                    or (
+                        bool(re.match(r"^[a-z]?\s*(?:[;,.:]|$)", window_after))
+                        and bool(re.search(r"(?:\(|,|(?:&|\band)\s+[A-Z][a-zA-Z'’\-]+)\s*\(?$", window_before))
+                    )
+                )
+            )
+            # Analysis scale constants: "per 10 years", "caliper 0.2 SD" (engine parity, ADR 81)
+            is_scale_unit = bool(re.search(r"\b(?:per|caliper(?:\s+(?:of|width))?)\s*$", window_before, re.IGNORECASE))
+            # Section number opening a line or Markdown heading (## 4. Results, 6.1 Sensitivity Analysis)
+            is_section = not has_pct and bool(re.match(r"^\s*(?:#{1,6}\s*)?$", window_before)) and (
+                (bool(re.fullmatch(r"\d{1,2}", raw_str)) and 1.0 <= val <= 50.0 and bool(re.match(r"^[.)]\s+[A-Z]", window_after)))
+                or (bool(re.fullmatch(r"\d{1,2}\.\d{1,2}", raw_str)) and bool(re.match(r"^\.?\s+[A-Z]", window_after)))
+            )
             date_prefix_pattern = (
                 r"(?:"
                 r"\b(?:in|year|years|during|period|from|dated|since|until|between)(?:\s+(?:the\s+)?(?:calendar|fiscal|academic|study)?(?:\s*year)?)?(?:\s+"
@@ -1447,6 +1521,9 @@ def verify_standalone_integrity(
                 or is_counter
                 or is_exponent
                 or is_year
+                or is_author_year
+                or is_scale_unit
+                or is_section
                 or is_citation
             ):
                 untraced_nums.append(val)

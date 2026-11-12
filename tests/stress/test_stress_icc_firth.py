@@ -347,6 +347,15 @@ class TestICCSciPyParity:
 class TestFirthPenalizedModels:
     """Stress-test Firth penalized logistic and Cox models on monotone likelihood & separation."""
 
+    def test_check_separation_negative_control(self):
+        """Overlapping classes are not separated; the detector must say so."""
+        rng = np.random.default_rng(20261112)
+        X = rng.normal(size=(200, 2))
+        y = rng.binomial(1, 0.4, size=200)
+        sep = check_separation(y, X)
+        assert sep["is_separated"] is False
+        assert sep["recommendation"] == "Standard MLE acceptable"
+
     def test_firth_complete_separation_vs_statsmodels(self):
         """Stress test: Complete linear separation.
         Demonstrates statsmodels Logit divergence/failure vs Firth convergence."""

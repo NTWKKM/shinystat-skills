@@ -26,6 +26,54 @@ from medstat.figures.styles import (
     set_clinical_figure_style,
 )
 
+_STANDARD_RATIO_TICKS = (0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 10.0)
+
+
+def _ratio_axis_limits(
+    ci_lower: np.ndarray,
+    ci_upper: np.ndarray,
+    estimates: np.ndarray | None = None,
+) -> tuple[float, float, list[float]]:
+    """Log-axis limits and ticks that contain every finite interval and point estimate.
+
+    Intervals inside [0.05, 20] keep the standard clinical ticks. Wider intervals,
+    such as Firth estimates under separation, switch to decade ticks so no point
+    estimate or interval falls outside the axis. ``estimates`` keeps a point whose
+    interval is unavailable (NaN bounds) on the axis.
+    """
+    est = np.asarray(estimates if estimates is not None else [], dtype=float)
+    lo = np.concatenate([np.asarray(ci_lower, dtype=float), est])
+    hi = np.concatenate([np.asarray(ci_upper, dtype=float), est])
+    lo = lo[np.isfinite(lo) & (lo > 0)]
+    hi = hi[np.isfinite(hi) & (hi > 0)]
+    xmin = float(lo.min()) * 0.8 if lo.size else 0.25
+    xmax = float(hi.max()) * 1.25 if hi.size else 4.0
+    xmin, xmax = min(xmin, 0.8), max(xmax, 1.25)
+    if xmin >= 0.05 and xmax <= 20.0:
+        ticks = [t for t in _STANDARD_RATIO_TICKS if xmin <= t <= xmax]
+    else:
+        lo_dec = int(np.ceil(np.log10(xmin)))
+        hi_dec = int(np.floor(np.log10(xmax)))
+        # At most ~4 labelled decades so labels stay legible on a narrow panel;
+        # stepping from 10^0 keeps the null value on a tick.
+        step = max(1, int(np.ceil((hi_dec - lo_dec + 1) / 4)))
+        ticks = [10.0**k for k in range(lo_dec, hi_dec + 1) if k % step == 0]
+    if 1.0 not in ticks:
+        ticks = sorted(ticks + [1.0])
+    return xmin, xmax, ticks
+
+
+def _ci_decimals(x: float) -> int:
+    """Two decimals for ordinary effects; whole numbers from 100 upward so a
+    separated-data interval (e.g. 618 (66.39 to 83528)) fits its column."""
+    return 0 if abs(x) >= 100 else 2
+
+
+def _ratio_tick_decimals(x: float) -> int:
+    if x < 0.01:
+        return int(np.ceil(-np.log10(x)))
+    return 2 if x < 0.5 else (1 if x < 1 else 0)
+
 
 def plot_forest(
     data: list[dict[str, Any]] | pd.DataFrame,
@@ -37,12 +85,16 @@ def plot_forest(
     canvas: str = "manuscript",
     export_vector: bool = True,
     null_value: float | None = None,
-    favor_left_label: str = "Favors Intervention",
-    favor_right_label: str = "Favors Control",
+    favor_left_label: str | None = None,
+    favor_right_label: str | None = None,
 ) -> FigureResult:
     """
     Renders an ICMJE/journal-standard Forest Plot with log-scale axis,
     95% CI error bars, and aligned right-hand numerical estimates.
+
+    Favour arrows under the axis are drawn only when ``favor_left_label`` and
+    ``favor_right_label`` are both given, since an association model (age, LDL)
+    has no intervention or control arm to favour.
     """
     if isinstance(data, list):
         df = pd.DataFrame(data)
@@ -75,8 +127,7 @@ def plot_forest(
 
     phi_texts = [
         title,
-        favor_left_label,
-        favor_right_label,
+        *[lbl for lbl in (favor_left_label, favor_right_label) if lbl is not None],
         *df.columns.astype(str),
         *df["term"].astype(str),
     ]
@@ -91,6 +142,10 @@ def plot_forest(
         ):
             phi_texts.extend(df[col].dropna().astype(str).tolist())
     assert_zero_phi_text(phi_texts)
+    if (favor_left_label is None) != (favor_right_label is None):
+        raise ValueError(
+            "Pass both favor_left_label and favor_right_label, or neither."
+        )
 
     if journal is not None:
         spec = apply_journal_theme(journal, canvas, target)
@@ -244,7 +299,7 @@ def plot_forest(
                 else:
                     sep = "–"
 
-                est_txt = f"{format_num(est, 2, journal)} ({format_num(lo, 2, journal)}{sep}{format_num(hi, 2, journal)})"
+                est_txt = f"{format_num(est, _ci_decimals(est), journal)} ({format_num(lo, _ci_decimals(lo), journal)}{sep}{format_num(hi, _ci_decimals(hi), journal)})"
                 ax_right.text(
                     0.02, y, est_txt, fontsize=fs - 0.3, va="center", ha="left"
                 )
@@ -261,62 +316,58 @@ def plot_forest(
         ax_left.set_ylim(-0.4, n_terms + 1.3)
 
         if is_ratio:
-            valid_lo = df["ci_lower"].dropna()
-            valid_hi = df["ci_upper"].dropna()
-            xmin = max(0.05, float(valid_lo.min()) * 0.8) if len(valid_lo) else 0.25
-            xmax = min(20.0, float(valid_hi.max()) * 1.25) if len(valid_hi) else 4.0
+            xmin, xmax, ticks = _ratio_axis_limits(
+                pd.to_numeric(df["ci_lower"], errors="coerce").to_numpy(),
+                pd.to_numeric(df["ci_upper"], errors="coerce").to_numpy(),
+                pd.to_numeric(df["estimate"], errors="coerce").to_numpy(),
+            )
             ax_mid.set_xlim(xmin, xmax)
-            ticks = [
-                t for t in [0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 10.0] if xmin <= t <= xmax
-            ]
-            if 1.0 not in ticks:
-                ticks = sorted(ticks + [1.0])
             ax_mid.set_xticks(ticks)
             ax_mid.xaxis.set_minor_formatter(mpl.ticker.NullFormatter())
             ax_mid.get_xaxis().set_major_formatter(
                 mpl.ticker.FuncFormatter(
-                    lambda x, _: format_num(
-                        x, 2 if x < 0.5 else (1 if x < 1 else 0), journal
-                    )
+                    lambda x, _: format_num(x, _ratio_tick_decimals(x), journal)
                 )
             )
 
         ax_mid.set_xlabel(scale_header, fontsize=fs, fontweight="bold")
-        _x_tr = ax_mid.get_xaxis_transform()
-        _shift = mpl.transforms.ScaledTranslation(3 / 72, 0, fig.dpi_scale_trans)
-        _shift_inv = mpl.transforms.ScaledTranslation(-3 / 72, 0, fig.dpi_scale_trans)
-        ax_mid.text(
-            ref_val,
-            -0.34,
-            _wrap("\u2190 " + favor_left_label, 16),
-            transform=_x_tr + _shift_inv,
-            fontsize=fs - 1.2,
-            ha="right",
-            va="top",
-            multialignment="right",
-            linespacing=1.0,
-        )
-        ax_mid.text(
-            ref_val,
-            -0.34,
-            _wrap(favor_right_label + " \u2192", 16),
-            transform=_x_tr + _shift,
-            fontsize=fs - 1.2,
-            ha="left",
-            va="top",
-            multialignment="left",
-            linespacing=1.0,
-        )
+        if favor_left_label is not None and favor_right_label is not None:
+            _x_tr = ax_mid.get_xaxis_transform()
+            _shift = mpl.transforms.ScaledTranslation(3 / 72, 0, fig.dpi_scale_trans)
+            _shift_inv = mpl.transforms.ScaledTranslation(-3 / 72, 0, fig.dpi_scale_trans)
+            ax_mid.text(
+                ref_val,
+                -0.34,
+                _wrap("\u2190 " + favor_left_label, 16),
+                transform=_x_tr + _shift_inv,
+                fontsize=fs - 1.2,
+                ha="right",
+                va="top",
+                multialignment="right",
+                linespacing=1.0,
+            )
+            ax_mid.text(
+                ref_val,
+                -0.34,
+                _wrap(favor_right_label + " \u2192", 16),
+                transform=_x_tr + _shift,
+                fontsize=fs - 1.2,
+                ha="left",
+                va="top",
+                multialignment="left",
+                linespacing=1.0,
+            )
 
         qa = qa_layout(fig, check_outside=False)
 
         if export_vector:
-            png_path, vec_path, _ = save_figure_bundle(
+            png_path, vec_path, svg_path = save_figure_bundle(
                 fig, out_path, dpi=dpi, export_vector=True
             )
         else:
             png_path = save_publication_figure(fig, out_path, dpi=dpi)
             vec_path = None
+            svg_path = None
         csv_path = export_source_data(df, png_path)
 
         alt_text = (
@@ -331,6 +382,7 @@ def plot_forest(
             source_df=df,
             csv_path=csv_path,
             vector_path=vec_path,
+            svg_path=svg_path,
             qa=qa,
         )
 
@@ -344,7 +396,7 @@ def plot_forest(
     # Adjust height based on number of terms
     dynamic_height = max(h, 0.45 * n_terms + 2.0)
     fig, (ax_plot, ax_text) = plt.subplots(
-        1, 2, figsize=(w, dynamic_height), gridspec_kw={"width_ratios": [3.2, 2.0]}
+        1, 2, figsize=(w, dynamic_height), gridspec_kw={"width_ratios": [3.0, 2.4]}
     )
 
     y_positions = np.arange(n_terms)
@@ -390,9 +442,39 @@ def plot_forest(
     # X-axis configuration
     if is_ratio:
         ax_plot.set_xscale("log")
+        xmin, xmax, ticks = _ratio_axis_limits(ci_lowers, ci_uppers, estimates)
+        ax_plot.set_xlim(xmin, xmax)
+        ax_plot.set_xticks(ticks)
+        ax_plot.xaxis.set_minor_formatter(mpl.ticker.NullFormatter())
+        ax_plot.xaxis.set_major_formatter(
+            mpl.ticker.FuncFormatter(
+                lambda x, _: format_num(x, _ratio_tick_decimals(x), None)
+            )
+        )
         ax_plot.set_xlabel(f"{scale} (log scale)", labelpad=6)
     else:
         ax_plot.set_xlabel(f"{scale} Effect Size", labelpad=6)
+
+    if favor_left_label is not None and favor_right_label is not None:
+        # Same favour arrows as the journal path, below the x-axis label on either
+        # side of the null line; offsets are in points so they track the canvas size.
+        for text, ha, dx in (
+            (_wrap("\u2190 " + favor_left_label, 16), "right", -3),
+            (_wrap(favor_right_label + " \u2192", 16), "left", 3),
+        ):
+            ax_plot.annotate(
+                text,
+                xy=(ref_val, 0.0),
+                xycoords=("data", "axes fraction"),
+                xytext=(dx, -44),
+                textcoords="offset points",
+                fontsize=8,
+                ha=ha,
+                va="top",
+                multialignment=ha,
+                linespacing=1.0,
+                annotation_clip=False,
+            )
 
     ax_plot.set_yticks(y_positions)
     ax_plot.set_yticklabels(terms, fontweight="500")
@@ -406,7 +488,7 @@ def plot_forest(
     # Header in text pane
     header_str = f"{scale} (95% CI)"
     ax_text.text(
-        0.05,
+        0.0,
         n_terms - 0.2,
         header_str,
         fontweight="bold",
@@ -416,7 +498,7 @@ def plot_forest(
     )
     if "p_value" in df_rev.columns:
         ax_text.text(
-            0.85,
+            1.0,
             n_terms - 0.2,
             "P-value",
             fontweight="bold",
@@ -426,14 +508,17 @@ def plot_forest(
         )
 
     for idx, y in enumerate(y_positions):
-        est_str = f"{estimates[idx]:.2f} [{ci_lowers[idx]:.2f}, {ci_uppers[idx]:.2f}]"
+        # Whole numbers from 100 upward keep a separated-data interval clear of the P column.
+        est_str = "{} [{}, {}]".format(
+            *(f"{v:.{_ci_decimals(v)}f}" for v in (estimates[idx], ci_lowers[idx], ci_uppers[idx]))
+        )
         ax_text.text(
-            0.05,
+            0.0,
             y,
             est_str,
             va="center",
             ha="left",
-            fontsize=9.5,
+            fontsize=8.5,
             fontfamily="monospace",
         )
         if "p_value" in df_rev.columns:
@@ -445,7 +530,7 @@ def plot_forest(
                 p_str = f"{val_f:.3f}" if val_f >= 0.001 else "<0.001"
             else:
                 p_str = str(pval)
-            ax_text.text(0.85, y, p_str, va="center", ha="right", fontsize=9.5)
+            ax_text.text(1.0, y, p_str, va="center", ha="right", fontsize=8.5)
 
     fig.tight_layout()
 
@@ -453,12 +538,13 @@ def plot_forest(
 
     rev_df = df_rev.iloc[::-1].reset_index(drop=True)
     if export_vector:
-        png_path, vec_path, _ = save_figure_bundle(
+        png_path, vec_path, svg_path = save_figure_bundle(
             fig, out_path, dpi=dpi, export_vector=True
         )
     else:
         png_path = save_publication_figure(fig, out_path, dpi=dpi)
         vec_path = None
+        svg_path = None
     csv_path = export_source_data(rev_df, png_path)
 
     alt_text = f"Forest plot displaying {n_terms} effect estimates ({scale}) with 95% confidence intervals."
@@ -471,5 +557,6 @@ def plot_forest(
         source_df=rev_df,
         csv_path=csv_path,
         vector_path=vec_path,
+        svg_path=svg_path,
         qa=qa,
     )

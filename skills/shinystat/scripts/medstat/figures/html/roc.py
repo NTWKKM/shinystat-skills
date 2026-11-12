@@ -26,11 +26,15 @@ def plot_dual_roc_curve(
     title: str = "Receiver Operating Characteristic (ROC) Curve",
     out_path: str | Path = "figures/roc_curve.png",
     target: Literal["docx", "pptx", "web"] = "docx",
+    journal: str | None = None,
+    canvas: str = "manuscript",
 ) -> DualFigureResult:
     """
     Renders both publication-grade 300 DPI Matplotlib figure and interactive Plotly ROC curve.
     """
     res = plot_roc_curve(
+        journal=journal,
+        canvas=canvas,
         roc_data=roc_data,
         paired_roc_data=paired_roc_data,
         paired_p_value=paired_p_value,
@@ -170,6 +174,9 @@ def plot_dual_roc_curve(
 
     return DualFigureResult(
         png_path=res.png_path,
+        vector_path=res.vector_path,
+        svg_path=res.svg_path,
+        qa=res.qa,
         alt_text=res.alt_text,
         caption=res.caption,
         source_df=res.source_df,
@@ -184,11 +191,15 @@ def plot_dual_time_dependent_roc(
     title: str | None = None,
     out_path: str | Path = "figures/td_roc.png",
     target: Literal["docx", "pptx", "web"] = "docx",
+    journal: str | None = None,
+    canvas: str = "manuscript",
 ) -> DualFigureResult:
     """
     Renders both publication-grade 300 DPI Matplotlib figure and interactive Plotly time-dependent ROC.
     """
     res = plot_time_dependent_roc(
+        journal=journal,
+        canvas=canvas,
         td_roc_data=td_roc_data,
         mode=mode,
         title=title,
@@ -422,6 +433,9 @@ def plot_dual_time_dependent_roc(
 
     return DualFigureResult(
         png_path=res.png_path,
+        vector_path=res.vector_path,
+        svg_path=res.svg_path,
+        qa=res.qa,
         alt_text=res.alt_text,
         caption=res.caption,
         source_df=res.source_df,
@@ -439,11 +453,15 @@ def plot_dual_reclassification(
     title: str = "Risk Reclassification (Baseline vs Updated Model)",
     out_path: str | Path = "figures/reclassification.png",
     target: Literal["docx", "pptx", "web"] = "docx",
+    journal: str | None = None,
+    canvas: str = "manuscript",
 ) -> DualFigureResult:
     """
     Renders both publication-grade 300 DPI Matplotlib figure and interactive Plotly risk reclassification plot.
     """
     res = plot_reclassification(
+        journal=journal,
+        canvas=canvas,
         reclass_data=reclass_data,
         p_old=p_old,
         p_new=p_new,
@@ -567,6 +585,9 @@ def plot_dual_reclassification(
 
     return DualFigureResult(
         png_path=res.png_path,
+        vector_path=res.vector_path,
+        svg_path=res.svg_path,
+        qa=res.qa,
         alt_text=res.alt_text,
         caption=res.caption,
         source_df=res.source_df,

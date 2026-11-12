@@ -16,7 +16,7 @@ from statsmodels.nonparametric.smoothers_lowess import lowess
 from medstat.figures.base import FigureResult, export_source_data
 from medstat.figures.styles import (
     CLINICAL_PALETTE,
-    save_publication_figure,
+    save_figure_bundle,
     set_clinical_figure_style,
 )
 
@@ -58,7 +58,7 @@ def plot_missingness_map(
             for col in cols
         ]
     )
-    png_path = save_publication_figure(fig, out_path, dpi=dpi)
+    png_path, vec_path, svg_path = save_figure_bundle(fig, out_path, dpi=dpi)
     csv_path = export_source_data(source_df, png_path)
 
     alt_text = f"Heatmap showing missing data patterns across {len(cols)} variables."
@@ -70,6 +70,8 @@ def plot_missingness_map(
         caption=caption,
         source_df=source_df,
         csv_path=csv_path,
+        vector_path=vec_path,
+        svg_path=svg_path,
     )
 
 
@@ -148,7 +150,7 @@ def plot_schoenfeld_residuals(
     fig.tight_layout()
 
     source_df = pd.DataFrame({"Time": t, "Residual": r})
-    png_path = save_publication_figure(fig, out_path, dpi=dpi)
+    png_path, vec_path, svg_path = save_figure_bundle(fig, out_path, dpi=dpi)
     csv_path = export_source_data(source_df, png_path)
 
     alt_text = f"Schoenfeld residual plot for {var_name} evaluating proportional hazards assumption."
@@ -160,6 +162,8 @@ def plot_schoenfeld_residuals(
         caption=caption,
         source_df=source_df,
         csv_path=csv_path,
+        vector_path=vec_path,
+        svg_path=svg_path,
     )
 
 
@@ -230,7 +234,7 @@ def plot_mice_diagnostics(
     for m_idx, imp_clean in enumerate(cleaned_imputed):
         source_data[f"Imputed Set {m_idx + 1}"] = pd.Series(imp_clean)
     source_df = pd.DataFrame(source_data)
-    png_path = save_publication_figure(fig, out_path, dpi=dpi)
+    png_path, vec_path, svg_path = save_figure_bundle(fig, out_path, dpi=dpi)
     csv_path = export_source_data(source_df, png_path)
 
     alt_text = f"MICE density overlay comparing observed versus imputed distributions for {var_name}."
@@ -242,4 +246,6 @@ def plot_mice_diagnostics(
         caption=caption,
         source_df=source_df,
         csv_path=csv_path,
+        vector_path=vec_path,
+        svg_path=svg_path,
     )

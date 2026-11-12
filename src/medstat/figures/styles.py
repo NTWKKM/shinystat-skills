@@ -116,14 +116,14 @@ def save_figure_bundle(
     out_path: str | Path,
     dpi: int = 300,
     export_vector: bool = True,
-    export_svg: bool = False,
+    export_svg: bool = True,
     close: bool = True,
 ) -> tuple[str, str | None, str | None]:
     """
     Saves figure bundle cleanly ensuring parent directories exist:
     - Primary PNG at requested DPI (default 300)
     - Optional vector PDF with TrueType fonts (fonttype=42)
-    - Optional SVG
+    - SVG (on by default; SKILL.md §3 requires svg_path)
     Returns (png_path, vector_pdf_path, svg_path).
     """
     p = Path(out_path).resolve()

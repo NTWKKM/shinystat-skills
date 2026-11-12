@@ -1227,6 +1227,7 @@ def model_cmd(
                 )
             result_data["knots"] = rcs_res.get("knots", [])
             result_data["non_linear_pvalue"] = rcs_res.get("non_linear_pvalue")
+            result_data["non_linear_reason"] = rcs_res.get("non_linear_reason")
         elif mtype in ("logistic", "logit", "binary"):
             other_covars = [c for c in covar_list if c != spline_var]
             rcs_res = fit_logistic_rcs(
@@ -1247,6 +1248,9 @@ def model_cmd(
                 )
             result_data["knots"] = rcs_res.get("knots", [])
             result_data["non_linear_pvalue"] = rcs_res.get("non_linear_pvalue")
+            # A NaN P value travels with its reason (separation, non-convergence).
+            result_data["non_linear_reason"] = rcs_res.get("non_linear_reason")
+            result_data["fit_failure_reason"] = rcs_res.get("fit_failure_reason")
 
     if output:
         Path(output).parent.mkdir(parents=True, exist_ok=True)

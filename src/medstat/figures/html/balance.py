@@ -21,11 +21,15 @@ def plot_dual_love(
     title: str = "Covariate Balance Before and After Propensity Score Matching",
     out_path: str | Path = "figures/love_plot.png",
     target: Literal["docx", "pptx", "web"] = "docx",
+    journal: str | None = None,
+    canvas: str = "manuscript",
 ) -> DualFigureResult:
     """
     Renders both publication-grade 300 DPI Matplotlib figure and interactive Plotly Love plot.
     """
     res = plot_love(
+        journal=journal,
+        canvas=canvas,
         love_data=love_data,
         threshold=threshold,
         title=title,
@@ -163,6 +167,9 @@ def plot_dual_love(
 
     return DualFigureResult(
         png_path=res.png_path,
+        vector_path=res.vector_path,
+        svg_path=res.svg_path,
+        qa=res.qa,
         alt_text=res.alt_text,
         caption=res.caption,
         source_df=res.source_df,

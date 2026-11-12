@@ -741,9 +741,10 @@ def fit_multinomial_logistic(
 
 ## 22. Restricted Cubic Splines (Harrell RCS) for Non-Linear Continuous Predictors
 
-Constructs a standalone **Harrell Restricted Cubic Spline (RCS)** basis with $k \in \{3, 4, 5\}$ quantile knots (Harrell 2015 canonical quantiles: $[0.10, 0.50, 0.90]$ for $k=3$; $[0.05, 0.35, 0.65, 0.95]$ for $k=4$; $[0.05, 0.275, 0.50, 0.725, 0.95]$ for $k=5$), fits either a logistic regression (`family="binomial"`), linear model (`family="gaussian"`), or Cox PH model (`family="cox"`), and computes the **Likelihood Ratio Test for non-linearity (`p_nonlinearity`)**, overall spline association (`p_overall`), and reference-centered dose-response contrast curve ($\text{OR}(x)$ or $\text{HR}(x)$ vs `ref_value`).
+Constructs a standalone **Harrell Restricted Cubic Spline (RCS)** basis with $k \in \{3, 4, 5\}$ quantile knots (Harrell 2015 canonical quantiles: $[0.10, 0.50, 0.90]$ for $k=3$; $[0.05, 0.35, 0.65, 0.95]$ for $k=4$; $[0.05, 0.275, 0.50, 0.725, 0.95]$ for $k=5$), fits either a logistic regression (`family="binomial"`), linear model (`family="gaussian"`), or Cox PH model (`family="cox"`), and computes the **Likelihood Ratio Test for non-linearity (`p_nonlinearity`)**, overall spline association (`p_overall`), and reference-centered dose-response contrast curve ($\text{OR}(x)$ or $\text{HR}(x)$ vs `ref_value`). Models are fitted on centred, QR-orthonormalised spline columns (same likelihood, stable Newton-Raphson at $k=5$) and coefficients are mapped back to the Harrell basis; `model` therefore holds the orthonormal fit. A spline fit whose log-likelihood falls below the nested linear fit returns `p_nonlinearity = NaN` with `nonlinearity_reason`. Integer `knots` whose quantiles tie raise instead of silently fitting fewer knots, a rank-deficient GLM design raises, and a GLM fit under perfect separation or without convergence returns `model = None` and NaN estimates, P values and curve with `fit_failure_reason`.
 
 ```python
+import warnings
 from typing import Any, Literal
 import numpy as np
 import pandas as pd
@@ -770,6 +771,12 @@ def build_harrell_rcs_basis(
         else:
             q = np.linspace(0.05, 0.95, k).tolist()
         knot_vals = np.quantile(x_arr[~np.isnan(x_arr)], q)
+        if len(np.unique(knot_vals)) < k:
+            # Merging tied quantiles would silently fit fewer knots and fewer df (engine parity).
+            raise ValueError(
+                f"{k} Harrell knots requested but only {len(np.unique(knot_vals))} quantile "
+                "locations are distinct; lower `knots` or pass explicit knot locations."
+            )
     else:
         knot_vals = np.sort(np.asarray(knots, dtype=float))
         k = len(knot_vals)
@@ -799,6 +806,20 @@ def build_harrell_rcs_basis(
         cols.append(term)
 
     return np.column_stack(cols), knot_vals
+
+
+def _orthonormalize_rcs(basis: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Centred, QR-orthonormalised columns Z = (B - c) @ T; beta_B = T @ beta_Z.
+
+    Harrell columns are nearly collinear (r > 0.99 at k = 5) and stall Newton-Raphson;
+    fitting on Z gives the same likelihood (engine parity, ADR 78).
+    """
+    center = basis.mean(axis=0)
+    q, r = np.linalg.qr(basis - center)
+    if np.any(np.abs(np.diag(r)) <= 1e-10 * max(1.0, float(np.abs(r).max()))):
+        raise ValueError("RCS basis is rank deficient: too few distinct values of the spline variable.")
+    t = np.linalg.inv(r) * np.sqrt(basis.shape[0])
+    return (basis - center) @ t, t, center
 
 
 def fit_rcs_spline_model(
@@ -837,8 +858,10 @@ def fit_rcs_spline_model(
     basis_mat, knot_vals = build_harrell_rcs_basis(x_vals, knots=knots)
     n_spline_cols = basis_mat.shape[1]
     spline_names = [f"{rcs_var}_rcs{i}" for i in range(n_spline_cols)]
+    z_mat, t_mat, _ = _orthonormalize_rcs(basis_mat)
+    z_names = [f"_z{i}" for i in range(n_spline_cols)]
 
-    X_spline_df = pd.DataFrame(basis_mat, index=clean.index, columns=spline_names)
+    X_spline_df = pd.DataFrame(z_mat, index=clean.index, columns=z_names)
     X_lin_df = pd.DataFrame({f"{rcs_var}_rcs0": x_vals}, index=clean.index)
     if adjust:
         for c in adjust:
@@ -866,27 +889,68 @@ def fit_rcs_spline_model(
 
         cph_full = CoxPHFitter().fit(df_full_cox, duration_col="_dur", event_col="_ev")
         cph_lin = CoxPHFitter().fit(df_lin_cox, duration_col="_dur", event_col="_ev")
-        lr_nonlin = max(0.0, float(2.0 * (cph_full.log_likelihood_ - cph_lin.log_likelihood_)))
-        b_spline = cph_full.params_.loc[spline_names].to_numpy(dtype=float)
-        cov_spline = cph_full.variance_matrix_.loc[spline_names, spline_names].to_numpy(dtype=float)
+        ll_full, ll_lin = float(cph_full.log_likelihood_), float(cph_lin.log_likelihood_)
+        b_z = cph_full.params_.loc[z_names].to_numpy(dtype=float)
+        cov_z = cph_full.variance_matrix_.loc[z_names, z_names].to_numpy(dtype=float)
         res_full = cph_full
         aic_val = float(cph_full.AIC_partial_)
+        fit_failure_reason = None
     else:
         X_full = sm.add_constant(X_spline_df)
         X_lin = sm.add_constant(X_lin_df)
+        for label, X_chk in (("Spline", X_full), ("Linear", X_lin)):
+            if np.linalg.matrix_rank(X_chk.to_numpy(dtype=float)) < X_chk.shape[1]:
+                raise ValueError(
+                    f"{label} design matrix is rank deficient: drop collinear covariates before the RCS fit."
+                )
         fam = sm.families.Binomial() if fam_str == "binomial" else sm.families.Gaussian()
 
-        res_full = sm.GLM(y_vals, X_full, family=fam).fit()
-        res_lin = sm.GLM(y_vals, X_lin, family=fam).fit()
-        lr_nonlin = max(0.0, float(2.0 * (res_full.llf - res_lin.llf)))
-        b_spline = res_full.params[spline_names].to_numpy(dtype=float)
-        cov_spline = res_full.cov_params().loc[spline_names, spline_names].to_numpy(dtype=float)
+        def _glm_checked(X_fit: pd.DataFrame, label: str) -> tuple[Any, str | None]:
+            # statsmodels warns on separation but still reports converged=True: check both.
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                res = sm.GLM(y_vals, X_fit, family=fam).fit()
+            if any("PerfectSeparation" in type(w.message).__name__ for w in caught):
+                return res, f"{label} model: perfect or quasi-complete separation in the binomial GLM"
+            if not bool(getattr(res, "converged", True)):
+                return res, f"{label} model: {fam_str} GLM did not converge"
+            return res, None
+
+        res_full, fail_full = _glm_checked(X_full, "spline")
+        res_lin, fail_lin = _glm_checked(X_lin, "linear")
+        fit_failure_reason = fail_full or fail_lin
+        ll_full, ll_lin = float(res_full.llf), float(res_lin.llf)
+        b_z = res_full.params[z_names].to_numpy(dtype=float)
+        cov_z = res_full.cov_params().loc[z_names, z_names].to_numpy(dtype=float)
         aic_val = float(res_full.aic)
 
+    # Back-transform to the Harrell basis.
+    b_spline = t_mat @ b_z
+    cov_spline = t_mat @ cov_z @ t_mat.T
+
+    if fit_failure_reason is not None:
+        # Fail closed: no estimate, P value or curve from a separated / non-converged fit.
+        b_spline = np.full_like(b_spline, np.nan)
+        cov_spline = np.full_like(cov_spline, np.nan)
+
     df_nonlin = max(1, n_spline_cols - 1)
-    p_nonlinearity = float(stats.chi2.sf(lr_nonlin, df=df_nonlin))
-    wald_overall = float(b_spline.T @ np.linalg.pinv(cov_spline) @ b_spline)
-    p_overall = float(stats.chi2.sf(wald_overall, df=n_spline_cols))
+    lr_raw = 2.0 * (ll_full - ll_lin)
+    if fit_failure_reason is not None:
+        lr_nonlin, p_nonlinearity = float("nan"), float("nan")
+        nonlinearity_reason = fit_failure_reason
+    elif lr_raw < -1e-6 * max(1.0, abs(ll_lin)):
+        # Spline fit below its nested linear fit = non-convergence, not P = 1.
+        lr_nonlin, p_nonlinearity = float("nan"), float("nan")
+        nonlinearity_reason = "spline model log-likelihood below the nested linear model (non-convergence)"
+    else:
+        lr_nonlin = max(0.0, lr_raw)
+        p_nonlinearity = float(stats.chi2.sf(lr_nonlin, df=df_nonlin))
+        nonlinearity_reason = None
+    if fit_failure_reason is not None:
+        p_overall = float("nan")
+    else:
+        wald_overall = float(b_spline.T @ np.linalg.pinv(cov_spline) @ b_spline)
+        p_overall = float(stats.chi2.sf(wald_overall, df=n_spline_cols))
 
     if ref_value is None:
         ref_value = float(np.median(x_vals))
@@ -925,8 +989,10 @@ def fit_rcs_spline_model(
     )
 
     return {
-        "model": res_full,
-        "converged": bool(getattr(res_full, "converged", True)),
+        # Withheld on failure, like b_spline / cov_spline (engine parity).
+        "model": None if fit_failure_reason else res_full,
+        "converged": bool(getattr(res_full, "converged", True)) and fit_failure_reason is None,
+        "fit_failure_reason": fit_failure_reason,
         "family": fam_str,
         "effect_label": (
             "Hazard Ratio"
@@ -937,6 +1003,7 @@ def fit_rcs_spline_model(
         "ref_value": float(ref_value),
         "p_overall": p_overall,
         "p_nonlinearity": p_nonlinearity,
+        "nonlinearity_reason": nonlinearity_reason,
         "lr_nonlinearity": lr_nonlin,
         "df_nonlinearity": df_nonlin,
         "contrast_df": contrast_df,

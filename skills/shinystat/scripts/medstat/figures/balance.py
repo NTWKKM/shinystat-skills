@@ -260,6 +260,15 @@ def plot_love(
         else 0.40
     )
     ax.set_xlim(0.0, max(0.40, float(valid_max * 1.15)))
+    if journal is not None:
+        # House number style on the SMD axis (e.g. Lancet mid-dot decimals).
+        from matplotlib.ticker import FuncFormatter
+
+        from medstat.figures.journal import format_num
+
+        ax.xaxis.set_major_formatter(
+            FuncFormatter(lambda x, _: format_num(x, 2, journal))
+        )
     ax.set_ylim(-0.8, n_vars - 0.2)
     ax.set_title(title, loc="left", pad=12)
     ax.legend(loc="lower right")
@@ -275,12 +284,13 @@ def plot_love(
     if export_vector:
         from medstat.figures.styles import save_figure_bundle
 
-        png_path, vec_path, _ = save_figure_bundle(
+        png_path, vec_path, svg_path = save_figure_bundle(
             fig, out_path, dpi=dpi, export_vector=True
         )
     else:
         png_path = save_publication_figure(fig, out_path, dpi=dpi)
         vec_path = None
+        svg_path = None
     csv_path = export_source_data(source_df, png_path)
 
     alt_text = "Love plot showing covariate standardized mean differences before and after adjustment."
@@ -293,5 +303,6 @@ def plot_love(
         source_df=source_df,
         csv_path=csv_path,
         vector_path=vec_path,
+        svg_path=svg_path,
         qa=qa,
     )
