@@ -307,3 +307,45 @@ def test_installer_is_idempotent(fake_repo: dict[str, Path]):
     # Capture workspace state after the second run and assert zero changes
     state_second = capture_workspace_state(repo)
     assert state_second == state_first
+
+
+def test_sync_check_reports_orphan_mirror_references(fake_repo: dict[str, Path]):
+    """--check names a mirror reference with no shared source (ADR 69 Round 3)."""
+    repo = fake_repo["repo"]
+    sync = repo / "scripts" / "sync-skills.sh"
+    local_refs = repo / "skills" / "shinystat" / "references"
+    cloud_refs = repo / "skills" / "shinystat-cloud" / "references"
+
+    def run(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["bash", str(sync), *args],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    assert run().returncode == 0
+    # Files each mirror owns in place, with no source under _shared
+    (local_refs / "api-quickref.md").write_text("# API", encoding="utf-8")
+    (cloud_refs / "recipes" / "01-recipe.md").write_text("# Recipe", encoding="utf-8")
+    assert run("--check").returncode == 0
+
+    # Left behind after their canonical source was deleted
+    (local_refs / "retired.md").write_text("# Retired", encoding="utf-8")
+    (cloud_refs / "retired.md").write_text("# Retired", encoding="utf-8")
+    check = run("--check")
+    assert check.returncode == 1
+    assert check.stderr.count("retired.md") >= 2
+
+    # Syncing copies and never deletes: the orphans stay until someone removes them.
+    assert run().returncode == 0
+    assert (local_refs / "retired.md").exists()
+    assert run("--check").returncode == 1
+
+    (local_refs / "retired.md").unlink()
+    (cloud_refs / "retired.md").unlink()
+    assert run("--check").returncode == 0
+    assert (local_refs / "api-quickref.md").exists()
+    assert (cloud_refs / "figures.md").read_text(encoding="utf-8") == "# Figures Cloud"
+    assert (cloud_refs / "recipes" / "01-recipe.md").exists()

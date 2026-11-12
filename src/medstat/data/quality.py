@@ -22,6 +22,8 @@ from typing import Any, Callable, Sequence
 import numpy as np
 import pandas as pd
 
+from medstat.data.expressions import eval_rows
+
 # ==============================================================================
 # Helper Functions for Column Type & Dirty Token Detection
 # ==============================================================================
@@ -350,7 +352,7 @@ class DataQualityReport:
                     if callable(rule.condition):
                         raw_valid = rule.condition(self.df)
                     else:
-                        raw_valid = self.df.eval(rule.condition)
+                        raw_valid = eval_rows(self.df, rule.condition)
 
                     if isinstance(raw_valid, pd.Series):
                         valid_mask = raw_valid

@@ -17,7 +17,7 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
 | **Wilson Score Interval** | `wilson` | Asymmetric confidence interval for binomial proportions providing nominal coverage even near boundary proportions ($p \approx 0$ or $1$). |
 | **DeLong Test** | `delong` | Non-parametric placement-value covariance estimation for ROC AUC standard errors and paired comparative testing. |
 | **Decision Curve Analysis** | `dca` | Vickers decision-analytic metric evaluating clinical net benefit across threshold probabilities ($p_t$) against "Treat All" and "Treat None". |
-| **Propensity Score Matching** | `psm` | Logistic regression modeling treatment probability followed by caliper-bounded nearest neighbor pairing. |
+| **Propensity Score Matching** | `psm` | Logistic regression modeling treatment probability followed by caliper-bounded nearest neighbor pairing. The propensity model is maximum-likelihood logistic by default or Firth when named (`ps_method`); a rank-deficient or separated design raises (ADR 82). |
 | **Limits of Agreement** | `bland_altman` | Bland-Altman interval $\bar{d} \pm 1.96 \cdot s_d$ containing 95% of paired measurement differences, accompanied by Bland–Altman (1999) large-sample approximate CIs. |
 | **Intraclass Correlation** | `icc` | Variance partition ratio quantifying reliability and agreement among clinical observers based on two-way ANOVA decomposition. |
 | **DerSimonian-Laird** | `dl` | Non-iterative method of moments estimator for between-study variance ($\tau^2$) in random-effects meta-analysis. |
@@ -110,7 +110,7 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
   - `df_weighted: pd.DataFrame` (cohort augmented with `propensity_score` and `weight`)
   - `weights: np.ndarray`, `propensity_scores: np.ndarray`
   - `effective_sample_size: float`, `effective_sample_size_treated: float`, `effective_sample_size_control: float`
-  - `diagnostics: dict[str, Any]` (estimand, stabilized, truncated, extreme weight flags, positivity violations)
+  - `diagnostics: dict[str, Any]` (estimand, `ps_method`, stabilized, truncated, extreme weight flags, positivity violations)
   - Supports tuple unpacking: `df_weighted, diagnostics = iptw_result`
 - **`CompetingRisksCIFResult`**:
   - `cif_table: pd.DataFrame` (time, CIF, Greenwood lower/upper CIs, standard error per event type)

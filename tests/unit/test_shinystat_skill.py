@@ -452,6 +452,122 @@ def test_sync_skills_script_execution_and_drift_check():
     assert "Zero git drift verified in skills/." in res.stdout
 
 
+def test_ci_drift_check_detects_untracked_mirror_files(tmp_path):
+    """The CI drift command lists a mirror file that was never committed (ADR 69 Round 1)."""
+    import shutil
+
+    if shutil.which("git") is None:
+        pytest.skip("Drift command needs git")
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    workflow = yaml.safe_load(
+        (repo_root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    )
+    steps = workflow["jobs"]["verify-and-test"]["steps"]
+    script = next(
+        s["run"] for s in steps if s.get("name", "").startswith("Check SSOT sync")
+    )
+    # `git diff` does not show untracked files, so it cannot be the drift test.
+    assert "git diff --quiet skills/" not in script
+    assert "git diff --exit-code skills/" not in script
+    match = re.search(r'^\s*DRIFT="\$\((?P<cmd>[^\n]+)\)"\s*$', script, re.MULTILINE)
+    assert match, 'the drift step must capture drift as DRIFT="$(...)"'
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    def drift() -> str:
+        res = subprocess.run(
+            ["bash", "-c", match["cmd"]],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return res.stdout.strip()
+
+    tracked = tmp_path / "skills" / "tracked.md"
+    tracked.parent.mkdir()
+    tracked.write_text("a\n", encoding="utf-8")
+    git("init", "-q")
+    git("add", ".")
+    git(
+        "-c",
+        "user.name=test",
+        "-c",
+        "user.email=test@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-qm",
+        "init",
+    )
+    assert drift() == ""
+
+    new_mirror = tmp_path / "skills" / "new_module.py"
+    new_mirror.write_text("x = 1\n", encoding="utf-8")
+    assert "skills/new_module.py" in drift()
+    new_mirror.unlink()
+
+    tracked.write_text("b\n", encoding="utf-8")
+    assert "skills/tracked.md" in drift()
+    tracked.unlink()
+    assert "skills/tracked.md" in drift()
+
+
+def test_ci_workflow_keeps_event_data_out_of_shell_and_pins_actions():
+    """Scripts read event data from env; actions are pinned to commits (ADR 69 Round 2)."""
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    workflow = yaml.safe_load(
+        (repo_root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    )
+    interpolated, unpinned = [], []
+    for job_name, job in workflow["jobs"].items():
+        for step in job["steps"]:
+            # An expression inside `run` is pasted into the script before the shell
+            # parses it, so a branch name could carry shell syntax.
+            if "${{" in step.get("run", ""):
+                interpolated.append(f"{job_name} / {step.get('name')}")
+            uses = step.get("uses")
+            if uses and not re.fullmatch(r"[\w.-]+/[\w./-]+@[0-9a-f]{40}", uses):
+                unpinned.append(uses)
+    assert not interpolated, f"expressions inside run scripts: {interpolated}"
+    assert not unpinned, f"actions not pinned to a commit SHA: {unpinned}"
+
+    checkout = next(
+        s
+        for s in workflow["jobs"]["verify-and-test"]["steps"]
+        if s.get("uses", "").startswith("actions/checkout@")
+    )
+    # A fork PR's head branch does not exist in this repository, so the head branch
+    # is checked out only when the PR comes from this repository.
+    assert (
+        "github.event.pull_request.head.repo.full_name == github.repository"
+        in checkout["with"]["ref"]
+    )
+
+
+def test_engine_dependencies_equal_the_skill_runtime_packages():
+    """pyproject declares the packages the bundled engine imports (ADR 69 Round 3)."""
+    import tomllib
+
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    project = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
+    declared = {
+        re.split(r"[<>=!~ \[;]", dep, maxsplit=1)[0].lower()
+        for dep in project["project"]["dependencies"]
+    }
+    requirements = repo_root / "skills" / "shinystat" / "requirements.txt"
+    runtime = {
+        line.partition("==")[0].strip().lower()
+        for line in requirements.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    assert declared == runtime, (
+        f"only in pyproject: {sorted(declared - runtime)}; "
+        f"only in requirements.txt: {sorted(runtime - declared)}"
+    )
+
+
 def test_design_md_adr_numbers_unique_and_sequential():
     """Verify DESIGN.md ADR headings are unique, sequential 1..68, and include ADR 68."""
     repo_root = Path(__file__).resolve().parent.parent.parent

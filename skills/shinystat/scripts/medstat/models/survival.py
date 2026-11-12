@@ -137,7 +137,8 @@ def fit_cox_ph(
 
     Returns:
         dict with cph model, summary_df (HR, 95% CIs, p-values), concordance_index,
-        and assumption_test_summary.
+        and ph_test: the Schoenfeld test summary, {"error": reason} when the test
+        failed, or None when check_assumptions is False.
     """
     cols = [duration_col, event_col] + covariates
     clean_df = df[cols].dropna()
@@ -173,6 +174,8 @@ def fit_cox_ph(
             ph_results = ph_test.summary.to_dict()
         except Exception as e:
             logger.warning(f"Schoenfeld PH assumption test failed: {e}")
+            # Same shape as check_proportional_hazards: a failed test is not "not run".
+            ph_results = {"error": str(e)}
 
     return {
         "cph": cph,

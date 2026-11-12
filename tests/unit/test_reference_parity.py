@@ -530,6 +530,257 @@ def test_psm_matching_is_invariant_to_row_order_and_matches_recipe6(recipes):
     assert rec["n_matched_pairs"] == info["n_treated_matched"]
 
 
+# ---------------------------------------------------------------------------
+# ADR 82: the propensity model fails closed (engine, Recipe 6, Recipe 14)
+# ---------------------------------------------------------------------------
+def _separated_cohort(n: int = 300, seed: int = 1) -> pd.DataFrame:
+    """Treatment is a deterministic function of x1: complete separation."""
+    rng = np.random.default_rng(seed)
+    x1 = rng.normal(size=n)
+    return pd.DataFrame(
+        {
+            "x1": x1,
+            "x2": rng.normal(size=n),
+            "trt": (x1 > 0).astype(int),
+            "y": rng.integers(0, 2, n),
+        }
+    )
+
+
+def _propensity_entry_points(recipes, df, covs):
+    from medstat.causal.iptw import compute_iptw_weights
+    from medstat.causal.psm import calculate_propensity_score, propensity_score_match
+
+    return {
+        "engine calculate_propensity_score": lambda: calculate_propensity_score(
+            df, "trt", covs
+        ),
+        "engine propensity_score_match": lambda: propensity_score_match(
+            df, "trt", covs
+        ),
+        "engine compute_iptw_weights": lambda: compute_iptw_weights(df, "trt", covs),
+        "recipe 6": lambda: recipes["match_propensity_scores"](df, "trt", covs),
+        "recipe 14": lambda: recipes["compute_iptw"](df, "trt", covs),
+    }
+
+
+def test_propensity_model_separation_raises_in_engine_and_recipes(recipes):
+    """A separated propensity model raises; it never returns scores of 0 or 1."""
+    calls = _propensity_entry_points(recipes, _separated_cohort(), ["x1", "x2"])
+    for name, call in calls.items():
+        with pytest.raises(ValueError, match="separation"):
+            call()
+            pytest.fail(f"{name} accepted a separated propensity model")
+
+
+@pytest.mark.parametrize("redundant", ["collinear", "constant"])
+def test_propensity_model_rank_deficient_raises_in_engine_and_recipes(
+    recipes, redundant
+):
+    """A rank-deficient design raises; no regularized fit replaces it."""
+    df = _adr75_cohort()
+    df["x3"] = 2.0 * df["x1"] if redundant == "collinear" else 1.0
+    calls = _propensity_entry_points(recipes, df, ["x1", "x2", "x3"])
+    for name, call in calls.items():
+        with pytest.raises(ValueError, match="rank deficient"):
+            call()
+            pytest.fail(f"{name} accepted a rank-deficient propensity design")
+
+
+def test_propensity_method_is_disclosed_and_unknown_method_raises(recipes):
+    from medstat.causal.iptw import compute_iptw_weights
+    from medstat.causal.psm import calculate_propensity_score, propensity_score_match
+
+    df = _adr75_cohort()
+    covs = ["x1", "x2"]
+    assert compute_iptw_weights(df, "trt", covs).diagnostics["ps_method"] == "logistic"
+    assert propensity_score_match(df, "trt", covs)[1]["ps_method"] == "logistic"
+    assert recipes["match_propensity_scores"](df, "trt", covs)["ps_method"] == (
+        "logistic"
+    )
+    assert recipes["compute_iptw"](df, "trt", covs)[1]["ps_method"] == "logistic"
+    with pytest.raises(ValueError, match="Unsupported propensity score method"):
+        calculate_propensity_score(df, "trt", covs, method="lasso")
+    with pytest.raises(ValueError, match="Unsupported propensity score method"):
+        compute_iptw_weights(df, "trt", covs, ps_method="lasso")
+
+
+def test_firth_propensity_scores_are_opt_in_and_match_firth_fit():
+    """method='firth' is the only penalized route, and it equals fit_firth_logistic."""
+    from medstat.causal.iptw import compute_iptw_weights
+    from medstat.causal.psm import calculate_propensity_score, propensity_score_match
+    from medstat.models.firth import fit_firth_logistic
+
+    # A binary confounder that every treated subject carries: the sparse-data
+    # separation Firth's penalty is meant for.
+    df = pd.DataFrame(
+        {
+            "trt": [0] * 30 + [1] * 30,
+            "b": [0.0] * 30 + [1.0] * 30,
+            "x": np.tile([0.0, 1.0, 2.0], 20),
+        }
+    )
+    covs = ["b", "x"]
+    with pytest.raises(ValueError, match="separation"):
+        calculate_propensity_score(df, "trt", covs)
+
+    ps = calculate_propensity_score(df, "trt", covs, method="firth")
+    assert ((ps > 0.0) & (ps < 1.0)).all()
+    fit = fit_firth_logistic(df["trt"], df[covs], ci_method="wald")
+    coef = np.asarray(fit["model"].coef_, dtype=float).ravel()
+    expected = 1.0 / (1.0 + np.exp(-(coef[0] + df[covs].to_numpy() @ coef[1:])))
+    np.testing.assert_allclose(ps.to_numpy(), expected, rtol=1e-10)
+
+    res = compute_iptw_weights(df, "trt", covs, ps_method="firth")
+    assert res.diagnostics["ps_method"] == "firth"
+    np.testing.assert_allclose(res.propensity_scores.to_numpy(), expected, rtol=1e-10)
+    info = propensity_score_match(df, "trt", covs, ps_method="firth")[1]
+    assert info["ps_method"] == "firth"
+
+
+def test_firth_propensity_model_raises_when_it_does_not_converge():
+    """Treatment fixed by a continuous threshold stays unusable under Firth as well."""
+    from medstat.causal.psm import calculate_propensity_score
+
+    with pytest.raises(ValueError, match="did not converge"):
+        calculate_propensity_score(
+            _separated_cohort(), "trt", ["x1", "x2"], method="firth"
+        )
+
+
+# ---------------------------------------------------------------------------
+# ADR 84: undefined statistics are NaN or raise, and carry a reason
+# ---------------------------------------------------------------------------
+def _no_root(*args, **kwargs):
+    raise ValueError("f(a) and f(b) must have different signs")
+
+
+def test_calibration_intercept_is_nan_when_undefined():
+    from medstat.diagnostic.validation import (
+        _compute_calibration_intercept_offset as citl,
+    )
+
+    rng = np.random.default_rng(0)
+    y = rng.integers(0, 2, 60).astype(float)
+    lp = rng.normal(size=60)
+    assert np.isfinite(citl(y, lp))
+    # A single outcome class has no intercept; it is not -50 or +50.
+    assert np.isnan(citl(np.zeros(60), lp))
+    assert np.isnan(citl(np.ones(60), lp))
+    # No intercept in [-50, 50] reproduces the event count; it is not 0 (= "calibrated").
+    assert np.isnan(citl(y, np.full(60, 1000.0)))
+
+
+def test_recalibration_raises_when_the_intercept_has_no_root(recipes, monkeypatch):
+    import scipy.optimize as opt
+
+    from medstat.diagnostic.validation import recalibrate_prediction_model
+
+    rng = np.random.default_rng(3)
+    p = rng.uniform(0.05, 0.95, 200)
+    y = rng.binomial(1, p)
+    monkeypatch.setattr(opt, "brentq", _no_root)
+    for fit in (recalibrate_prediction_model, recipes["recalibrate_prediction_model"]):
+        with pytest.raises(RuntimeError, match="no intercept in"):
+            fit(y, p, method="both")
+
+
+def test_bootstrap_validation_never_reports_a_substitute_intercept(
+    recipes, monkeypatch
+):
+    import scipy.optimize as opt
+
+    from medstat.diagnostic.validation import bootstrap_internal_validation
+
+    df = _adr75_cohort()
+    monkeypatch.setattr(opt, "brentq", _no_root)
+    res = recipes["bootstrap_internal_validation"](
+        df, "y", ["x1", "x2"], n_bootstrap=20, random_state=1
+    )
+    assert np.isnan(res["apparent_metrics"]["calibration_intercept"])
+    assert np.isnan(res["metrics"]["calibration_intercept"]["optimism_corrected"])
+    assert any("Calibration intercept" in w for w in res["warnings"])
+    # The engine rejects every resample whose intercept is unavailable.
+    with pytest.raises(RuntimeError, match="replicates converged"):
+        bootstrap_internal_validation(
+            df, "y", ["x1", "x2"], n_bootstrap=20, random_state=1
+        )
+
+
+def _table_one_builders(recipes, df):
+    from medstat.reporting.table1 import generate_table_one
+
+    return {
+        "engine": lambda: generate_table_one(
+            df, strata="arm", continuous_vars=["age"], categorical_vars=["sex"]
+        ),
+        "recipe 1": lambda: recipes["generate_table_one"](df, "arm", ["age"], ["sex"]),
+    }
+
+
+def _unavailable(table, variable, statistic):
+    return [
+        note["reason"]
+        for note in table.attrs["unavailable"]
+        if note["variable"] == variable and note["statistic"] == statistic
+    ]
+
+
+def test_table_one_records_why_a_p_value_is_unavailable(recipes, monkeypatch):
+    import scipy.stats as stats
+
+    rng = np.random.default_rng(7)
+    df = pd.DataFrame(
+        {
+            "arm": ["A"] * 12 + ["B"] * 12,
+            "age": rng.normal(60.0, 8.0, 24),
+            "sex": ["F", "M"] * 12,
+        }
+    )
+    for name, build in _table_one_builders(recipes, df).items():
+        assert build().attrs["unavailable"] == [], name
+
+    # A group of one observation: the Welch test is undefined (NaN).
+    lone = df.iloc[:13].copy()
+    for name, build in _table_one_builders(recipes, lone).items():
+        reasons = _unavailable(build(), "age", "P-value")
+        assert len(reasons) == 1 and "undefined" in reasons[0], name
+
+    def failing_test(*args, **kwargs):
+        raise ValueError("synthetic test failure")
+
+    monkeypatch.setattr(stats, "ttest_ind", failing_test)
+    for name, build in _table_one_builders(recipes, df).items():
+        reasons = _unavailable(build(), "age", "P-value")
+        assert len(reasons) == 1 and "synthetic test failure" in reasons[0], name
+
+
+def test_cox_ph_test_failure_is_reported_not_dropped(monkeypatch):
+    import medstat.models.survival as survival
+
+    rng = np.random.default_rng(5)
+    n = 120
+    df = pd.DataFrame(
+        {
+            "time": rng.exponential(10.0, n) + 0.1,
+            "event": rng.binomial(1, 0.7, n),
+            "age": rng.normal(60.0, 10.0, n),
+        }
+    )
+    unchecked = survival.fit_cox_ph(
+        df, "time", "event", ["age"], check_assumptions=False
+    )
+    assert unchecked["ph_test"] is None
+
+    def failing_test(*args, **kwargs):
+        raise RuntimeError("synthetic Schoenfeld failure")
+
+    monkeypatch.setattr(survival, "proportional_hazard_test", failing_test)
+    res = survival.fit_cox_ph(df, "time", "event", ["age"])
+    assert res["ph_test"] == {"error": "synthetic Schoenfeld failure"}
+    assert survival.check_proportional_hazards(res) == res["ph_test"]
+
+
 @pytest.mark.parametrize("skill", ["shinystat", "shinystat-cloud"])
 def test_skill_reference_pointers_resolve(skill):
     """Every markdown link and backticked references/recipes path in a skill resolves inside that skill."""

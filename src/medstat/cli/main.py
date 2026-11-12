@@ -1967,6 +1967,12 @@ def causal_grp() -> None:
 )
 @click.option("--ratio", default=1, type=int, help="Matching ratio.")
 @click.option(
+    "--ps-method",
+    default="logistic",
+    type=click.Choice(["logistic", "firth"], case_sensitive=False),
+    help="Propensity model: logistic (maximum likelihood) or firth. A separated or rank-deficient logistic design raises.",
+)
+@click.option(
     "--balance-check",
     is_flag=True,
     help="Evaluate post-match Standardized Mean Differences.",
@@ -1979,6 +1985,7 @@ def psm_cmd(
     covariates: str,
     caliper: float,
     ratio: int,
+    ps_method: str,
     balance_check: bool,
     love_plot: str | None,
     output: str | None,
@@ -1994,6 +2001,7 @@ def psm_cmd(
         covariates=covar_list,
         caliper=caliper,
         ratio=ratio,
+        ps_method=ps_method,
     )
 
     def _clean_smd(val: Any) -> float | None:
@@ -2101,6 +2109,12 @@ def psm_cmd(
     help="Comma-separated lower and upper quantiles for truncation (e.g. '0.01,0.99').",
 )
 @click.option(
+    "--ps-method",
+    default="logistic",
+    type=click.Choice(["logistic", "firth"], case_sensitive=False),
+    help="Propensity model: logistic (maximum likelihood) or firth. A separated or rank-deficient logistic design raises.",
+)
+@click.option(
     "--outcome",
     default=None,
     help="Optional outcome column to fit weighted outcome model.",
@@ -2135,6 +2149,7 @@ def iptw_cmd(
     estimand: str,
     stabilized: bool,
     truncate: str | None,
+    ps_method: str,
     outcome: str | None,
     outcome_type: str | None,
     time_col: str | None,
@@ -2172,6 +2187,7 @@ def iptw_cmd(
         estimand=estimand.upper(),
         stabilized=stabilized,
         truncate_quantiles=trunc_tuple,
+        ps_method=ps_method,
     )
     weighted_df = res.df
 

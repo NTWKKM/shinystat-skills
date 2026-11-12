@@ -29,7 +29,7 @@ uv run ruff check src tests scripts
 UPDATE_RECIPES_SNAPSHOT=1 uv run pytest tests/unit/test_recipes_snapshot.py   # re-baseline recipe outputs
 ```
 
-- Select tests by path or `-k`: the markers in `pyproject.toml` are applied to no test.
+- Select tests by path or `-k`: the markers in `pyproject.toml` do not select a tier (`unit` tags some modules, two of them under `tests/stress/`; the others are unused).
 - R oracle tests live in `tests/unit/test_reference_parity.py`; `tests/benchmarks/` holds their CSVs and the R script only.
 - Format only the lines you change: `ruff format` is unenforced and the tree is not format-clean.
 - `FutureWarning` and `DeprecationWarning` raised from `medstat.*` fail the test that triggers them.
@@ -45,6 +45,7 @@ Edit the canonical file, then run `./scripts/sync-skills.sh`. Mirrors are commit
 
 Canonical in place, with no upstream: both `SKILL.md` files, `skills/shinystat-cloud/references/figures.md`, `skills/shinystat-cloud/references/recipes/`, `skills/shinystat/references/api-quickref.md` (pinned to engine signatures by a test), `skills/shinystat/scripts/medstat_cli.py`, `skills/shinystat/requirements.txt`.
 
+- `--check` fails on a `.md` in either mirror `references/` directory that has no source in `skills/_shared/references/` and is not in the own-list at the top of `scripts/sync-skills.sh`. Delete a retired copy; add a new in-place file to that list.
 - pytest writes mirrors: several tests call `package-cloud-skill.sh`, which syncs first. A drifted tree returns from a test run with `skills/` modified.
 - CI pushes a sync commit onto a drifted same-repo branch, and fails a drifted fork PR or `v*` tag. Sync before pushing so CI has nothing to add.
 - `.agent/`, `.agents/`, `.cursor/` and `packaging/` are gitignored output of `scripts/install-skills.sh` and `package-cloud-skill.sh`. Regenerate them with those scripts.

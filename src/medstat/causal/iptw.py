@@ -16,7 +16,7 @@ import pandas as pd
 import statsmodels.api as sm
 from lifelines import CoxPHFitter
 
-from medstat.causal.psm import calculate_propensity_score
+from medstat.causal.psm import calculate_propensity_score, normalize_ps_method
 from medstat.logging import get_logger
 
 logger = get_logger(__name__)
@@ -83,6 +83,7 @@ def compute_iptw_weights(
     ps_clip: tuple[float, float] = (1e-4, 1.0 - 1e-4),
     treatment: str | None = None,
     truncation: tuple[float, float] | None = None,
+    ps_method: str = "logistic",
 ) -> IPTWResult:
     """
     Compute Inverse Probability of Treatment Weights (IPTW) with comprehensive diagnostics.
@@ -99,11 +100,14 @@ def compute_iptw_weights(
         stabilized: If True, computes stabilized weights (ignored for ATO).
         truncate_quantiles: Quantiles for weight truncation (e.g. (0.01, 0.99)), or None. Alias: truncation.
         ps_clip: Minimum and maximum bounds to clip propensity scores before division.
+        ps_method: Propensity model, 'logistic' (default) or 'firth'; a separated or
+            rank-deficient 'logistic' design raises. Reported in diagnostics['ps_method'].
 
     Returns:
         IPTWResult with attributes .df, .weights, .propensity_scores, .diagnostics,
         and iterable unpacking as (df_weighted, diagnostics).
     """
+    ps_method = normalize_ps_method(ps_method)
     t_col = treatment_col if treatment_col is not None else treatment
     if t_col is None:
         raise ValueError("Either 'treatment_col' or 'treatment' must be specified.")
@@ -124,7 +128,7 @@ def compute_iptw_weights(
         )
 
     # 1. Estimate Propensity Scores
-    ps_series = calculate_propensity_score(sub_df, t_col, covariates)
+    ps_series = calculate_propensity_score(sub_df, t_col, covariates, method=ps_method)
     sub_df["propensity_score"] = ps_series
 
     T = sub_df[t_col].to_numpy(dtype=float)
@@ -265,6 +269,7 @@ def compute_iptw_weights(
 
     diagnostics = {
         "estimand": estimand_upper,
+        "ps_method": ps_method,
         "stabilized": stabilized,
         "truncate_quantiles": trunc,
         "truncation_bounds": (round(w_low, 4), round(w_high, 4)),

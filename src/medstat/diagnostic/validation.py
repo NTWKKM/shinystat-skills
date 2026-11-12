@@ -60,6 +60,9 @@ def _compute_cox_snell_and_nagelkerke(
     return float(r2_cs), float(r2_nag)
 
 
+_NO_INTERCEPT_ROOT = "no intercept in [-50, 50] reproduces the observed event count"
+
+
 def _compute_calibration_intercept_offset(
     y_true: np.ndarray,
     lp: np.ndarray,
@@ -67,30 +70,25 @@ def _compute_calibration_intercept_offset(
     """
     Calibration-in-the-large intercept: logit(Y) = alpha + 1 * LP.
     Solves sum(y_i - expit(alpha + LP_i)) = 0 via 1D monotone root finding.
+
+    Returns NaN when the intercept is undefined: a single outcome class, or no root
+    in [-50, 50]. No sentinel and no substitute value is returned (ADR 84).
     """
     y_arr = np.asarray(y_true, dtype=float)
     lp_arr = np.asarray(lp, dtype=float)
     n = len(y_arr)
     sum_y = float(np.sum(y_arr))
 
-    if sum_y <= 0:
-        return -50.0
-    if sum_y >= n:
-        return 50.0
+    if sum_y <= 0 or sum_y >= n:
+        return float("nan")
 
     def obj(alpha: float) -> float:
         return float(np.sum(expit(alpha + lp_arr)) - sum_y)
 
     try:
-        sol = opt.brentq(obj, -50.0, 50.0)
-        return float(sol)
-    except Exception:
-        # Fallback to statsmodels Logit with offset
-        try:
-            mod = sm.Logit(y_arr, np.ones(n), offset=lp_arr).fit(disp=False)
-            return float(mod.params[0])
-        except Exception:
-            return 0.0
+        return float(opt.brentq(obj, -50.0, 50.0))
+    except (ValueError, RuntimeError):
+        return float("nan")
 
 
 def _compute_calibration_slope(
@@ -320,6 +318,11 @@ def bootstrap_internal_validation(
     apparent_cs_r2, apparent_nag_r2 = _compute_cox_snell_and_nagelkerke(y_orig, p_orig)
     apparent_intercept = _compute_calibration_intercept_offset(y_orig, lp_orig)
     apparent_slope = _compute_calibration_slope(y_orig, lp_orig)
+    if not np.isfinite(apparent_intercept):
+        warnings_list.append(
+            "Calibration intercept (calibration-in-the-large) is unavailable for the "
+            f"fitted model: {_NO_INTERCEPT_ROOT}."
+        )
 
     apparent_metrics = {
         "auroc": apparent_auroc,
@@ -390,6 +393,7 @@ def bootstrap_internal_validation(
         if (
             not np.isfinite(b_slope)
             or not np.isfinite(t_slope)
+            or not np.isfinite(b_inter)
             or not np.isfinite(t_inter)
         ):
             continue
@@ -620,6 +624,10 @@ def recalibrate_prediction_model(
 
     # 1. Intercept-only recalibration
     alpha_inter = _compute_calibration_intercept_offset(y_arr, lp_orig)
+    if not np.isfinite(alpha_inter):
+        raise RuntimeError(
+            f"Intercept-only recalibration is undefined: {_NO_INTERCEPT_ROOT}."
+        )
     beta_inter = 1.0
     lp_inter = alpha_inter + lp_orig
     p_recal_int = expit(lp_inter)

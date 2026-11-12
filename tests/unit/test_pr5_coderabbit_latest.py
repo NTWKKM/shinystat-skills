@@ -162,52 +162,34 @@ class TestCliGeeAutoregressiveRequiresTime:
         assert res.exit_code == 0, res.output
 
 
-class TestPsmRegularizedFallbackPenalty:
-    def test_fit_regularized_zero_intercept_and_covariate_penalty(self):
+class TestPsmPropensityModelFailsClosed:
+    """ADR 82 replaces the ADR 24 fallback chain (logit, then Firth, then L1)."""
+
+    def test_singular_fit_raises_without_a_regularized_refit(self):
         from unittest.mock import patch
+
+        from medstat.causal.psm import calculate_propensity_score
 
         df = pd.DataFrame(
             {
-                "treatment": [0, 0, 1, 1],
-                "x1": [1.0, 2.0, 3.0, 4.0],
-                "x2": [10.0, 20.0, 30.0, 40.0],
+                "treatment": [0, 1, 0, 1, 0, 1, 0, 1],
+                "x1": [1.0, 2.0, 3.0, 4.0, 2.5, 1.5, 3.5, 0.5],
+                "x2": [10.0, 5.0, 30.0, 20.0, 15.0, 25.0, 8.0, 12.0],
             }
         )
 
         def mock_fit(self, *args, **kwargs):
             raise np.linalg.LinAlgError("Singular matrix")
 
-        def mock_firth(*args, **kwargs):
-            raise RuntimeError("Firth failed")
-
-        with patch.object(sm.Logit, "fit", side_effect=mock_fit):
-            with patch(
-                "medstat.models.firth.fit_firth_logistic", side_effect=mock_firth
-            ):
-                with patch.object(
-                    sm.Logit, "fit_regularized", autospec=True
-                ) as mock_reg:
-                    mock_reg.return_value.predict.return_value = np.array(
-                        [0.1, 0.2, 0.8, 0.9]
-                    )
-                    mock_reg.return_value.params = np.array([0.5, 1.2, -0.8])
-                    from medstat.causal.psm import calculate_propensity_score
-
-                    ps = calculate_propensity_score(
+        with patch.object(sm.Logit, "fit", side_effect=mock_fit, autospec=True):
+            with patch.object(sm.Logit, "fit_regularized", autospec=True) as mock_reg:
+                with pytest.raises(ValueError, match="Singular matrix"):
+                    calculate_propensity_score(
                         df, treatment="treatment", covariates=["x1", "x2"]
                     )
-                assert mock_reg.called
-                alphas = mock_reg.call_args.kwargs.get("alpha")
-                assert alphas is not None
-                # Intercept is at index 0 with weight 0.0
-                assert alphas[0] == 0.0
-                # Covariates have sample-size-scaled alpha = 1.0 * len(y) = 4.0
-                expected_alpha = 1.0 * len(df)
-                assert alphas[1] == expected_alpha
-                assert alphas[2] == expected_alpha
-                assert len(ps) == 4
+        assert not mock_reg.called
 
-    def test_fit_regularized_with_binary_confounders_separation(self):
+    def test_binary_confounder_separation_raises_then_firth_is_explicit(self):
         from medstat.causal.psm import calculate_propensity_score
 
         # Dataset with binary confounders where bin1 causes separation
@@ -218,54 +200,32 @@ class TestPsmRegularizedFallbackPenalty:
                 "bin2": [0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
             }
         )
+        with pytest.raises(ValueError, match="separation"):
+            calculate_propensity_score(
+                df, treatment="treatment", covariates=["bin1", "bin2"]
+            )
         ps = calculate_propensity_score(
-            df, treatment="treatment", covariates=["bin1", "bin2"]
+            df, treatment="treatment", covariates=["bin1", "bin2"], method="firth"
         )
         assert len(ps) == 10
         assert ps.notna().all()
         assert ((ps > 0.0) & (ps < 1.0)).all()
 
-    def test_varying_covariate_named_const_remains_penalized(self):
-        from unittest.mock import patch
+    def test_varying_covariate_named_const_is_kept_as_a_covariate(self):
+        from medstat.causal.psm import calculate_propensity_score
 
-        df = pd.DataFrame(
-            {
-                "treatment": [0, 0, 1, 1],
-                "const": [10.0, 20.0, 30.0, 40.0],  # varying user covariate named const
-                "x1": [1.0, 2.0, 3.0, 4.0],
-            }
+        rng = np.random.default_rng(5)
+        n = 200
+        const = rng.normal(20.0, 5.0, n)  # varying user covariate named const
+        x1 = rng.normal(size=n)
+        trt = rng.binomial(1, 1 / (1 + np.exp(-(0.1 * (const - 20.0) + 0.5 * x1))))
+        df = pd.DataFrame({"treatment": trt, "const": const, "x1": x1})
+        ps = calculate_propensity_score(
+            df, treatment="treatment", covariates=["const", "x1"]
         )
-
-        def mock_fit(self, *args, **kwargs):
-            raise np.linalg.LinAlgError("Singular matrix")
-
-        def mock_firth(*args, **kwargs):
-            raise RuntimeError("Firth failed")
-
-        with patch.object(sm.Logit, "fit", side_effect=mock_fit):
-            with patch(
-                "medstat.models.firth.fit_firth_logistic", side_effect=mock_firth
-            ):
-                with patch.object(
-                    sm.Logit, "fit_regularized", autospec=True
-                ) as mock_reg:
-                    mock_reg.return_value.predict.return_value = np.array(
-                        [0.1, 0.2, 0.8, 0.9]
-                    )
-                    mock_reg.return_value.params = np.array([0.5, 1.2, -0.8])
-                    from medstat.causal.psm import calculate_propensity_score
-
-                    calculate_propensity_score(
-                        df, treatment="treatment", covariates=["const", "x1"]
-                    )
-                assert mock_reg.called
-                alphas = mock_reg.call_args.kwargs.get("alpha")
-                # Intercept (added by add_constant) is at index 0 with weight 0.0
-                assert alphas[0] == 0.0
-                # Varying 'const' covariate (index 1) must remain penalized with sample-size-scaled alpha (1.0 * len(y) = 4.0)
-                expected_alpha = 1.0 * len(df)
-                assert alphas[1] == expected_alpha
-                assert alphas[2] == expected_alpha
+        design = sm.add_constant(df[["const", "x1"]], has_constant="add")
+        expected = sm.Logit(trt, design).fit(disp=False).predict()
+        np.testing.assert_allclose(ps.to_numpy(), expected, rtol=1e-10)
 
 
 class TestCleanOrdinalMappingIntegralKeyCheck:

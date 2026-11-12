@@ -8,7 +8,7 @@
 
 ## 1. Table 1 Baseline Characteristics & Standardized Mean Difference (SMD)
 
-Computes publication-grade baseline patient characteristics with Austin (2009) Standardized Mean Differences ($|\text{SMD}| < 0.10$ denotes balance). Handles zero-variance disparity correctly (returning `np.nan` rather than misleading `0.00`) and provides Fisher's exact test fallback for sparse cell counts.
+Computes publication-grade baseline patient characteristics with Austin (2009) Standardized Mean Differences ($|\text{SMD}| < 0.10$ denotes balance). Handles zero-variance disparity correctly (returning `np.nan` rather than misleading `0.00`) and provides Fisher's exact test fallback for sparse cell counts. A P value or SMD that cannot be computed leaves its cell empty or `-` and is listed with its reason in `table.attrs["unavailable"]`; report those reasons in the table footnote.
 
 ```python
 import numpy as np
@@ -60,11 +60,23 @@ def generate_table_one(
     categorical_vars: list[str],
     nonnormal_vars: list[str] | None = None,
 ) -> pd.DataFrame:
-    """Build stratified Table 1 with parametric/non-parametric tests and SMD."""
+    """Build stratified Table 1 with parametric/non-parametric tests and SMD.
+
+    `attrs["unavailable"]` lists every P value or SMD that could not be computed as
+    {"variable", "statistic", "reason"}; the cell itself stays empty or shows "-".
+    """
     nonnormal = set(nonnormal_vars or [])
     clean_df = df.dropna(subset=[strata]).copy()
     groups = sorted(clean_df[strata].unique())
     rows = []
+    unavailable = []
+    undefined_test = "test undefined: a group is empty, has one observation or has zero variance"
+    undefined_smd = "SMD undefined: an empty group or zero pooled variance"
+
+    def note(variable, statistic, reason):
+        unavailable.append(
+            {"variable": str(variable), "statistic": statistic, "reason": reason}
+        )
 
     # Unified group column mapping to prevent count vs measurement column divergence
     col_labels = {
@@ -82,6 +94,7 @@ def generate_table_one(
     # 2. Continuous variables
     for var in continuous_vars:
         row = {"Characteristic": var}
+        p_reason = undefined_test
         group_vals = [
             clean_df.loc[clean_df[strata] == g, var].dropna().to_numpy(dtype=float)
             for g in groups
@@ -103,8 +116,9 @@ def generate_table_one(
                     pval = stats.kruskal(*group_vals).pvalue
                 else:
                     pval = np.nan
-            except Exception:
+            except Exception as err:
                 pval = np.nan
+                p_reason = f"{type(err).__name__}: {err}"
         else:
             for g, vals in zip(groups, group_vals):
                 if len(vals) > 0:
@@ -121,9 +135,12 @@ def generate_table_one(
                     pval = stats.f_oneway(*group_vals).pvalue
                 else:
                     pval = np.nan
-            except Exception:
+            except Exception as err:
                 pval = np.nan
+                p_reason = f"{type(err).__name__}: {err}"
 
+        if np.isnan(pval):
+            note(var, "P-value", p_reason)
         row["P-value"] = (
             f"{pval:.3f}"
             if (not np.isnan(pval) and pval >= 0.001)
@@ -132,6 +149,8 @@ def generate_table_one(
         if len(groups) == 2 and len(group_vals[0]) > 0 and len(group_vals[1]) > 0:
             smd_val = calculate_smd(group_vals[1], group_vals[0])
             row["SMD"] = f"{smd_val:.2f}" if not np.isnan(smd_val) else "-"
+            if np.isnan(smd_val):
+                note(var, "SMD", undefined_smd)
         else:
             row["SMD"] = ""
         rows.append(row)
@@ -150,6 +169,7 @@ def generate_table_one(
 
         # P-value calculation with Fisher fallback for 2x2 with small expected counts
         pval = np.nan
+        p_reason = undefined_test
         if contingency.size > 0:
             try:
                 if contingency.shape == (2, 2):
@@ -165,8 +185,11 @@ def generate_table_one(
                         _, pval, _, _ = stats.chi2_contingency(contingency)
                 else:
                     _, pval, _, _ = stats.chi2_contingency(contingency)
-            except Exception:
+            except Exception as err:
                 pval = np.nan
+                p_reason = f"{type(err).__name__}: {err}"
+        if np.isnan(pval):
+            note(var, "P-value", p_reason)
 
         p_str = (
             f"{pval:.3f}"
@@ -193,11 +216,15 @@ def generate_table_one(
                     p1 = float(np.mean(g1_sub[var] == cat))
                     smd_cat = calculate_binary_smd(p0, p1)
                 row["SMD"] = f"{smd_cat:.2f}" if not np.isnan(smd_cat) else "-"
+                if np.isnan(smd_cat):
+                    note(f"{var}: {cat}", "SMD", undefined_smd)
             else:
                 row["SMD"] = ""
             rows.append(row)
 
-    return pd.DataFrame(rows)
+    table = pd.DataFrame(rows)
+    table.attrs["unavailable"] = unavailable
+    return table
 ```
 
 ---

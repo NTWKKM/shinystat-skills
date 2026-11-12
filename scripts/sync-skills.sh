@@ -33,6 +33,30 @@ SHINYSTAT_SCRIPTS_DIR="$REPO_ROOT/skills/shinystat/scripts"
 TARGET_MEDSTAT="$SHINYSTAT_SCRIPTS_DIR/medstat"
 CLOUD_REF_DIR="$REPO_ROOT/skills/shinystat-cloud/references"
 
+# Reference files a mirror owns in place, with no source under skills/_shared/references
+# (space-separated). The cloud figures.md shares its name with a shared file.
+SHINYSTAT_OWN_REFS="api-quickref.md"
+CLOUD_OWN_REFS=""
+
+# Print each *.md in mirror directory $1 that has no shared source and is not in the
+# own-list $2: a copy left behind after its shared reference was deleted. --check
+# reports these; syncing never deletes a file, so a new in-place reference that is not
+# yet in an own-list is reported, not lost.
+list_orphan_refs() {
+    local dir="$1" own="$2" f fname
+    for f in "$dir"/*.md; do
+        [[ -e "$f" ]] || continue
+        fname="$(basename "$f")"
+        if [[ -e "$SHARED_REF_DIR/$fname" ]]; then
+            continue
+        fi
+        case " $own " in
+            *" $fname "*) continue ;;
+        esac
+        echo "$fname"
+    done
+}
+
 if [[ "$CHECK_ONLY" == true ]]; then
     echo "Verifying zero drift against SSOT (non-destructive check)..."
     drift=0
@@ -76,6 +100,15 @@ if [[ "$CHECK_ONLY" == true ]]; then
         echo "Error: Drift detected between src/medstat and $TARGET_MEDSTAT" >&2
         drift=1
     fi
+
+    # 4. Check for mirror references whose shared source no longer exists
+    for pair in "$SHINYSTAT_REF_DIR|$SHINYSTAT_OWN_REFS" "$CLOUD_REF_DIR|$CLOUD_OWN_REFS"; do
+        while IFS= read -r orphan; do
+            [[ -n "$orphan" ]] || continue
+            echo "Error: Orphan reference ${pair%%|*}/$orphan (no source in $SHARED_REF_DIR). Delete it, or add it to the own-list in scripts/sync-skills.sh if it is canonical in place." >&2
+            drift=1
+        done < <(list_orphan_refs "${pair%%|*}" "${pair#*|}")
+    done
 
     if [[ $drift -ne 0 ]]; then
         echo "Error: skills/ is out of sync with SSOT (src/medstat or skills/_shared/references)." >&2

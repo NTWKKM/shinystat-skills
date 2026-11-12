@@ -818,11 +818,14 @@ def test_each_recipe_is_self_contained():
                     )
                     assert isinstance(res2, pd.DataFrame)
                 elif "match_propensity_scores" in isolated_ns:
+                    # Treatment independent of the confounders: a separated
+                    # propensity design raises (ADR 82).
+                    rng_psm = np.random.default_rng(42)
                     df_psm = pd.DataFrame(
                         {
-                            "trt": [0, 0, 1, 1, 0, 1],
-                            "age": [20.0, 25.0, 30.0, 35.0, 22.0, 32.0],
-                            "sex": ["M", "F", "M", "F", "F", "M"],
+                            "trt": rng_psm.binomial(1, 0.5, 40),
+                            "age": rng_psm.normal(50.0, 10.0, 40),
+                            "sex": rng_psm.choice(["M", "F"], 40),
                         }
                     )
                     res = isolated_ns["match_propensity_scores"](
@@ -1206,28 +1209,32 @@ def test_psm_and_logistic_strict_binary_and_retention_audit(recipes):
         fit_table(df_invalid, outcome="treated", covariates=["age"])
 
     # Retention audit verification in PSM and Logistic
-    np.random.seed(42)
+    # Arms overlap on age and sex: a separated propensity design raises (ADR 82).
+    rng = np.random.default_rng(42)
+    n_valid = 40
+    age = rng.normal(55.0, 8.0, n_valid)
+    age[1] = np.nan
     df_valid = pd.DataFrame(
         {
-            "y": [0, 1, 1, 0, 1, 0, 1, 0],
-            "trt": [1, 0, 1, 0, 1, 0, 1, 0],
-            "age": [50, np.nan, 55, 65, 45, 70, 60, 58],
-            "sex": ["F", "M", "F", "M", "F", "M", "F", "M"],
+            "y": rng.binomial(1, 0.5, n_valid),
+            "trt": rng.binomial(1, 0.5, n_valid),
+            "age": age,
+            "sex": rng.choice(["F", "M"], n_valid),
         }
     )
     res_psm = psm_match(df_valid, treatment_col="trt", confounders=["age", "sex"])
     assert "retention_audit" in res_psm
-    assert res_psm["retention_audit"]["n_initial"] == 8
+    assert res_psm["retention_audit"]["n_initial"] == n_valid
     assert res_psm["retention_audit"]["n_excluded"] == 1
-    assert res_psm["retention_audit"]["n_analyzed"] == 7
+    assert res_psm["retention_audit"]["n_analyzed"] == n_valid - 1
     # Balance table includes categorical dummy level
     assert any("sex" in str(v) for v in res_psm["balance_df"]["Variable"])
 
     res_logistic = fit_table(df_valid, outcome="y", covariates=["age"])
     assert "retention_audit" in res_logistic.attrs
-    assert res_logistic.attrs["retention_audit"]["n_initial"] == 8
+    assert res_logistic.attrs["retention_audit"]["n_initial"] == n_valid
     assert res_logistic.attrs["retention_audit"]["n_excluded"] == 1
-    assert res_logistic.attrs["retention_audit"]["n_analyzed"] == 7
+    assert res_logistic.attrs["retention_audit"]["n_analyzed"] == n_valid - 1
 
     # Reject covariate with < 2 distinct finite values
     df_const_cov = pd.DataFrame(
