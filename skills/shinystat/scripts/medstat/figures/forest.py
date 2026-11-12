@@ -455,6 +455,27 @@ def plot_forest(
     else:
         ax_plot.set_xlabel(f"{scale} Effect Size", labelpad=6)
 
+    if favor_left_label is not None and favor_right_label is not None:
+        # Same favour arrows as the journal path, below the x-axis label on either
+        # side of the null line; offsets are in points so they track the canvas size.
+        for text, ha, dx in (
+            (_wrap("\u2190 " + favor_left_label, 16), "right", -3),
+            (_wrap(favor_right_label + " \u2192", 16), "left", 3),
+        ):
+            ax_plot.annotate(
+                text,
+                xy=(ref_val, 0.0),
+                xycoords=("data", "axes fraction"),
+                xytext=(dx, -44),
+                textcoords="offset points",
+                fontsize=8,
+                ha=ha,
+                va="top",
+                multialignment=ha,
+                linespacing=1.0,
+                annotation_clip=False,
+            )
+
     ax_plot.set_yticks(y_positions)
     ax_plot.set_yticklabels(terms, fontweight="500")
     ax_plot.set_ylim(-0.8, n_terms - 0.2)

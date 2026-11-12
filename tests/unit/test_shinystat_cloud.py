@@ -4354,3 +4354,18 @@ def test_cloud_verifier_flags_identifier_columns_in_exported_files(
     unknown.write_text("{}", encoding="utf-8")
     res = verify(narrative, results, exported_files=[unknown])
     assert res["passed"] is False and any("could not be audited" in v for v in res["phi_violations"])
+    # ADR 81 Round 3: UTF-16, invalid UTF-8 and corrupt XLSX fail closed; leading blank rows skipped.
+    utf16 = tmp_path / "utf16.csv"
+    utf16.write_bytes("patient_id,statin_rx\nPATIENT_MOCK_CVD_0001,1\n".encode("utf-16-le"))
+    latin = tmp_path / "latin.csv"
+    latin.write_bytes(b"pair_id,site\n1,Sa\xefd\n")
+    broken = tmp_path / "broken.xlsx"
+    broken.write_bytes(b"PK\x03\x04 truncated")
+    for fp in (utf16, latin, broken):
+        res = verify(narrative, results, exported_files=[fp])
+        assert res["passed"] is False, fp.name
+        assert any("could not be audited" in v for v in res["phi_violations"]), fp.name
+    blank = tmp_path / "blank_first.csv"
+    blank.write_text("\n , \npatient_id,statin_rx\nPATIENT_MOCK_CVD_0001,1\n", encoding="utf-8")
+    res = verify(narrative, results, exported_files=[blank])
+    assert any("'patient_id'" in v for v in res["phi_violations"])

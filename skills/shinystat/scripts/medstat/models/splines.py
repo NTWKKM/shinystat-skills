@@ -410,8 +410,9 @@ def fit_logistic_rcs(
     Returns:
         dict containing model, summary_df, contrast_df, knots, knot_locations,
         non_linear_pvalue (with non_linear_reason), p_overall and log_likelihood.
-        Under separation or non-convergence every estimate, P value and contrast is
-        NaN and ``fit_failure_reason`` says why; a rank-deficient design raises.
+        Under separation or non-convergence ``model`` is None, every estimate, P value
+        and contrast is NaN and ``fit_failure_reason`` says why; a rank-deficient
+        design raises.
     """
     import statsmodels.api as sm
 
@@ -516,7 +517,8 @@ def fit_logistic_rcs(
     )
 
     return {
-        "model": logit_model,
+        # Withheld on failure, like coef / cov_full: no estimates from an invalid fit.
+        "model": None if fit_failure_reason else logit_model,
         "summary_df": summary_df,
         "contrast_df": contrast_df,
         "ref_value": ref_value,

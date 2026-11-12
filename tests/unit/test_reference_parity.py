@@ -1324,3 +1324,28 @@ def test_logistic_rcs_separation_returns_nan_with_reason(recipes):
     assert "separation" in eng["fit_failure_reason"] and "separation" in rec["fit_failure_reason"]
     assert eng["contrast_df"]["OR"].isna().all() and rec["contrast_df"]["estimate"].isna().all()
     assert eng["summary_df"]["coef"].isna().all() and rec["converged"] is False
+    assert eng["model"] is None and rec["model"] is None
+
+
+def test_model_cli_reports_rcs_failure_reasons(tmp_path):
+    """A NaN non-linearity P value reaches the CLI JSON together with its reason."""
+    import json
+
+    from click.testing import CliRunner
+
+    from medstat.cli.main import cli
+
+    rng = np.random.default_rng(7)
+    df = pd.DataFrame({"x": rng.normal(size=80), "age": rng.normal(60, 8, 80)})
+    df["y"] = (df["x"] > 0.3).astype(int)
+    df.to_csv(tmp_path / "sep.csv", index=False)
+    out = tmp_path / "sep.json"
+    res = CliRunner().invoke(
+        cli,
+        ["model", "--data", str(tmp_path / "sep.csv"), "--type", "logistic", "--outcome", "y",
+         "--covariates", "age", "--spline-var", "x", "--output", str(out)],
+    )
+    assert res.exit_code == 0, res.output
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["non_linear_pvalue"] is None
+    assert "separation" in data["fit_failure_reason"] and "separation" in data["non_linear_reason"]

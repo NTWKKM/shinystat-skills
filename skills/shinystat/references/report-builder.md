@@ -683,6 +683,7 @@ import csv
 import io
 import math
 import re
+import zipfile
 from pathlib import Path
 import pandas as pd
 
@@ -754,9 +755,14 @@ def verify_standalone_integrity(
         suffix = fp.suffix.lower()
         try:
             if suffix in (".csv", ".tsv", ".tab"):
-                content = fp.read_text(encoding="utf-8-sig", errors="replace")
+                # Strict decode (UnicodeDecodeError is a ValueError); NUL bytes mean UTF-16 or binary.
+                content = fp.read_bytes().decode("utf-8-sig")
+                if "\x00" in content:
+                    raise ValueError("NUL bytes in text export (not UTF-8; UTF-16?)")
                 delim = "," if suffix == ".csv" else "\t"
-                cols = [c.strip() for c in next(csv.reader(io.StringIO(content), delimiter=delim), [])]
+                rows = csv.reader(io.StringIO(content), delimiter=delim)
+                header = next((r for r in rows if any(c.strip() for c in r)), [])
+                cols = [c.strip() for c in header]
             elif suffix in (".xlsx", ".parquet"):
                 frames = (
                     pd.read_excel(fp, sheet_name=None, dtype=str)
@@ -767,7 +773,7 @@ def verify_standalone_integrity(
                 content = "\n".join(f.astype(str).to_csv(index=False) for f in frames.values())
             else:
                 raise ValueError(f"unsupported format '{suffix or fp.name}' (use .csv, .tsv, .xlsx or .parquet)")
-        except (ValueError, ImportError) as exc:
+        except (ValueError, ImportError, zipfile.BadZipFile) as exc:
             # Fail closed: a file the audit cannot read is never passed unchecked.
             violations.append(f"Exported file '{fp.name}' could not be audited: {exc}")
             continue

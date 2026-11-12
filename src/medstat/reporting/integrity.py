@@ -13,6 +13,7 @@ from __future__ import annotations
 import csv
 import io
 import re
+import zipfile
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -511,15 +512,21 @@ _DELIMITED_EXPORTS = {".csv": ",", ".tsv": "\t", ".tab": "\t"}
 def _read_exported_table(fp: Path) -> tuple[list[str], str]:
     """Header columns and scannable text of an exported data file.
 
-    CSV and TSV are decoded as ``utf-8-sig`` so a leading BOM cannot hide a
-    ``patient_id`` header; XLSX and Parquet are read through pandas. Any other
-    format raises ``ValueError`` so the caller records it as unaudited.
+    CSV and TSV are decoded as strict ``utf-8-sig`` (a leading BOM cannot hide a
+    ``patient_id`` header) and the header is the first record with a non-blank
+    cell; XLSX and Parquet are read through pandas. Undecodable or NUL-bearing
+    text (e.g. UTF-16), a corrupt archive, or any other format raises
+    ``ValueError`` so the caller records the file as unaudited.
     """
     suffix = fp.suffix.lower()
     if suffix in _DELIMITED_EXPORTS:
-        content = fp.read_text(encoding="utf-8-sig", errors="replace")
-        first = next(csv.reader(io.StringIO(content), delimiter=_DELIMITED_EXPORTS[suffix]), [])
-        return [c.strip() for c in first], content
+        # UnicodeDecodeError is a ValueError: invalid bytes are never replaced and passed.
+        content = fp.read_bytes().decode("utf-8-sig")
+        if "\x00" in content:
+            raise ValueError("NUL bytes in text export (not UTF-8; UTF-16?)")
+        reader = csv.reader(io.StringIO(content), delimiter=_DELIMITED_EXPORTS[suffix])
+        header = next((row for row in reader if any(c.strip() for c in row)), [])
+        return [c.strip() for c in header], content
     try:
         if suffix == ".xlsx":
             frames = pd.read_excel(fp, sheet_name=None, dtype=str)
@@ -529,6 +536,8 @@ def _read_exported_table(fp: Path) -> tuple[list[str], str]:
             raise ValueError(f"unsupported format '{suffix or fp.name}' (use .csv, .tsv, .xlsx or .parquet)")
     except ImportError as exc:
         raise ValueError(f"no reader for '{suffix}' ({exc})") from exc
+    except zipfile.BadZipFile as exc:
+        raise ValueError(f"corrupt or truncated '{suffix}' archive ({exc})") from exc
     cols: list[str] = []
     parts: list[str] = []
     for frame in frames.values():

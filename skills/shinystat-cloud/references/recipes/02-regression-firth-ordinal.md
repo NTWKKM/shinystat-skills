@@ -741,7 +741,7 @@ def fit_multinomial_logistic(
 
 ## 22. Restricted Cubic Splines (Harrell RCS) for Non-Linear Continuous Predictors
 
-Constructs a standalone **Harrell Restricted Cubic Spline (RCS)** basis with $k \in \{3, 4, 5\}$ quantile knots (Harrell 2015 canonical quantiles: $[0.10, 0.50, 0.90]$ for $k=3$; $[0.05, 0.35, 0.65, 0.95]$ for $k=4$; $[0.05, 0.275, 0.50, 0.725, 0.95]$ for $k=5$), fits either a logistic regression (`family="binomial"`), linear model (`family="gaussian"`), or Cox PH model (`family="cox"`), and computes the **Likelihood Ratio Test for non-linearity (`p_nonlinearity`)**, overall spline association (`p_overall`), and reference-centered dose-response contrast curve ($\text{OR}(x)$ or $\text{HR}(x)$ vs `ref_value`). Models are fitted on centred, QR-orthonormalised spline columns (same likelihood, stable Newton-Raphson at $k=5$) and coefficients are mapped back to the Harrell basis; `model` therefore holds the orthonormal fit. A spline fit whose log-likelihood falls below the nested linear fit returns `p_nonlinearity = NaN` with `nonlinearity_reason`. Integer `knots` whose quantiles tie raise instead of silently fitting fewer knots, a rank-deficient GLM design raises, and a GLM fit under perfect separation or without convergence returns NaN estimates, P values and curve with `fit_failure_reason`.
+Constructs a standalone **Harrell Restricted Cubic Spline (RCS)** basis with $k \in \{3, 4, 5\}$ quantile knots (Harrell 2015 canonical quantiles: $[0.10, 0.50, 0.90]$ for $k=3$; $[0.05, 0.35, 0.65, 0.95]$ for $k=4$; $[0.05, 0.275, 0.50, 0.725, 0.95]$ for $k=5$), fits either a logistic regression (`family="binomial"`), linear model (`family="gaussian"`), or Cox PH model (`family="cox"`), and computes the **Likelihood Ratio Test for non-linearity (`p_nonlinearity`)**, overall spline association (`p_overall`), and reference-centered dose-response contrast curve ($\text{OR}(x)$ or $\text{HR}(x)$ vs `ref_value`). Models are fitted on centred, QR-orthonormalised spline columns (same likelihood, stable Newton-Raphson at $k=5$) and coefficients are mapped back to the Harrell basis; `model` therefore holds the orthonormal fit. A spline fit whose log-likelihood falls below the nested linear fit returns `p_nonlinearity = NaN` with `nonlinearity_reason`. Integer `knots` whose quantiles tie raise instead of silently fitting fewer knots, a rank-deficient GLM design raises, and a GLM fit under perfect separation or without convergence returns `model = None` and NaN estimates, P values and curve with `fit_failure_reason`.
 
 ```python
 import warnings
@@ -989,7 +989,8 @@ def fit_rcs_spline_model(
     )
 
     return {
-        "model": res_full,
+        # Withheld on failure, like b_spline / cov_spline (engine parity).
+        "model": None if fit_failure_reason else res_full,
         "converged": bool(getattr(res_full, "converged", True)) and fit_failure_reason is None,
         "fit_failure_reason": fit_failure_reason,
         "family": fam_str,

@@ -263,6 +263,17 @@ def test_forest_default_has_no_favour_labels_and_custom_labels_render(tmp_path: 
     )
     svg = Path(res_arms.svg_path).read_text(encoding="utf-8")
     assert "Favors Drug" in svg and "Favors Placebo" in svg
+    # The default (no-journal) path draws them too, matching the Plotly view.
+    for scale in ("HR", "MD"):
+        res_default = plot_forest(
+            df, scale=scale, journal=None, out_path=str(tmp_path / f"d_{scale}.png"),
+            favor_left_label="Favors Drug", favor_right_label="Favors Placebo",
+        )
+        _assert_bundle_intact(res_default)
+        svg = Path(res_default.svg_path).read_text(encoding="utf-8")
+        assert "Favors Drug" in svg and "Favors Placebo" in svg
+    plain = plot_forest(df, scale="HR", journal=None, out_path=str(tmp_path / "p.png"))
+    assert "Favors" not in Path(plain.svg_path).read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
