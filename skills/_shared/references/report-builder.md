@@ -763,7 +763,7 @@ def verify_standalone_integrity(
                     if suffix == ".xlsx"
                     else {"": pd.read_parquet(fp)}
                 )
-                cols = [str(c) for f in frames.values() for c in f.columns]
+                cols = [str(c).strip() for f in frames.values() for c in f.columns]
                 content = "\n".join(f.astype(str).to_csv(index=False) for f in frames.values())
             else:
                 raise ValueError(f"unsupported format '{suffix or fp.name}' (use .csv, .tsv, .xlsx or .parquet)")

@@ -2124,13 +2124,13 @@ def test_exported_files_bom_tsv_xlsx_parquet_and_unsupported(tmp_path):
     tsv.write_text("hn\tstatin_rx\n123\t1\n", encoding="utf-8")
     frame = pd.DataFrame({"patient_id": ["PATIENT_MOCK_CVD_0001"], "statin_rx": [1]})
     xlsx = tmp_path / "ids.xlsx"
-    frame.to_excel(xlsx, index=False)
+    frame.rename(columns={"patient_id": " patient_id "}).to_excel(xlsx, index=False)
     parquet = tmp_path / "ids.parquet"
     frame.to_parquet(parquet)
     for fp, col in ((bom, "patient_id"), (tsv, "hn"), (xlsx, "patient_id"), (parquet, "patient_id")):
         audit = verify_report_integrity(_audit_doc(), exported_files=[fp])
         assert audit.passed is False, fp.name
-        assert any(f"'{col}'" in v and fp.name in v for v in audit.phi_violations), fp.name
+        assert any(col in v and fp.name in v for v in audit.phi_violations), fp.name
     clean_tsv = tmp_path / "clean.tsv"
     clean_tsv.write_text("pair_id\tstatin_rx\n1\t1\n", encoding="utf-8")
     assert verify_report_integrity(_audit_doc(), exported_files=[clean_tsv]).passed

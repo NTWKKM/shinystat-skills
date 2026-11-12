@@ -4341,6 +4341,15 @@ def test_cloud_verifier_flags_identifier_columns_in_exported_files(
     for fp, col in ((bom, "patient_id"), (tsv, "hn")):
         res = verify(narrative, results, exported_files=[fp])
         assert res["passed"] is False and any(f"'{col}'" in v for v in res["phi_violations"])
+    # Padded headers in binary formats are stripped before matching, as in the engine.
+    padded = pd.DataFrame({" patient_id ": ["PATIENT_MOCK_CVD_0001"], "statin_rx": [1]})
+    xlsx = tmp_path / "ids.xlsx"
+    padded.to_excel(xlsx, index=False)
+    parquet = tmp_path / "ids.parquet"
+    padded.to_parquet(parquet)
+    for fp in (xlsx, parquet):
+        res = verify(narrative, results, exported_files=[fp])
+        assert res["passed"] is False and any("patient_id" in v for v in res["phi_violations"]), fp.name
     unknown = tmp_path / "ids.json"
     unknown.write_text("{}", encoding="utf-8")
     res = verify(narrative, results, exported_files=[unknown])
