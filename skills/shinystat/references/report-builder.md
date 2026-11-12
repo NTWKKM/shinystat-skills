@@ -773,7 +773,7 @@ def verify_standalone_integrity(
                 content = "\n".join(f.astype(str).to_csv(index=False) for f in frames.values())
             else:
                 raise ValueError(f"unsupported format '{suffix or fp.name}' (use .csv, .tsv, .xlsx or .parquet)")
-        except (ValueError, ImportError, zipfile.BadZipFile) as exc:
+        except (ValueError, ImportError, zipfile.BadZipFile, csv.Error) as exc:
             # Fail closed: a file the audit cannot read is never passed unchecked.
             violations.append(f"Exported file '{fp.name}' could not be audited: {exc}")
             continue

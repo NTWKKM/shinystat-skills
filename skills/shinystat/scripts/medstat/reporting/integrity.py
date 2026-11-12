@@ -515,7 +515,7 @@ def _read_exported_table(fp: Path) -> tuple[list[str], str]:
     CSV and TSV are decoded as strict ``utf-8-sig`` (a leading BOM cannot hide a
     ``patient_id`` header) and the header is the first record with a non-blank
     cell; XLSX and Parquet are read through pandas. Undecodable or NUL-bearing
-    text (e.g. UTF-16), a corrupt archive, or any other format raises
+    text (e.g. UTF-16), a malformed CSV record (``csv.Error``), a corrupt archive, or any other format raises
     ``ValueError`` so the caller records the file as unaudited.
     """
     suffix = fp.suffix.lower()
@@ -525,7 +525,10 @@ def _read_exported_table(fp: Path) -> tuple[list[str], str]:
         if "\x00" in content:
             raise ValueError("NUL bytes in text export (not UTF-8; UTF-16?)")
         reader = csv.reader(io.StringIO(content), delimiter=_DELIMITED_EXPORTS[suffix])
-        header = next((row for row in reader if any(c.strip() for c in row)), [])
+        try:
+            header = next((row for row in reader if any(c.strip() for c in row)), [])
+        except csv.Error as exc:  # not a ValueError: e.g. a field over the size limit
+            raise ValueError(f"malformed delimited export ({exc})") from exc
         return [c.strip() for c in header], content
     try:
         if suffix == ".xlsx":

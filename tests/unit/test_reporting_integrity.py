@@ -2150,7 +2150,9 @@ def test_exported_files_unreadable_text_corrupt_xlsx_and_leading_blank_rows(tmp_
     latin.write_bytes(b"pair_id,site\n1,Sa\xefd\n")
     broken = tmp_path / "broken.xlsx"
     broken.write_bytes(b"PK\x03\x04 truncated")
-    for fp in (utf16, latin, broken):
+    oversized = tmp_path / "oversized.csv"  # csv.Error: field larger than field limit
+    oversized.write_text('"' + "x" * 200_000 + '",a\npatient_id,b\n', encoding="utf-8")
+    for fp in (utf16, latin, broken, oversized):
         audit = verify_report_integrity(_audit_doc(), exported_files=[fp])
         assert audit.passed is False, fp.name
         assert any("could not be audited" in v and fp.name in v for v in audit.phi_violations), fp.name

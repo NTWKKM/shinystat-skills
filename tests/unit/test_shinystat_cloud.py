@@ -4361,7 +4361,9 @@ def test_cloud_verifier_flags_identifier_columns_in_exported_files(
     latin.write_bytes(b"pair_id,site\n1,Sa\xefd\n")
     broken = tmp_path / "broken.xlsx"
     broken.write_bytes(b"PK\x03\x04 truncated")
-    for fp in (utf16, latin, broken):
+    oversized = tmp_path / "oversized.csv"  # csv.Error: field larger than field limit
+    oversized.write_text('"' + "x" * 200_000 + '",a\npatient_id,b\n', encoding="utf-8")
+    for fp in (utf16, latin, broken, oversized):
         res = verify(narrative, results, exported_files=[fp])
         assert res["passed"] is False, fp.name
         assert any("could not be audited" in v for v in res["phi_violations"]), fp.name
