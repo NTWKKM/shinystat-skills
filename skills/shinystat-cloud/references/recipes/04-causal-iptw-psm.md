@@ -8,13 +8,69 @@
 
 ## 6. Propensity Score Matching (PSM) with Pair IDs & Covariate Balance
 
-Performs 1:1 nearest-neighbor matching without replacement bounded by Austin (2011) 0.2 caliper of logit propensity score. Returns the matched cohort with **`pair_id`** column (enabling paired t-test, conditional logistic regression, and cluster-robust standard errors) alongside pre- and post-match SMD balance diagnostics.
+Performs 1:1 nearest-neighbor matching without replacement bounded by Austin (2011) 0.2 caliper of logit propensity score. Returns the matched cohort with **`pair_id`** column (enabling paired t-test, conditional logistic regression, and cluster-robust standard errors) alongside pre- and post-match SMD balance diagnostics. The propensity model is fitted by maximum likelihood only (`ps_method: "logistic"` in the result): a rank-deficient or separated design raises `ValueError`, and the Grilling Gate #3 resolution for it starts with reviewing confounding and positivity and stating the target estimand, before the adjustment set is changed.
 
 ```python
+import warnings
+
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 from scipy.special import logit
+
+
+def _fit_propensity_logit(t: np.ndarray, X_raw: pd.DataFrame) -> np.ndarray:
+    """Maximum-likelihood propensity scores; a rank-deficient or separated design raises."""
+    from statsmodels.tools.sm_exceptions import (
+        ConvergenceWarning,
+        PerfectSeparationError,
+        PerfectSeparationWarning,
+    )
+
+    X_arr = X_raw.to_numpy(dtype=float)
+    # Rank check on standardized columns, so it does not depend on covariate units.
+    sd = X_arr.std(axis=0)
+    constant = [c for c, s in zip(X_raw.columns, sd) if s == 0.0]
+    z_design = np.column_stack(
+        [np.ones(len(t)), (X_arr - X_arr.mean(axis=0)) / np.where(sd > 0, sd, 1.0)]
+    )
+    if constant or np.linalg.matrix_rank(z_design) < z_design.shape[1]:
+        detail = f" Constant covariates: {constant}." if constant else ""
+        raise ValueError(
+            "Propensity score design matrix is rank deficient (constant or collinear "
+            f"covariates).{detail} Remove or combine the redundant covariates."
+        )
+
+    X = sm.add_constant(X_raw, has_constant="add")
+    limit = 10.0  # unit-free separation bound: |coefficient| per SD of its covariate
+    reason = None
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", PerfectSeparationWarning)
+            # Convergence and finiteness are read from the fit below.
+            warnings.simplefilter("ignore", ConvergenceWarning)
+            warnings.simplefilter("ignore", RuntimeWarning)
+            model = sm.Logit(t, X).fit(disp=False)
+    except (PerfectSeparationWarning, PerfectSeparationError, np.linalg.LinAlgError) as e:
+        reason = f"{type(e).__name__}: {e}"
+    else:
+        params = np.asarray(model.params, dtype=float)
+        per_sd = np.abs(params[1:]) * sd
+        if not np.all(np.isfinite(params)):
+            reason = "non-finite coefficients"
+        elif not bool(getattr(model, "mle_retvals", {}).get("converged", True)):
+            reason = "the optimizer did not converge"
+        elif np.any(per_sd > limit):
+            flagged = [c for c, g in zip(X_raw.columns, per_sd) if g > limit]
+            reason = f"|coefficient| per SD exceeds {limit:g} for {flagged}"
+    if reason is not None:
+        raise ValueError(
+            f"Propensity score model shows separation or did not converge ({reason}); "
+            "its fitted scores approach 0 or 1 and are not usable. Review confounding "
+            "and positivity, and state the target estimand, before changing the "
+            "adjustment set (Grilling Gate #3)."
+        )
+    return np.asarray(model.predict(X), dtype=float)
 
 
 def match_propensity_scores(
@@ -72,11 +128,9 @@ def match_propensity_scores(
 
     # Handle categorical confounders via dummy encoding
     X_raw = pd.get_dummies(clean[confounders], drop_first=True, dtype=float)
-    X = sm.add_constant(X_raw)
 
-    # Fit propensity score model
-    ps_model = sm.Logit(y, X).fit(disp=False)
-    clean["ps"] = ps_model.predict(X)
+    # Fit propensity score model (raises on a rank-deficient or separated design)
+    clean["ps"] = _fit_propensity_logit(y, X_raw)
     clean["logit_ps"] = logit(np.clip(clean["ps"], 1e-5, 1.0 - 1e-5))
 
     if not np.isfinite(caliper_sd) or caliper_sd < 0.0:
@@ -175,6 +229,7 @@ def match_propensity_scores(
         "love_plot_data": love_plot_data,
         "n_matched_pairs": pair_counter - 1,
         "n_unmatched_treated": len(treated) - (pair_counter - 1),
+        "ps_method": "logistic",
         "retention_audit": {
             "n_initial": n_initial,
             "n_excluded": n_excluded,
@@ -192,15 +247,70 @@ def match_propensity_scores(
 
 ## 14. Inverse Probability of Treatment Weighting (IPTW) & Weighted Balance
 
-Standalone implementation for causal inference via propensity score weighting supporting ATE, ATT, ATC, and Overlap Weights (ATO; Li et al., 2018). Computes stabilized weights, quantile truncation, Kish's Effective Sample Size (\$N_{\text{eff}}\$), Bessel-corrected weighted SMD, and Huber-White sandwich variance estimation.
+Standalone implementation for causal inference via propensity score weighting supporting ATE, ATT, ATC, and Overlap Weights (ATO; Li et al., 2018). Computes stabilized weights, quantile truncation, Kish's Effective Sample Size (\$N_{\text{eff}}\$), Bessel-corrected weighted SMD, and Huber-White sandwich variance estimation. The propensity model is fitted by maximum likelihood only (`diagnostics["ps_method"] == "logistic"`): a rank-deficient or separated design raises `ValueError`, and the Grilling Gate #3 resolution for it starts with reviewing confounding and positivity and stating the target estimand, before the adjustment set is changed.
 
 ```python
+import warnings
 from typing import Any, Literal
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
 import statsmodels.api as sm
 from lifelines import CoxPHFitter
+
+
+def _fit_propensity_logit(t: np.ndarray, X_raw: pd.DataFrame) -> np.ndarray:
+    """Maximum-likelihood propensity scores; a rank-deficient or separated design raises."""
+    from statsmodels.tools.sm_exceptions import (
+        ConvergenceWarning,
+        PerfectSeparationError,
+        PerfectSeparationWarning,
+    )
+
+    X_arr = X_raw.to_numpy(dtype=float)
+    # Rank check on standardized columns, so it does not depend on covariate units.
+    sd = X_arr.std(axis=0)
+    constant = [c for c, s in zip(X_raw.columns, sd) if s == 0.0]
+    z_design = np.column_stack(
+        [np.ones(len(t)), (X_arr - X_arr.mean(axis=0)) / np.where(sd > 0, sd, 1.0)]
+    )
+    if constant or np.linalg.matrix_rank(z_design) < z_design.shape[1]:
+        detail = f" Constant covariates: {constant}." if constant else ""
+        raise ValueError(
+            "Propensity score design matrix is rank deficient (constant or collinear "
+            f"covariates).{detail} Remove or combine the redundant covariates."
+        )
+
+    X = sm.add_constant(X_raw, has_constant="add")
+    limit = 10.0  # unit-free separation bound: |coefficient| per SD of its covariate
+    reason = None
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", PerfectSeparationWarning)
+            # Convergence and finiteness are read from the fit below.
+            warnings.simplefilter("ignore", ConvergenceWarning)
+            warnings.simplefilter("ignore", RuntimeWarning)
+            model = sm.Logit(t, X).fit(disp=False)
+    except (PerfectSeparationWarning, PerfectSeparationError, np.linalg.LinAlgError) as e:
+        reason = f"{type(e).__name__}: {e}"
+    else:
+        params = np.asarray(model.params, dtype=float)
+        per_sd = np.abs(params[1:]) * sd
+        if not np.all(np.isfinite(params)):
+            reason = "non-finite coefficients"
+        elif not bool(getattr(model, "mle_retvals", {}).get("converged", True)):
+            reason = "the optimizer did not converge"
+        elif np.any(per_sd > limit):
+            flagged = [c for c, g in zip(X_raw.columns, per_sd) if g > limit]
+            reason = f"|coefficient| per SD exceeds {limit:g} for {flagged}"
+    if reason is not None:
+        raise ValueError(
+            f"Propensity score model shows separation or did not converge ({reason}); "
+            "its fitted scores approach 0 or 1 and are not usable. Review confounding "
+            "and positivity, and state the target estimand, before changing the "
+            "adjustment set (Grilling Gate #3)."
+        )
+    return np.asarray(model.predict(X), dtype=float)
 
 
 def compute_iptw(
@@ -232,9 +342,7 @@ def compute_iptw(
 
     # 1. Fit Propensity Score via Logistic Regression with dummy encoding for categorical covariates
     X_raw = pd.get_dummies(clean[covariates], drop_first=True, dtype=float)
-    X = sm.add_constant(X_raw)
-    ps_model = sm.Logit(T, X).fit(disp=False)
-    ps = np.clip(ps_model.predict(X).to_numpy(dtype=float), 1e-4, 1.0 - 1e-4)
+    ps = np.clip(_fit_propensity_logit(T, X_raw), 1e-4, 1.0 - 1e-4)
     clean["propensity_score"] = ps
 
     p_t = float(np.mean(T))
@@ -293,6 +401,7 @@ def compute_iptw(
 
     diagnostics = {
         "estimand": estimand_u,
+        "ps_method": "logistic",
         "stabilized": stabilized and estimand_u == "ATE",
         "n_eff": {"treated": round(n_eff_treated, 1), "control": round(n_eff_control, 1), "total": round(n_eff_total, 1)},
         "extreme_weights_gt_10": int(np.sum(w_final > 10.0)),

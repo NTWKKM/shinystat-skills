@@ -22,6 +22,8 @@ from typing import Any, Callable, Sequence
 import numpy as np
 import pandas as pd
 
+from medstat.data.expressions import eval_rows, validate_row_expression
+
 # ==============================================================================
 # Helper Functions for Column Type & Dirty Token Detection
 # ==============================================================================
@@ -324,6 +326,11 @@ class DataQualityReport:
 
             for rule in self.schema.cross_variable_rules:
                 try:
+                    # A string rule is checked before any row is considered, so an
+                    # unsafe rule is recorded even when its columns hold only nulls.
+                    if isinstance(rule.condition, str):
+                        validate_row_expression(rule.condition)
+
                     # Scope evaluation to non-null rows of referenced columns
                     if isinstance(rule.condition, str):
                         backtick_tokens = re.findall(r"`([^`]+)`", rule.condition)
@@ -350,14 +357,17 @@ class DataQualityReport:
                     if callable(rule.condition):
                         raw_valid = rule.condition(self.df)
                     else:
-                        raw_valid = self.df.eval(rule.condition)
+                        raw_valid = eval_rows(self.df, rule.condition)
 
                     if isinstance(raw_valid, pd.Series):
                         valid_mask = raw_valid
                     elif isinstance(raw_valid, (bool, np.bool_)):
                         valid_mask = pd.Series(bool(raw_valid), index=self.df.index)
                     else:
-                        continue
+                        raise TypeError(
+                            "rule must return a boolean Series or a scalar bool, got "
+                            f"{type(raw_valid).__name__}"
+                        )
 
                     violations = int(((~valid_mask) & non_null_mask).sum())
                     violation_rate = violations / evaluable_rows
@@ -375,6 +385,11 @@ class DataQualityReport:
                     )
 
             base_score = max(0.0, base_score - min(100.0, rule_penalties))
+
+            # A rule that could not be evaluated leaves the dimension unassessed:
+            # the score is undefined (NaN), never a passing value (see rule_errors).
+            if self.rule_errors:
+                return float("nan")
 
         return base_score
 
@@ -640,6 +655,8 @@ class DataQualityReport:
             "uniqueness": self.uniqueness_score(),
             "plausibility": self.plausibility_score(),
         }
+        if any(np.isnan(v) for v in calc_scores.values()):
+            return float("nan")
         total_w = sum(w.get(k, 0.0) for k in calc_scores)
         composite = sum(calc_scores[k] * w.get(k, 0.0) for k in calc_scores) / total_w
         return round(composite, 1)
@@ -678,6 +695,8 @@ class DataQualityReport:
 
     @staticmethod
     def _score_to_grade(score: float) -> str:
+        if np.isnan(score):
+            return "Unavailable"
         if score >= 95.0:
             return "A"
         if score >= 85.0:
@@ -707,6 +726,12 @@ class DataQualityReport:
         if scores["plausibility"] < 95.0:
             recs.append(
                 "Extreme statistical outliers detected (>3x IQR). Consider clinical winsorization or sensitivity check."
+            )
+        if self.rule_errors:
+            names = ", ".join(str(e["rule"]) for e in self.rule_errors)
+            recs.append(
+                f"Consistency is unavailable: rule(s) {names} could not be evaluated "
+                "(see rule_errors)."
             )
         if not recs:
             recs.append(

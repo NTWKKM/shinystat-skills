@@ -454,9 +454,14 @@ def generate_iptw_narrative(
     else:
         est_desc = "Average Treatment Effect (ATE), reweighting the entire study cohort to a pseudo-population where treatment assignment is independent of measured baseline confounders"
 
+    ps_desc = (
+        "multivariable logistic regression with Firth's penalized likelihood"
+        if str((diagnostics or {}).get("ps_method", "")).lower() == "firth"
+        else "multivariable logistic regression"
+    )
     p1 = (
         f"To evaluate the causal effect of {exp_str} on {out_str}, Inverse Probability of Treatment Weighting (IPTW) was performed "
-        f"based on propensity scores estimated via multivariable logistic regression ({cov_str}). "
+        f"based on propensity scores estimated via {ps_desc} ({cov_str}). "
         f"The target estimand was the {est_desc}."
     )
     if stabilized and estimand_u != "ATO":

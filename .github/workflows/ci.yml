@@ -15,13 +15,16 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ github.head_ref || github.ref_name }}
+          # The head branch (so a sync commit can be pushed to it) only for a PR from
+          # this repository. A fork PR's head branch does not exist here, so it keeps
+          # the default merge ref, as pushes and tags keep their own ref.
+          ref: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.head_ref || github.ref }}
           fetch-depth: 0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           enable-cache: true
 
@@ -29,27 +32,38 @@ jobs:
         run: uv python install 3.12
 
       - name: Check SSOT sync and auto-sync if drifted
+        # Event data reaches the script as environment variables, never as text pasted
+        # into it: a branch name is attacker-controlled and may contain shell syntax.
+        env:
+          GIT_REF: ${{ github.ref }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+          TARGET_BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
           chmod +x ./scripts/sync-skills.sh ./scripts/install-skills.sh ./scripts/package-cloud-skill.sh
           ./scripts/sync-skills.sh
-          if git diff --quiet skills/; then
+          # Porcelain status lists untracked files as well: a new canonical file whose
+          # mirror was never committed is drift that `git diff` does not show.
+          DRIFT="$(git status --porcelain --untracked-files=all -- skills/)"
+          if [ -z "$DRIFT" ]; then
             echo "✓ skills/ is already in sync with SSOT. Passing directly."
           else
             echo "⚡ Drift detected between SSOT and skills/! Auto-syncing..."
-            if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "$DRIFT"
+            if [[ "$GIT_REF" == refs/tags/* ]]; then
               echo "::error::Cannot auto-push on a static release tag. Please sync skills before tagging."
-              git diff --exit-code skills/
+              exit 1
             fi
-            if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+            if [ "$EVENT_NAME" = "pull_request" ] && [ "$HEAD_REPO" != "$BASE_REPO" ]; then
               echo "::error::Cannot auto-push to a fork PR. Please run './scripts/sync-skills.sh' locally and push."
-              git diff --exit-code skills/
+              exit 1
             fi
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add skills/
+            git add -A skills/
             git commit -m "chore(skills): auto-sync skills with SSOT [skip ci]"
-            TARGET_BRANCH="${{ github.head_ref || github.ref_name }}"
-            git push origin HEAD:"$TARGET_BRANCH"
+            git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
             echo "✓ Successfully auto-synced skills and pushed to $TARGET_BRANCH."
           fi
 
@@ -70,10 +84,10 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
 
       - name: Set up Python
         run: uv python install 3.12
@@ -84,7 +98,7 @@ jobs:
           ./scripts/package-cloud-skill.sh
 
       - name: Create GitHub Release & Upload Asset
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: packaging/cloud/shinystat-cloud.zip
           generate_release_notes: true

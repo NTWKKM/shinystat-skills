@@ -303,8 +303,9 @@ def test_tier2_causal_caliper_too_narrow_zero_matches_handled():
     psm_mod = require_medstat_module("medstat.causal.psm")
     df = pd.DataFrame(
         {
-            "trt": [1, 1, 0, 0],
-            "age": [80.0, 85.0, 20.0, 25.0],  # Completely non-overlapping
+            # Overlapping ages (a separated design raises, ADR 82), all distinct
+            "trt": [1, 1, 1, 0, 0, 0],
+            "age": [80.0, 60.0, 30.0, 70.0, 40.0, 20.0],
         }
     )
     df["ps"] = psm_mod.calculate_propensity_score(
@@ -318,7 +319,12 @@ def test_tier2_causal_no_common_support_in_propensity_scores():
     """FEAT-05-B2: Complete lack of common support between treatment and control groups."""
     psm_mod = require_medstat_module("medstat.causal.psm")
     df = pd.DataFrame({"trt": [1] * 10 + [0] * 10, "x": [100.0] * 10 + [0.0] * 10})
-    df["ps"] = psm_mod.calculate_propensity_score(df, treatment="trt", covariates=["x"])
+    # The covariate determines treatment: the propensity model is separated and raises
+    # instead of returning scores of 0 and 1 (ADR 82).
+    with pytest.raises(ValueError, match="separation"):
+        psm_mod.calculate_propensity_score(df, treatment="trt", covariates=["x"])
+    # Scores without overlap, supplied directly, still match nobody.
+    df["ps"] = [0.99] * 10 + [0.01] * 10
     matched = psm_mod.perform_matching(df, treatment="trt", ps_col="ps", caliper=0.1)
     assert len(matched) == 0
 

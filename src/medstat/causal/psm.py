@@ -7,34 +7,69 @@ with caliper constraints, and inverse probability of treatment weighting.
 
 from __future__ import annotations
 
+import warnings
 from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 from scipy.spatial.distance import cdist
+from scipy.special import expit
+from statsmodels.tools.sm_exceptions import (
+    ConvergenceWarning,
+    PerfectSeparationError,
+    PerfectSeparationWarning,
+)
 
 from medstat.logging import get_logger
 
 logger = get_logger(__name__)
 
 
+# Propensity model estimators. The caller names one; none is substituted for another.
+PS_METHODS: tuple[str, ...] = ("logistic", "firth")
+
+# Unit-free separation bound: |coefficient| per SD of its covariate (the bound Recipe 18 and
+# diagnostic.validation._fit_logit_shared use for the same purpose).
+_PS_SEPARATION_LIMIT = 10.0
+
+
+def normalize_ps_method(method: str) -> str:
+    """Return the canonical propensity model name, or raise for an unsupported one."""
+    key = str(method).strip().lower()
+    if key not in PS_METHODS:
+        raise ValueError(
+            f"Unsupported propensity score method '{method}'. "
+            f"Choose from: {', '.join(repr(m) for m in PS_METHODS)}."
+        )
+    return key
+
+
 def calculate_propensity_score(
     df: pd.DataFrame,
     treatment: str,
     covariates: list[str],
+    method: str = "logistic",
 ) -> pd.Series:
     """
-    Estimate propensity scores using logistic regression.
+    Estimate propensity scores with the named model. No estimator is substituted for another.
 
     Parameters:
         df: Input DataFrame.
         treatment: Name of binary treatment/exposure column (0/1).
         covariates: List of baseline confounder column names.
+        method: 'logistic' (maximum likelihood, default) or 'firth' (Firth's penalized
+            likelihood, finite under separation).
 
     Returns:
         pd.Series containing estimated propensity scores aligned with df.index.
+
+    Raises:
+        ValueError: unsupported method; no complete observations; treatment not 0/1 or
+            missing a group; rank-deficient design; or, for 'logistic', a fit that shows
+            separation or did not converge.
     """
+    method_key = normalize_ps_method(method)
     cols = [treatment] + covariates
     clean_sub = df[cols].dropna()
 
@@ -43,56 +78,79 @@ def calculate_propensity_score(
             "No complete observations available to estimate propensity scores."
         )
 
-    y = clean_sub[treatment].astype(int)
+    t_vals = clean_sub[treatment].to_numpy(dtype=float)
+    if not np.all(np.isin(t_vals, [0.0, 1.0])) or np.unique(t_vals).size < 2:
+        raise ValueError(
+            f"Treatment column '{treatment}' must be binary 0/1 with both groups present "
+            "to estimate propensity scores."
+        )
+    y = t_vals.astype(int)
     X = clean_sub[covariates].astype(float)
-    X = sm.add_constant(X)
+    X_arr = X.to_numpy(dtype=float)
 
-    try:
-        model = sm.Logit(y, X).fit(disp=False)
-        ps_clean = model.predict(X)
-    except Exception:
+    # Rank check on standardized columns, so it does not depend on covariate units.
+    sd = X_arr.std(axis=0)
+    constant = [c for c, s in zip(covariates, sd) if s == 0.0]
+    z_design = np.column_stack(
+        [np.ones(len(y)), (X_arr - X_arr.mean(axis=0)) / np.where(sd > 0, sd, 1.0)]
+    )
+    if constant or np.linalg.matrix_rank(z_design) < z_design.shape[1]:
+        detail = f" Constant covariates: {constant}." if constant else ""
+        raise ValueError(
+            "Propensity score design matrix is rank deficient (constant or collinear "
+            f"covariates).{detail} Remove or combine the redundant covariates."
+        )
+
+    if method_key == "firth":
+        from medstat.models.firth import fit_firth_logistic
+
+        firth_fit = fit_firth_logistic(y, X, fit_intercept=True, ci_method="wald")
+        coef = np.asarray(firth_fit["model"].coef_, dtype=float).ravel()
+        if not firth_fit["converged"] or not np.all(np.isfinite(coef)):
+            raise ValueError(
+                "Firth propensity score model did not converge to finite estimates: "
+                "the covariates determine treatment. Review confounding and positivity, "
+                "and state the target estimand, before changing the adjustment set "
+                "(Grilling Gate #3)."
+            )
+        ps_clean = expit(coef[0] + X_arr @ coef[1:])
+    else:
+        X_const = sm.add_constant(X, has_constant="add")
+        reason = None
         try:
-            from medstat.models.firth import fit_firth_logistic
-
-            firth_fit = fit_firth_logistic(y, clean_sub[covariates], fit_intercept=True)
-            fl_model = firth_fit["model"]
-            ps_clean = fl_model.predict_proba(X)[:, 1]
-        except Exception:
-            # Statsmodels fit_regularized minimizes unnormalized negative log-likelihood plus L1 penalty.
-            # Scale covariate L1 penalty by sample size (alpha = 1.0 * len(y)) to maintain consistent
-            # regularization strength relative to the summed log-likelihood across varying sample sizes,
-            # while leaving the intercept unpenalized (alpha=0.0).
-            # Identify intercept strictly by all-ones values and position, ensuring any varying covariate named 'const' remains penalized.
-            covariate_alpha = 1.0 * float(len(y))
-            alphas = np.full(X.shape[1], covariate_alpha, dtype=float)
-            const_indices = [
-                i
-                for i in range(X.shape[1])
-                if bool((X.iloc[:, i] == 1.0).all())
-                and (i == 0 or X.columns[i] == "const")
-            ]
-            for idx in const_indices:
-                alphas[idx] = 0.0
-            model = sm.Logit(y, X).fit_regularized(alpha=alphas, disp=False)
-            # Guard against degenerating to constant intercept-only fit
-            coefs = np.asarray(model.params)
-            non_const_indices = [i for i in range(len(coefs)) if i not in const_indices]
-            if len(non_const_indices) > 0 and np.all(
-                np.isclose(coefs[non_const_indices], 0.0)
-            ):
-                # If all non-intercept coefficients shrunk to zero, retry with small unscaled penalty
-                alphas_small = np.full(X.shape[1], 0.1, dtype=float)
-                for idx in const_indices:
-                    alphas_small[idx] = 0.0
-                model = sm.Logit(y, X).fit_regularized(alpha=alphas_small, disp=False)
-                coefs = np.asarray(model.params)
-                if len(non_const_indices) > 0 and np.all(
-                    np.isclose(coefs[non_const_indices], 0.0)
-                ):
-                    raise RuntimeError(
-                        "Regularized propensity score fit shrank all covariate coefficients to zero."
-                    )
-            ps_clean = model.predict(X)
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", PerfectSeparationWarning)
+                # Convergence and finiteness are read from the fit below.
+                warnings.simplefilter("ignore", ConvergenceWarning)
+                warnings.simplefilter("ignore", RuntimeWarning)
+                model = sm.Logit(y, X_const).fit(disp=False)
+        except (
+            PerfectSeparationWarning,
+            PerfectSeparationError,
+            np.linalg.LinAlgError,
+        ) as e:
+            reason = f"{type(e).__name__}: {e}"
+        else:
+            params = np.asarray(model.params, dtype=float)
+            per_sd = np.abs(params[1:]) * sd
+            if not np.all(np.isfinite(params)):
+                reason = "non-finite coefficients"
+            elif not bool(getattr(model, "mle_retvals", {}).get("converged", True)):
+                reason = "the optimizer did not converge"
+            elif np.any(per_sd > _PS_SEPARATION_LIMIT):
+                flagged = [
+                    c for c, g in zip(covariates, per_sd) if g > _PS_SEPARATION_LIMIT
+                ]
+                reason = f"|coefficient| per SD exceeds {_PS_SEPARATION_LIMIT:g} for {flagged}"
+        if reason is not None:
+            raise ValueError(
+                f"Propensity score model shows separation or did not converge ({reason}); "
+                "its fitted scores approach 0 or 1 and are not usable. Review confounding "
+                "and positivity, and state the target estimand, before changing the "
+                "adjustment set (Grilling Gate #3), or pass method='firth' "
+                "(ps_method='firth') for Firth's penalized likelihood."
+            )
+        ps_clean = model.predict(X_const)
 
     ps_full = pd.Series(index=df.index, dtype=float)
     ps_full.loc[clean_sub.index] = np.asarray(ps_clean, dtype=float)
@@ -205,6 +263,7 @@ def propensity_score_match(
     covariates: list[str],
     caliper: float = 0.2,
     ratio: int = 1,
+    ps_method: str = "logistic",
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """
     Convenience wrapper: calculate propensity scores and perform matching.
@@ -215,13 +274,15 @@ def propensity_score_match(
         covariates: List of confounder column names.
         caliper: Caliper width in SDs of the logit propensity score (default 0.2; Austin 2011).
         ratio: Matching ratio (default 1).
+        ps_method: Propensity model, 'logistic' (default) or 'firth'; reported in info['ps_method'].
 
     Returns:
         tuple of (matched_df, info_dict).
     """
     df_ps = df.copy()
+    ps_method = normalize_ps_method(ps_method)
     ps_series = calculate_propensity_score(
-        df, treatment=treatment_col, covariates=covariates
+        df, treatment=treatment_col, covariates=covariates, method=ps_method
     )
     df_ps["ps"] = ps_series
     matched_df = perform_matching(
@@ -246,6 +307,7 @@ def propensity_score_match(
         "n_control_matched": n_ctrl,
         "caliper": caliper,
         "ratio": ratio,
+        "ps_method": ps_method,
     }
     return matched_df, info
 

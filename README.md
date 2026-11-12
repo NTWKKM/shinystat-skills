@@ -606,7 +606,7 @@ html_content = render_html(doc, output_path="reports/diagnostic_report.html")
 The project includes an automatic forwarding wrapper in `tests/conftest.py` that transparently forwards execution to the Python 3.12 virtual environment (`.venv/bin/pytest`) even if executed from older system Python environments.
 
 ```bash
-# Run full comprehensive test suite (741 passed tests)
+# Run the full test suite
 uv run pytest
 
 # Run unit tests for Reclassification & Time-Dependent ROC

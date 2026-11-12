@@ -18,7 +18,9 @@ import yaml
 
 from medstat.causal.balance import compute_balance_table
 from medstat.causal.iptw import compute_iptw_weights, fit_iptw_outcome_model
+from medstat.causal.psm import normalize_ps_method
 from medstat.data.clean import prepare_data_for_analysis
+from medstat.data.expressions import query_rows, validate_row_expression
 from medstat.data.loader import get_clinical_columns, load_clinical_data
 from medstat.data.missing import pool_estimates
 from medstat.data.retention import SampleFlowTracker
@@ -427,7 +429,7 @@ class AnalysisPlan:
         for flt in self.data.filters:
             n_start = len(current_df)
             try:
-                filtered = current_df.query(flt.expression)
+                filtered = query_rows(current_df, flt.expression)
                 n_rem = len(filtered)
                 n_excl = n_start - n_rem
                 tracker.record_stage(
@@ -641,6 +643,7 @@ class AnalysisPlan:
                     estimand=estimand,
                     stabilized=stabilized,
                     truncate_quantiles=t_quantiles,
+                    ps_method=model_spec.options.get("ps_method", "logistic"),
                 )
 
                 out_type = model_spec.options.get("outcome_type")
@@ -1512,6 +1515,25 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
             "Specify `data.input_path: path/to/dataset.csv` in your spec YAML."
         )
 
+    # 1b. Cohort filters are row predicates, checked before any is evaluated
+    filters_cfg = data_cfg.get("filters") if isinstance(data_cfg, dict) else None
+    for idx, flt in enumerate(filters_cfg if isinstance(filters_cfg, list) else []):
+        try:
+            if not isinstance(flt, dict):
+                raise ValueError(
+                    "a filter must be a mapping with an 'expression' key "
+                    f"(got {type(flt).__name__})"
+                )
+            validate_row_expression(flt.get("expression"))
+        except ValueError as exc:
+            report["valid"] = False
+            report["errors"].append(f"data.filters[{idx}]: {exc}")
+            report["agent_remediation"].append(
+                f"Rewrite data.filters[{idx}].expression as a comparison of column names and "
+                "constants (and / or / not, in, between, isin, isna / notna, .str methods); "
+                "'@' references, other attributes and function calls are rejected."
+            )
+
     # 2. Executable models section check
     models_list = raw_spec.get("models")
     if not isinstance(models_list, list) or len(models_list) == 0:
@@ -1796,6 +1818,19 @@ def preflight_validate_spec(spec_path: str | Path) -> dict[str, Any]:
                 report["errors"].append(
                     f"Survival model '{item.get('name', 'unnamed')}' requires a 'time' or 'time_col' specification."
                 )
+
+            if is_iptw and "ps_method" in opts_dict:
+                try:
+                    normalize_ps_method(opts_dict["ps_method"])
+                except ValueError as exc:
+                    report["valid"] = False
+                    report["errors"].append(
+                        f"IPTW model '{item.get('name', 'unnamed')}': {exc}"
+                    )
+                    report["agent_remediation"].append(
+                        "Set options.ps_method to 'logistic' (maximum likelihood, default) or 'firth' "
+                        f"in model '{item.get('name', 'unnamed')}'."
+                    )
 
             # Collect model options column references
             if is_reclass:

@@ -14,6 +14,11 @@ import scipy.stats as stats
 
 from medstat.causal.balance import calculate_smd
 
+_UNDEFINED_TEST = (
+    "test undefined: a group is empty, has one observation or has zero variance"
+)
+_UNDEFINED_SMD = "SMD undefined: an empty group or zero pooled variance"
+
 
 def generate_table_one(
     df: pd.DataFrame,
@@ -39,7 +44,9 @@ def generate_table_one(
         digits: Number of decimal places to format.
 
     Returns:
-        pd.DataFrame formatted as Table 1.
+        pd.DataFrame formatted as Table 1. ``attrs["unavailable"]`` lists every P value
+        or SMD that could not be computed as {"variable", "statistic", "reason"}; the
+        cell itself shows "—" or stays empty.
     """
     data = df.copy()
     nonnormal = set(nonnormal_vars or [])
@@ -67,6 +74,12 @@ def generate_table_one(
         strata_levels = []
 
     rows = []
+    unavailable: list[dict[str, str]] = []
+
+    def note(variable: object, statistic: str, reason: str) -> None:
+        unavailable.append(
+            {"variable": str(variable), "statistic": statistic, "reason": reason}
+        )
 
     # 1. Overall Sample Size row
     n_total = len(data)
@@ -139,11 +152,14 @@ def generate_table_one(
                         _, p = stats.f_oneway(*valid_groups)
                 else:
                     p = np.nan
+                if np.isnan(p):
+                    note(var, "P-value", _UNDEFINED_TEST)
                 p_val_str = (
                     "<0.001" if p < 0.001 else f"{p:.3f}" if not np.isnan(p) else ""
                 )
-            except Exception:
+            except Exception as e:
                 p_val_str = "—"
+                note(var, "P-value", f"{type(e).__name__}: {e}")
             row["P-value"] = p_val_str
 
         # SMD
@@ -151,8 +167,11 @@ def generate_table_one(
             try:
                 smd = calculate_smd(group_series[0], group_series[1])
                 row["SMD"] = f"{abs(smd):.3f}" if not np.isnan(smd) else "—"
-            except Exception:
+                if np.isnan(smd):
+                    note(var, "SMD", _UNDEFINED_SMD)
+            except Exception as e:
                 row["SMD"] = "—"
+                note(var, "SMD", f"{type(e).__name__}: {e}")
 
         rows.append(row)
 
@@ -177,7 +196,9 @@ def generate_table_one(
 
         p_cat_str = ""
         if strata_levels:
-            p_cat_str = _categorical_p_value(observed, var, strata)
+            p_cat_str, p_cat_reason = _categorical_p_value(observed, var, strata)
+            if include_p and p_cat_reason is not None:
+                note(var, "P-value", p_cat_reason)
 
         if include_p and strata_levels:
             header_cat["P-value"] = p_cat_str
@@ -209,23 +230,38 @@ def generate_table_one(
                 try:
                     smd = calculate_smd(grp_props[0], grp_props[1])
                     cat_row["SMD"] = f"{abs(smd):.3f}" if not np.isnan(smd) else ""
-                except Exception:
+                    if np.isnan(smd):
+                        note(f"{var}: {cat}", "SMD", _UNDEFINED_SMD)
+                except Exception as e:
                     cat_row["SMD"] = ""
+                    note(f"{var}: {cat}", "SMD", f"{type(e).__name__}: {e}")
 
             rows.append(cat_row)
 
-    return pd.DataFrame(rows)
+    table = pd.DataFrame(rows)
+    table.attrs["unavailable"] = unavailable
+    return table
 
 
-def _categorical_p_value(observed: pd.DataFrame, var: str, strata: str) -> str:
-    """Pearson chi-square; Fisher's exact test for a 2x2 table with any expected count < 5."""
+def _categorical_p_value(
+    observed: pd.DataFrame, var: str, strata: str
+) -> tuple[str, str | None]:
+    """
+    Pearson chi-square; Fisher's exact test for a 2x2 table with any expected count < 5.
+
+    Returns (cell text, reason). The reason is None when the P value was computed.
+    """
     try:
         ct = pd.crosstab(observed[var], observed[strata])
         if ct.size == 0 or min(ct.shape) < 2:
-            return ""
+            return "", (
+                "test undefined: fewer than two observed levels of the variable or the strata"
+            )
         _, p, _, expected = stats.chi2_contingency(ct)
         if ct.shape == (2, 2) and (expected < 5).any():
             _, p = stats.fisher_exact(ct.to_numpy())
-        return "<0.001" if p < 0.001 else f"{p:.3f}"
-    except Exception:
-        return "—"
+        if np.isnan(p):
+            return "", _UNDEFINED_TEST
+        return ("<0.001" if p < 0.001 else f"{p:.3f}"), None
+    except Exception as e:
+        return "—", f"{type(e).__name__}: {e}"

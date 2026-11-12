@@ -581,7 +581,7 @@ def test_cli_iptw_survival_invalid_duration_rejects(tmp_path: Path):
     df_neg = pd.DataFrame(
         {
             "treatment": [0, 1, 0, 1, 0, 1],
-            "age": [50, 60, 55, 65, 52, 58],
+            "age": [50, 60, 62, 55, 52, 58],  # arms overlap on age
             "event": [0, 1, 0, 1, 0, 1],
             "time": [10.0, -5.0, 12.0, 8.0, 15.0, 9.0],  # negative duration
         }
@@ -613,7 +613,7 @@ def test_cli_iptw_survival_invalid_duration_rejects(tmp_path: Path):
     df_str = pd.DataFrame(
         {
             "treatment": [0, 1, 0, 1, 0, 1],
-            "age": [50, 60, 55, 65, 52, 58],
+            "age": [50, 60, 62, 55, 52, 58],  # arms overlap on age
             "event": [0, 1, 0, 1, 0, 1],
             "time": ["10", "bad_time", "12", "8", "15", "9"],  # non-numeric duration
         }
@@ -691,3 +691,104 @@ reporting:
     assert "must contain only numeric 0 and 1 values" in (
         result.output or str(result.exception)
     )
+
+
+def test_cli_causal_ps_method_is_passed_and_disclosed(
+    sample_iptw_csv: Path, tmp_path: Path
+):
+    """ADR 82: --ps-method reaches the engine and is reported in the diagnostics."""
+    runner = CliRunner()
+    for method in ("logistic", "firth"):
+        out_json = tmp_path / f"iptw_{method}.json"
+        result = runner.invoke(
+            cli,
+            [
+                "causal",
+                "iptw",
+                "--data",
+                str(sample_iptw_csv),
+                "--treatment",
+                "treatment",
+                "--covariates",
+                "age,bmi",
+                "--ps-method",
+                method,
+                "--output",
+                str(out_json),
+            ],
+        )
+        assert result.exit_code == 0, f"Error: {result.output}"
+        assert json.loads(out_json.read_text())["diagnostics"]["ps_method"] == method
+
+    for method in ("logistic", "firth"):
+        for suffix in ("json", "csv"):
+            out = tmp_path / f"psm_{method}.{suffix}"
+            result = runner.invoke(
+                cli,
+                [
+                    "causal",
+                    "psm",
+                    "--data",
+                    str(sample_iptw_csv),
+                    "--treatment",
+                    "treatment",
+                    "--covariates",
+                    "age,bmi",
+                    "--ps-method",
+                    method,
+                    "--output",
+                    str(out),
+                ],
+            )
+            assert result.exit_code == 0, f"Error: {result.output}"
+            assert f"propensity model: {method}" in result.output
+            if suffix == "json":
+                assert json.loads(out.read_text())["ps_method"] == method
+
+    result = runner.invoke(
+        cli,
+        [
+            "causal",
+            "psm",
+            "--data",
+            str(sample_iptw_csv),
+            "--treatment",
+            "treatment",
+            "--covariates",
+            "age,bmi",
+            "--ps-method",
+            "lasso",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "--ps-method" in result.output
+
+
+def test_preflight_rejects_unknown_iptw_ps_method(
+    sample_iptw_csv: Path, tmp_path: Path
+):
+    from medstat.cli.spec import preflight_validate_spec
+
+    spec = tmp_path / "spec.yaml"
+    spec.write_text(
+        f"""
+metadata:
+  study_title: "IPTW ps_method"
+data:
+  input_path: "{sample_iptw_csv}"
+models:
+  - name: "iptw_ate"
+    type: "iptw"
+    outcome: "outcome_cont"
+    exposure: "treatment"
+    covariates: ["age", "bmi"]
+    options:
+      outcome_type: "continuous"
+      ps_method: "lasso"
+""",
+        encoding="utf-8",
+    )
+    report = preflight_validate_spec(spec)
+    assert report["valid"] is False
+    assert any("Unsupported propensity score method" in e for e in report["errors"])
+    assert any("options.ps_method" in h for h in report["agent_remediation"])

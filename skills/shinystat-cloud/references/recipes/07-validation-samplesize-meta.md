@@ -6,7 +6,7 @@
 
 ## 18. TRIPOD+AI Optimism-Corrected Bootstrap Internal Validation & Uniform Shrinkage
 
-Computes Efron-Gong optimism-corrected performance metrics (AUROC, Brier score, Cox-Snell $R^2$, Nagelkerke $R^2$, calibration-in-the-large, calibration slope) across $B$ bootstrap resamples. Derives the uniform shrinkage factor $\hat{s}$ and re-estimates the intercept $\alpha_0$ to preserve sample prevalence on future predictions.
+Computes Efron-Gong optimism-corrected performance metrics (AUROC, Brier score, Cox-Snell $R^2$, Nagelkerke $R^2$, calibration-in-the-large, calibration slope) across $B$ bootstrap resamples. Derives the uniform shrinkage factor $\hat{s}$ and re-estimates the intercept $\alpha_0$ to preserve sample prevalence on future predictions. A calibration intercept with no root in $[-50, 50]$ is `NaN` (with an entry in `warnings` when it is the apparent one), never a substitute value.
 
 ```python
 import math
@@ -188,12 +188,11 @@ def bootstrap_internal_validation(
         )
         brier = float(np.mean((y_true - p_pred) ** 2))
 
-        # Intercept offset
+        # Intercept offset: NaN (unavailable) for a single outcome class or when no
+        # intercept in [-50, 50] reproduces the event count; never a substitute value
         sum_y = float(np.sum(y_true))
-        if sum_y <= 0:
-            inter = -50.0
-        elif sum_y >= n:
-            inter = 50.0
+        if sum_y <= 0 or sum_y >= n:
+            inter = float("nan")
         else:
             try:
                 inter = float(
@@ -203,8 +202,8 @@ def bootstrap_internal_validation(
                         50.0,
                     )
                 )
-            except Exception:
-                inter = 0.0
+            except (ValueError, RuntimeError):
+                inter = float("nan")
 
         # Slope: NaN (unavailable) when the LP is constant or the fit fails/does not converge
         if np.allclose(lp, lp[0]):
@@ -227,6 +226,11 @@ def bootstrap_internal_validation(
         }
 
     apparent = _calc_metrics(y_orig, p_orig, lp_orig)
+    if not np.isfinite(apparent["calibration_intercept"]):
+        warnings.append(
+            "Calibration intercept (calibration-in-the-large) is unavailable for the "
+            "fitted model: no intercept in [-50, 50] reproduces the observed event count."
+        )
 
     # 2. Bootstrap loop
     rng = np.random.default_rng(random_state)
@@ -391,7 +395,7 @@ def bootstrap_internal_validation(
 
 ## 19. Prediction Model Recalibration and Updating (Logistic & Intercept-Only)
 
-Adjusts existing prediction models to a new target population or cohort. Supports Intercept-Only updating (calibration-in-the-large, shifting mean predicted risk to the observed outcome incidence while fixing slope=1) and Logistic Recalibration (updating both calibration intercept $\alpha$ and calibration slope $\beta$).
+Adjusts existing prediction models to a new target population or cohort. Supports Intercept-Only updating (calibration-in-the-large, shifting mean predicted risk to the observed outcome incidence while fixing slope=1) and Logistic Recalibration (updating both calibration intercept $\alpha$ and calibration slope $\beta$). When no intercept in $[-50, 50]$ reproduces the observed event count, `intercept_only` and `both` raise `RuntimeError`, while `logistic` proceeds, reports `p_recalibrated_intercept_only` as `NaN` and states the reason in `warnings`.
 
 ```python
 from typing import Any, Literal
@@ -476,8 +480,8 @@ def recalibrate_prediction_model(
                     lambda a: float(np.sum(expit(a + lp)) - sum_y), -50.0, 50.0
                 )
             )
-        except Exception:
-            inter = 0.0
+        except (ValueError, RuntimeError):
+            inter = float("nan")  # unavailable; 0.0 would read as "calibrated"
 
         if np.var(lp) <= 1e-12 or np.allclose(lp, lp[0]):
             slope = float("nan")
@@ -527,8 +531,15 @@ def recalibrate_prediction_model(
                 lambda a: float(np.sum(expit(a + lp_orig)) - sum_y), -50.0, 50.0
             )
         )
-    except Exception:
-        alpha_inter = 0.0
+    except (ValueError, RuntimeError):
+        alpha_inter = float("nan")
+    # Only a method that returns an intercept-only result needs the intercept; for
+    # "logistic" it is reported as NaN in p_recalibrated_intercept_only.
+    if not np.isfinite(alpha_inter) and norm_m in ("intercept_only", "both"):
+        raise RuntimeError(
+            "Intercept-only recalibration is undefined: no intercept in [-50, 50] "
+            "reproduces the observed event count."
+        )
     p_inter = expit(alpha_inter + lp_orig)
 
     X = sm.add_constant(lp_orig)
@@ -545,6 +556,11 @@ def recalibrate_prediction_model(
         beta_ci = [float(c) for c in fit_mod.conf_int()[1]]
         p_log = expit(alpha_log + beta_log * lp_orig)
     except Exception as e:
+        if not np.isfinite(alpha_inter):
+            raise RuntimeError(
+                f"Logistic recalibration failed ({e}) and the intercept-only fallback "
+                "is undefined: no intercept in [-50, 50] reproduces the observed event count."
+            ) from e
         logistic_fallback = True
         fallback_reason = f"Logistic recalibration failed ({e}); intercept-only parameters used."
         alpha_log = alpha_inter
@@ -573,6 +589,13 @@ def recalibrate_prediction_model(
         }
     elif norm_m == "logistic":
         reported_method = "intercept_only_fallback" if logistic_fallback else "logistic"
+        warnings_list = []
+        if not np.isfinite(alpha_inter):
+            warnings_list.append(
+                "Intercept-only recalibration is undefined (calibration_intercept and "
+                "p_recalibrated_intercept_only are NaN): no intercept in [-50, 50] "
+                "reproduces the observed event count."
+            )
         lp_recal = alpha_log + beta_log * lp_orig
         post_metrics = _calc_suite(y_arr, p_log, lp_recal)
         return {
@@ -591,6 +614,7 @@ def recalibrate_prediction_model(
             "p_recalibrated": p_log,
             "p_recalibrated_intercept_only": p_inter,
             "p_recalibrated_logistic": p_log,
+            "warnings": warnings_list,
         }
     else:  # both
         post_inter = _calc_suite(y_arr, p_inter, alpha_inter + lp_orig)

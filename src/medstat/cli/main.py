@@ -1967,6 +1967,12 @@ def causal_grp() -> None:
 )
 @click.option("--ratio", default=1, type=int, help="Matching ratio.")
 @click.option(
+    "--ps-method",
+    default="logistic",
+    type=click.Choice(["logistic", "firth"], case_sensitive=False),
+    help="Propensity model: logistic (maximum likelihood) or firth. A separated or rank-deficient logistic design raises.",
+)
+@click.option(
     "--balance-check",
     is_flag=True,
     help="Evaluate post-match Standardized Mean Differences.",
@@ -1979,6 +1985,7 @@ def psm_cmd(
     covariates: str,
     caliper: float,
     ratio: int,
+    ps_method: str,
     balance_check: bool,
     love_plot: str | None,
     output: str | None,
@@ -1994,6 +2001,7 @@ def psm_cmd(
         covariates=covar_list,
         caliper=caliper,
         ratio=ratio,
+        ps_method=ps_method,
     )
 
     def _clean_smd(val: Any) -> float | None:
@@ -2022,7 +2030,7 @@ def psm_cmd(
         if love_plot:
             Path(love_plot).parent.mkdir(parents=True, exist_ok=True)
             with open(love_plot, "w") as f:
-                json.dump(love_data, f, indent=2)
+                json.dump({**love_data, "ps_method": info["ps_method"]}, f, indent=2)
 
         if balance_check:
             click.echo("\n--- Austin (2009) Covariate Balance Diagnostics ---")
@@ -2067,12 +2075,16 @@ def psm_cmd(
                     ],
                 }
             with open(output, "w") as f:
-                json.dump(love_data, f, indent=2)
-            click.echo(f"Causal balance diagnostics saved: {output}")
+                json.dump({**love_data, "ps_method": info["ps_method"]}, f, indent=2)
+            click.echo(
+                f"Causal balance diagnostics saved: {output} "
+                f"(propensity model: {info['ps_method']})"
+            )
         else:
             matched_df.to_csv(output, index=False)
             click.echo(
-                f"Matched cohort saved to: {output} (Matched pairs: {len(matched_df) // 2})"
+                f"Matched cohort saved to: {output} (Matched pairs: {len(matched_df) // 2}; "
+                f"propensity model: {info['ps_method']})"
             )
 
 
@@ -2099,6 +2111,12 @@ def psm_cmd(
     "--truncate",
     default=None,
     help="Comma-separated lower and upper quantiles for truncation (e.g. '0.01,0.99').",
+)
+@click.option(
+    "--ps-method",
+    default="logistic",
+    type=click.Choice(["logistic", "firth"], case_sensitive=False),
+    help="Propensity model: logistic (maximum likelihood) or firth. A separated or rank-deficient logistic design raises.",
 )
 @click.option(
     "--outcome",
@@ -2135,6 +2153,7 @@ def iptw_cmd(
     estimand: str,
     stabilized: bool,
     truncate: str | None,
+    ps_method: str,
     outcome: str | None,
     outcome_type: str | None,
     time_col: str | None,
@@ -2172,6 +2191,7 @@ def iptw_cmd(
         estimand=estimand.upper(),
         stabilized=stabilized,
         truncate_quantiles=trunc_tuple,
+        ps_method=ps_method,
     )
     weighted_df = res.df
 
