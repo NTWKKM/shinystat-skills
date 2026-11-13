@@ -90,7 +90,7 @@ def _flatten_numbers(val: Any) -> list[float]:
 
 
 _P_KEY_RE = re.compile(
-    r"(?<![A-Za-z0-9])(?:p|p[-_]?(?:val|value|adj|overall|non[-_]?linear|omnibus|q|lrt|wald|trend|interaction))s?(?![A-Za-z0-9])",
+    r"(?<![A-Za-z0-9])(?:p(?![-_.])|p[-_]?(?:val|value|adj|overall|non[-_]?linear|omnibus|q|lrt|wald|trend|interaction))s?(?![A-Za-z0-9])",
     re.IGNORECASE,
 )
 
@@ -365,7 +365,7 @@ def _is_structural_context(
 
     # 5b. Normal critical values in method statements (mean ± 1.96 SD, z = 1.645)
     if val in (1.645, 1.96, 2.576) and re.search(
-        r"\b(?:SD|SE|SEM|z|z-score|critical|limits)\b", window, re.IGNORECASE
+        r"(?:±|\+/-|\bz(?:-score)?\s*[=:]?|\bcritical\s+value\s*[=:]?)\s*$", window_before, re.IGNORECASE
     ):
         return True
 

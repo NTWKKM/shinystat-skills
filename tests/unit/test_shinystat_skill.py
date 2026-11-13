@@ -1373,10 +1373,11 @@ def test_live_eval_round_two_wording_and_engine_adr85():
 
     with tempfile.TemporaryDirectory() as tmp:
         res = plot_retention_flow(
-            {"initial_n": 100, "stages": [{"name": "Analyzed", "n_remaining": 90, "n_excluded": 10, "reason": "x"}]},
+            {"n_initial": 100, "n_excluded": 10, "n_analyzed": 90, "exclusion_reasons": ["Missing outcome"]},
             out_path=Path(tmp) / "flow.png",
         )
         assert res.qa is not None and res.qa["passed"] is True
+        assert res.source_df["Count"].tolist() == [100, 10, 90]
 
     # Run Sequence: separation and Little's test run at pre-flight; Gate #3 joins the consolidated ask.
     assert "`check_separation` on each logistic design" in local
@@ -1389,12 +1390,19 @@ def test_live_eval_round_two_wording_and_engine_adr85():
     assert "any model covariate counts as non-primary" in heur
     assert "ask at Gate #1 unless the user gave a disposition" in heur
     assert "never switch silently" in heur
-    assert "per 10 years (age) or per 1 SD" in heur
+    assert "per 10 years (age, when the data record it in years) or per 1 SD" in heur
     assert "`EffectScaleError`" in heur
-    assert "never set `received` equal to `allocated`" in flows
+    assert "never derive `received` from `allocated` alone" in flows
     assert "deliver those, labelled partial" in flows
     assert "without observed receipt/analysis counts" in cloud
-    assert "(any model covariate; Little's test cannot lift it)" in local
+    for text in (local, cloud):
+        assert "in the exposure or any covariate (Little's test cannot lift it)" in text
+        assert "`#2`–`#4` first found mid-run" in text
+    assert "Primary Exposure Missing > 40%" in heur and "the exposure is never dropped" in heur
+    assert "when the data record it in years" in heur
+    assert "(outcome-complete rows)" in local
+    assert "without observed receipt/analysis counts" in local
+    assert "for an In-Chat Summary render nothing" in quick
     assert "pooled effect scale" in local and "pooled effect scale" in cloud
     assert "No estimand named by the user" in heur
     assert "do not change the primary model silently" in heur

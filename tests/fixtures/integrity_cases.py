@@ -339,6 +339,27 @@ INTEGRITY_PARITY_CASES: list[IntegrityParityCase] = [
         expected_untraced=[],
     ),
     IntegrityParityCase(
+        id="fail_critical_value_beside_sd_is_still_a_result",
+        narrative=f"The mean difference was 1.96 (SD 2.10). {BASE_NARRATIVE}",
+        results_dict={**BASE_RESULTS_DICT, "sd": 2.10},
+        expected_passed=False,
+        expected_untraced=[1.96],
+    ),
+    IntegrityParityCase(
+        id="fail_bare_two_sided_result_p_stays_traced",
+        narrative="Age had two-sided P < 0.001 (OR 1.45, n=412).",
+        results_dict={"or_age": 1.45, "n": 412, "age_p_value": 0.04},
+        expected_passed=False,
+        expected_untraced=[0.001],
+    ),
+    IntegrityParityCase(
+        id="pass_z_critical_value",
+        narrative=f"The z critical value was z = 1.645 for a one-sided test. {BASE_NARRATIVE}",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=True,
+        expected_untraced=[],
+    ),
+    IntegrityParityCase(
         id="fail_critical_value_as_a_result_stays_untraced",
         narrative=f"There were 1.96 events per patient. {BASE_NARRATIVE}",
         results_dict=BASE_RESULTS_DICT,

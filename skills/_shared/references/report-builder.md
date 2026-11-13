@@ -1239,7 +1239,7 @@ def verify_standalone_integrity(
         return nums
 
     p_key_re = re.compile(
-        r"(?<![A-Za-z0-9])(?:p|p[-_]?(?:val|value|adj|overall|non[-_]?linear|omnibus|q|lrt|wald|trend|interaction))s?(?![A-Za-z0-9])",
+        r"(?<![A-Za-z0-9])(?:p(?![-_.])|p[-_]?(?:val|value|adj|overall|non[-_]?linear|omnibus|q|lrt|wald|trend|interaction))s?(?![A-Za-z0-9])",
         re.IGNORECASE,
     )
 
@@ -1436,7 +1436,7 @@ def verify_standalone_integrity(
             is_scale_const = (val in (0.0, 100.0) and bool(
                 re.search(r"\b(?:scale|normalized|range|total)\b", window, re.IGNORECASE)
             )) or (val in (1.645, 1.96, 2.576) and bool(
-                re.search(r"\b(?:SD|SE|SEM|z|z-score|critical|limits)\b", window, re.IGNORECASE)
+                re.search(r"(?:±|\+/-|\bz(?:-score)?\s*[=:]?|\bcritical\s+value\s*[=:]?)\s*$", window_before, re.IGNORECASE)
             ))
             is_version = bool(
                 re.search(r"\b(?:Version|v\.)\s*$", window_before, re.IGNORECASE)

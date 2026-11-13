@@ -11,9 +11,10 @@ Every clinical flow diagram must satisfy mathematical reconciliation before rend
 ### A. Randomized Controlled Trials (CONSORT 2025/2010)
 $$\text{Assessed} - \sum \text{Excluded} = \text{Randomized} = \sum \text{Allocated}$$
 For each trial arm $i$:
-$$\text{Allocated}_i = \text{Analyzed}_i + \text{Lost to Follow-up}_i + \text{Discontinued Intervention}_i + \text{Excluded from Analysis}_i$$
+$$\text{Allocated}_i = \text{Received}_i + \text{Did Not Receive}_i = \text{Analyzed}_i + \text{Excluded from Analysis}_i$$
+Lost to follow-up and discontinued intervention are reported beside these partitions; they may overlap with the analyzed count.
 
-The CONSORT recipe raises when an arm has no observed receipt count (`received` or `did_not_receive`) or analysis count. Ask the user for the missing counts (Gate #2) and never set `received` equal to `allocated`, because the figure would then state an unobserved fact; `excluded_from_analysis = allocated - analyzed` is arithmetic on observed counts and is allowed. A halted figure does not block independent parts of the request (for example a sample-size table): deliver those, labelled partial, and list the question.
+The CONSORT recipe raises when an arm has no observed receipt count (`received` or `did_not_receive`) or analysis count. Ask the user for the missing counts (Gate #2) and never derive `received` from `allocated` alone, because the figure would then state an unobserved fact (`received = allocated` is right only when an observed `did_not_receive = 0` says so); `excluded_from_analysis = allocated - analyzed` is arithmetic on observed counts and is allowed. A halted figure does not block independent parts of the request (for example a sample-size table): deliver those, labelled partial, and list the question.
 
 ### B. Observational Cohort Studies (STROBE)
 $$\text{Retained}_{k} - \text{Excluded}_{k+1} = \text{Retained}_{k+1}$$

@@ -11,7 +11,7 @@ Execute clinical biostatistics via **Run Sequence** (§0) and **The 5 Decision P
 
 ## 0. Run Sequence
 
-1. **Inspect**: Run **Pillar 1** **pre-flight** profile (`df.info()`, `df.describe()`, missingness, numeric `0/1` coding; `check_separation` on each logistic design, `littles_mcar_test` when any model variable is missing). *Done when* every model variable's dtype, missingness count, and coding are printed.
+1. **Inspect**: Run **Pillar 1** **pre-flight** profile (`df.info()`, `df.describe()`, missingness, numeric `0/1` coding; `check_separation` on each logistic design (outcome-complete rows), `littles_mcar_test` when any model variable is missing). *Done when* every model variable's dtype, missingness count, and coding are printed.
 2. **Ask**: Present one consolidated turn holding every triggered pre-flight gate (§2: `#1`–`#4`) plus every unspecified **Output Alignment Gate** axis (`#5a`–`#5d`) via `ask_question` when available. *Done when* the user has answered every triggered question.
 3. **Plan**: Map study archetype to model family (**Pillar 2**, [decision-heuristics.md §1](references/decision-heuristics.md#1-clinical-study-archetype-to-statistical-model-mapping)) and compute **pre-flight** $\text{EPV}_{\text{binary}}$ or $\text{EPV}_{\text{Cox}}$ (**Pillar 3**; record "N/A" when the task has no logistic or Cox model). *Done when* model family, missing-data route (**Pillar 4**), and EPV route are recorded.
 4. **Execute**: Run **Pillar 3** scripts (or dispatch subagents per [subagent-protocol.md](references/subagent-protocol.md) when `#5d` selected **Subagent Offload**). *Done when* every fitted model converges and each applicable diagnostic passes or has its documented remedy applied and reported; halt at `#3` or `#4` (§2) if triggered mid-run.
@@ -27,11 +27,11 @@ Execute clinical biostatistics via **Run Sequence** (§0) and **The 5 Decision P
    - Select summaries by shape (Mean (SD) symmetric; Median [IQR] skewed) and tests by design/estimand.
 
 2. **Pillar 2: Research & Estimand Triangulation (Autonomous Selection)**
-   - Align PICO/PECO and clinical archetype (Cohort, Case-Control, RCT, Diagnostic, Agreement, Clustered, Causal, Competing Risks, Meta-Analysis) via [decision-heuristics.md §1](references/decision-heuristics.md#1-clinical-study-archetype-to-statistical-model-mapping).
+   - Align PICO/PECO and clinical archetype via [decision-heuristics.md §1](references/decision-heuristics.md#1-clinical-study-archetype-to-statistical-model-mapping).
    - **Effect Scale**: One headline measure per estimand (requested, else OR logistic / HR Cox); one stated unit per continuous predictor (e.g. per 10 years) across tables, text and figures.
 
 3. **Pillar 3: Adaptive Python Scripting (Autonomous Biostatistical Authority)**
-   - Write scripts using the bundled `medstat` engine in `scripts/medstat/` (signatures: [api-quickref.md](references/api-quickref.md)) and run with `uv run --with-requirements <skill-dir>/requirements.txt python <script.py>` (append `--with <pkg>` only for external packages).
+   - Write scripts using the bundled `medstat` engine in `scripts/medstat/` (signatures: [api-quickref.md](references/api-quickref.md)) and run with `uv run --with-requirements <skill-dir>/requirements.txt python <script.py>` (`--with <pkg>` for external packages).
    - **Spec Validation**: Validate YAML plans via `python <skill-dir>/scripts/medstat_cli.py --validate-only <plan.yaml>` (schema: `--schema`); self-heal from `agent_remediation` JSON on failure.
    - **EPV & Sparse-Data Routing** ([decision-heuristics.md §2.A](references/decision-heuristics.md#a-events-per-variable-epv-sparse-data--separation)):
      - $\text{EPV}_{\text{binary}} = \min(N_{\text{events}}, N_{\text{non-events}}) / P_{\text{parameters}}$; $\text{EPV}_{\text{Cox}} = N_{\text{failures}} / P_{\text{parameters}}$ ($k-1$ factor levels and spline df; no intercept).
@@ -48,7 +48,7 @@ Execute clinical biostatistics via **Run Sequence** (§0) and **The 5 Decision P
    - **Sample Retention Flow**: Track **reconciled** *($N_{\text{initial}} = N_{\text{excluded}} + N_{\text{analyzed}}$)* retention via `SampleFlowTracker` (`medstat.data.retention`).
    - **Zero Silent Deletion & Missing-Data Routing** ([decision-heuristics.md §2.B](references/decision-heuristics.md#b-missing-data-strategy)):
      - Run **pre-flight** Little's MCAR check (`medstat.data.clean`). Missing primary outcomes $\longrightarrow$ **Grilling Gate #1**.
-     - *Triage*: $< 5\%$ complete-case with sensitivity notes; $5\%\text{--}40\%$ MAR $\longrightarrow$ MICE (`medstat.data.missing`) primary, Complete-Case sensitivity; $> 40\%$ non-primary missingness or plausible MNAR $\longrightarrow$ **Grilling Gate #4** (§2).
+     - *Triage*: $< 5\%$ complete-case with sensitivity notes; $5\%\text{--}40\%$ MAR $\longrightarrow$ MICE (`medstat.data.missing`) primary, Complete-Case sensitivity; $> 40\%$ exposure or covariate missingness or plausible MNAR $\longrightarrow$ **Grilling Gate #4** (§2).
      - **Standard CIs**: Wilson 95% CIs (proportions), DeLong (AUROC), exact F (ICC), profile likelihood (Firth).
 
 5. **Pillar 5: Reporting Integrity & Multi-Format Documents**
@@ -61,14 +61,14 @@ Execute clinical biostatistics via **Run Sequence** (§0) and **The 5 Decision P
 ## 2. The Deterministic Grilling Gate
 
 ### Autonomous Execution (Decide, Execute, and Document)
-- Decide, execute, and document routine biostatistical mechanics autonomously: parametric vs non-parametric tests, Mean (SD) vs Median [IQR], PH/Brant tests, low-EPV penalization, $< 40\%$ MAR missingness, spline knots, Youden cutpoints, and table styling.
+- Decide, execute, and document routine mechanics autonomously: parametric vs non-parametric tests, Mean (SD) vs Median [IQR], PH/Brant tests, low-EPV penalization, $< 40\%$ MAR missingness, spline knots, Youden cutpoints, and table styling.
 
 ### Situations Requiring Mandatory Grilling / Inquiry
-After **Pillar 1** pre-flight inspection, ask all triggered pre-flight questions (`#1`–`#4`; `#4` when pre-flight confirms $> 40\%$ non-primary missingness or clinically plausible MNAR without sensitivity analysis, and every unspecified `#5` axis) in a **single consolidated turn**, written as one question per gate and axis (computing EPV after `#1`/`#2` resolution). When your tools include `ask_question`, send the consolidated turn through it—one question per gate and per Gate #5 axis, recommended option first. When the question tool caps a call (e.g. `AskUserQuestion`: 4 questions × 4 options), split into consecutive calls and name options beyond the cap in the question text. If a diagnostic gate (`#3` or `#4` first found mid-run, `#6`) triggers during execution, halt directly in **Direct in Main Agent** mode, or via [subagent-protocol.md](references/subagent-protocol.md) when **Subagent Offload** is active:
+After **Pillar 1** pre-flight inspection, ask all triggered pre-flight questions (`#1`–`#4`; `#4` when pre-flight confirms $> 40\%$ non-primary missingness or clinically plausible MNAR without sensitivity analysis, and every unspecified `#5` axis) in a **single consolidated turn**, written as one question per gate and axis (computing EPV after `#1`/`#2` resolution). When your tools include `ask_question`, send the consolidated turn through it—one question per gate and per Gate #5 axis, recommended option first. When the question tool caps a call (e.g. `AskUserQuestion`: 4 questions × 4 options), split into consecutive calls and name options beyond the cap in the question text. If a gate (`#2`–`#4` first found mid-run, `#6`) triggers during execution, halt directly in **Direct in Main Agent** mode, or via [subagent-protocol.md](references/subagent-protocol.md) when **Subagent Offload** is active:
 1. **Outcome, Event Direction, or Missing Outcome Ambiguity**: Primary event definition, censoring code, pooled effect scale (log ratio vs difference), biomarker direction not fixed by [decision-heuristics.md §2.C](references/decision-heuristics.md#c-diagnostic-test-directionality--cutpoint-selection), or missing outcome disposition is unspecified.
-2. **Proposal vs Data Geometry Mismatch**: Survival modeling without follow-up time/censoring, or clustered modeling without cluster IDs.
+2. **Proposal vs Data Geometry Mismatch**: Survival modeling without follow-up time/censoring, clustered modeling without cluster IDs, or a flow diagram arm without observed receipt/analysis counts.
 3. **Severe Sparse Data & Monotone Separation**: Monotone separation in logistic or Cox regression; confirm Firth estimation (`medstat.models.firth`) vs covariate reduction.
-4. **High Missingness ($> 40\%$) or Plausible MNAR without Sensitivity Analysis**: Non-primary missingness $> 40\%$ (any model covariate; Little's test cannot lift it) or clinically plausible MNAR lacks pattern-mixture / delta-adjustment sensitivity analysis.
+4. **High Missingness ($> 40\%$) or Plausible MNAR without Sensitivity Analysis**: Missingness $> 40\%$ in the exposure or any covariate (Little's test cannot lift it) or clinically plausible MNAR lacks pattern-mixture / delta-adjustment sensitivity analysis.
 5. **Output Alignment Gate** (Mandatory Inquiry per Unspecified Axis): Gate #5 has four independent **axes**. Ask one separate question per axis left unspecified, listing every option (auto-activating Gate #6 Full Polish when prompt explicitly requests literature evidence, e.g. "หาหลักฐานมาประกอบ", "find evidence"):
    - **5a. Deliverable Format**: **(Recommended) Interactive HTML (`.html`) with Dual/Toggle View** (`render_html`, `plot_dual_*` figures), **Word (`.docx`)**, **PowerPoint (`.pptx`)**, **PDF (`.pdf`)**, **Markdown (`.md`)**, or **In-Chat Summary**.
    - **5b. Figure House Style** ([house-styles.md](references/house-styles.md)): **(Recommended) `NEJM`**, `JAMA`, `LANCET`, `BMJ`, `CLINICAL`, or `OKABE_ITO` (CVD-safe); offer each separately.
