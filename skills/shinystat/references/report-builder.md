@@ -1239,7 +1239,7 @@ def verify_standalone_integrity(
         return nums
 
     p_key_re = re.compile(
-        r"^(?:p|p[-_]?(?:val|value|adj|overall|non[-_]?linear|omnibus|q|lrt|wald|trend|interaction))s?$",
+        r"(?<![A-Za-z0-9])(?:p|p[-_]?(?:val|value|adj|overall|non[-_]?linear|omnibus|q|lrt|wald|trend|interaction))s?(?![A-Za-z0-9])",
         re.IGNORECASE,
     )
 
@@ -1265,7 +1265,7 @@ def verify_standalone_integrity(
             for k, v in d.items():
                 k_str = str(k)
                 k_qual = _detect_p_qual(k_str) or parent_qual
-                if p_key_re.match(k_str):
+                if p_key_re.search(k_str):
                     if isinstance(v, dict):
                         pvals.extend(_extract_qualified_p_vals(v, parent_qual=k_qual))
                     elif isinstance(v, pd.DataFrame):
@@ -1281,7 +1281,7 @@ def verify_standalone_integrity(
             for col in d.columns:
                 col_str = str(col)
                 col_qual = _detect_p_qual(col_str) or parent_qual
-                if p_key_re.match(col_str):
+                if p_key_re.search(col_str):
                     pvals.extend((col_qual, n) for n in _flatten_nums(d[col]) if 0.0 <= n <= 1.0)
         return pvals
 
@@ -1329,7 +1329,7 @@ def verify_standalone_integrity(
         )
         is_threshold_def = bool(
             re.search(
-                r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff|prespecified(?:\s+(?:level|threshold|cutoff))?|defined\s+as)"
+                r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff|prespecified(?:\s+(?:level|threshold|cutoff))?|defined\s+as|two\s?-?sided|two\s?-?tailed)"
                 r"(?:\s*(?:[:=]|\b(?:was|were|is)?\s*(?:set\s+at|defined\s+as|of|at)?\b))?\s*"
                 r"\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+[a-zA-Z_-]+\)?|\(?[a-zA-Z_-]+\)?))?\s*([<>]=?|[≤≥])\s*$",
                 window_before,
@@ -1433,9 +1433,11 @@ def verify_standalone_integrity(
             is_ci_level = val in (90.0, 95.0, 99.0) and bool(
                 re.search(r"\b(?:CI|confidence|credible)\b", window, re.IGNORECASE)
             )
-            is_scale_const = val in (0.0, 100.0) and bool(
+            is_scale_const = (val in (0.0, 100.0) and bool(
                 re.search(r"\b(?:scale|normalized|range|total)\b", window, re.IGNORECASE)
-            )
+            )) or (val in (1.645, 1.96, 2.576) and bool(
+                re.search(r"\b(?:SD|SE|SEM|z|z-score|critical|limits)\b", window, re.IGNORECASE)
+            ))
             is_version = bool(
                 re.search(r"\b(?:Version|v\.)\s*$", window_before, re.IGNORECASE)
             )

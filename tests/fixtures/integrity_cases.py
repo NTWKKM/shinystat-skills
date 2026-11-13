@@ -309,6 +309,42 @@ INTEGRITY_PARITY_CASES: list[IntegrityParityCase] = [
         expected_passed=False,
         expected_untraced=[1.37],
     ),
+    # --- ADR 85: live-agent replicates (compound P keys, significance statement, z constants) ---
+    IntegrityParityCase(
+        id="pass_compound_p_key_traces_inequality",
+        narrative="Sex was not associated with the outcome (P = 0.68). Age showed P < 0.001 (OR 1.45, n=412).",
+        results_dict={"or_age": 1.45, "n": 412, "sex_p_value": 0.68, "age_p_value": 0.0004},
+        expected_passed=True,
+        expected_untraced=[],
+    ),
+    IntegrityParityCase(
+        id="fail_compound_p_key_above_threshold_stays_untraced",
+        narrative="Age showed P < 0.001 (OR 1.45, n=412).",
+        results_dict={"or_age": 1.45, "n": 412, "age_p_value": 0.04},
+        expected_passed=False,
+        expected_untraced=[0.001],
+    ),
+    IntegrityParityCase(
+        id="pass_two_sided_significance_statement",
+        narrative="Two-sided P < .05 was the threshold. Treatment showed OR 1.10 (P = 0.68; n=412).",
+        results_dict={"or_trt": 1.10, "n": 412, "p": 0.68},
+        expected_passed=True,
+        expected_untraced=[],
+    ),
+    IntegrityParityCase(
+        id="pass_normal_critical_value_in_method",
+        narrative=f"Limits of agreement were the mean difference ± 1.96 SD. {BASE_NARRATIVE}",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=True,
+        expected_untraced=[],
+    ),
+    IntegrityParityCase(
+        id="fail_critical_value_as_a_result_stays_untraced",
+        narrative=f"There were 1.96 events per patient. {BASE_NARRATIVE}",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=False,
+        expected_untraced=[1.96],
+    ),
     IntegrityParityCase(
         id="fail_line_start_count_is_not_a_section",
         narrative=f"12 patients died.\n{BASE_NARRATIVE}",

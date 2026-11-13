@@ -1332,3 +1332,82 @@ def test_api_quickref_matches_engine():
         ret = sig.return_annotation
         ret_s = "" if ret is sig.empty or ret in ("None", None) else f" -> {ret}"
         assert ln == f"{qual}({', '.join(params)}){ret_s}", f"Stale quick-reference line: {ln}"
+
+
+def test_live_eval_round_two_wording_and_engine_adr85():
+    """ADR 85: fixes from 26 live-agent replicates (Thai fonts, retention QA, wording, quick reference)."""
+    import warnings
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib import font_manager as fm
+
+    from medstat.figures.journal import apply_journal_theme, thai_fallback_family
+    from medstat.figures.retention import plot_retention_flow
+
+    root = Path(__file__).resolve().parents[2] / "skills"
+    local = (root / "shinystat" / "SKILL.md").read_text(encoding="utf-8")
+    cloud = (root / "shinystat-cloud" / "SKILL.md").read_text(encoding="utf-8")
+    heur = (root / "_shared" / "references" / "decision-heuristics.md").read_text(encoding="utf-8")
+    flows = (root / "_shared" / "references" / "flows.md").read_text(encoding="utf-8")
+    quick = (root / "shinystat" / "references" / "api-quickref.md").read_text(encoding="utf-8")
+
+    # Thai labels render in every journal theme when a Thai face is installed.
+    installed = {f.name for f in fm.fontManager.ttflist}
+    if installed & {"Sarabun", "Thonburi", "Sukhumvit Set", "Ayuthaya", "Tahoma", "Arial Unicode MS"}:
+        apply_journal_theme("NEJM")
+        assert len(matplotlib.rcParams["font.family"]) >= 2
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            fig, ax = plt.subplots()
+            ax.set_title("มาตรฐาน vs ทดลอง")
+            fig.canvas.draw()
+            plt.close(fig)
+        assert not [w for w in caught if "missing from font" in str(w.message)]
+    assert thai_fallback_family(["No Such Face"])[-1] in {"DejaVu Sans", "sans-serif"}
+
+    # plot_retention_flow reports layout QA like every other figure.
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        res = plot_retention_flow(
+            {"initial_n": 100, "stages": [{"name": "Analyzed", "n_remaining": 90, "n_excluded": 10, "reason": "x"}]},
+            out_path=Path(tmp) / "flow.png",
+        )
+        assert res.qa is not None and res.qa["passed"] is True
+
+    # Run Sequence: separation and Little's test run at pre-flight; Gate #3 joins the consolidated ask.
+    assert "`check_separation` on each logistic design" in local
+    assert "`#1`–`#4`" in local and "`#1`–`#4`" in cloud
+    for text in (local, cloud):
+        assert "chat message" in text  # chat reply audited for file deliverables too
+    assert "render_pptx" in local and "read only for the PDF fallback" in local
+
+    # Heuristics: covariate >40% missing halts, missing outcome asks, ATT vs ATO, units, effect scale.
+    assert "any model covariate counts as non-primary" in heur
+    assert "ask at Gate #1 unless the user gave a disposition" in heur
+    assert "never switch silently" in heur
+    assert "per 10 years (age) or per 1 SD" in heur
+    assert "`EffectScaleError`" in heur
+    assert "never set `received` equal to `allocated`" in flows
+    assert "deliver those, labelled partial" in flows
+    assert "without observed receipt/analysis counts" in cloud
+    assert "(any model covariate; Little's test cannot lift it)" in local
+    assert "pooled effect scale" in local and "pooled effect scale" in cloud
+    assert "No estimand named by the user" in heur
+    assert "do not change the primary model silently" in heur
+    assert "medstat.causal.psm.propensity_score_match(" in quick
+    assert "`FigureResult.csv_path`" in quick and "rename the strata columns" in quick
+
+    # Quick reference now lists the functions every replicate had to look up in engine source.
+    for needle in (
+        "medstat.diagnostic.roc.auc_ci_delong(",
+        "medstat.models.survival.fit_cox_ph(",
+        "medstat.reporting.ir.ReportDocument.add_table(",
+        "medstat.reporting.renderers.render_pptx(",
+        "medstat.agreement.icc.calculate_icc(",
+        "medstat.data.missing.pool_regression_results(",
+    ):
+        assert needle in quick, needle

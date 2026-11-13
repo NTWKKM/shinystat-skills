@@ -58,8 +58,8 @@ Audit Missingness Pattern & Mechanism (`littles_mcar_test` / Recipe 8; note H0: 
 
 ├── Per-variable missingness < 5% in non-primary covariates ──▶ Complete-case analysis with documented justification
 ├── Missing 5%–40% under Missing at Random (MAR) ──▶ Multiple Imputation by Chained Equations for numeric (continuous) targets (`MICEImputer` / Recipe 12 `impute_mice_datasets`; categorical or binary targets need a type-appropriate imputation model such as logistic / polytomous regression, e.g. Recipe 12 `impute_mice_mixed_datasets`; include categorical predictors, fully observed ones too, in every continuous-target imputation model so the imputation model is congenial with the analysis model: fully observed categorical predictors are dummy-encoded before fitting (local: listed in `MICEImputer.fit_transform(columns=...)`; cloud: Recipe 12 `predictors`), while categorical predictors with missing values must be imputed jointly with type-appropriate categorical models (cloud: Recipe 12 `impute_mice_mixed_datasets`), never as dummy columns in `MICEImputer`, which imputes them as continuous; proper Bayesian draws, M ≥ 5 for ≤ 30% missing, M ≥ 20 for > 30% missing; MICE is the primary analysis and Complete-Case Analysis the sensitivity analysis, noting agreement does not prove MAR or exclude MNAR bias; the retention flow ends at the primary analytic N and the complete-case n is reported beside the sensitivity estimate)
-├── Non-Primary Missing > 40% (Not MNAR) ──▶ Halt at Grilling Gate: (a) drop auxiliary covariate, (b) high-M MICE (M ≥ 40, tracking FMI) under MAR, or (c) pattern-mixture modeling (or missing-indicator adjustment restricted to randomized-trial baseline covariates or explicitly labeled sensitivity analyses)
-├── Primary Outcome Missing ──▶ Default: avoid outcome imputation in observational cohorts and preserve retention flow (N_initial ➔ N_analyzed); for trial/longitudinal dropout under MAR, allow protocol-justified outcome imputation (MICE) or MMRM with mandatory complete-case and tipping-point sensitivity analyses
+├── Non-Primary Missing > 40% (Not MNAR; any model covariate counts as non-primary, only the outcome and the exposure of interest are primary) ──▶ Halt at Grilling Gate #4: (a) drop auxiliary covariate, (b) high-M MICE (M ≥ 40, tracking FMI) under MAR, or (c) pattern-mixture modeling (or missing-indicator adjustment restricted to randomized-trial baseline covariates or explicitly labeled sensitivity analyses)
+├── Primary Outcome Missing (any row; ask at Gate #1 unless the user gave a disposition) ──▶ Recommended option: avoid outcome imputation in observational cohorts and preserve retention flow (N_initial ➔ N_analyzed); for trial/longitudinal dropout under MAR, allow protocol-justified outcome imputation (MICE) or MMRM with mandatory complete-case and tipping-point sensitivity analyses
 └── Missingness Informative / MNAR ──▶ Halt for clinical domain review or sensitivity bounds
 ```
 
@@ -78,14 +78,15 @@ Identify Clinical Biomarker Mechanism
 ```
 Evaluate Treatment Assignment & Causal Target
 ├── Target Population
+│   ├── No estimand named by the user ──▶ ATT for both PSM and IPTW so the two analyses target the same population; state it, and use ATE only when asked
 │   ├── Target = Treated Population (ATT) ──▶ IPTW (estimand='ATT', Recipe 14; if propensity-score trimming removes treated units, report excluded treated count and revise estimand to retained treated population, distinguishing from full ATT) OR 1:1 Nearest-Neighbor PSM with caliper 0.2 SD (Recipe 6; if caliper drops unmatched treated units, report unmatched-treated count and label estimand as matched-population effect, distinguishing from full ATT)
 │   ├── Target = Whole Target Population (ATE) ──▶ IPTW (estimand='ATE') with stabilized weights (Recipe 14)
 │   └── Significant Propensity Truncation / Lack of Overlap ──▶ Overlap Weights (estimand='ATO', Li et al. 2018, Recipe 14)
 ├── Weight Stability & Positivity Audit
 │   ├── Positivity Alert (PS < 0.05 or > 0.95) ──▶ Trim extreme tails (if trimming removes treated patients under ATT, report excluded treated count and revised estimand) OR switch to Overlap Weights (ATO)
 │   ├── Extreme Weights (> 10.0) ──▶ Quantile Truncation (0.01, 0.99) OR Overlap Weights
-│   └── Kish's Effective Sample Size (Neff < 0.5 * N) ──▶ Warning for variance inflation; use robust SE (HC1)
-├── Balance Diagnostics: Austin (2009) Love Plot (absolute SMD < 0.10)
+│   └── Kish's Effective Sample Size (Neff < 0.5 * N, overall weighted N) ──▶ Warning for variance inflation; use robust SE (HC1). When the user fixed the estimand (ATT) and positivity or Neff fails, report the requested estimand as primary with the diagnostics and add ATO as a labelled sensitivity analysis; never switch silently
+├── Balance Diagnostics: Austin (2009) Love Plot (absolute SMD < 0.10); when any SMD stays at or above 0.10 after matching or weighting, report it as a limitation and add a covariate-adjusted outcome model as a labelled sensitivity analysis (do not change the primary model silently)
 ├── Matched-Pair Outcome ──▶ Headline OR from GEE logistic clustered on pair ID (exchangeable); RR and RD from the same pairs as secondary; E-value from the RR when the outcome is common (> 15%)
 └── Weighted Outcome Model ──▶ IPTW weights as probability weights with sandwich variance (local: `medstat.causal.iptw.fit_iptw_outcome_model`; cloud: Recipe 14 `fit_weighted_outcome_model`); frequency weights inflate N and understate the variance
 ```
@@ -184,7 +185,7 @@ Polish Grilling Gate #6 Activation & Routing
 - **Ordinal Outcomes ($\ge 3$ ordered levels)**: Fit Cumulative Logit Proportional Odds models (`fit_proportional_odds` [local API & Recipe 21 cloud]) and verify parallel slopes via the Brant test (`assess_proportional_odds` / `test_proportional_odds` in local API and Recipe 21 [cloud]); compare the omnibus $P$-value with the prespecified diagnostic $\alpha$ (using $0.05$ when unspecified), and fall back to multinomial logistic regression (`fit_multinomial_logistic`) when the omnibus $P$-value is below that $\alpha$ ($P < \alpha$).
 - **Non-Linear Continuous Predictors**: Fit Harrell Restricted Cubic Splines (local API: `fit_logistic_rcs`, `fit_cox_rcs`; cloud recipe: `fit_rcs_spline_model` in Recipe 22) and report both `p_overall` and `p_nonlinearity`.
 - **Clustered / Multi-Center Cohorts**: Compute cluster intraclass correlation ($\text{ICC}_{\text{cluster}}$) and Design Effect ($\text{DEFF} = 1 + (\bar{m} - 1)\text{ICC}$); fit GEE with robust sandwich standard errors or mixed-effects models (local API and cloud recipe: `fit_gee` in Recipe 23).
-- **Systematic Synthesis & Meta-Analysis**: Run inverse-variance Fixed-Effects and DerSimonian-Laird Random-Effects meta-analysis (`run_meta_analysis` / Recipe 24), reporting Cochran's $Q$, Higgins' $I^2$, $\hat{\tau}^2$, and the 95% prediction interval.
+- **Systematic Synthesis & Meta-Analysis**: An undeclared effect scale (log ratio vs raw difference) is a Gate #1 question; `run_meta_analysis` raises `EffectScaleError` without it. Run inverse-variance Fixed-Effects and DerSimonian-Laird Random-Effects meta-analysis (`run_meta_analysis` / Recipe 24), reporting Cochran's $Q$, Higgins' $I^2$, $\hat{\tau}^2$, and the 95% prediction interval.
 
 ---
 
@@ -192,6 +193,7 @@ Polish Grilling Gate #6 Activation & Routing
 
 - **NEJM Style**: 3 horizontal rules (top border 2px, header border 1px, bottom border 2px), zero vertical dividers, $P$-values formatted as $P = 0.04$ or $P < 0.001$. Render via `render_nejm_table` (local) or Recipe 13 (cloud).
 - **JAMA Style**: Clean minimal dividers, $P$-values formatted without leading zero: $P = .04$ or $P < .001$.
+- **Predictor Units & Coding**: A continuous predictor without a user-named unit is scaled per 10 years (age) or per 1 SD (others, SD stated in its unit) in every table, text and figure. Categorical covariates enter Cox and logistic suites as 0/1 dummies against a stated reference level. A unit absent from the data is written "unit not stated", never assumed.
 - **Precision Invariants**: Unrounded intermediate calculations (`float64`); OR/HR reported to 2 decimal places with 95% CIs; percentages reported to 1 decimal place; explicit units mandatory (`mg/dL`, `mL/min/1.73m²`).
 - **Reporting Checklists**: Consult EQUATOR standards: STROBE (observational cohorts), CONSORT (trials), TRIPOD (prediction models), STARD (diagnostic accuracy), or PRISMA (systematic reviews).
 - **Figures & Visualizations**: When generating 300 DPI publication plots, read [figures.md](figures.md#2-available-plot-recipes); when rendering HTML Dual / Toggle View or multi-format reports, read [report-builder.md](report-builder.md#2-standalone-document-generation-recipes).

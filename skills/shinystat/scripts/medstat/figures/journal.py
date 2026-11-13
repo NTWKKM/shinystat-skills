@@ -145,6 +145,27 @@ TARGET_WIDTHS: dict[str, float] = {
 }
 
 
+
+_THAI_FONTS = ("Sarabun", "Thonburi", "Sukhumvit Set", "Ayuthaya", "Tahoma", "Arial Unicode MS")
+
+
+def thai_fallback_family(latin_chain: list[str]) -> list[str]:
+    """Return a ``font.family`` list: first installed Latin face, then a Thai-capable face.
+
+    Matplotlib falls back per glyph across the entries of ``font.family``, not across
+    the candidates of ``font.sans-serif`` (those resolve to a single face), so Thai labels
+    set in Arial render as boxes unless a Thai face follows it in ``font.family``.
+    """
+    from matplotlib import font_manager as fm
+
+    installed = {f.name for f in fm.fontManager.ttflist}
+    family = [name for name in latin_chain if name in installed][:1]
+    family += [name for name in _THAI_FONTS if name in installed][:1]
+    if "DejaVu Sans" in installed and "DejaVu Sans" not in family:
+        family.append("DejaVu Sans")
+    return family or ["sans-serif"]
+
+
 def apply_journal_theme(
     journal: str = "NEJM",
     canvas: str = "manuscript",
@@ -178,7 +199,7 @@ def apply_journal_theme(
     mpl.rcdefaults()
     mpl.rcParams.update(
         {
-            "font.family": "sans-serif",
+            "font.family": thai_fallback_family(font_chain),
             "font.sans-serif": font_chain,
             "axes.unicode_minus": False,
             "axes.grid": False,

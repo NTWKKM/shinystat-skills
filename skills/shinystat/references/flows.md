@@ -13,6 +13,8 @@ $$\text{Assessed} - \sum \text{Excluded} = \text{Randomized} = \sum \text{Alloca
 For each trial arm $i$:
 $$\text{Allocated}_i = \text{Analyzed}_i + \text{Lost to Follow-up}_i + \text{Discontinued Intervention}_i + \text{Excluded from Analysis}_i$$
 
+The CONSORT recipe raises when an arm has no observed receipt count (`received` or `did_not_receive`) or analysis count. Ask the user for the missing counts (Gate #2) and never set `received` equal to `allocated`, because the figure would then state an unobserved fact; `excluded_from_analysis = allocated - analyzed` is arithmetic on observed counts and is allowed. A halted figure does not block independent parts of the request (for example a sample-size table): deliver those, labelled partial, and list the question.
+
 ### B. Observational Cohort Studies (STROBE)
 $$\text{Retained}_{k} - \text{Excluded}_{k+1} = \text{Retained}_{k+1}$$
 

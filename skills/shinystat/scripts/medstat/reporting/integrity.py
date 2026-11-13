@@ -90,7 +90,7 @@ def _flatten_numbers(val: Any) -> list[float]:
 
 
 _P_KEY_RE = re.compile(
-    r"^(?:p|p[-_]?(?:val|value|adj|overall|non[-_]?linear|omnibus|q|lrt|wald|trend|interaction))s?$",
+    r"(?<![A-Za-z0-9])(?:p|p[-_]?(?:val|value|adj|overall|non[-_]?linear|omnibus|q|lrt|wald|trend|interaction))s?(?![A-Za-z0-9])",
     re.IGNORECASE,
 )
 
@@ -127,7 +127,7 @@ def _extract_qualified_p_values(
         for k, v in val.items():
             k_str = str(k)
             k_qual = _detect_p_qualifier(k_str) or parent_qualifier
-            if _P_KEY_RE.match(k_str):
+            if _P_KEY_RE.search(k_str):
                 if isinstance(v, dict):
                     pvals.extend(
                         _extract_qualified_p_values(v, parent_qualifier=k_qual)
@@ -151,7 +151,7 @@ def _extract_qualified_p_values(
         for col in val.columns:
             col_str = str(col)
             col_qual = _detect_p_qualifier(col_str) or parent_qualifier
-            if _P_KEY_RE.match(col_str):
+            if _P_KEY_RE.search(col_str):
                 for n in _flatten_numbers(val[col]):
                     if 0.0 <= n <= 1.0:
                         pvals.append((col_qual, float(n)))
@@ -294,7 +294,7 @@ def _is_structural_context(
         )
         is_threshold_def = bool(
             re.search(
-                r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff|prespecified(?:\s+(?:level|threshold|cutoff))?|defined\s+as)"
+                r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff|prespecified(?:\s+(?:level|threshold|cutoff))?|defined\s+as|two\s?-?sided|two\s?-?tailed)"
                 r"(?:\s*(?:[:=]|\b(?:was|were|is)?\s*(?:set\s+at|defined\s+as|of|at)?\b))?\s*"
                 r"\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+[a-zA-Z_-]+\)?|\(?[a-zA-Z_-]+\)?))?\s*([<>]=?|[≤≥])\s*$",
                 window_before,
@@ -360,6 +360,12 @@ def _is_structural_context(
     # 5. Fixed percentage scale reference (e.g. "on a 0 to 100% scale", "normalized to 100%")
     if val in (0.0, 100.0) and re.search(
         r"\b(?:scale|normalized|range|total)\b", window, re.IGNORECASE
+    ):
+        return True
+
+    # 5b. Normal critical values in method statements (mean ± 1.96 SD, z = 1.645)
+    if val in (1.645, 1.96, 2.576) and re.search(
+        r"\b(?:SD|SE|SEM|z|z-score|critical|limits)\b", window, re.IGNORECASE
     ):
         return True
 
