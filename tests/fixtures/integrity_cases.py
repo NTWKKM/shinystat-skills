@@ -395,6 +395,20 @@ INTEGRITY_PARITY_CASES: list[IntegrityParityCase] = [
         expected_untraced=[0.05],
     ),
     IntegrityParityCase(
+        id="fail_plural_p_values_ci_bound_key_is_not_a_p_value",
+        narrative="Age showed P < 0.05 (OR 1.45, n=412).",
+        results_dict={"or_age": 1.45, "n": 412, "p_values_ci_lower": 0.01},
+        expected_passed=False,
+        expected_untraced=[0.05],
+    ),
+    IntegrityParityCase(
+        id="pass_plural_p_values_key_traces_inequality",
+        narrative="Age showed P < 0.05 (OR 1.45, n=412).",
+        results_dict={"or_age": 1.45, "n": 412, "p_values": [0.01, 0.30]},
+        expected_passed=True,
+        expected_untraced=[],
+    ),
+    IntegrityParityCase(
         id="fail_p_prefixed_keys_are_not_p_values",
         narrative="Age showed P < 0.05 (OR 1.45, n=412).",
         results_dict={"or_age": 1.45, "n": 412, "p_orig": 0.01, "p_score": 0.02},
