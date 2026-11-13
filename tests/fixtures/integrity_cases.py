@@ -374,6 +374,27 @@ INTEGRITY_PARITY_CASES: list[IntegrityParityCase] = [
         expected_untraced=[1.96],
     ),
     IntegrityParityCase(
+        id="fail_result_in_sd_units_stays_traced",
+        narrative=f"The standardized mean difference was 1.96 SDs; the mean difference was 1.96 standard deviations. {BASE_NARRATIVE}",
+        results_dict={**BASE_RESULTS_DICT, "smd": 0.4},
+        expected_passed=False,
+        expected_untraced=[1.96, 1.96],
+    ),
+    IntegrityParityCase(
+        id="pass_critical_value_multiplier_of_se",
+        narrative=f"The 95% CI was the estimate ± 1.96 SE, i.e. 1.96 × SE either side. {BASE_NARRATIVE}",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=True,
+        expected_untraced=[],
+    ),
+    IntegrityParityCase(
+        id="fail_p_value_ci_bound_key_is_not_a_p_value",
+        narrative="Age showed P < 0.05 (OR 1.45, n=412).",
+        results_dict={"or_age": 1.45, "n": 412, "p_value_ci_lower": 0.01},
+        expected_passed=False,
+        expected_untraced=[0.05],
+    ),
+    IntegrityParityCase(
         id="fail_p_prefixed_keys_are_not_p_values",
         narrative="Age showed P < 0.05 (OR 1.45, n=412).",
         results_dict={"or_age": 1.45, "n": 412, "p_orig": 0.01, "p_score": 0.02},

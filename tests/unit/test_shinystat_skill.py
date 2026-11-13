@@ -1400,7 +1400,9 @@ def test_live_eval_round_two_wording_and_engine_adr85():
         assert "`#2`–`#4` first found mid-run" in text
     assert "Primary Exposure Missing > 40%" in heur and "the exposure is never dropped" in heur
     assert "when the data record it in years" in heur
-    assert "(outcome-complete rows)" in local
+    assert "(rows complete on its variables)" in local
+    assert "compute that SD once from the observed values" in heur
+    assert "the primary analysis is high-M MICE (M ≥ 40, tracking FMI) that imputes the exposure" in heur
     assert "without observed receipt/analysis counts" in local
     assert "for an In-Chat Summary render nothing" in quick
     assert "pooled effect scale" in local and "pooled effect scale" in cloud

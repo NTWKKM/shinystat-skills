@@ -1239,7 +1239,7 @@ def verify_standalone_integrity(
         return nums
 
     p_key_re = re.compile(
-        r"(?<![A-Za-z0-9])(?:p(?![-_.])|p[-_]?(?:val|value|adj|overall|non[-_]?linear|omnibus|q|lrt|wald|trend|interaction))s?(?![A-Za-z0-9])",
+        r"(?<![A-Za-z0-9])(?:p(?![-_.])|p[-_]?(?:val|value|adj|overall|non[-_]?linear|omnibus|q|lrt|wald|trend|interaction)(?!(?:-|_|\.)(?:ci|lower|upper)(?![A-Za-z0-9])))s?(?![A-Za-z0-9])",
         re.IGNORECASE,
     )
 
@@ -1436,7 +1436,9 @@ def verify_standalone_integrity(
             is_scale_const = (val in (0.0, 100.0) and bool(
                 re.search(r"\b(?:scale|normalized|range|total)\b", window, re.IGNORECASE)
             )) or (val in (1.645, 1.96, 2.576) and (
-                bool(re.match(r"^\s*(?:[×x*]\s*)?(?:SDs?|SEs?|SEM|standard\s+(?:deviations?|errors?))\b", window_after, re.IGNORECASE))
+                (bool(re.search(r"(?:±|\+/-)\s*$", window_before))
+                 and bool(re.match(r"^\s*(?:SDs?|SEs?|SEM|standard\s+(?:deviations?|errors?))\b", window_after, re.IGNORECASE)))
+                or bool(re.match(r"^\s*[×x*]\s*(?:SDs?|SEs?|SEM|standard\s+(?:deviations?|errors?))\b", window_after, re.IGNORECASE))
                 or bool(re.search(r"\bcritical\s+value\s*(?:of\s*)?(?:z\s*)?[=:]?\s*$", window_before, re.IGNORECASE))
             ))
             is_version = bool(

@@ -90,7 +90,7 @@ def _flatten_numbers(val: Any) -> list[float]:
 
 
 _P_KEY_RE = re.compile(
-    r"(?<![A-Za-z0-9])(?:p(?![-_.])|p[-_]?(?:val|value|adj|overall|non[-_]?linear|omnibus|q|lrt|wald|trend|interaction))s?(?![A-Za-z0-9])",
+    r"(?<![A-Za-z0-9])(?:p(?![-_.])|p[-_]?(?:val|value|adj|overall|non[-_]?linear|omnibus|q|lrt|wald|trend|interaction)(?!(?:-|_|\.)(?:ci|lower|upper)(?![A-Za-z0-9])))s?(?![A-Za-z0-9])",
     re.IGNORECASE,
 )
 
@@ -364,10 +364,14 @@ def _is_structural_context(
         return True
 
     # 5b. Normal critical values in method statements: a multiplier of an SD/SE ("mean ± 1.96 SD",
-    # "1.96 × SE") or a named critical value ("critical value of 1.645"). An observed SD after "±"
-    # or a reported z statistic stays traced.
+    # "1.96 × SE") or a named critical value ("critical value of 1.645"). An observed SD after "±",
+    # a result in SD units ("1.96 SDs") and a reported z statistic stay traced.
     if val in (1.645, 1.96, 2.576) and (
-        re.match(r"^\s*(?:[×x*]\s*)?(?:SDs?|SEs?|SEM|standard\s+(?:deviations?|errors?))\b", window_after, re.IGNORECASE)
+        (
+            re.search(r"(?:±|\+/-)\s*$", window_before)
+            and re.match(r"^\s*(?:SDs?|SEs?|SEM|standard\s+(?:deviations?|errors?))\b", window_after, re.IGNORECASE)
+        )
+        or re.match(r"^\s*[×x*]\s*(?:SDs?|SEs?|SEM|standard\s+(?:deviations?|errors?))\b", window_after, re.IGNORECASE)
         or re.search(r"\bcritical\s+value\s*(?:of\s*)?(?:z\s*)?[=:]?\s*$", window_before, re.IGNORECASE)
     ):
         return True
