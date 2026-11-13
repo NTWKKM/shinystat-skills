@@ -90,7 +90,7 @@ def _flatten_numbers(val: Any) -> list[float]:
 
 
 _P_KEY_RE = re.compile(
-    r"(?<![A-Za-z0-9])(?:p(?![-_.])|p[-_]?(?:val|value|adj|overall|non[-_]?linear|omnibus|q|lrt|wald|trend|interaction))s?(?!(?:-|_|\.)(?:ci|lower|upper)(?![A-Za-z0-9]))(?![A-Za-z0-9])",
+    r"(?<![A-Za-z0-9])(?:p(?![-_.])|p[-_]?(?:val|value|adj|overall|non[-_]?linear|omnibus|q|lrt|wald|trend|interaction))s?(?!(?:-|_|\.)(?:ci|lower|upper)s?(?![A-Za-z0-9]))(?![A-Za-z0-9])",
     re.IGNORECASE,
 )
 

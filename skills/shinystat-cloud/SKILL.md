@@ -11,7 +11,7 @@ Execute clinical biostatistics in cloud Python sandboxes through the **Run Seque
 
 ## 0. Run Sequence
 
-1. **Inspect**: Run **Pillar 1** **pre-flight** profile (`df.info()`, `df.describe()`, missingness, numeric `0/1` coding; `Recipe 8` when any model variable is missing). *Done when* every model variable's dtype, missingness count, and coding are printed in sandbox output.
+1. **Inspect**: Run **Pillar 1** **pre-flight** profile (`df.info()`, `df.describe()`, missingness, numeric `0/1` coding; `Recipe 8` when any model variable is missing, scope per §2.B). *Done when* every model variable's dtype, missingness count, and coding are printed in sandbox output.
 2. **Ask**: Present one consolidated turn holding every triggered pre-flight gate (§2: `#1`–`#4`) plus every unspecified **Output Alignment Gate** axis (`#5a`–`#5d`) via `ask_question` when available. *Done when* the user has answered every triggered question.
 3. **Plan**: Map study archetype to model family (**Pillar 2**, [decision-heuristics.md §1](references/decision-heuristics.md#1-clinical-study-archetype-to-statistical-model-mapping)), load matching recipe (`references/recipes/`), and compute **pre-flight** $\text{EPV}_{\text{binary}}$ or $\text{EPV}_{\text{Cox}}$ (**Pillar 3**; record "N/A" when the task has no logistic or Cox model, e.g. ordinal-only, agreement, diagnostic 2×2, or meta-analysis). *Done when* target `Recipe #`, missing-data route (**Pillar 4**), and EPV route are recorded.
 4. **Execute**: Run **Pillar 3** standalone Python recipes (or dispatch subagents per [subagent-protocol.md](references/subagent-protocol.md) when `#5d` selected **Subagent Offload**). *Done when* every fitted model satisfies convergence (`converged == True`, or for Recipe 11 Cox models, fits without convergence warnings) and each applicable diagnostic passes or has its documented remedy applied and reported; halt at `#3` or `#4` (§2) if triggered mid-run.
@@ -102,7 +102,7 @@ Each file is self-contained except: E-values after `Recipe 6` / `Recipe 14` need
    - **Sample Retention Flow**: Track **reconciled** *($N_{\text{initial}} = N_{\text{excluded}} + N_{\text{analyzed}}$)* cohort retention across every step.
    - **Identifier-Free Exports**: Exported data files carry no patient identifier column.
    - **Zero Silent Deletion & Missing-Data Routing** ([decision-heuristics.md §2.B](references/decision-heuristics.md#b-missing-data-strategy)):
-     - Run **pre-flight** Little's MCAR test (`Recipe 8`; $H_0: \text{MCAR}$). Missing primary outcomes $\longrightarrow$ **Grilling Gate #1**.
+     - Run **pre-flight** Little's MCAR test (`Recipe 8`; $H_0: \text{MCAR}$); name tested variables (untested ≠ MCAR). Missing primary outcomes $\longrightarrow$ **Grilling Gate #1**.
      - *Triage*: $< 5\%$ complete-case with sensitivity notes; $5\%\text{--}40\%$ MAR $\longrightarrow$ [Recipe 12](references/recipes/01-data-missing-table1.md#12-multiple-imputation-by-chained-equations-mice--rubins-rules) ($M \ge 5$ for $\le 30\%$, $M \ge 20$ for $> 30\%$) primary, Complete-Case sensitivity; $> 40\%$ exposure or covariate missingness or plausible MNAR $\longrightarrow$ **Grilling Gate #4** (§2).
    - **Standard CIs**: Wilson score 95% CIs (`Recipe 2`), DeLong CIs (`Recipe 3`), exact F CIs (`Recipe 5`), profile likelihood CIs (`Recipe 7`).
 

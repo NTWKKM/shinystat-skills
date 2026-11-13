@@ -8,6 +8,8 @@ tests/unit/test_shinystat_cloud.py (standalone pure-Python implementation extrac
 from dataclasses import dataclass
 from typing import Any
 
+import pandas as pd
+
 BASE_RESULTS_DICT: dict[str, Any] = {
     "or_age": 1.45,
     "ci_low": 1.10,
@@ -398,6 +400,30 @@ INTEGRITY_PARITY_CASES: list[IntegrityParityCase] = [
         id="fail_plural_p_values_ci_bound_key_is_not_a_p_value",
         narrative="Age showed P < 0.05 (OR 1.45, n=412).",
         results_dict={"or_age": 1.45, "n": 412, "p_values_ci_lower": 0.01},
+        expected_passed=False,
+        expected_untraced=[0.05],
+    ),
+    IntegrityParityCase(
+        id="fail_plural_ci_suffix_key_is_not_a_p_value",
+        narrative="Age showed P < 0.05 (OR 1.45, n=412).",
+        results_dict={
+            "or_age": 1.45,
+            "n": 412,
+            "age_p_value_cis": [0.001, 0.3],
+            "p_lowers": 0.01,
+            "p_value_uppers": 0.02,
+        },
+        expected_passed=False,
+        expected_untraced=[0.05],
+    ),
+    IntegrityParityCase(
+        id="fail_plural_ci_suffix_column_is_not_a_p_value",
+        narrative="Age showed P < 0.05 (OR 1.45, n=412).",
+        results_dict={
+            "or_age": 1.45,
+            "n": 412,
+            "model": pd.DataFrame({"p_value_cis": [0.001], "p_lowers": [0.01], "p_uppers": [0.02]}),
+        },
         expected_passed=False,
         expected_untraced=[0.05],
     ),
