@@ -1380,7 +1380,7 @@ def test_live_eval_round_two_wording_and_engine_adr85():
         assert res.source_df["Count"].tolist() == [100, 10, 90]
 
     # Run Sequence: separation and Little's test run at pre-flight; Gate #3 joins the consolidated ask.
-    assert "`check_separation` on each logistic design" in local
+    assert "`check_separation` on each dummy-coded logistic design" in local
     assert "`#1`–`#4`" in local and "`#1`–`#4`" in cloud
     for text in (local, cloud):
         assert "chat message" in text  # chat reply audited for file deliverables too
@@ -1403,10 +1403,14 @@ def test_live_eval_round_two_wording_and_engine_adr85():
     assert "(rows complete on its variables)" in local
     assert "(rows complete on its variables) with rows" in local
     for text in (local, cloud):
-        assert "name tested variables (untested ≠ MCAR)" in text
-    assert "Primary Exposure Missing = 100% ──▶ Stop" in heur
+        assert "name tested variables (untested or df 0 ≠ MCAR)" in text
+    assert "Primary Exposure Missing = 100% in the analytic cohort" in heur
     assert "a categorical or otherwise excluded variable as untested, never as MCAR" in heur
     assert "marks separation unevaluable" in heur
+    assert "after applying the approved outcome disposition" in heur
+    assert "the local run halts and reports the exposure as not locally imputable" in heur
+    assert "is reported as unavailable, never as MCAR" in heur
+    assert "`check_separation` on each dummy-coded logistic design" in local
     assert "compute that SD once from the observed values" in heur
     assert "the primary analysis is high-M MICE (M ≥ 40, tracking FMI) that imputes the exposure" in heur
     assert "without observed receipt/analysis counts" in local

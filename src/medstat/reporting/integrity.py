@@ -95,6 +95,17 @@ _P_KEY_RE = re.compile(
 )
 
 
+_P_THRESHOLD_KEY_RE = re.compile(
+    r"(?<![A-Za-z0-9])(?:thresh(?:old)?|cut[-_.]?off|alpha|sig(?:nificance)?[-_.]?level)s?(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
+
+
+def _is_p_key(key_str: str) -> bool:
+    """A P-value key names a P-value, not a threshold, cutoff or alpha level."""
+    return bool(_P_KEY_RE.search(key_str)) and not _P_THRESHOLD_KEY_RE.search(key_str)
+
+
 def _detect_p_qualifier(key_str: str) -> str | None:
     """Infers specialized p-value qualifier from key or context string."""
     k_lower = key_str.lower()
@@ -127,7 +138,7 @@ def _extract_qualified_p_values(
         for k, v in val.items():
             k_str = str(k)
             k_qual = _detect_p_qualifier(k_str) or parent_qualifier
-            if _P_KEY_RE.search(k_str):
+            if _is_p_key(k_str):
                 if isinstance(v, dict):
                     pvals.extend(
                         _extract_qualified_p_values(v, parent_qualifier=k_qual)
@@ -151,7 +162,7 @@ def _extract_qualified_p_values(
         for col in val.columns:
             col_str = str(col)
             col_qual = _detect_p_qualifier(col_str) or parent_qualifier
-            if _P_KEY_RE.search(col_str):
+            if _is_p_key(col_str):
                 for n in _flatten_numbers(val[col]):
                     if 0.0 <= n <= 1.0:
                         pvals.append((col_qual, float(n)))

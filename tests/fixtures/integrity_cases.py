@@ -428,6 +428,31 @@ INTEGRITY_PARITY_CASES: list[IntegrityParityCase] = [
         expected_untraced=[0.05],
     ),
     IntegrityParityCase(
+        id="fail_threshold_p_keys_are_not_p_values",
+        narrative="Age showed P < 0.05 (OR 1.45, n=412).",
+        results_dict={
+            "or_age": 1.45,
+            "n": 412,
+            "age_p_value_threshold": 0.01,
+            "threshold_p_value": 0.01,
+            "p_cutoff": 0.01,
+            "alpha_p": 0.01,
+        },
+        expected_passed=False,
+        expected_untraced=[0.05],
+    ),
+    IntegrityParityCase(
+        id="fail_threshold_p_column_is_not_a_p_value",
+        narrative="Age showed P < 0.05 (OR 1.45, n=412).",
+        results_dict={
+            "or_age": 1.45,
+            "n": 412,
+            "model": pd.DataFrame({"p_value_cutoff": [0.01], "significance_level_p": [0.01]}),
+        },
+        expected_passed=False,
+        expected_untraced=[0.05],
+    ),
+    IntegrityParityCase(
         id="pass_plural_p_values_key_traces_inequality",
         narrative="Age showed P < 0.05 (OR 1.45, n=412).",
         results_dict={"or_age": 1.45, "n": 412, "p_values": [0.01, 0.30]},

@@ -102,7 +102,7 @@ Each file is self-contained except: E-values after `Recipe 6` / `Recipe 14` need
    - **Sample Retention Flow**: Track **reconciled** *($N_{\text{initial}} = N_{\text{excluded}} + N_{\text{analyzed}}$)* cohort retention across every step.
    - **Identifier-Free Exports**: Exported data files carry no patient identifier column.
    - **Zero Silent Deletion & Missing-Data Routing** ([decision-heuristics.md §2.B](references/decision-heuristics.md#b-missing-data-strategy)):
-     - Run **pre-flight** Little's MCAR test (`Recipe 8`; $H_0: \text{MCAR}$); name tested variables (untested ≠ MCAR). Missing primary outcomes $\longrightarrow$ **Grilling Gate #1**.
+     - Run **pre-flight** Little's MCAR test (`Recipe 8`; $H_0: \text{MCAR}$); name tested variables (untested or df 0 ≠ MCAR). Missing primary outcomes $\longrightarrow$ **Grilling Gate #1**.
      - *Triage*: $< 5\%$ complete-case with sensitivity notes; $5\%\text{--}40\%$ MAR $\longrightarrow$ [Recipe 12](references/recipes/01-data-missing-table1.md#12-multiple-imputation-by-chained-equations-mice--rubins-rules) ($M \ge 5$ for $\le 30\%$, $M \ge 20$ for $> 30\%$) primary, Complete-Case sensitivity; $> 40\%$ exposure or covariate missingness or plausible MNAR $\longrightarrow$ **Grilling Gate #4** (§2).
    - **Standard CIs**: Wilson score 95% CIs (`Recipe 2`), DeLong CIs (`Recipe 3`), exact F CIs (`Recipe 5`), profile likelihood CIs (`Recipe 7`).
 

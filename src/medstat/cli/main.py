@@ -327,12 +327,15 @@ def profile_cmd(data: str, output: str | None) -> None:
     mcar_summary = None
     if audit.littles_mcar:
         mcar = audit.littles_mcar
+        mcar_available = bool(np.isfinite(mcar.p_value))
         mcar_summary = {
-            "statistic": round(mcar.statistic, 2),
-            "p_value": round(mcar.p_value, 4),
-            "is_mcar": mcar.is_mcar,
+            "statistic": round(mcar.statistic, 2) if mcar_available else None,
+            "p_value": round(mcar.p_value, 4) if mcar_available else None,
+            "is_mcar": mcar.is_mcar if mcar_available else None,
             "interpretation": (
-                "No evidence against MCAR (P > 0.05)"
+                f"Test unavailable: {mcar.message}"
+                if not mcar_available
+                else "No evidence against MCAR (P > 0.05)"
                 if mcar.is_mcar
                 else "Evidence against MCAR (P <= 0.05); does not distinguish MAR from MNAR"
             ),

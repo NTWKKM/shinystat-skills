@@ -1243,6 +1243,15 @@ def verify_standalone_integrity(
         re.IGNORECASE,
     )
 
+    p_threshold_re = re.compile(
+        r"(?<![A-Za-z0-9])(?:thresh(?:old)?|cut[-_.]?off|alpha|sig(?:nificance)?[-_.]?level)s?(?![A-Za-z0-9])",
+        re.IGNORECASE,
+    )
+
+    def _is_p_key(key_str):
+        # A P-value key names a P-value, not a threshold, cutoff or alpha level.
+        return bool(p_key_re.search(key_str)) and not p_threshold_re.search(key_str)
+
     def _detect_p_qual(key_str):
         k_lower = key_str.lower()
         if "interaction" in k_lower:
@@ -1265,7 +1274,7 @@ def verify_standalone_integrity(
             for k, v in d.items():
                 k_str = str(k)
                 k_qual = _detect_p_qual(k_str) or parent_qual
-                if p_key_re.search(k_str):
+                if _is_p_key(k_str):
                     if isinstance(v, dict):
                         pvals.extend(_extract_qualified_p_vals(v, parent_qual=k_qual))
                     elif isinstance(v, pd.DataFrame):
@@ -1281,7 +1290,7 @@ def verify_standalone_integrity(
             for col in d.columns:
                 col_str = str(col)
                 col_qual = _detect_p_qual(col_str) or parent_qual
-                if p_key_re.search(col_str):
+                if _is_p_key(col_str):
                     pvals.extend((col_qual, n) for n in _flatten_nums(d[col]) if 0.0 <= n <= 1.0)
         return pvals
 
