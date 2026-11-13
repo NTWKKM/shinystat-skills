@@ -363,9 +363,12 @@ def _is_structural_context(
     ):
         return True
 
-    # 5b. Normal critical values in method statements (mean ± 1.96 SD, z = 1.645)
-    if val in (1.645, 1.96, 2.576) and re.search(
-        r"(?:±|\+/-|\bz(?:-score)?\s*[=:]?|\bcritical\s+value\s*[=:]?)\s*$", window_before, re.IGNORECASE
+    # 5b. Normal critical values in method statements: a multiplier of an SD/SE ("mean ± 1.96 SD",
+    # "1.96 × SE") or a named critical value ("critical value of 1.645"). An observed SD after "±"
+    # or a reported z statistic stays traced.
+    if val in (1.645, 1.96, 2.576) and (
+        re.match(r"^\s*(?:[×x*]\s*)?(?:SDs?|SEs?|SEM|standard\s+(?:deviations?|errors?))\b", window_after, re.IGNORECASE)
+        or re.search(r"\bcritical\s+value\s*(?:of\s*)?(?:z\s*)?[=:]?\s*$", window_before, re.IGNORECASE)
     ):
         return True
 

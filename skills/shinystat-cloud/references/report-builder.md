@@ -1435,8 +1435,9 @@ def verify_standalone_integrity(
             )
             is_scale_const = (val in (0.0, 100.0) and bool(
                 re.search(r"\b(?:scale|normalized|range|total)\b", window, re.IGNORECASE)
-            )) or (val in (1.645, 1.96, 2.576) and bool(
-                re.search(r"(?:±|\+/-|\bz(?:-score)?\s*[=:]?|\bcritical\s+value\s*[=:]?)\s*$", window_before, re.IGNORECASE)
+            )) or (val in (1.645, 1.96, 2.576) and (
+                bool(re.match(r"^\s*(?:[×x*]\s*)?(?:SDs?|SEs?|SEM|standard\s+(?:deviations?|errors?))\b", window_after, re.IGNORECASE))
+                or bool(re.search(r"\bcritical\s+value\s*(?:of\s*)?(?:z\s*)?[=:]?\s*$", window_before, re.IGNORECASE))
             ))
             is_version = bool(
                 re.search(r"\b(?:Version|v\.)\s*$", window_before, re.IGNORECASE)

@@ -14,7 +14,7 @@ For each trial arm $i$:
 $$\text{Allocated}_i = \text{Received}_i + \text{Did Not Receive}_i = \text{Analyzed}_i + \text{Excluded from Analysis}_i$$
 Lost to follow-up and discontinued intervention are reported beside these partitions; they may overlap with the analyzed count.
 
-The CONSORT recipe raises when an arm has no observed receipt count (`received` or `did_not_receive`) or analysis count. Ask the user for the missing counts (Gate #2) and never derive `received` from `allocated` alone, because the figure would then state an unobserved fact (`received = allocated` is right only when an observed `did_not_receive = 0` says so); `excluded_from_analysis = allocated - analyzed` is arithmetic on observed counts and is allowed. A halted figure does not block independent parts of the request (for example a sample-size table): deliver those, labelled partial, and list the question.
+The CONSORT recipe raises when an arm has no observed receipt count (`received` or `did_not_receive`) or analysis count. Ask the user for the missing counts (Gate #2) and never derive `received` from `allocated` alone, because the figure would then state an unobserved fact (`received = allocated` is right when `received` itself was observed, or when an observed `did_not_receive = 0` gives it); `excluded_from_analysis = allocated - analyzed` is arithmetic on observed counts and is allowed. A halted figure does not block independent parts of the request (for example a sample-size table): deliver those, labelled partial, and list the question.
 
 ### B. Observational Cohort Studies (STROBE)
 $$\text{Retained}_{k} - \text{Excluded}_{k+1} = \text{Retained}_{k+1}$$
