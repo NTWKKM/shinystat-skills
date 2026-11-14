@@ -87,6 +87,7 @@ def test_assert_zero_phi_text_raises_on_violations():
     assert_zero_phi_text(["Survival Probability", "Cohort (n = 120)", "Stage 2"])
     assert_zero_phi_text(["นายกรัฐมนตรีแถลงนโยบาย"])
     assert_zero_phi_text(["นางพยาบาลประจำวอร์ด"])
+    assert_zero_phi_text(["อาชีพ: นายจ้าง"])
 
     # Violations
     with pytest.raises(ValueError, match="Zero-PHI Violation"):
@@ -112,6 +113,9 @@ def test_assert_zero_phi_text_raises_on_violations():
 
     with pytest.raises(ValueError, match="Zero-PHI Violation"):
         assert_zero_phi_text(["Dr. สมชาย"])
+
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        assert_zero_phi_text(["Dr. บี"])
 
     with pytest.raises(ValueError, match="Zero-PHI Violation"):
         assert_zero_phi_text(["นาย John"])

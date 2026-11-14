@@ -1507,7 +1507,7 @@ def test_live_eval_round_two_wording_and_engine_adr85():
     )
     assert "for genuinely auxiliary covariates only" in heur
     assert (
-        "for important confounders, do not recommend removal from the primary model"
+        "for important confounders with observed data (< 100% missing), do not recommend removal from the primary model"
         in heur
     )
     for text in (local, cloud):
@@ -1518,3 +1518,12 @@ def test_live_eval_round_two_wording_and_engine_adr85():
         "default to **Direct in Main Agent** only when no subagent tool exists, the run is ineligible, or non-interactive execution is explicitly authorized"
         in proto
     )
+    assert "nonnormal_vars" in type1_row and "nonnormal_vars" in heur
+    assert (
+        "Important Non-Primary Confounder Missing = 100% in the analytic cohort" in heur
+    )
+    assert (
+        "label the unit in years (e.g., `per 10 years`) when supplied metadata establishes that age is measured in years"
+        in heur
+    )
+    assert "triggered `#1`–`#4` have explicit user decisions" in local
