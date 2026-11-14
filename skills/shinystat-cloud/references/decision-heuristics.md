@@ -2,13 +2,15 @@
 
 Shared by `shinystat` (local) and `shinystat-cloud`. Consult during Pillar 2 (Research & Estimand Triangulation) to map a clinical research question to its model. Each method names both routes: the **local API** function in the bundled engine (`scripts/medstat/`; module map in the local SKILL.md Pillar 3) and the **cloud Recipe #** (file map in the cloud SKILL.md Recipe Index). Use the route your skill provides.
 
+> **Read §3 before modeling (lines ~200–220):** §3 pins the deterministic **Table 1 normality rule** (`|skewness| <= 1.0` Mean (SD); `> 1.0` Median [IQR]) and **predictor unit scaling** (`age` per 10 years when in years, even if header omits `_years`; other continuous predictors per 1 SD; `"unit not stated"` if absent). Do not truncate before §3.
+
 ---
 
 ## 1. Clinical Study Archetype to Statistical Model Mapping
 
 | Study Archetype | Target Estimand / Goal | Primary Model / Method | Key Assumption / Diagnostics | Local API · Cloud Recipe |
 | :--- | :--- | :--- | :--- | :--- |
-| **Type 1: Baseline Cohort** | Cohort characteristics | Table 1 (Mean/SD, Median/IQR, Count/%, SMD) | Normality inspection; Fisher exact fallback for small cells | `generate_table_one`, `calculate_smd` · Recipe 1 |
+| **Type 1: Baseline Cohort** | Cohort characteristics | Table 1 (Mean/SD, Median/IQR, Count/%, SMD) | Skewness rule (`|skewness| <= 1.0` Mean (SD); `> 1.0` Median [IQR]); Fisher exact fallback for small cells | `generate_table_one`, `calculate_smd` · Recipe 1 |
 | **Type 2: Binary Outcome** | Odds Ratio (OR), Risk factors | Multivariable Binary Logistic Regression | Linearity of log-odds; Crude & Adjusted OR table | `fit_standard_logistic`, `fit_logistic_rcs` · Recipes 10, 22 |
 | **Type 2-Sparse: Separation** | OR estimate in rare events | Firth Penalized Logistic Regression | Profile likelihood CIs; resolves monotone separation | `fit_firth_logistic` · Recipe 7 |
 | **Type 2b: Ordinal Scale** | Cumulative Odds Ratio | Cumulative Logit Proportional Odds | Brant test for parallel lines; multinomial logit fallback | `fit_proportional_odds`, `test_proportional_odds` · Recipe 21 |
@@ -202,7 +204,8 @@ Polish Grilling Gate #6 Activation & Routing
 
 - **NEJM Style**: 3 horizontal rules (top border 2px, header border 1px, bottom border 2px), zero vertical dividers, $P$-values formatted as $P = 0.04$ or $P < 0.001$. Render via `render_nejm_table` (local) or Recipe 13 (cloud).
 - **JAMA Style**: Clean minimal dividers, $P$-values formatted without leading zero: $P = .04$ or $P < .001$.
-- **Predictor Units & Coding**: A continuous predictor without a user-named unit is scaled per 10 years (age, when the data record it in years) or per 1 SD (others, and age in an unknown unit; SD stated in the data's unit) in every table, text and figure. Under multiple imputation, compute that SD once from the observed values and apply it to every imputed dataset before pooling. Categorical covariates enter Cox and logistic suites as 0/1 dummies against a stated reference level. A unit absent from the data is written "unit not stated", never assumed.
+- **Table 1 Summary Selection**: Summarize continuous variables as Mean (SD) when `|skewness| <= 1.0` across the analytic cohort (use Median [IQR] when `|skewness| > 1.0` or for known inherently skewed clinical biomarkers/length-of-stay), rather than switching between Mean (SD) and Median [IQR] on Shapiro-Wilk *P*-values alone in large samples.
+- **Predictor Units & Coding**: A continuous predictor without a user-named unit is scaled per 10 years (age, when the data record it in years) or per 1 SD (others, and age in an unknown non-year unit; SD stated in the data's unit) in every table, text and figure—treat columns simply named `age` with plausible human year values (`0–120`, e.g. `45–88`) as recorded in years even when `_years` is absent from the column header. Under multiple imputation, compute that SD once from the observed values and apply it to every imputed dataset before pooling. Categorical covariates enter Cox and logistic suites as 0/1 dummies against a stated reference level. A unit absent from the data header is written "unit not stated" in table/figure labels (never invent units like `mmHg` or `mg/dL`).
 - **Precision Invariants**: Unrounded intermediate calculations (`float64`); OR/HR reported to 2 decimal places with 95% CIs; percentages reported to 1 decimal place; explicit units mandatory (`mg/dL`, `mL/min/1.73m²`).
 - **Reporting Checklists**: Consult EQUATOR standards: STROBE (observational cohorts), CONSORT (trials), TRIPOD (prediction models), STARD (diagnostic accuracy), or PRISMA (systematic reviews).
 - **Figures & Visualizations**: When generating 300 DPI publication plots, read [figures.md](figures.md#2-available-plot-recipes); when rendering HTML Dual / Toggle View or multi-format reports, read [report-builder.md](report-builder.md#2-standalone-document-generation-recipes).

@@ -95,13 +95,19 @@ _P_KEY_RE = re.compile(
 )
 
 
-_P_THRESHOLD_WORD = r"(?:thresh(?:old)?|cut[-_.\s]?off|alpha|sig(?:nificance)?[-_.\s]?level)s?"
+_P_THRESHOLD_WORD = (
+    r"(?:thresh(?:old)?|cut[-_.\s]?off|alpha|sig(?:nificance)?[-_.\s]?level)s?"
+)
 # A whole key that names a threshold record ("thresholds", "alpha", "significance level").
 _P_THRESHOLD_RECORD_RE = re.compile(rf"\s*{_P_THRESHOLD_WORD}\s*", re.IGNORECASE)
 # A threshold word joined to the P token ("p_value_threshold", "threshold_p", "alpha_p");
 # "alpha_diversity_p_value" names an observed P-value and is not one.
-_P_THRESHOLD_BEFORE_RE = re.compile(rf"(?<![A-Za-z0-9]){_P_THRESHOLD_WORD}[-_.\s]+$", re.IGNORECASE)
-_P_THRESHOLD_AFTER_RE = re.compile(rf"^[-_.\s]+{_P_THRESHOLD_WORD}(?![A-Za-z0-9])", re.IGNORECASE)
+_P_THRESHOLD_BEFORE_RE = re.compile(
+    rf"(?<![A-Za-z0-9]){_P_THRESHOLD_WORD}[-_.\s]+$", re.IGNORECASE
+)
+_P_THRESHOLD_AFTER_RE = re.compile(
+    rf"^[-_.\s]+{_P_THRESHOLD_WORD}(?![A-Za-z0-9])", re.IGNORECASE
+)
 
 
 def _is_threshold_key(key_str: str) -> bool:
@@ -258,7 +264,11 @@ _AUTHOR_CONTEXT_BEFORE_YEAR = re.compile(
 
 
 def _is_section_number(
-    val: float, raw_str: str, window_before: str, window_after: str, has_pct: bool = False
+    val: float,
+    raw_str: str,
+    window_before: str,
+    window_after: str,
+    has_pct: bool = False,
 ) -> bool:
     if has_pct:
         return False
@@ -358,6 +368,21 @@ def _is_structural_context(
         ):
             return True
 
+    # 3a. DOI identifiers (e.g., doi:10.1016/S1470-2045(15)00188-6 or https://doi.org/10.1056/NEJMoa123456)
+    if (
+        re.search(
+            r"(?:\bdoi\s*:?\s*|https?://(?:dx\.)?doi\.org/)$",
+            window_before,
+            re.IGNORECASE,
+        )
+        and re.match(r"^10\.\d+/\S*", f"{raw_str}{window_after}")
+    ) or re.search(
+        r"(?:\bdoi\s*:?\s*|https?://(?:dx\.)?doi\.org/)10\.\d+/[^\s,;]*$",
+        window_before,
+        re.IGNORECASE,
+    ):
+        return True
+
     # 3b. Author-year citations without "et al." (Austin (2011), VanderWeele & Ding 2017,
     # (Rubin, 1987)): a capitalised surname right before the year and a citation
     # boundary after it. "Total 1987 patients" and "Total 1987." stay untraced.
@@ -376,7 +401,9 @@ def _is_structural_context(
         return True
 
     # 3d. Analysis scale constants: "per 10 years", "per 0.5 mg/dL", "caliper 0.2 SD".
-    if re.search(r"\b(?:per|caliper(?:\s+(?:of|width))?)\s*$", window_before, re.IGNORECASE):
+    if re.search(
+        r"\b(?:per|caliper(?:\s+(?:of|width))?)\s*$", window_before, re.IGNORECASE
+    ):
         return True
 
     # 3c. Section numbers at the start of a line or Markdown heading (## 4. Results, 7. Discussion,
@@ -408,10 +435,22 @@ def _is_structural_context(
     if val in (1.645, 1.96, 2.576) and (
         (
             re.search(r"(?:±|\+/-)\s*$", window_before)
-            and re.match(r"^\s*(?:SDs?|SEs?|SEM|standard\s+(?:deviations?|errors?))\b", window_after, re.IGNORECASE)
+            and re.match(
+                r"^\s*(?:SDs?|SEs?|SEM|standard\s+(?:deviations?|errors?))\b",
+                window_after,
+                re.IGNORECASE,
+            )
         )
-        or re.match(r"^\s*[×x*]\s*(?:SDs?|SEs?|SEM|standard\s+(?:deviations?|errors?))\b", window_after, re.IGNORECASE)
-        or re.search(r"\bcritical\s+value\s*(?:of\s*)?(?:z\s*)?[=:]?\s*$", window_before, re.IGNORECASE)
+        or re.match(
+            r"^\s*[×x*]\s*(?:SDs?|SEs?|SEM|standard\s+(?:deviations?|errors?))\b",
+            window_after,
+            re.IGNORECASE,
+        )
+        or re.search(
+            r"\bcritical\s+value\s*(?:of\s*)?(?:z\s*)?[=:]?\s*$",
+            window_before,
+            re.IGNORECASE,
+        )
     ):
         return True
 
@@ -588,7 +627,9 @@ def _read_exported_table(fp: Path) -> tuple[list[str], str]:
         elif suffix == ".parquet":
             frames = {"": pd.read_parquet(fp)}
         else:
-            raise ValueError(f"unsupported format '{suffix or fp.name}' (use .csv, .tsv, .xlsx or .parquet)")
+            raise ValueError(
+                f"unsupported format '{suffix or fp.name}' (use .csv, .tsv, .xlsx or .parquet)"
+            )
     except ImportError as exc:
         raise ValueError(f"no reader for '{suffix}' ({exc})") from exc
     except zipfile.BadZipFile as exc:
@@ -653,15 +694,21 @@ def verify_report_integrity(
     for path in exported_files or []:
         fp = Path(path)
         if not fp.is_file():
-            raise FileNotFoundError(f"Exported file not found for integrity audit: {fp}")
+            raise FileNotFoundError(
+                f"Exported file not found for integrity audit: {fp}"
+            )
         try:
             cols, content = _read_exported_table(fp)
         except ValueError as exc:
             # Fail closed: a file the audit cannot read is never passed unchecked.
-            phi_violations.append(f"Exported file '{fp.name}' could not be audited: {exc}")
+            phi_violations.append(
+                f"Exported file '{fp.name}' could not be audited: {exc}"
+            )
             continue
         for col in scan_identifier_columns(cols):
-            phi_violations.append(f"Identifier column '{col}' in exported file '{fp.name}'")
+            phi_violations.append(
+                f"Identifier column '{col}' in exported file '{fp.name}'"
+            )
         for pattern, label in PHI_PATTERNS:
             for m in pattern.findall(content):
                 phi_violations.append(f"{label} in exported file '{fp.name}': '{m}'")
@@ -1181,11 +1228,36 @@ def verify_report_integrity(
     is_non_causal_prediction = (
         is_confirmed_prediction and not has_causal_claims and not is_observational
     )
+    is_non_causal_meta_or_agreement = (
+        bool(
+            clean_design
+            and (
+                any(
+                    term in clean_design
+                    for term in [
+                        "meta_analysis",
+                        "metaanalysis",
+                        "agreement",
+                        "reliability",
+                        "bland_altman",
+                    ]
+                )
+                or re.search(r"(?:^|_)icc(?:_|$)", clean_design)
+            )
+        )
+        and not is_observational
+        and not has_causal_key
+        and not has_causal_claims
+    )
 
     is_causal = (
         is_observational
         or has_causal_key
-        or (has_regression_key and not is_non_causal_prediction)
+        or (
+            has_regression_key
+            and not is_non_causal_prediction
+            and not is_non_causal_meta_or_agreement
+        )
         or has_causal_claims
     )
 

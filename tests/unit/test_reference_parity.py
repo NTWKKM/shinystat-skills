@@ -906,7 +906,13 @@ def test_recipe16_degenerate_nri_and_idi_are_unavailable(recipes):
 
 def test_recipe24_rejects_incomplete_or_mixed_inputs(recipes):
     df = pd.DataFrame(
-        {"study": ["a", "b"], "et": [3, np.nan], "nt": [20, 20], "ec": [5, 6], "nc": [20, 20]}
+        {
+            "study": ["a", "b"],
+            "et": [3, np.nan],
+            "nt": [20, 20],
+            "ec": [5, 6],
+            "nc": [20, 20],
+        }
     )
     with pytest.raises(ValueError, match="Incomplete study inputs"):
         recipes["compute_binary_effect_sizes"](df, "et", "nt", "ec", "nc", "study")
@@ -914,14 +920,22 @@ def test_recipe24_rejects_incomplete_or_mixed_inputs(recipes):
         recipes["compute_binary_effect_sizes"](
             df.dropna(), "et", "nt", "ec", "nc", "study", effect_measure="HR"
         )
-    md = pd.DataFrame({"study": ["a", "b", "c"], "effect_size": [1.2, 2.0, 1.5], "se": [0.2] * 3})
+    md = pd.DataFrame(
+        {"study": ["a", "b", "c"], "effect_size": [1.2, 2.0, 1.5], "se": [0.2] * 3}
+    )
     with pytest.raises(ValueError, match="scale of 'effect_size' is unknown"):
         recipes["run_meta_analysis"](md)
 
 
 def test_recipe24_raw_ratio_effect_col_is_logged(recipes):
     df = pd.DataFrame(
-        {"study": ["a", "b", "c"], "et": [3, 5, 8], "nt": [20] * 3, "ec": [6, 9, 10], "nc": [20] * 3}
+        {
+            "study": ["a", "b", "c"],
+            "et": [3, 5, 8],
+            "nt": [20] * 3,
+            "ec": [6, 9, 10],
+            "nc": [20] * 3,
+        }
     )
     es = recipes["compute_binary_effect_sizes"](df, "et", "nt", "ec", "nc", "study")
     via_log = recipes["run_meta_analysis"](es)
@@ -995,9 +1009,7 @@ def test_recipe3_paired_delong_small_positive_variance_keeps_inference(recipes):
     # Move one positive just below the adjacent lower negative: exactly one pair flips,
     # so Var(AUC1 - AUC2) is positive but ~1e-13, below the old 1e-12 floor.
     order = np.argsort(s1)
-    k = next(
-        i for i in range(1, n) if y[order[i]] == 1 and y[order[i - 1]] == 0
-    )
+    k = next(i for i in range(1, n) if y[order[i]] == 1 and y[order[i - 1]] == 0)
     s2 = s1.copy()
     s2[order[k]] = s1[order[k - 1]] - 1e-9
     v10_1, v01_1, _ = recipes["_delong_placements"](y, s1)
@@ -1020,7 +1032,9 @@ def test_recipe18_predictions_invariant_to_predictor_units(recipes):
     df = pd.DataFrame({"y": y, "x": x, "x_milli": x * 1000.0})
     a = recipes["bootstrap_internal_validation"](df, "y", ["x"], n_bootstrap=20)
     b = recipes["bootstrap_internal_validation"](df, "y", ["x_milli"], n_bootstrap=20)
-    assert a["metrics"]["auroc"]["apparent"] == pytest.approx(b["metrics"]["auroc"]["apparent"])
+    assert a["metrics"]["auroc"]["apparent"] == pytest.approx(
+        b["metrics"]["auroc"]["apparent"]
+    )
     assert a["shrinkage_factor"] == pytest.approx(b["shrinkage_factor"], rel=1e-6)
     m = a["metrics"]["calibration_slope"]
     assert a["shrinkage_factor"] == pytest.approx(
@@ -1069,9 +1083,13 @@ def test_engine_bootstrap_validation_matches_recipe18(recipes):
 
     df = _adr75_cohort()
     eng = bootstrap_internal_validation(df, "y", ["x1", "x2"], n_bootstrap=40)
-    rec = recipes["bootstrap_internal_validation"](df, "y", ["x1", "x2"], n_bootstrap=40)
+    rec = recipes["bootstrap_internal_validation"](
+        df, "y", ["x1", "x2"], n_bootstrap=40
+    )
     for term, coef in eng["shrunk_coefficients"]["original"].items():
-        assert coef == pytest.approx(rec["shrunk_coefficients"]["original"][term], rel=1e-6)
+        assert coef == pytest.approx(
+            rec["shrunk_coefficients"]["original"][term], rel=1e-6
+        )
     assert eng["shrinkage_factor"] == pytest.approx(rec["shrinkage_factor"], abs=1e-6)
 
 
@@ -1118,11 +1136,19 @@ def test_firth_logistic_mixed_fallback_marks_the_right_term(monkeypatch):
     res = firth.fit_firth_logistic(d["case"], X)
     s = res["summary_df"]
     assert res["ci_fallback"] is True
-    assert res["ci_methods"] == {"(Intercept)": "profile", "age": "wald", "oc": "profile"}
-    np.testing.assert_allclose(s.loc["age", ["ci_lower", "ci_upper"]], wald.loc["age", ["ci_lower", "ci_upper"]])
+    assert res["ci_methods"] == {
+        "(Intercept)": "profile",
+        "age": "wald",
+        "oc": "profile",
+    }
+    np.testing.assert_allclose(
+        s.loc["age", ["ci_lower", "ci_upper"]],
+        wald.loc["age", ["ci_lower", "ci_upper"]],
+    )
     for term in ("(Intercept)", "oc"):
         np.testing.assert_allclose(
-            s.loc[term, ["ci_lower", "ci_upper"]], profile.loc[term, ["ci_lower", "ci_upper"]]
+            s.loc[term, ["ci_lower", "ci_upper"]],
+            profile.loc[term, ["ci_lower", "ci_upper"]],
         )
 
 
@@ -1138,8 +1164,12 @@ def test_firth_cox_mixed_fallback_marks_the_right_term(monkeypatch):
     s = res["summary_df"]
     assert res["ci_fallback"] is True
     assert res["ci_methods"] == {"T": "wald", "N": "profile"}
-    np.testing.assert_allclose(s.loc["T", ["ci_lower", "ci_upper"]], wald.loc["T", ["ci_lower", "ci_upper"]])
-    np.testing.assert_allclose(s.loc["N", ["ci_lower", "ci_upper"]], profile.loc["N", ["ci_lower", "ci_upper"]])
+    np.testing.assert_allclose(
+        s.loc["T", ["ci_lower", "ci_upper"]], wald.loc["T", ["ci_lower", "ci_upper"]]
+    )
+    np.testing.assert_allclose(
+        s.loc["N", ["ci_lower", "ci_upper"]], profile.loc["N", ["ci_lower", "ci_upper"]]
+    )
 
 
 def test_firth_ci_methods_keep_original_labels_and_reject_duplicates():
@@ -1149,7 +1179,9 @@ def test_firth_ci_methods_keep_original_labels_and_reject_duplicates():
     X = d[["age", "oc"]].copy()
     X.columns = [1, 2]
     res = fit_firth_logistic(d["case"], X)
-    assert set(res["ci_methods"]) == set(res["summary_df"].index) == {"(Intercept)", 1, 2}
+    assert (
+        set(res["ci_methods"]) == set(res["summary_df"].index) == {"(Intercept)", 1, 2}
+    )
     X.columns = ["age", "age"]
     with pytest.raises(ValueError, match="unique"):
         fit_firth_logistic(d["case"], X)
@@ -1161,7 +1193,9 @@ def test_recipe16_zero_idi_with_zero_se_is_unavailable(recipes):
     res = recipes["compute_reclassification_metrics"](y, p0, p0 + 0.25)
     idi = res["idi"]
     assert idi["estimate"] == pytest.approx(0.0, abs=1e-12)
-    assert np.isnan(idi["se"]) and np.isnan(idi["p_value"]) and np.isnan(idi["ci_lower"])
+    assert (
+        np.isnan(idi["se"]) and np.isnan(idi["p_value"]) and np.isnan(idi["ci_lower"])
+    )
 
 
 @pytest.mark.parametrize("cells", [(0, 4, 0, 6), (3, 0, 2, 0)])
@@ -1177,7 +1211,9 @@ def test_recipe2_ratios_unavailable_when_a_class_is_absent(recipes, cells):
 @pytest.mark.parametrize("target", [1.0, 1.5])
 def test_recipe20_rejects_mape_target_at_or_above_one(recipes, target):
     with pytest.raises(ValueError, match="mape_target"):
-        recipes["calculate_riley_sample_size"](10, 0.3, cox_snell_r2=0.15, mape_target=target)
+        recipes["calculate_riley_sample_size"](
+            10, 0.3, cox_snell_r2=0.15, mape_target=target
+        )
 
 
 def test_engine_bootstrap_skips_replicates_with_failed_boot_slope(monkeypatch):
@@ -1193,7 +1229,9 @@ def test_engine_bootstrap_skips_replicates_with_failed_boot_slope(monkeypatch):
         return float("nan") if calls["n"] == 2 else real(y, lp)
 
     monkeypatch.setattr(validation, "_compute_calibration_slope", flaky)
-    res = validation.bootstrap_internal_validation(df, "y", ["x1", "x2"], n_bootstrap=10)
+    res = validation.bootstrap_internal_validation(
+        df, "y", ["x1", "x2"], n_bootstrap=10
+    )
     assert res["n_successful_replicates"] == 9
     assert np.isfinite(res["metrics"]["calibration_slope"]["optimism"])
 
@@ -1244,7 +1282,11 @@ def test_recipe24_effect_measure_decides_scale_before_column_name(recipes):
     rng = np.random.default_rng(6)
     se = rng.uniform(0.2, 0.6, 6)
     base = pd.DataFrame(
-        {"study": [f"s{i}" for i in range(6)], "log_effect": 1.5 + rng.normal(0, se), "se": se}
+        {
+            "study": [f"s{i}" for i in range(6)],
+            "log_effect": 1.5 + rng.normal(0, se),
+            "se": se,
+        }
     )
     md = base.assign(effect_measure="MD")
     rec_md = recipes["run_meta_analysis"](md)
@@ -1292,8 +1334,12 @@ def test_engine_cif_uses_original_event_times():
     dur, evt = _close_and_tied_events()
     tab = fit_competing_risks_cif(dur, evt).cif_table.set_index("time")
     for t in [3.0, 3.00001, 3.00002, 5.1]:
-        assert tab.loc[t, "cif_primary"] == pytest.approx(_aj_bruteforce(dur, evt, 1, t), abs=1e-12)
-        assert tab.loc[t, "cif_competing"] == pytest.approx(_aj_bruteforce(dur, evt, 2, t), abs=1e-12)
+        assert tab.loc[t, "cif_primary"] == pytest.approx(
+            _aj_bruteforce(dur, evt, 1, t), abs=1e-12
+        )
+        assert tab.loc[t, "cif_competing"] == pytest.approx(
+            _aj_bruteforce(dur, evt, 2, t), abs=1e-12
+        )
     res = fit_competing_risks_cif(dur, evt, horizons=[3.000015])
     assert res.horizon_summary["cif_primary"].iloc[0] == pytest.approx(
         round(_aj_bruteforce(dur, evt, 1, 3.000015), 4)
@@ -1306,7 +1352,9 @@ def test_recipe15_cif_uses_original_event_times(recipes):
     dur, evt = _close_and_tied_events()
     tab = recipes["fit_competing_risks_cif"](dur, evt)["cif_table"].set_index("time")
     for t in [3.0, 3.00001, 3.00002]:
-        assert tab.loc[t, "cif_primary"] == pytest.approx(_aj_bruteforce(dur, evt, 1, t), abs=1e-12)
+        assert tab.loc[t, "cif_primary"] == pytest.approx(
+            _aj_bruteforce(dur, evt, 1, t), abs=1e-12
+        )
 
 
 def test_engine_aj_variance_equals_lifelines_without_ties():
@@ -1323,7 +1371,9 @@ def test_engine_aj_variance_equals_lifelines_without_ties():
     tl = tl[tl < dur.max()]  # lifelines' terminal-time variance is non-finite (0 * inf)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        aj = AalenJohansenFitter(calculate_variance=True).fit(dur, evt, event_of_interest=1)
+        aj = AalenJohansenFitter(calculate_variance=True).fit(
+            dur, evt, event_of_interest=1
+        )
     cif, var = _aalen_johansen_exact(dur, evt, 1, tl)
     ref_cif = aj.cumulative_density_.iloc[:, 0].reindex(tl, method="ffill").to_numpy()
     ref_var = aj.variance_.reindex(tl, method="ffill").to_numpy()
@@ -1336,23 +1386,31 @@ def test_engine_meta_raw_effect_size_is_logged_or_rejected():
     from medstat.meta.models import compute_binary_effect_sizes, run_meta_analysis
 
     counts = pd.DataFrame(
-        {"study": list("abcd"), "et": [3, 5, 8, 4], "nt": [20] * 4, "ec": [6, 9, 10, 7], "nc": [20] * 4}
+        {
+            "study": list("abcd"),
+            "et": [3, 5, 8, 4],
+            "nt": [20] * 4,
+            "ec": [6, 9, 10, 7],
+            "nc": [20] * 4,
+        }
     )
     es = compute_binary_effect_sizes(counts, "et", "nt", "ec", "nc", "study")
     via_log = run_meta_analysis(es)
     via_raw = run_meta_analysis(es, effect_col="effect_size")
-    assert via_raw["random_effects"]["effect_disp"] == pytest.approx(via_log["random_effects"]["effect_disp"])
+    assert via_raw["random_effects"]["effect_disp"] == pytest.approx(
+        via_log["random_effects"]["effect_disp"]
+    )
     raw_only = es[["study", "effect_size", "se"]]
     with pytest.raises(ValueError, match="scale of 'effect_size' is unknown"):
         run_meta_analysis(raw_only)
-    assert run_meta_analysis(raw_only, effect_measure="OR")["random_effects"]["effect_disp"] == pytest.approx(
-        via_log["random_effects"]["effect_disp"]
-    )
+    assert run_meta_analysis(raw_only, effect_measure="OR")["random_effects"][
+        "effect_disp"
+    ] == pytest.approx(via_log["random_effects"]["effect_disp"])
     # A 'log_*' measure label declares log-scale input: no second log transform.
     logged = es[["study", "se"]].assign(effect_size=es["log_effect"])
-    assert run_meta_analysis(logged, effect_measure="log_or")["random_effects"]["effect_disp"] == pytest.approx(
-        via_log["random_effects"]["effect_disp"]
-    )
+    assert run_meta_analysis(logged, effect_measure="log_or")["random_effects"][
+        "effect_disp"
+    ] == pytest.approx(via_log["random_effects"]["effect_disp"])
 
 
 # ---------------------------------------------------------------------------
@@ -1362,7 +1420,11 @@ def test_engine_meta_raw_effect_size_is_logged_or_rejected():
 def test_aj_terminal_risk_set_variance(recipes, source):
     from medstat.models.survival import _aalen_johansen_exact
 
-    fn = _aalen_johansen_exact if source == "engine" else recipes["_aalen_johansen_exact"]
+    fn = (
+        _aalen_johansen_exact
+        if source == "engine"
+        else recipes["_aalen_johansen_exact"]
+    )
     # Five simultaneous events, two primary: F = 2/5, Var = S^2 d_k (n - d_k) / n^3 = 0.048.
     cif, var = fn(np.full(5, 2.0), np.array([1, 1, 2, 2, 2]), 1, np.array([0.0, 2.0]))
     assert cif[-1] == pytest.approx(0.4) and var[-1] == pytest.approx(0.048)
@@ -1378,23 +1440,40 @@ def test_cif_terminal_event_keeps_a_proper_interval(recipes):
     ):
         last = tab.iloc[-1]
         assert last["time"] == 5.0 and last["cif_primary"] == pytest.approx(0.4)
-        assert np.isfinite(last["cif_primary_ci_lower"]) and np.isfinite(last["cif_primary_ci_upper"])
+        assert np.isfinite(last["cif_primary_ci_lower"]) and np.isfinite(
+            last["cif_primary_ci_upper"]
+        )
         assert last["cif_primary_ci_upper"] - last["cif_primary_ci_lower"] > 0.1
 
 
 def test_cif_loglog_ci_is_nan_for_undefined_variance():
     from medstat.models.survival import _cif_loglog_ci
 
-    lo, hi = _cif_loglog_ci(np.array([0.0, 0.3, 0.3, 1.0]), np.array([0.0, np.inf, 0.0, np.nan]), 1.96)
+    lo, hi = _cif_loglog_ci(
+        np.array([0.0, 0.3, 0.3, 1.0]), np.array([0.0, np.inf, 0.0, np.nan]), 1.96
+    )
     assert np.isnan(lo[1]) and np.isnan(hi[1])  # undefined variance -> unavailable
     assert lo[2] == hi[2] == 0.3  # zero variance keeps the degenerate interval
-    assert (lo[0], hi[0], lo[3], hi[3]) == (0.0, 0.0, 1.0, 1.0)  # boundary values unchanged
+    assert (lo[0], hi[0], lo[3], hi[3]) == (
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+    )  # boundary values unchanged
 
 
 @pytest.mark.parametrize(
     "label, family, logged",
-    [("odds_ratio", "OR", False), ("OR", "OR", False), ("lnor", "OR", True), ("log_or", "OR", True),
-     ("log odds ratio", "OR", True), ("risk_ratio", "RR", False), ("wmd", "MD", False), ("foo", None, False)],
+    [
+        ("odds_ratio", "OR", False),
+        ("OR", "OR", False),
+        ("lnor", "OR", True),
+        ("log_or", "OR", True),
+        ("log odds ratio", "OR", True),
+        ("risk_ratio", "RR", False),
+        ("wmd", "MD", False),
+        ("foo", None, False),
+    ],
 )
 def test_resolve_effect_measure_aliases(label, family, logged):
     from medstat.meta.models import resolve_effect_measure
@@ -1406,20 +1485,34 @@ def test_engine_meta_measure_aliases_raw_and_prelogged():
     from medstat.meta.models import compute_binary_effect_sizes, run_meta_analysis
 
     counts = pd.DataFrame(
-        {"study": list("abcd"), "et": [3, 5, 8, 4], "nt": [20] * 4, "ec": [6, 9, 10, 7], "nc": [20] * 4}
+        {
+            "study": list("abcd"),
+            "et": [3, 5, 8, 4],
+            "nt": [20] * 4,
+            "ec": [6, 9, 10, 7],
+            "nc": [20] * 4,
+        }
     )
     es = compute_binary_effect_sizes(counts, "et", "nt", "ec", "nc", "study")
     target = run_meta_analysis(es)["random_effects"]["effect_disp"]
     raw = es[["study", "effect_size", "se"]]
     logged = es[["study", "se"]].assign(effect_size=es["log_effect"])
-    assert run_meta_analysis(raw, effect_measure="odds_ratio")["random_effects"]["effect_disp"] == pytest.approx(target)
-    assert run_meta_analysis(logged, effect_measure="lnor")["random_effects"]["effect_disp"] == pytest.approx(target)
+    assert run_meta_analysis(raw, effect_measure="odds_ratio")["random_effects"][
+        "effect_disp"
+    ] == pytest.approx(target)
+    assert run_meta_analysis(logged, effect_measure="lnor")["random_effects"][
+        "effect_disp"
+    ] == pytest.approx(target)
 
 
 def _meta_csv(tmp_path, effect):
     path = tmp_path / "meta.csv"
     pd.DataFrame(
-        {"study": [f"S{i}" for i in range(4)], "effect_size": effect, "se": [0.2, 0.3, 0.25, 0.2]}
+        {
+            "study": [f"S{i}" for i in range(4)],
+            "effect_size": effect,
+            "se": [0.2, 0.3, 0.25, 0.2],
+        }
     ).to_csv(path, index=False)
     return path
 
@@ -1429,17 +1522,46 @@ def test_meta_cli_routes_only_scale_errors_to_measure(tmp_path):
 
     from medstat.cli.main import cli
 
-    base = ["meta", "--effect-col", "effect_size", "--se-col", "se", "--study-col", "study"]
-    scale = CliRunner().invoke(cli, base + ["--data", str(_meta_csv(tmp_path, [1.2, 0.8, 1.5, 1.1]))])
-    assert scale.exit_code != 0 and "--measure" in scale.output and "scale of 'effect_size'" in scale.output
+    base = [
+        "meta",
+        "--effect-col",
+        "effect_size",
+        "--se-col",
+        "se",
+        "--study-col",
+        "study",
+    ]
+    scale = CliRunner().invoke(
+        cli, base + ["--data", str(_meta_csv(tmp_path, [1.2, 0.8, 1.5, 1.1]))]
+    )
+    assert (
+        scale.exit_code != 0
+        and "--measure" in scale.output
+        and "scale of 'effect_size'" in scale.output
+    )
     ok = CliRunner().invoke(
-        cli, base + ["--data", str(_meta_csv(tmp_path, [1.2, 0.8, 1.5, 1.1])), "--measure", "odds_ratio", "--method", "iv"]
+        cli,
+        base
+        + [
+            "--data",
+            str(_meta_csv(tmp_path, [1.2, 0.8, 1.5, 1.1])),
+            "--measure",
+            "odds_ratio",
+            "--method",
+            "iv",
+        ],
     )
     assert ok.exit_code == 0, ok.output
     bad_se = tmp_path / "bad.csv"
-    pd.DataFrame({"study": ["a", "b"], "effect_size": [0.1, 0.2], "se": [0.0, 0.2]}).to_csv(bad_se, index=False)
+    pd.DataFrame(
+        {"study": ["a", "b"], "effect_size": [0.1, 0.2], "se": [0.0, 0.2]}
+    ).to_csv(bad_se, index=False)
     other = CliRunner().invoke(cli, base + ["--data", str(bad_se), "--measure", "md"])
-    assert other.exit_code != 0 and "strictly positive" in other.output and "--measure" not in other.output
+    assert (
+        other.exit_code != 0
+        and "strictly positive" in other.output
+        and "--measure" not in other.output
+    )
 
 
 def test_meta_cli_egger_runs_after_se_validation(tmp_path):
@@ -1452,10 +1574,26 @@ def test_meta_cli_egger_runs_after_se_validation(tmp_path):
     se[0] = 0.0  # invalid: pooling must reject it before Egger is estimated
     path = tmp_path / "egger.csv"
     pd.DataFrame(
-        {"study": [f"S{i}" for i in range(12)], "effect_size": rng.normal(0.3, 0.2, 12), "se": se}
+        {
+            "study": [f"S{i}" for i in range(12)],
+            "effect_size": rng.normal(0.3, 0.2, 12),
+            "se": se,
+        }
     ).to_csv(path, index=False)
-    args = ["meta", "--data", str(path), "--effect-col", "effect_size", "--se-col", "se",
-            "--study-col", "study", "--measure", "md", "--egger"]
+    args = [
+        "meta",
+        "--data",
+        str(path),
+        "--effect-col",
+        "effect_size",
+        "--se-col",
+        "se",
+        "--study-col",
+        "study",
+        "--measure",
+        "md",
+        "--egger",
+    ]
     bad = CliRunner().invoke(cli, args)
     assert bad.exit_code == 1 and "strictly positive" in bad.output
     assert bad.exception is None or isinstance(bad.exception, SystemExit)
@@ -1520,15 +1658,27 @@ def test_cox_rcs_matches_recipe22(recipes, k):
     from medstat.models.splines import fit_cox_rcs
 
     df = pd.read_csv(_FIXTURES / "oncology_survival.csv")
-    eng = fit_cox_rcs(df, "time", "status", rcs_var="biomarker", adjust_cols=["age"], knots=k)
+    eng = fit_cox_rcs(
+        df, "time", "status", rcs_var="biomarker", adjust_cols=["age"], knots=k
+    )
     rec = recipes["fit_rcs_spline_model"](
-        df, "time", "biomarker", adjust_cols=["age"], knots=k, family="cox", event_col="status"
+        df,
+        "time",
+        "biomarker",
+        adjust_cols=["age"],
+        knots=k,
+        family="cox",
+        event_col="status",
     )
     np.testing.assert_allclose(eng["knot_locations"], rec["knots"], rtol=1e-12)
     assert eng["non_linear_pvalue"] == pytest.approx(rec["p_nonlinearity"], abs=1e-8)
     assert eng["p_overall"] == pytest.approx(rec["p_overall"], abs=1e-8)
-    np.testing.assert_allclose(eng["contrast_df"]["HR"], rec["contrast_df"]["estimate"], rtol=1e-6)
-    np.testing.assert_allclose(eng["contrast_df"]["HR_upper"], rec["contrast_df"]["ci_upper"], rtol=1e-6)
+    np.testing.assert_allclose(
+        eng["contrast_df"]["HR"], rec["contrast_df"]["estimate"], rtol=1e-6
+    )
+    np.testing.assert_allclose(
+        eng["contrast_df"]["HR_upper"], rec["contrast_df"]["ci_upper"], rtol=1e-6
+    )
     # Nested models: the spline fit can never be worse than the linear fit.
     assert np.isfinite(eng["non_linear_pvalue"]) and eng["lr_nonlinearity"] >= 0
 
@@ -1538,22 +1688,35 @@ def test_logistic_rcs_matches_recipe22(recipes, k):
     from medstat.models.splines import fit_logistic_rcs
 
     df = pd.read_csv(_FIXTURES / "cardiovascular_cohort.csv")
-    eng = fit_logistic_rcs(df, "cv_event", "ldl", covariates=["age", "statin_rx"], n_knots=k)
+    eng = fit_logistic_rcs(
+        df, "cv_event", "ldl", covariates=["age", "statin_rx"], n_knots=k
+    )
     rec = recipes["fit_rcs_spline_model"](
-        df, "cv_event", "ldl", adjust_cols=["age", "statin_rx"], knots=k, family="binomial"
+        df,
+        "cv_event",
+        "ldl",
+        adjust_cols=["age", "statin_rx"],
+        knots=k,
+        family="binomial",
     )
     assert eng["non_linear_pvalue"] == pytest.approx(rec["p_nonlinearity"], abs=1e-8)
     assert eng["p_overall"] == pytest.approx(rec["p_overall"], abs=1e-8)
-    np.testing.assert_allclose(eng["contrast_df"]["OR"], rec["contrast_df"]["estimate"], rtol=1e-6)
+    np.testing.assert_allclose(
+        eng["contrast_df"]["OR"], rec["contrast_df"]["estimate"], rtol=1e-6
+    )
     # Back-transformed covariate effects equal a direct fit on the raw Harrell basis.
     import statsmodels.api as sm
 
     basis, _ = recipes["build_harrell_rcs_basis"](df["ldl"].to_numpy(float), k)
     raw = sm.Logit(
         df["cv_event"].to_numpy(float),
-        sm.add_constant(np.column_stack([basis, df[["age", "statin_rx"]].to_numpy(float)])),
+        sm.add_constant(
+            np.column_stack([basis, df[["age", "statin_rx"]].to_numpy(float)])
+        ),
     ).fit(disp=False)
-    np.testing.assert_allclose(eng["summary_df"]["coef"].to_numpy(), raw.params, rtol=1e-5, atol=1e-8)
+    np.testing.assert_allclose(
+        eng["summary_df"]["coef"].to_numpy(), raw.params, rtol=1e-5, atol=1e-8
+    )
 
 
 def test_recipe22_reports_nonconvergence_as_nan_with_reason(recipes, monkeypatch):
@@ -1573,7 +1736,10 @@ def test_recipe22_reports_nonconvergence_as_nan_with_reason(recipes, monkeypatch
     res = recipes["fit_rcs_spline_model"](
         df, "time", "biomarker", knots=4, family="cox", event_col="status"
     )
-    assert np.isnan(res["p_nonlinearity"]) and "non-convergence" in res["nonlinearity_reason"]
+    assert (
+        np.isnan(res["p_nonlinearity"])
+        and "non-convergence" in res["nonlinearity_reason"]
+    )
 
 
 def test_rcs_tied_quantile_knots_raise_in_engine_and_recipe22(recipes):
@@ -1593,10 +1759,17 @@ def test_logistic_rcs_rank_deficient_design_raises(recipes):
     df = pd.read_csv(_FIXTURES / "cardiovascular_cohort.csv")
     df["age_copy"] = df["age"]
     with pytest.raises(ValueError, match="rank deficient"):
-        fit_logistic_rcs(df, "cv_event", "ldl", covariates=["age", "age_copy"], n_knots=4)
+        fit_logistic_rcs(
+            df, "cv_event", "ldl", covariates=["age", "age_copy"], n_knots=4
+        )
     with pytest.raises(ValueError, match="rank deficient"):
         recipes["fit_rcs_spline_model"](
-            df, "cv_event", "ldl", adjust_cols=["age", "age_copy"], knots=4, family="binomial"
+            df,
+            "cv_event",
+            "ldl",
+            adjust_cols=["age", "age_copy"],
+            knots=4,
+            family="binomial",
         )
 
 
@@ -1608,11 +1781,22 @@ def test_logistic_rcs_separation_returns_nan_with_reason(recipes):
     df = pd.DataFrame({"x": rng.normal(size=80), "age": rng.normal(60, 8, 80)})
     df["y"] = (df["x"] > 0.3).astype(int)
     eng = fit_logistic_rcs(df, "y", "x", covariates=["age"], n_knots=4)
-    rec = recipes["fit_rcs_spline_model"](df, "y", "x", adjust_cols=["age"], knots=4, family="binomial")
-    for p_eng, p_rec in (("non_linear_pvalue", "p_nonlinearity"), ("p_overall", "p_overall")):
+    rec = recipes["fit_rcs_spline_model"](
+        df, "y", "x", adjust_cols=["age"], knots=4, family="binomial"
+    )
+    for p_eng, p_rec in (
+        ("non_linear_pvalue", "p_nonlinearity"),
+        ("p_overall", "p_overall"),
+    ):
         assert np.isnan(eng[p_eng]) and np.isnan(rec[p_rec])
-    assert "separation" in eng["fit_failure_reason"] and "separation" in rec["fit_failure_reason"]
-    assert eng["contrast_df"]["OR"].isna().all() and rec["contrast_df"]["estimate"].isna().all()
+    assert (
+        "separation" in eng["fit_failure_reason"]
+        and "separation" in rec["fit_failure_reason"]
+    )
+    assert (
+        eng["contrast_df"]["OR"].isna().all()
+        and rec["contrast_df"]["estimate"].isna().all()
+    )
     assert eng["summary_df"]["coef"].isna().all() and rec["converged"] is False
     assert eng["model"] is None and rec["model"] is None
 
@@ -1632,10 +1816,125 @@ def test_model_cli_reports_rcs_failure_reasons(tmp_path):
     out = tmp_path / "sep.json"
     res = CliRunner().invoke(
         cli,
-        ["model", "--data", str(tmp_path / "sep.csv"), "--type", "logistic", "--outcome", "y",
-         "--covariates", "age", "--spline-var", "x", "--output", str(out)],
+        [
+            "model",
+            "--data",
+            str(tmp_path / "sep.csv"),
+            "--type",
+            "logistic",
+            "--outcome",
+            "y",
+            "--covariates",
+            "age",
+            "--spline-var",
+            "x",
+            "--output",
+            str(out),
+        ],
     )
     assert res.exit_code == 0, res.output
     data = json.loads(out.read_text(encoding="utf-8"))
     assert data["non_linear_pvalue"] is None
-    assert "separation" in data["fit_failure_reason"] and "separation" in data["non_linear_reason"]
+    assert (
+        "separation" in data["fit_failure_reason"]
+        and "separation" in data["non_linear_reason"]
+    )
+
+
+def _load_canonical_report_builder():
+    import re
+
+    rb_path = (
+        Path(__file__).resolve().parents[2]
+        / "skills"
+        / "_shared"
+        / "references"
+        / "report-builder.md"
+    )
+    content = rb_path.read_text(encoding="utf-8")
+    ns: dict = {}
+    for block in re.findall(r"```python\n(.*?)\n```", content, re.DOTALL):
+        exec(block, ns)
+    return ns
+
+
+def test_phi_thai_id_and_name_markers_parity(tmp_path):
+    """Engine _phi/integrity and cloud report-builder agree on Thai ID float tails and Thai words."""
+    from medstat.reporting.integrity import verify_report_integrity
+    from medstat.reporting.ir import ReportDocument
+
+    verify_cloud = _load_canonical_report_builder()["verify_standalone_integrity"]
+
+    clean_csv = tmp_path / "mice_diag.csv"
+    clean_csv.write_text(
+        "obs,bmi_imp\n1,27.7100083304435\n2,0.5403257538631\n", encoding="utf-8"
+    )
+    thai_prose = "Methods: จำนวนพารามิเตอร์ ตลอดระยะเวลา กำหนดระดับ ระมัดระวัง ทำนายการ cohort retention OR 1.45 (n=412)."
+    results = {"or": 1.45, "n": 412}
+
+    doc = ReportDocument(title="Thai Clean", results_dict=results)
+    doc.add_paragraph(thai_prose)
+    eng_clean = verify_report_integrity(doc, exported_files=[clean_csv])
+    cld_clean = verify_cloud(thai_prose, results, exported_files=[clean_csv])
+    assert eng_clean.passed is True and eng_clean.phi_violations == []
+    assert cld_clean["passed"] is True and cld_clean["phi_violations"] == []
+
+    # Real Thai Citizen IDs & Thai/English personal name markers still fail closed
+    for marker in [
+        "1234567890123",
+        "1-2345-67890-12-3",
+        "นายสมชาย",
+        "ผู้ป่วยนายสมชาย",
+        "นางสาวสมหญิง",
+        "ผู้ป่วยนางสาวสมศรี",
+        "นางสมศรี",
+        "นพ.สมชาย",
+        "นพ. สมชาย",
+        "พญ.สุดา",
+        "ดร.วิชัย",
+        "Dr. Smith",
+    ]:
+        bad_text = f"{thai_prose} {marker}"
+        bad_doc = ReportDocument(title="PHI", results_dict=results)
+        bad_doc.add_paragraph(bad_text)
+        eng_bad = verify_report_integrity(bad_doc)
+        cld_bad = verify_cloud(bad_text, results)
+        assert eng_bad.passed is False and eng_bad.phi_violations, marker
+        assert cld_bad["passed"] is False and cld_bad["phi_violations"], marker
+
+
+def test_delivered_text_parity_engine_and_cloud():
+    """Both engine and cloud integrity verifiers audit delivered_text for numbers and PHI."""
+    from medstat.reporting.integrity import verify_report_integrity
+    from medstat.reporting.ir import ReportDocument
+
+    verify_cloud = _load_canonical_report_builder()["verify_standalone_integrity"]
+    base_text = "Methods: cohort retention flow yielded OR 1.45 in 412 patients."
+    results = {"or": 1.45, "n": 412}
+    doc = ReportDocument(title="Summary", results_dict=results)
+    doc.add_paragraph(base_text)
+
+    assert verify_report_integrity(
+        doc, delivered_text="Summary: OR 1.45 (n=412)."
+    ).passed
+    assert verify_cloud(base_text, results, delivered_text="Summary: OR 1.45 (n=412).")[
+        "passed"
+    ]
+
+    eng_untraced = verify_report_integrity(
+        doc, delivered_text="Summary: risk fell by 17.3%."
+    )
+    cld_untraced = verify_cloud(
+        base_text, results, delivered_text="Summary: risk fell by 17.3%."
+    )
+    assert eng_untraced.passed is False and 17.3 in eng_untraced.untraced_numbers
+    assert cld_untraced["passed"] is False and 17.3 in cld_untraced["untraced_numbers"]
+
+    eng_phi = verify_report_integrity(
+        doc, delivered_text="Contact นพ.สมชาย for details."
+    )
+    cld_phi = verify_cloud(
+        base_text, results, delivered_text="Contact นพ.สมชาย for details."
+    )
+    assert eng_phi.passed is False and eng_phi.phi_violations
+    assert cld_phi["passed"] is False and cld_phi["phi_violations"]

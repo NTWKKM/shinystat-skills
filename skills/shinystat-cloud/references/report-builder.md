@@ -101,13 +101,20 @@ def generate_html_report(
     figure_paths: list[str] = None,
     plotly_figs: list[any] = None,  # optional list of go.Figure matching figure_paths
     out_path: str = "report.html",
+    include_plotly_cdn: bool = True,
 ) -> str:
+    """Render a self-contained HTML report with Dual / Toggle View when plotly_figs are provided.
+
+    Note: ``include_plotly_cdn=True`` loads ``https://cdn.plot.ly/plotly-2.35.2.min.js`` when
+    online (with automatic offline fallback to 300 DPI static images). Set
+    ``include_plotly_cdn=False`` for strict zero-external-reference offline bundles.
+    """
     has_plotly = bool(plotly_figs)
     parts = [
         "<!DOCTYPE html><html><head><meta charset='utf-8'>",
         f"<title>{html.escape(title)}</title>",
     ]
-    if has_plotly:
+    if has_plotly and include_plotly_cdn:
         parts.append("<script src='https://cdn.plot.ly/plotly-2.35.2.min.js'></script>")
 
     parts.extend([
@@ -695,14 +702,20 @@ def verify_standalone_integrity(
     allowed_untraced: list[float] | set[float] | tuple[float, ...] = None,
     study_design: str = None,
     exported_files: list = None,
+    delivered_text: str | None = None,
 ) -> dict:
     """Verifies numerical traceability (len(untraced_numbers) == 0) and screens for PHI without importing medstat.
 
-    Pass the exact text delivered to the reader (for In-Chat Summary, the chat reply) as `narrative_text`,
-    and every data file written beside the report as `exported_files`: a missing file raises, and an
-    identifier column (patient_id, hn, mrn, ...) or PHI pattern in one is a violation (engine parity, ADR 81).
+    Pass the exact text delivered to the reader (for In-Chat Summary, the chat reply; or pass the
+    accompanying chat reply via ``delivered_text`` alongside a file deliverable) as ``narrative_text`` /
+    ``delivered_text`` so both are audited together for PHI and numerical traceability, and every data
+    file written beside the report as ``exported_files``: a missing file raises, and an identifier column
+    (patient_id, hn, mrn, ...) or PHI pattern in one is a violation (engine parity, ADR 81).
     """
     violations = []
+    all_text = narrative_text or ""
+    if delivered_text:
+        all_text = f"{all_text}\n\n{delivered_text}" if all_text else delivered_text
 
     # 1. PHI Scan
     phi_patterns = [
@@ -713,7 +726,7 @@ def verify_standalone_integrity(
             "Hospital Number (HN)",
         ),
         (
-            re.compile(r"\b\d{1}[-\s]?\d{4}[-\s]?\d{5}[-\s]?\d{2}[-\s]?\d{1}\b"),
+            re.compile(r"(?<![\d.])\d{1}[-\s]?\d{4}[-\s]?\d{5}[-\s]?\d{2}[-\s]?\d{1}(?!\d)"),
             "Thai Citizen ID (13 digits)",
         ),
         (
@@ -723,8 +736,12 @@ def verify_standalone_integrity(
             "Phone Number",
         ),
         (
+            re.compile(r"\b(?:Mr\.?|Mrs\.?|Ms\.?|Dr\.?)\s+[A-Za-z]{2,}\b"),
+            "Personal Name Marker",
+        ),
+        (
             re.compile(
-                r"\b(?:Mr\.?|Mrs\.?|Ms\.?|Dr\.?|นาย|นาง|นางสาว|นพ\.?|พญ\.?|ดร\.?)\s+[A-Za-zก-๙]{2,}\b"
+                r"(?:(?<![ก-๙])(?:นาย(?!กรัฐมนตรี)|นาง(?!พยาบาล)|นพ(?:\.|(?=\s))|พญ(?:\.|(?=\s))|ดร(?:\.|(?=\s)))|(?<=ผู้ป่วย)(?:นาย(?!กรัฐมนตรี)|นาง(?!พยาบาล))|(?<=คนไข้)(?:นาย(?!กรัฐมนตรี)|นาง(?!พยาบาล))|(?<=ชื่อ)(?:นาย(?!กรัฐมนตรี)|นาง(?!พยาบาล))|นางสาว)\s*[ก-๙]{2,}"
             ),
             "Personal Name Marker",
         ),
@@ -738,7 +755,7 @@ def verify_standalone_integrity(
     ]
 
     for pat, label in phi_patterns:
-        for m in pat.findall(narrative_text):
+        for m in pat.findall(all_text):
             violations.append(f"{label}: '{m}'")
 
     id_col_pattern = re.compile(
@@ -813,7 +830,7 @@ def verify_standalone_integrity(
 
     results_keys_normalized = [_normalize_key(k) for k in results_dict]
     results_keys_str = " ".join(results_keys_normalized)
-    text_lower = narrative_text.lower()
+    text_lower = all_text.lower()
     has_causal_key = (
         any(
             k in results_keys_str
@@ -1198,11 +1215,36 @@ def verify_standalone_integrity(
         and not has_causal_claims
         and not is_observational
     )
+    is_non_causal_meta_or_agreement = (
+        bool(
+            clean_design
+            and (
+                any(
+                    term in clean_design
+                    for term in [
+                        "meta_analysis",
+                        "metaanalysis",
+                        "agreement",
+                        "reliability",
+                        "bland_altman",
+                    ]
+                )
+                or re.search(r"(?:^|_)icc(?:_|$)", clean_design)
+            )
+        )
+        and not is_observational
+        and not has_causal_key
+        and not has_causal_claims
+    )
 
     is_causal = (
         is_observational
         or has_causal_key
-        or (has_regression_key and not is_non_causal_prediction)
+        or (
+            has_regression_key
+            and not is_non_causal_prediction
+            and not is_non_causal_meta_or_agreement
+        )
         or has_causal_claims
     )
     has_caveat = True
@@ -1313,11 +1355,11 @@ def verify_standalone_integrity(
     allowed_list = (
         [float(x) for x in allowed_untraced] if allowed_untraced is not None else []
     )
-    clean_text = re.sub(r"(?<=\d),(?=\d{3}\b)", "", narrative_text)
+    clean_text = re.sub(r"(?<=\d),(?=\d{3}\b)", "", all_text)
     doc_has_references = bool(
         re.search(
             r"(?:^|\n)\s*(?:#{1,4}\s*)?(?:References|Bibliography)\b",
-            narrative_text,
+            all_text,
             re.IGNORECASE,
         )
     )
@@ -1532,6 +1574,23 @@ def verify_standalone_integrity(
                     )
                 )
             )
+            is_doi = (
+                bool(
+                    re.search(
+                        r"(?:\bdoi\s*:?\s*|https?://(?:dx\.)?doi\.org/)$",
+                        window_before,
+                        re.IGNORECASE,
+                    )
+                    and re.match(r"^10\.\d+/\S*", f"{raw_str}{window_after}")
+                )
+                or bool(
+                    re.search(
+                        r"(?:\bdoi\s*:?\s*|https?://(?:dx\.)?doi\.org/)10\.\d+/[^\s,;]*$",
+                        window_before,
+                        re.IGNORECASE,
+                    )
+                )
+            )
             is_citation = (
                 "." not in raw_str
                 and (
@@ -1563,6 +1622,7 @@ def verify_standalone_integrity(
                 or is_author_year
                 or is_scale_unit
                 or is_section
+                or is_doi
                 or is_citation
             ):
                 untraced_nums.append(val)
