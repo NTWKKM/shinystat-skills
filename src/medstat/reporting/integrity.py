@@ -248,6 +248,55 @@ class TextToken(NamedTuple):
     is_p_floor: bool = False
     p_inequality: str | None = None
     p_qualifier: str | None = None
+    has_pct_scale: bool = False
+
+
+_PCT_SCALE_AFTER_RE = re.compile(
+    r"^\s*(?:percentage[\s-]+points?\b|pct\.?\s*points?\b|pp(?:\b(?![.\w])|\.(?=\s*(?:$|[A-Z(\[]))))",
+    re.IGNORECASE,
+)
+_UUID_SPAN_RE = re.compile(
+    r"(?<![0-9a-fA-F])[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![0-9a-fA-F])"
+)
+_URI_SCHEME_RE = re.compile(r"^(?:file|https?|ftp)://", re.IGNORECASE)
+_PATH_ROOT_RE = re.compile(
+    r"^(?:\.\.?/|~/|[A-Za-z]:\\|/(?:Users|home|tmp|var|opt|private|mnt|srv|etc|app|workspace|scratch|brain)(?:/|$))"
+    r"|(?:^|[/\\])(?:scratch|live_eval|figures|brain|outputs?|reports?)/"
+)
+_PATH_EXT_RE = re.compile(
+    r"\.(?:html?|docx?|pptx?|pdf|png|svg|jpe?g|tiff?|eps|csv|tsv|json|ya?ml|md|qmd|rmd|py|sh|txt|xlsx?|parquet|log|zip)$",
+    re.IGNORECASE,
+)
+_RUN_DIR_SEG_RE = re.compile(
+    r"(?:^|[/\\])run_\d{8}(?:_\d{6})?(?:_[^/\s\\]+)?(?:/|\\|$)"
+)
+
+
+def _is_path_uri_or_uuid_token(
+    raw_str: str, window_before: str, window_after: str
+) -> bool:
+    """Return True when ``raw_str`` sits inside a UUID, URI, or filesystem path."""
+    seg_before_m = re.search(r"[^\s()\[\]<>\"'`]*$", window_before)
+    seg_after_m = re.match(r"^[^\s()\[\]<>\"'`]*", window_after)
+    seg_before = seg_before_m.group(0) if seg_before_m else ""
+    seg_after = (seg_after_m.group(0) if seg_after_m else "").rstrip(".,;:")
+    tok_span = f"{seg_before}{raw_str}{seg_after}"
+    raw_start = len(seg_before)
+    raw_end = raw_start + len(raw_str)
+    for m in _UUID_SPAN_RE.finditer(tok_span):
+        if m.start() <= raw_start and raw_end <= m.end():
+            return True
+    tok_clean = tok_span.lstrip("([<\"'`")
+    if _URI_SCHEME_RE.match(tok_clean):
+        return True
+    if "/" in tok_clean or "\\" in tok_clean:
+        if (
+            _PATH_ROOT_RE.search(tok_clean)
+            or _PATH_EXT_RE.search(tok_clean)
+            or _RUN_DIR_SEG_RE.search(tok_clean)
+        ):
+            return True
+    return False
 
 
 _AUTHOR_BEFORE_YEAR = re.compile(
@@ -509,6 +558,31 @@ def _is_structural_context(
         ):
             return True
 
+    # 8. UUIDs, URIs, and filesystem artifact paths (e.g., Antigravity brain UUID paths)
+    if _is_path_uri_or_uuid_token(raw_str, window_before, window_after):
+        return True
+
+    # 9. Naive 1 - KM complement notation and publication DPI specs (300/600 DPI)
+    if (
+        val == 1.0
+        and "." not in raw_str
+        and not has_pct
+        and re.match(r"^\s*[-–−]\s*(?:KM\b|[Kk]aplan\b)", window_after)
+    ):
+        return True
+
+    if (
+        val in (300.0, 600.0)
+        and "." not in raw_str
+        and not has_pct
+        and re.match(
+            r"^\s*(?:[-/]\s*(?:300|600)\s*)?-?\s*dpi\b",
+            window_after,
+            re.IGNORECASE,
+        )
+    ):
+        return True
+
     return False
 
 
@@ -578,6 +652,7 @@ def _extract_text_tokens(text: str) -> list[TextToken]:
             p_qualifier = _detect_p_qualifier(qual_raw) if qual_raw else None
 
         is_p_floor = bool(p_inequality in ("<", "<="))
+        has_pct_scale = has_pct or bool(_PCT_SCALE_AFTER_RE.match(window_after))
         tokens.append(
             TextToken(
                 val=val,
@@ -587,6 +662,7 @@ def _extract_text_tokens(text: str) -> list[TextToken]:
                 is_p_floor=is_p_floor,
                 p_inequality=p_inequality,
                 p_qualifier=p_qualifier,
+                has_pct_scale=has_pct_scale,
             )
         )
     return tokens
@@ -815,8 +891,8 @@ def verify_report_integrity(
                 matched = True
                 break
 
-            # 2. Percentage scale match: only permitted when token explicitly has '%' attached
-            if has_pct:
+            # 2. Percentage scale match: permitted when token carries '%' or percentage-point units (pp / percentage points)
+            if has_pct or token.has_pct_scale:
                 if abs(tn - kn * 100.0) <= tol:
                     matched = True
                     break

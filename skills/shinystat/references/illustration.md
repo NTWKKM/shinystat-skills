@@ -2,6 +2,8 @@
 
 This reference provides self-contained, standalone Python recipes for rendering anatomical cross-sections, cellular biology, blood vessels, and signaling pathways in cloud sandboxes using pure `matplotlib` and `numpy`.
 
+> **Local (`shinystat`) vs Cloud (`shinystat-cloud`)**: In local engine runs (`shinystat`), prefer the `Scene` builder documented in `api-quickref.md` (local `shinystat` skill only: `Scene(width='double_col', ...)`, `.vessel_longitudinal()`, `.macrophage()`, `.neutrophil()`, `.callout()`, `.save(...)`) rather than the standalone `SEM` recipes below. In `shinystat-cloud` sandboxes (or custom multi-panel artwork), use §1–§8 below.
+
 ---
 
 ## 1. Semantic Art Palette (`SEM`)

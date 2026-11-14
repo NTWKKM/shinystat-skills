@@ -184,20 +184,35 @@ def test_dry_run_performs_zero_deletion(fake_repo: dict[str, Path]):
 
 
 def test_global_target_antigravity_and_cursor(fake_repo: dict[str, Path]):
-    """--global targets select exactly the corresponding directories."""
+    """--global defaults to Antigravity (~/.gemini/config/skills) without creating ~/.cursor or duplicating into ~/.gemini/antigravity/skills."""
     repo = fake_repo["repo"]
     home = fake_repo["home"]
 
-    # Target antigravity
+    # Default --global targets antigravity config only
+    res_default = run_installer(repo, home, "--global")
+    assert res_default.returncode == 0
+    assert (home / ".gemini" / "config" / "skills" / "shinystat" / "SKILL.md").is_file()
+    assert (
+        home / ".gemini" / "config" / "skills" / "shinystat-cloud" / "SKILL.md"
+    ).is_file()
+    assert not (home / ".gemini" / "antigravity" / "skills").exists()
+    assert not (home / ".cursor").exists()
+
+    # Legacy physical duplicate under ~/.gemini/antigravity/skills is cleaned, while symlink is preserved
+    legacy_agy = home / ".gemini" / "antigravity" / "skills"
+    (legacy_agy / "shinystat").mkdir(parents=True)
+    (legacy_agy / "shinystat" / "SKILL.md").write_text(
+        "# Old Duplicate", encoding="utf-8"
+    )
+
+    # Explicit -t antigravity
     res_ag = run_installer(repo, home, "--global", "-t", "antigravity")
     assert res_ag.returncode == 0
     assert (home / ".gemini" / "config" / "skills" / "shinystat" / "SKILL.md").is_file()
-    assert (
-        home / ".gemini" / "antigravity" / "skills" / "shinystat-cloud" / "SKILL.md"
-    ).is_file()
+    assert not (legacy_agy / "shinystat").exists()
     assert not (home / ".cursor").exists()
 
-    # Target cursor
+    # Explicit --target cursor still installs into ~/.cursor/skills
     res_cur = run_installer(repo, home, "--global", "--target", "cursor")
     assert res_cur.returncode == 0
     assert (home / ".cursor" / "skills" / "shinystat" / "SKILL.md").is_file()

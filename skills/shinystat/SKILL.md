@@ -24,14 +24,14 @@ Execute clinical biostatistics via **Run Sequence** (§0) and **The 5 Decision P
 
 1. **Pillar 1: Data Reality Inspection (Autonomous Profiling)**
    - Run **pre-flight** checks on geometry, dtypes, missingness, and distributions (`df.info()`, `df.describe()`), isolating cohorts from non-data annotations (including Thai), preserving valid Thai analytic values.
-   - Select summaries by shape (Mean (SD) symmetric; Median [IQR] skewed) and tests by design/estimand.
+   - Select summaries by shape (Mean (SD) symmetric; Median [IQR] when skewed per `pd.Series.skew()`) and tests by design/estimand.
 
 2. **Pillar 2: Research & Estimand Triangulation (Autonomous Selection)**
    - Align PICO/PECO and clinical archetype via [decision-heuristics.md §1](references/decision-heuristics.md#1-clinical-study-archetype-to-statistical-model-mapping).
    - **Effect Scale**: One headline measure per estimand (requested, else OR logistic / HR Cox); one stated unit per continuous predictor—per 10 years (age in years), per 1 SD (other continuous), or `"unit not stated"` if data omits units (never invent units)—across tables, text and figures.
 
 3. **Pillar 3: Adaptive Python Scripting (Autonomous Biostatistical Authority)**
-   - Write scripts using bundled `medstat` in `scripts/medstat/` ([api-quickref.md](references/api-quickref.md)), inserting `<skill-dir>/scripts` into `sys.path` (never `PYTHONPATH=... uv run python`), and run via `uv run --with-requirements <skill-dir>/requirements.txt python <script.py>` (`--with <pkg>` for extras).
+   - Write scripts using bundled `medstat` in `scripts/medstat/` ([api-quickref.md](references/api-quickref.md) — check signatures and `Return shapes` before indexing results), inserting `<skill-dir>/scripts` into `sys.path` (never `PYTHONPATH=... uv run python`), and run via `uv run --with-requirements <skill-dir>/requirements.txt python <script.py>` (`--with <pkg>` for extras).
    - **Spec Validation**: Validate regression/survival/causal/diagnostic YAML plans via `scripts/medstat_cli.py --validate-only <plan.yaml>` (`--schema`, with the `uv run --with-requirements` prefix above; `icc`/`meta` use CLI subcommands); self-heal from `agent_remediation` JSON.
    - **EPV & Sparse-Data Routing** ([decision-heuristics.md §2.A](references/decision-heuristics.md#a-events-per-variable-epv-sparse-data--separation)):
      - $\text{EPV}_{\text{binary}} = \min(N_{\text{events}}, N_{\text{non-events}}) / P_{\text{parameters}}$; $\text{EPV}_{\text{Cox}} = N_{\text{failures}} / P_{\text{parameters}}$ ($k-1$ factor levels and spline df; no intercept).

@@ -580,6 +580,59 @@ INTEGRITY_PARITY_CASES: list[IntegrityParityCase] = [
         expected_passed=False,
         expected_untraced=[17.3],
     ),
+    # --- ADR 86 Round 1: UUID/URI/file paths, pp/percentage points, 1-KM, DPI specs ---
+    IntegrityParityCase(
+        id="pass_uuid_path_and_uri_tokens",
+        narrative=(
+            f"{BASE_NARRATIVE} Artifacts exported to "
+            "/Users/clinician/.gemini/antigravity/brain/f341b108-fc49-415f-9ad4-ae230b12e431/"
+            "scratch/live_eval/s4_orch/run_20261114_211200_a9e8f6fd/report_v2.html "
+            "and [report.pptx](file:///Users/clinician/.gemini/antigravity/brain/"
+            "f341b108-fc49-415f-9ad4-ae230b12e431/scratch/live_eval/s4_orch/"
+            "run_20261114_211200_a9e8f6fd/figures/fig12_forest.png)."
+        ),
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=True,
+        expected_untraced=[],
+    ),
+    IntegrityParityCase(
+        id="pass_percentage_points_and_naive_km_and_dpi",
+        narrative=(
+            f"{BASE_NARRATIVE} Naive 1 - KM overestimated cumulative incidence by "
+            "+13.9 percentage points (+13.9 pp) across 300/600 DPI figures."
+        ),
+        results_dict={**BASE_RESULTS_DICT, "overestimation_abs": 0.139},
+        expected_passed=True,
+        expected_untraced=[],
+    ),
+    IntegrityParityCase(
+        id="fail_percentage_points_without_result_stays_untraced",
+        narrative=f"{BASE_NARRATIVE} Naive 1 - KM overestimated risk by +13.9 percentage points and +13.9 pp.",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=False,
+        expected_untraced=[13.9, 13.9],
+    ),
+    IntegrityParityCase(
+        id="fail_event_fraction_14_of_14_not_path_exempt",
+        narrative=f"{BASE_NARRATIVE} All 14/14 patients with the variant had the event.",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=False,
+        expected_untraced=[14.0, 14.0],
+    ),
+    IntegrityParityCase(
+        id="fail_page_range_pp_dot_still_traced",
+        narrative=f"{BASE_NARRATIVE} Reviewed 12 pp. 14-18 without scale multiplier.",
+        results_dict={**BASE_RESULTS_DICT, "prop": 0.12},
+        expected_passed=False,
+        expected_untraced=[12.0, 14.0, 18.0],
+    ),
+    IntegrityParityCase(
+        id="fail_300_patients_without_dpi_still_traced",
+        narrative=f"{BASE_NARRATIVE} Screened 300 patients and 600 samples.",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=False,
+        expected_untraced=[300.0, 600.0],
+    ),
 ]
 
 # Task 2b: Statistical token mutations (+-1 last decimal digit, *10, *100, /100, and n+-3)

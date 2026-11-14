@@ -77,7 +77,7 @@ Each file is self-contained except: E-values after `Recipe 6` / `Recipe 14` need
 
 1. **Pillar 1: Data Reality Inspection (Autonomous Profiling)**
    - Run **pre-flight** checks on geometry, headers, dtypes, missingness, and distributions (`df.info()`, `df.describe()`), isolating cohorts from embedded summaries, multi-line headers, and Thai/regional text.
-   - Choose summaries by shape (Mean (SD) symmetric; Median [IQR] skewed) and tests by design/estimand (Mann–Whitney U tests rank-sum shifts, not medians, if group shapes differ).
+   - Choose summaries by shape (Mean (SD) symmetric; Median [IQR] when skewed per `pd.Series.skew()`) and tests by design/estimand (Mann–Whitney U tests rank-sum shifts, not medians, if group shapes differ).
    - Compute **pre-flight** $\text{EPV}_{\text{binary}}$ or $\text{EPV}_{\text{Cox}}$ once outcome and event coding are clear (or after **Gate #1 / #2**).
 
 2. **Pillar 2: Research & Estimand Triangulation (Autonomous Selection)**

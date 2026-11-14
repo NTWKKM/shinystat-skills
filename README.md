@@ -228,17 +228,18 @@ npx skills add NTWKKM/shinystat-skills -g --yes
 # Verify skills are synchronized without git drift (used in CI)
 ./scripts/sync-skills.sh --check
 
-# Install standalone skills globally (Antigravity, Cursor)
+# Install standalone skills globally (defaults to Antigravity: ~/.gemini/config/skills/)
 ./scripts/install-skills.sh --global
 ./scripts/install-skills.sh --global --target antigravity
 ./scripts/install-skills.sh --global --target cursor
+./scripts/install-skills.sh --global --target all
 
 # Package standalone shinystat-cloud.zip for cloud sandboxes
 ./scripts/package-cloud-skill.sh
 ```
 - `--global`: Install standalone dereferenced skills into global configuration directories.
 - `-s, --scope <workspace|global>`: Installation scope (default: `workspace`). In workspace scope, duplicate harness mirrors are no longer created (SSOT, ADR 49).
-- `-t, --target <all|antigravity|cursor>`: Target AI harness for global installation (default: `all`).
+- `-t, --target <antigravity|cursor|all>`: Target AI harness for global installation (default: `antigravity`).
 - `--dry-run`: Print all sync, packaging, and legacy mirror deletion actions without modifying the filesystem.
 
 Pick your platform and follow the corresponding manual setup if needed:
@@ -246,15 +247,15 @@ Pick your platform and follow the corresponding manual setup if needed:
 <details>
 <summary><strong>Google Antigravity</strong> (Desktop / CLI / IDE)</summary>
 
-Install into your global Antigravity skills directory or link into a project workspace:
+Install into your global Antigravity configuration directory:
 
 ```bash
 git clone https://github.com/NTWKKM/shinystat-skills.git
 cd shinystat-skills
-./scripts/install-skills.sh --global --target antigravity
+./scripts/install-skills.sh --global
 ```
 
-This installs dereferenced copies of `shinystat` and `shinystat-cloud` into `~/.gemini/config/skills/` and `~/.gemini/antigravity/skills/`.
+This installs dereferenced copies of `shinystat` and `shinystat-cloud` into `~/.gemini/config/skills/` (and `~/.gemini/config/agents/figure-tester.md` if `~/.gemini/config/agents/` exists), without creating `~/.cursor/skills/` or duplicating into `~/.gemini/antigravity/skills/`.
 
 </details>
 

@@ -6,7 +6,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODE="--symlink"
 SCOPE="workspace"
-TARGET="all"
+TARGET="antigravity"
 DRY_RUN=false
 
 while [[ $# -gt 0 ]]; do
@@ -44,7 +44,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -h|--help)
-            echo "Usage: $0 [--symlink|--copy] [--global] [-s|--scope workspace|global] [-t|--target all|antigravity|cursor] [--dry-run]"
+            echo "Usage: $0 [--symlink|--copy] [--global] [-s|--scope workspace|global] [-t|--target antigravity|cursor|all] [--dry-run] (global default target: antigravity)"
             exit 0
             ;;
         *)
@@ -210,10 +210,21 @@ if [[ "$SCOPE" == "global" ]]; then
     echo "[Global] Installing standalone dereferenced skills into global config..."
     GLOBAL_DIRS=()
     if [[ "$TARGET" == "all" || "$TARGET" == "antigravity" ]]; then
-        GLOBAL_DIRS+=(
-            "${HOME}/.gemini/config/skills"
-            "${HOME}/.gemini/antigravity/skills"
-        )
+        GLOBAL_DIRS+=("${HOME}/.gemini/config/skills")
+        # Remove legacy physical duplicate directories in ~/.gemini/antigravity/skills while preserving symlinks
+        LEGACY_AGY_SKILLS="${HOME}/.gemini/antigravity/skills"
+        if [[ -d "$LEGACY_AGY_SKILLS" && ! -L "$LEGACY_AGY_SKILLS" ]]; then
+            for legacy_skill in shinystat shinystat-cloud; do
+                if [[ -e "$LEGACY_AGY_SKILLS/$legacy_skill" ]]; then
+                    if [[ "$DRY_RUN" == true ]]; then
+                        echo "[dry-run] remove legacy duplicate $LEGACY_AGY_SKILLS/$legacy_skill"
+                    else
+                        rm -rf "$LEGACY_AGY_SKILLS/$legacy_skill"
+                        echo "  [remove] legacy duplicate $LEGACY_AGY_SKILLS/$legacy_skill"
+                    fi
+                fi
+            done
+        fi
     fi
     if [[ "$TARGET" == "all" || "$TARGET" == "cursor" ]]; then
         GLOBAL_DIRS+=("${HOME}/.cursor/skills")
