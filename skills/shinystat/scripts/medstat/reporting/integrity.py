@@ -137,6 +137,8 @@ def _extract_qualified_p_values(
     if isinstance(val, dict):
         for k, v in val.items():
             k_str = str(k)
+            if _P_THRESHOLD_KEY_RE.search(k_str):
+                continue  # a threshold record holds no P-values, at any depth
             k_qual = _detect_p_qualifier(k_str) or parent_qualifier
             if _is_p_key(k_str):
                 if isinstance(v, dict):
