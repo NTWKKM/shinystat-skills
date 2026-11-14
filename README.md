@@ -199,7 +199,7 @@ For the standalone `shinystat-cloud` skill, 24 zero-`medstat` standalone Python 
 
 #### 1. Instant 1-Line Install via skills.sh (Recommended)
 
-Both `skills/shinystat/` and `skills/shinystat-cloud/` are fully self-contained physical directories vendored in Git (no dangling symlinks or missing sibling dependencies). You can install either skill directly across all supported AI coding agents (**Claude Code**, **Cursor**, **Windsurf**, **Antigravity**) using the open [skills.sh](https://skills.sh) package manager:
+Both `skills/shinystat/` and `skills/shinystat-cloud/` are fully self-contained physical directories vendored in Git (no dangling symlinks or missing sibling dependencies). You can install either skill directly across all supported AI coding agents (**Antigravity**, **Cursor**, **Windsurf**) using the open [skills.sh](https://skills.sh) package manager:
 
 ```bash
 # Interactive selection (pick shinystat, shinystat-cloud, or both)
@@ -219,7 +219,7 @@ npx skills add NTWKKM/shinystat-skills -g --yes
 
 `./scripts/sync-skills.sh` maintains Single Source of Truth (SSOT). It copies canonical shared references (`skills/_shared/references/`) and the `medstat` core engine (`src/medstat/`) into `skills/shinystat/` and `skills/shinystat-cloud/` as committed physical files, ensuring zero git drift and immediate offline usability in hospital network environments.
 
-`./scripts/install-skills.sh` automates local and global agent installations, safely cleans legacy mirror directories (`.agent/`, `.agents/`, `.claude/`, `.cursor/`), and copies standalone skills into your global agent directories without touching user-managed skills:
+`./scripts/install-skills.sh` automates local and global agent installations, safely cleans legacy mirror directories (`.agent/`, `.agents/`, `.cursor/`), and copies standalone skills into your global agent directories without touching user-managed skills:
 
 ```bash
 # Synchronize SSOT into self-contained skill directories
@@ -228,18 +228,17 @@ npx skills add NTWKKM/shinystat-skills -g --yes
 # Verify skills are synchronized without git drift (used in CI)
 ./scripts/sync-skills.sh --check
 
-# Install standalone skills globally (Antigravity, Claude Code, Cursor)
+# Install standalone skills globally (Antigravity, Cursor)
 ./scripts/install-skills.sh --global
 ./scripts/install-skills.sh --global --target antigravity
-./scripts/install-skills.sh --global --target claude
 ./scripts/install-skills.sh --global --target cursor
 
-# Package standalone shinystat-cloud.zip for cloud sandboxes (e.g., Claude Web)
+# Package standalone shinystat-cloud.zip for cloud sandboxes
 ./scripts/package-cloud-skill.sh
 ```
 - `--global`: Install standalone dereferenced skills into global configuration directories.
 - `-s, --scope <workspace|global>`: Installation scope (default: `workspace`). In workspace scope, duplicate harness mirrors are no longer created (SSOT, ADR 49).
-- `-t, --target <all|antigravity|claude|cursor>`: Target AI harness for global installation (default: `all`).
+- `-t, --target <all|antigravity|cursor>`: Target AI harness for global installation (default: `all`).
 - `--dry-run`: Print all sync, packaging, and legacy mirror deletion actions without modifying the filesystem.
 
 Pick your platform and follow the corresponding manual setup if needed:
@@ -260,35 +259,18 @@ This installs dereferenced copies of `shinystat` and `shinystat-cloud` into `~/.
 </details>
 
 <details>
-<summary><strong>Claude Code</strong> (Anthropic CLI)</summary>
+<summary><strong>Cloud Sandboxes</strong> (Hosted Python Sandboxes)</summary>
 
-Install skills into your Claude Code skills directory:
-
-```bash
-git clone https://github.com/NTWKKM/shinystat-skills.git
-cd shinystat-skills
-./scripts/install-skills.sh --global --target claude
-```
-
-Claude Code discovers skills in `~/.claude/skills/` (global) or `.claude/skills/` (project). Each `SKILL.md` with valid YAML frontmatter registers as an available skill.
-
-</details>
-
-<details>
-<summary><strong>Claude Web</strong> (claude.ai)</summary>
-
-Upload the cloud skill as a `.zip` file via **Upload a skill**:
+Upload the cloud skill as a `.zip` file:
 
 ```bash
-# Option 1: Package dedicated cloud skill for Claude Web (recommended, includes standalone Recipes 1–24)
-./scripts/package-cloud-skill.sh ~/Desktop
+# Option 1: Package dedicated cloud skill for cloud sandboxes (recommended, includes standalone Recipes 1–24)
+./scripts/package-cloud-skill.sh
 
 # Option 2: Package local skill with dereferenced symlinks
 ./scripts/install-skills.sh --copy
 (cd skills && zip -r ~/Desktop/shinystat.zip shinystat)
 ```
-
-Then in [claude.ai](https://claude.ai): Navigate to **Customize** → **Skills** → **+** → **Create skill** → **Upload a skill** and select `shinystat-cloud.zip`. Ensure **Code execution and file creation** is enabled. Claude reads the YAML frontmatter from `SKILL.md` inside the skill archive.
 
 > **Note:** The dedicated cloud package (`packaging/cloud/shinystat-cloud.zip`) contains 24 modular pure-Python standalone recipes in `references/recipes/01-*.md` through `07-*.md`, standalone figure helpers in `references/figures.md`, and multi-format report generators (`.md`, `.html`, `.docx`, `.pptx`, `.pdf`) + `verify_standalone_integrity` in `references/report-builder.md` so cloud sandboxes can execute all analyses using standard scientific libraries (`pandas`, `scipy.stats`, `statsmodels`, `lifelines`, `scikit-learn`) without `medstat-core` installed.
 

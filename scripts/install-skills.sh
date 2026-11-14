@@ -44,7 +44,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -h|--help)
-            echo "Usage: $0 [--symlink|--copy] [--global] [-s|--scope workspace|global] [-t|--target all|antigravity|claude|cursor] [--dry-run]"
+            echo "Usage: $0 [--symlink|--copy] [--global] [-s|--scope workspace|global] [-t|--target all|antigravity|cursor] [--dry-run]"
             exit 0
             ;;
         *)
@@ -59,8 +59,8 @@ if [[ "$SCOPE" != "workspace" && "$SCOPE" != "global" ]]; then
     exit 1
 fi
 
-if [[ "$TARGET" != "all" && "$TARGET" != "antigravity" && "$TARGET" != "claude" && "$TARGET" != "cursor" ]]; then
-    echo "Error: Invalid target '$TARGET'. Must be one of: all, antigravity, claude, cursor" >&2
+if [[ "$TARGET" != "all" && "$TARGET" != "antigravity" && "$TARGET" != "cursor" ]]; then
+    echo "Error: Invalid target '$TARGET'. Must be one of: all, antigravity, cursor" >&2
     exit 1
 fi
 
@@ -184,7 +184,6 @@ echo "[3/3] Cleaning up legacy mirror directories..."
 LEGACY_TARGETS=(
     "$REPO_ROOT/.agent/skills"
     "$REPO_ROOT/.agents/skills"
-    "$REPO_ROOT/.claude/skills"
     "$REPO_ROOT/.cursor/skills"
     "$REPO_ROOT/.agent/agents"
     "$REPO_ROOT/.agents/agents"
@@ -215,9 +214,6 @@ if [[ "$SCOPE" == "global" ]]; then
             "${HOME}/.gemini/config/skills"
             "${HOME}/.gemini/antigravity/skills"
         )
-    fi
-    if [[ "$TARGET" == "all" || "$TARGET" == "claude" ]]; then
-        GLOBAL_DIRS+=("${HOME}/.claude/skills")
     fi
     if [[ "$TARGET" == "all" || "$TARGET" == "cursor" ]]; then
         GLOBAL_DIRS+=("${HOME}/.cursor/skills")
