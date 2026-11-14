@@ -184,7 +184,7 @@ def test_dry_run_performs_zero_deletion(fake_repo: dict[str, Path]):
 
 
 def test_global_target_antigravity_and_cursor(fake_repo: dict[str, Path]):
-    """--global defaults to Antigravity (~/.gemini/config/skills) without creating ~/.cursor or duplicating into ~/.gemini/antigravity/skills."""
+    """--global defaults to Antigravity (~/.gemini/config/skills) without creating ~/.claude or ~/.cursor unless targeted."""
     repo = fake_repo["repo"]
     home = fake_repo["home"]
 
@@ -196,6 +196,7 @@ def test_global_target_antigravity_and_cursor(fake_repo: dict[str, Path]):
         home / ".gemini" / "config" / "skills" / "shinystat-cloud" / "SKILL.md"
     ).is_file()
     assert not (home / ".gemini" / "antigravity" / "skills").exists()
+    assert not (home / ".claude").exists()
     assert not (home / ".cursor").exists()
 
     # Legacy physical duplicate under ~/.gemini/antigravity/skills is cleaned, while symlink is preserved
@@ -210,6 +211,16 @@ def test_global_target_antigravity_and_cursor(fake_repo: dict[str, Path]):
     assert res_ag.returncode == 0
     assert (home / ".gemini" / "config" / "skills" / "shinystat" / "SKILL.md").is_file()
     assert not (legacy_agy / "shinystat").exists()
+    assert not (home / ".claude").exists()
+    assert not (home / ".cursor").exists()
+
+    # Explicit --target claude installs into ~/.claude/skills (and agents if present) without creating ~/.cursor
+    (home / ".claude" / "agents").mkdir(parents=True)
+    res_cl = run_installer(repo, home, "--global", "--target", "claude")
+    assert res_cl.returncode == 0
+    assert (home / ".claude" / "skills" / "shinystat" / "SKILL.md").is_file()
+    assert (home / ".claude" / "skills" / "shinystat-cloud" / "SKILL.md").is_file()
+    assert (home / ".claude" / "agents" / "figure-tester.md").is_file()
     assert not (home / ".cursor").exists()
 
     # Explicit --target cursor still installs into ~/.cursor/skills

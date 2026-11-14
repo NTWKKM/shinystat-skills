@@ -219,7 +219,7 @@ npx skills add NTWKKM/shinystat-skills -g --yes
 
 `./scripts/sync-skills.sh` maintains Single Source of Truth (SSOT). It copies canonical shared references (`skills/_shared/references/`) and the `medstat` core engine (`src/medstat/`) into `skills/shinystat/` and `skills/shinystat-cloud/` as committed physical files, ensuring zero git drift and immediate offline usability in hospital network environments.
 
-`./scripts/install-skills.sh` automates local and global agent installations, safely cleans legacy mirror directories (`.agent/`, `.agents/`, `.cursor/`), and copies standalone skills into your global agent directories without touching user-managed skills:
+`./scripts/install-skills.sh` automates local and global agent installations, safely cleans legacy mirror directories (`.agent/`, `.agents/`, `.claude/`, `.cursor/`), and copies standalone skills into your global agent directories without touching user-managed skills:
 
 ```bash
 # Synchronize SSOT into self-contained skill directories
@@ -231,6 +231,7 @@ npx skills add NTWKKM/shinystat-skills -g --yes
 # Install standalone skills globally (defaults to Antigravity: ~/.gemini/config/skills/)
 ./scripts/install-skills.sh --global
 ./scripts/install-skills.sh --global --target antigravity
+./scripts/install-skills.sh --global --target claude
 ./scripts/install-skills.sh --global --target cursor
 ./scripts/install-skills.sh --global --target all
 
@@ -239,7 +240,7 @@ npx skills add NTWKKM/shinystat-skills -g --yes
 ```
 - `--global`: Install standalone dereferenced skills into global configuration directories.
 - `-s, --scope <workspace|global>`: Installation scope (default: `workspace`). In workspace scope, duplicate harness mirrors are no longer created (SSOT, ADR 49).
-- `-t, --target <antigravity|cursor|all>`: Target AI harness for global installation (default: `antigravity`).
+- `-t, --target <antigravity|claude|cursor|all>`: Target AI harness for global installation (default: `antigravity`; creates `~/.claude/skills/` or `~/.cursor/skills/` only when `-t claude`, `-t cursor`, or `-t all` is passed).
 - `--dry-run`: Print all sync, packaging, and legacy mirror deletion actions without modifying the filesystem.
 
 Pick your platform and follow the corresponding manual setup if needed:
@@ -255,7 +256,7 @@ cd shinystat-skills
 ./scripts/install-skills.sh --global
 ```
 
-This installs dereferenced copies of `shinystat` and `shinystat-cloud` into `~/.gemini/config/skills/` (and `~/.gemini/config/agents/figure-tester.md` if `~/.gemini/config/agents/` exists), without creating `~/.cursor/skills/` or duplicating into `~/.gemini/antigravity/skills/`.
+This installs dereferenced copies of `shinystat` and `shinystat-cloud` into `~/.gemini/config/skills/` (and `~/.gemini/config/agents/figure-tester.md` if `~/.gemini/config/agents/` exists), without creating `~/.claude/skills/`, `~/.cursor/skills/`, or duplicating into `~/.gemini/antigravity/skills/`.
 
 </details>
 

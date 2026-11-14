@@ -44,7 +44,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -h|--help)
-            echo "Usage: $0 [--symlink|--copy] [--global] [-s|--scope workspace|global] [-t|--target antigravity|cursor|all] [--dry-run] (global default target: antigravity)"
+            echo "Usage: $0 [--symlink|--copy] [--global] [-s|--scope workspace|global] [-t|--target antigravity|claude|cursor|all] [--dry-run] (global default target: antigravity)"
             exit 0
             ;;
         *)
@@ -59,8 +59,8 @@ if [[ "$SCOPE" != "workspace" && "$SCOPE" != "global" ]]; then
     exit 1
 fi
 
-if [[ "$TARGET" != "all" && "$TARGET" != "antigravity" && "$TARGET" != "cursor" ]]; then
-    echo "Error: Invalid target '$TARGET'. Must be one of: all, antigravity, cursor" >&2
+if [[ "$TARGET" != "all" && "$TARGET" != "antigravity" && "$TARGET" != "claude" && "$TARGET" != "cursor" ]]; then
+    echo "Error: Invalid target '$TARGET'. Must be one of: antigravity, claude, cursor, all" >&2
     exit 1
 fi
 
@@ -184,9 +184,11 @@ echo "[3/3] Cleaning up legacy mirror directories..."
 LEGACY_TARGETS=(
     "$REPO_ROOT/.agent/skills"
     "$REPO_ROOT/.agents/skills"
+    "$REPO_ROOT/.claude/skills"
     "$REPO_ROOT/.cursor/skills"
     "$REPO_ROOT/.agent/agents"
     "$REPO_ROOT/.agents/agents"
+    "$REPO_ROOT/.claude/agents"
 )
 
 for hdir in "${LEGACY_TARGETS[@]}"; do
@@ -226,6 +228,9 @@ if [[ "$SCOPE" == "global" ]]; then
             done
         fi
     fi
+    if [[ "$TARGET" == "all" || "$TARGET" == "claude" ]]; then
+        GLOBAL_DIRS+=("${HOME}/.claude/skills")
+    fi
     if [[ "$TARGET" == "all" || "$TARGET" == "cursor" ]]; then
         GLOBAL_DIRS+=("${HOME}/.cursor/skills")
     fi
@@ -261,6 +266,16 @@ if [[ "$SCOPE" == "global" ]]; then
             else
                 cp "$CANONICAL_AGENT" "${HOME}/.gemini/config/agents/figure-tester.md"
                 echo "  ✓ Installed figure-tester agent into ${HOME}/.gemini/config/agents/figure-tester.md"
+            fi
+        fi
+    fi
+    if [[ -f "$CANONICAL_AGENT" && -d "${HOME}/.claude/agents" ]]; then
+        if [[ "$TARGET" == "all" || "$TARGET" == "claude" ]]; then
+            if [[ "$DRY_RUN" == true ]]; then
+                echo "[dry-run] would install agent into ${HOME}/.claude/agents/figure-tester.md"
+            else
+                cp "$CANONICAL_AGENT" "${HOME}/.claude/agents/figure-tester.md"
+                echo "  ✓ Installed figure-tester agent into ${HOME}/.claude/agents/figure-tester.md"
             fi
         fi
     fi
