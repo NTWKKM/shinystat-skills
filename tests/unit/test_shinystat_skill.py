@@ -1403,7 +1403,8 @@ def test_live_eval_round_two_wording_and_engine_adr85():
     assert "(rows complete on its variables)" in local
     assert "(rows complete on its variables) per §2.B" in local
     assert "when its outcome holds one class (report the absent class)" in heur
-    assert "name the aliased columns from the error" in heur
+    assert "map each aliased `xN` in the error to design column N, counted from 0 in the order passed" in heur
+    assert "`intercept` to the constant term; name those columns" in heur
     for text in (local, cloud):
         assert "name tested variables (untested or df 0 ≠ MCAR)" in text
     assert "Primary Exposure Missing = 100% in the analytic cohort" in heur

@@ -1353,31 +1353,23 @@ def verify_standalone_integrity(
             re.search(
                 r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff|prespecified(?:\s+(?:level|threshold|cutoff))?|defined\s+as)"
                 r"(?:\s*(?:[:=]|\b(?:was|were|is)?\s*(?:set\s+at|defined\s+as|of|at)?\b))?\s*"
-                r"\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+[a-zA-Z_-]+\)?|\(?[a-zA-Z_-]+\)?))?\s*([<>]=?|[≤≥])\s*$",
+                r"(?:two\s?-?(?:sided|tailed)\s*)?\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+[a-zA-Z_-]+\)?|\(?[a-zA-Z_-]+\)?))?\s*([<>]=?|[≤≥])\s*$",
                 window_before,
                 re.IGNORECASE,
             )
         )
-        # "two-sided P < x" names a threshold only with a threshold keyword in its own clause;
-        # an earlier threshold sentence cannot exempt a later two-sided result.
-        if not is_threshold_def and re.search(
-            r"\btwo\s?-?(?:sided|tailed)\s*"
-            r"\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+[a-zA-Z_-]+\)?|\(?[a-zA-Z_-]+\)?))?\s*([<>]=?|[≤≥])\s*$",
-            window_before,
-            re.IGNORECASE,
-        ):
-            clause = (
-                re.split(r"(?:\.|;|!|\?)(?=\s)", window_before)[-1]
-                + raw_str
-                + re.split(r"(?:\.|;|!|\?)(?=\s|$)", window_after)[0]
+        # "two-sided P < x" is a threshold only when a threshold keyword defines that same
+        # inequality ("threshold was two-sided P < 0.05"); a keyword elsewhere in the
+        # sentence or in an earlier one never exempts a reported result.
+        # The keyword may also follow as the predicate ("two-sided P < .05 was the threshold").
+        is_threshold_def = is_threshold_def or bool(
+            re.match(
+                r"\s*(?:was|is|were)\s+(?:(?:the|our)\s+)?(?:prespecified\s+)?"
+                r"(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff)\b",
+                window_after,
+                re.IGNORECASE,
             )
-            is_threshold_def = bool(
-                re.search(
-                    r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff)\b",
-                    clause,
-                    re.IGNORECASE,
-                )
-            )
+        )
         is_alpha_cutoff = (
             (not p_ineq_match or is_threshold_def)
             and val in (0.05, 0.01, 0.001, 0.005, 0.0001)
