@@ -1243,14 +1243,25 @@ def verify_standalone_integrity(
         re.IGNORECASE,
     )
 
-    p_threshold_re = re.compile(
-        r"(?<![A-Za-z0-9])(?:thresh(?:old)?|cut[-_.]?off|alpha|sig(?:nificance)?[-_.]?level)s?(?![A-Za-z0-9])",
-        re.IGNORECASE,
-    )
+    p_threshold_word = r"(?:thresh(?:old)?|cut[-_.\s]?off|alpha|sig(?:nificance)?[-_.\s]?level)s?"
+    # A whole key that names a threshold record ("thresholds", "alpha", "significance level").
+    p_threshold_record_re = re.compile(rf"\s*{p_threshold_word}\s*", re.IGNORECASE)
+    # A threshold word joined to the P token; "alpha_diversity_p_value" is an observed P-value.
+    p_threshold_before_re = re.compile(rf"(?<![A-Za-z0-9]){p_threshold_word}[-_.\s]+$", re.IGNORECASE)
+    p_threshold_after_re = re.compile(rf"^[-_.\s]+{p_threshold_word}(?![A-Za-z0-9])", re.IGNORECASE)
+
+    def _is_threshold_key(key_str):
+        if p_threshold_record_re.fullmatch(key_str):
+            return True
+        return any(
+            p_threshold_before_re.search(key_str[: m.start()])
+            or p_threshold_after_re.match(key_str[m.end() :])
+            for m in p_key_re.finditer(key_str)
+        )
 
     def _is_p_key(key_str):
         # A P-value key names a P-value, not a threshold, cutoff or alpha level.
-        return bool(p_key_re.search(key_str)) and not p_threshold_re.search(key_str)
+        return bool(p_key_re.search(key_str)) and not _is_threshold_key(key_str)
 
     def _detect_p_qual(key_str):
         k_lower = key_str.lower()
@@ -1273,7 +1284,7 @@ def verify_standalone_integrity(
         if isinstance(d, dict):
             for k, v in d.items():
                 k_str = str(k)
-                if p_threshold_re.search(k_str):
+                if _is_threshold_key(k_str):
                     continue  # a threshold record holds no P-values, at any depth
                 k_qual = _detect_p_qual(k_str) or parent_qual
                 if _is_p_key(k_str):
@@ -1340,13 +1351,33 @@ def verify_standalone_integrity(
         )
         is_threshold_def = bool(
             re.search(
-                r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff|prespecified(?:\s+(?:level|threshold|cutoff))?|defined\s+as|two\s?-?sided|two\s?-?tailed)"
+                r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff|prespecified(?:\s+(?:level|threshold|cutoff))?|defined\s+as)"
                 r"(?:\s*(?:[:=]|\b(?:was|were|is)?\s*(?:set\s+at|defined\s+as|of|at)?\b))?\s*"
                 r"\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+[a-zA-Z_-]+\)?|\(?[a-zA-Z_-]+\)?))?\s*([<>]=?|[≤≥])\s*$",
                 window_before,
                 re.IGNORECASE,
             )
         )
+        # "two-sided P < x" names a threshold only with a threshold keyword in its own clause;
+        # an earlier threshold sentence cannot exempt a later two-sided result.
+        if not is_threshold_def and re.search(
+            r"\btwo\s?-?(?:sided|tailed)\s*"
+            r"\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+[a-zA-Z_-]+\)?|\(?[a-zA-Z_-]+\)?))?\s*([<>]=?|[≤≥])\s*$",
+            window_before,
+            re.IGNORECASE,
+        ):
+            clause = (
+                re.split(r"(?:\.|;|!|\?)(?=\s)", window_before)[-1]
+                + raw_str
+                + re.split(r"(?:\.|;|!|\?)(?=\s|$)", window_after)[0]
+            )
+            is_threshold_def = bool(
+                re.search(
+                    r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff)\b",
+                    clause,
+                    re.IGNORECASE,
+                )
+            )
         is_alpha_cutoff = (
             (not p_ineq_match or is_threshold_def)
             and val in (0.05, 0.01, 0.001, 0.005, 0.0001)

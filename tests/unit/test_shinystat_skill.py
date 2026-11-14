@@ -1401,12 +1401,14 @@ def test_live_eval_round_two_wording_and_engine_adr85():
     assert "Primary Exposure Missing > 40%" in heur and "the exposure is never dropped" in heur
     assert "when the data record it in years" in heur
     assert "(rows complete on its variables)" in local
-    assert "(rows complete on its variables) with rows" in local
+    assert "(rows complete on its variables) per §2.B" in local
+    assert "when its outcome holds one class (report the absent class)" in heur
+    assert "name the aliased columns from the error" in heur
     for text in (local, cloud):
         assert "name tested variables (untested or df 0 ≠ MCAR)" in text
     assert "Primary Exposure Missing = 100% in the analytic cohort" in heur
     assert "a categorical or otherwise excluded variable as untested, never as MCAR" in heur
-    assert "marks separation unevaluable" in heur
+    assert "Mark separation unevaluable and continue to the gate questions" in heur
     assert "after applying the approved outcome disposition" in heur
     assert "the local run halts and reports the exposure as not locally imputable" in heur
     assert "is reported as unavailable, never as MCAR" in heur
