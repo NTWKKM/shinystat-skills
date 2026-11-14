@@ -1893,6 +1893,8 @@ def test_phi_thai_id_and_name_markers_parity(tmp_path):
         "พญ.สุดา",
         "ดร.วิชัย",
         "Dr. Smith",
+        "Dr. สมชาย",
+        "นาย John",
     ]:
         bad_text = f"{thai_prose} {marker}"
         bad_doc = ReportDocument(title="PHI", results_dict=results)

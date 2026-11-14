@@ -110,6 +110,12 @@ def test_assert_zero_phi_text_raises_on_violations():
     with pytest.raises(ValueError, match="Zero-PHI Violation"):
         assert_zero_phi_text(["ผู้ป่วยนางสาวสมศรี"])
 
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        assert_zero_phi_text(["Dr. สมชาย"])
+
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        assert_zero_phi_text(["นาย John"])
+
 
 def test_qa_layout_gate():
     fig, ax = plt.subplots(figsize=(5, 4))

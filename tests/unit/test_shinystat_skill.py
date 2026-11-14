@@ -1272,26 +1272,45 @@ def test_live_eval_wording_rules_adr80():
     root = Path(__file__).resolve().parents[2] / "skills"
     local = (root / "shinystat" / "SKILL.md").read_text(encoding="utf-8")
     cloud = (root / "shinystat-cloud" / "SKILL.md").read_text(encoding="utf-8")
-    heur = (root / "_shared" / "references" / "decision-heuristics.md").read_text(encoding="utf-8")
+    heur = (root / "_shared" / "references" / "decision-heuristics.md").read_text(
+        encoding="utf-8"
+    )
     for text in (local, cloud):
-        assert "≥2 distinct estimands (a primary model and its sensitivity re-fits count as one)" in text  # 5d trigger
+        assert (
+            "≥2 distinct estimands (a primary model and its sensitivity re-fits count as one)"
+            in text
+        )  # 5d trigger
         assert "biomarker direction not fixed by" in text  # Gate #1
         assert "primary, Complete-Case sensitivity" in text  # MICE triage
         assert "**Effect Scale**" in text
     # ADR 81: audit the delivered reply and exported data files; a figure per primary estimate.
     assert "on that same `ReportDocument` with `exported_files`" in local
     assert "`delivered_text` (In-Chat Summary reply)" in local
-    assert "(In-Chat Summary reply) with every data file written as `exported_files`" in cloud
-    assert "each primary estimate is plotted" in local and "each primary estimate is plotted" in cloud
+    assert (
+        "(In-Chat Summary reply) with every data file written as `exported_files`"
+        in cloud
+    )
+    assert (
+        "each primary estimate is plotted" in local
+        and "each primary estimate is plotted" in cloud
+    )
     assert "**Identifier-Free Exports**" in cloud
     for text in (local, cloud):
         assert "spline df; no intercept)" in text
     assert "GEE logistic clustered on pair ID" in heur
-    assert "`medstat.models.firth.check_separation` on every logistic design (outcome and propensity models)" in local  # Gate #3 detector
+    assert (
+        "`medstat.models.firth.check_separation` on every logistic design (outcome and propensity models)"
+        in local
+    )  # Gate #3 detector
     assert "`plot_dual_*` figures" in local  # 5a dual view
-    assert "pandas/scipy" not in cloud.split("---")[1]  # description names no library subset (ADR 81 Round 1)
+    assert (
+        "pandas/scipy" not in cloud.split("---")[1]
+    )  # description names no library subset (ADR 81 Round 1)
     assert "fit_iptw_outcome_model" in heur and "fit_weighted_outcome_model" in heur
-    assert "MICE is the primary analysis" in heur and "the retention flow ends at the primary analytic N" in heur
+    assert (
+        "MICE is the primary analysis" in heur
+        and "the retention flow ends at the primary analytic N" in heur
+    )
 
 
 def test_api_quickref_matches_engine():
@@ -1300,7 +1319,11 @@ def test_api_quickref_matches_engine():
     import inspect
 
     sheet = (
-        Path(__file__).resolve().parents[2] / "skills" / "shinystat" / "references" / "api-quickref.md"
+        Path(__file__).resolve().parents[2]
+        / "skills"
+        / "shinystat"
+        / "references"
+        / "api-quickref.md"
     ).read_text(encoding="utf-8")
     block = re.search(r"```text\n(.*?)\n```", sheet, re.DOTALL).group(1)
     lines = [ln for ln in block.splitlines() if ln.strip()]
@@ -1331,7 +1354,9 @@ def test_api_quickref_matches_engine():
             params.append(p.name if p.default is p.empty else f"{p.name}={p.default!r}")
         ret = sig.return_annotation
         ret_s = "" if ret is sig.empty or ret in ("None", None) else f" -> {ret}"
-        assert ln == f"{qual}({', '.join(params)}){ret_s}", f"Stale quick-reference line: {ln}"
+        assert ln == f"{qual}({', '.join(params)}){ret_s}", (
+            f"Stale quick-reference line: {ln}"
+        )
 
 
 def test_live_eval_round_two_wording_and_engine_adr85():
@@ -1350,13 +1375,24 @@ def test_live_eval_round_two_wording_and_engine_adr85():
     root = Path(__file__).resolve().parents[2] / "skills"
     local = (root / "shinystat" / "SKILL.md").read_text(encoding="utf-8")
     cloud = (root / "shinystat-cloud" / "SKILL.md").read_text(encoding="utf-8")
-    heur = (root / "_shared" / "references" / "decision-heuristics.md").read_text(encoding="utf-8")
+    heur = (root / "_shared" / "references" / "decision-heuristics.md").read_text(
+        encoding="utf-8"
+    )
     flows = (root / "_shared" / "references" / "flows.md").read_text(encoding="utf-8")
-    quick = (root / "shinystat" / "references" / "api-quickref.md").read_text(encoding="utf-8")
+    quick = (root / "shinystat" / "references" / "api-quickref.md").read_text(
+        encoding="utf-8"
+    )
 
     # Thai labels render in every journal theme when a Thai face is installed.
     installed = {f.name for f in fm.fontManager.ttflist}
-    if installed & {"Sarabun", "Thonburi", "Sukhumvit Set", "Ayuthaya", "Tahoma", "Arial Unicode MS"}:
+    if installed & {
+        "Sarabun",
+        "Thonburi",
+        "Sukhumvit Set",
+        "Ayuthaya",
+        "Tahoma",
+        "Arial Unicode MS",
+    }:
         apply_journal_theme("NEJM")
         assert len(matplotlib.rcParams["font.family"]) >= 2
         with warnings.catch_warnings(record=True) as caught:
@@ -1373,7 +1409,12 @@ def test_live_eval_round_two_wording_and_engine_adr85():
 
     with tempfile.TemporaryDirectory() as tmp:
         res = plot_retention_flow(
-            {"n_initial": 100, "n_excluded": 10, "n_analyzed": 90, "exclusion_reasons": ["Missing outcome"]},
+            {
+                "n_initial": 100,
+                "n_excluded": 10,
+                "n_analyzed": 90,
+                "exclusion_reasons": ["Missing outcome"],
+            },
             out_path=Path(tmp) / "flow.png",
         )
         assert res.qa is not None and res.qa["passed"] is True
@@ -1398,24 +1439,38 @@ def test_live_eval_round_two_wording_and_engine_adr85():
     for text in (local, cloud):
         assert "in the exposure or any covariate (Little's test cannot lift it)" in text
         assert "`#2`–`#4` first found mid-run" in text
-    assert "Primary Exposure Missing > 40%" in heur and "the exposure is never dropped" in heur
+    assert (
+        "Primary Exposure Missing > 40%" in heur
+        and "the exposure is never dropped" in heur
+    )
     assert "when the data record it in years" in heur
     assert "(rows complete on its variables)" in local
     assert "(rows complete on its variables) per §2.B" in local
     assert "when its outcome holds one class (report the absent class)" in heur
-    assert "map each aliased `xN` in the error to design column N, counted from 0 in the order passed" in heur
+    assert (
+        "map each aliased `xN` in the error to design column N, counted from 0 in the order passed"
+        in heur
+    )
     assert "`intercept` to the constant term; name those columns" in heur
     for text in (local, cloud):
         assert "name tested variables (untested or df 0 ≠ MCAR)" in text
     assert "Primary Exposure Missing = 100% in the analytic cohort" in heur
-    assert "a categorical or otherwise excluded variable as untested, never as MCAR" in heur
+    assert (
+        "a categorical or otherwise excluded variable as untested, never as MCAR"
+        in heur
+    )
     assert "Mark separation unevaluable and continue to the gate questions" in heur
     assert "after applying the approved outcome disposition" in heur
-    assert "the local run halts and reports the exposure as not locally imputable" in heur
+    assert (
+        "the local run halts and reports the exposure as not locally imputable" in heur
+    )
     assert "is reported as unavailable, never as MCAR" in heur
     assert "`check_separation` on each dummy-coded logistic design" in local
     assert "compute that SD once from the observed values" in heur
-    assert "the primary analysis is high-M MICE (M ≥ 40, tracking FMI) that imputes the exposure" in heur
+    assert (
+        "the primary analysis is high-M MICE (M ≥ 40, tracking FMI) that imputes the exposure"
+        in heur
+    )
     assert "without observed receipt/analysis counts" in local
     assert "for an In-Chat Summary render nothing" in quick
     assert "pooled effect scale" in local and "pooled effect scale" in cloud
@@ -1434,3 +1489,32 @@ def test_live_eval_round_two_wording_and_engine_adr85():
         "medstat.data.missing.pool_regression_results(",
     ):
         assert needle in quick, needle
+
+    # ADR 86 Round 2 (PR 32): table pipes, age-unit metadata, auxiliary vs confounder Gate #4, audit & subagent protocol.
+    proto = (root / "_shared" / "references" / "subagent-protocol.md").read_text(
+        encoding="utf-8"
+    )
+    type1_row = next(
+        ln
+        for ln in heur.splitlines()
+        if ln.startswith("| **Type 1: Baseline Cohort** |")
+    )
+    assert "abs(skewness) <= 1.0" in type1_row
+    assert len([c for c in type1_row.strip("|").split("|")]) == 5
+    assert (
+        "plausible numeric values (such as `0–120`) alone do not establish years"
+        in heur
+    )
+    assert "for genuinely auxiliary covariates only" in heur
+    assert (
+        "for important confounders, do not recommend removal from the primary model"
+        in heur
+    )
+    for text in (local, cloud):
+        assert "post-audit edit to an exported file" in text
+        assert "explicitly non-interactive run" in text
+    assert "triggered `#1`, `#2`, `#3`, `#4`, and `#5a`–`#5d`" in proto
+    assert (
+        "default to **Direct in Main Agent** only when no subagent tool exists, the run is ineligible, or non-interactive execution is explicitly authorized"
+        in proto
+    )

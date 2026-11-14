@@ -11,7 +11,7 @@ This file provides guidance to coding agents when working with code in this repo
 ## Working rules
 
 - Read this file before the first edit in this repository: it defines `Done when`, canonical → mirror, parity, fail closed, and the tests that guard skill and ADR prose.
-- Run ad-hoc Python snippets against local modules with `PYTHONPATH=src uv run python - <<'PY'` (`pyproject.toml` sets `pythonpath = ["src"]` for `pytest` only).
+- Run ad-hoc Python snippets against local modules with `PYTHONPATH=src uv run --with-requirements skills/shinystat/requirements.txt python - <<'PY'` (`pyproject.toml` sets `pythonpath = ["src"]` for `pytest` only).
 - Target a single test file during iteration (`uv run pytest tests/unit/test_<name>.py`), then finish with `uv run ruff check src tests scripts`, `uv run --extra dev pytest`, and every remaining line of `Done when`.
 - Locate relevant sections of `DESIGN.md`, `ARCHITECTURE.md`, and `CONTEXT.md` via `rg -n` and open only the matching slice; `Contracts` below says which file answers which question.
 
@@ -92,7 +92,7 @@ Engine and recipes fail closed, and tests hold them to it:
 - Undefined inference (zero variance, degenerate bootstrap, an absent class) returns `NaN` with a reason.
 - An unrecognised option or effect scale raises. A fallback that does run is disclosed in the result (`fallback_reason`, `ci_methods`).
 - Missing data without a strategy and justification raises `MissingStrategyRequiredError`. Rows missing the outcome or score are excluded and counted.
-- Outcomes and event indicators are numeric 0/1 (competing risks: 0 censored, 1 event of interest, 2+ competing). Unmapped text labels raise.
+- Binary outcomes and survival event indicators are numeric 0/1 (competing risks: 0 censored, 1 event of interest, 2+ competing). Continuous and ordinal outcomes keep their numeric or mapped codes. Unmapped text labels raise.
 - Flow diagram counts reconcile or raise.
 
 Fixed methods: Wilson CIs for proportions, DeLong variance for AUC, Firth with `penalty_weight=0.5`, IPTW weights as probability weights with sandwich variance. Dependencies stay permissively licensed (ADR 1 replaced GPL `pingouin`). Fixtures and examples use synthetic data with mock IDs such as `PATIENT_MOCK_ONC_001`.
