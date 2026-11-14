@@ -4378,3 +4378,22 @@ def test_cloud_verifier_flags_identifier_columns_in_exported_files(
     blank.write_text("\n , \npatient_id,statin_rx\nPATIENT_MOCK_CVD_0001,1\n", encoding="utf-8")
     res = verify(narrative, results, exported_files=[blank])
     assert any("'patient_id'" in v for v in res["phi_violations"])
+
+
+def test_littles_mcar_df_zero_unavailable_matches_engine(recipes):
+    """df <= 0 with missing values is undefined inference: engine and Recipe 8 both return NaN."""
+    from medstat.data.clean import littles_mcar_test as engine_littles
+
+    df = pd.DataFrame(
+        {
+            "a": [1.0, 2.0, np.nan, np.nan],
+            "b": [np.nan, np.nan, 3.0, 4.0],
+            "c": [np.nan, np.nan, 5.0, 6.0],
+        }
+    )
+    eng = engine_littles(df, cols=["a", "b", "c"])
+    rec = recipes["littles_mcar_test"](df, ["a", "b", "c"])
+    assert eng.df == 0 and rec["df"] <= 0
+    assert np.isnan(eng.p_value) and np.isnan(rec["p_value"])
+    assert np.isnan(eng.statistic) and np.isnan(rec["chi2"])
+    assert eng.is_mcar is False and rec["mcar_rejected"] is False

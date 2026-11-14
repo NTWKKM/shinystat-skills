@@ -62,7 +62,9 @@ def configure_matplotlib_fonts() -> list[str]:
         "sans-serif",
     ]
     plt.rcParams["font.sans-serif"] = font_chain
-    plt.rcParams["font.family"] = "sans-serif"
+    from medstat.figures.journal import thai_fallback_family
+
+    plt.rcParams["font.family"] = thai_fallback_family(font_chain)
     plt.rcParams["axes.unicode_minus"] = False
     return font_chain
 

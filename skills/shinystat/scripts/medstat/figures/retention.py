@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from medstat.figures.base import FigureResult, export_source_data
+from medstat.figures.qa import qa_layout
 from medstat.figures.styles import (
     CLINICAL_PALETTE,
     save_figure_bundle,
@@ -151,6 +152,7 @@ def plot_retention_flow(
             },
         ]
     )
+    qa = qa_layout(fig, check_outside=False)
     png_path, vec_path, svg_path = save_figure_bundle(fig, out_path, dpi=dpi)
     csv_path = export_source_data(source_df, png_path)
 
@@ -165,4 +167,5 @@ def plot_retention_flow(
         csv_path=csv_path,
         vector_path=vec_path,
         svg_path=svg_path,
+        qa=qa,
     )

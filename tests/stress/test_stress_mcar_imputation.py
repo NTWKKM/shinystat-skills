@@ -200,10 +200,11 @@ class TestLittlesMCARStress:
         )
         res = littles_mcar_test(df)
         assert res.df == 0
-        assert res.statistic == 0.0
-        assert res.p_value == 1.0
-        assert res.is_mcar is True
+        assert np.isnan(res.statistic)
+        assert np.isnan(res.p_value)
+        assert res.is_mcar is False
         assert "Degrees of freedom" in res.message
+        assert "unavailable" in res.message
 
     def test_littles_mcar_single_missingness_pattern(self):
         """Dataset with exactly 2 patterns (all-observed and 1 partial pattern)."""

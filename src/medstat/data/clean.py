@@ -793,11 +793,12 @@ def littles_mcar_test(
 
     # If df <= 0, test cannot be evaluated asymptotically
     if df_stat <= 0:
+        # Undefined inference: no evidence for or against MCAR (Recipe 8 parity).
         return LittlesMCARResult(
-            statistic=0.0,
+            statistic=float("nan"),
             df=max(0, df_stat),
-            p_value=1.0,
-            is_mcar=True,
+            p_value=float("nan"),
+            is_mcar=False,
             n_patterns=len(parsed_patterns),
             n_observations=N,
             n_variables=P,
@@ -808,7 +809,7 @@ def littles_mcar_test(
                 col: float(np.nanmean(Y[:, i])) for i, col in enumerate(target_cols)
             },
             sigma_mle={c1: {c2: 0.0 for c2 in target_cols} for c1 in target_cols},
-            message=f"Degrees of freedom ({df_stat}) <= 0; insufficient missingness patterns for asymptotic test.",
+            message=f"Degrees of freedom ({df_stat}) <= 0; insufficient missingness patterns for asymptotic test; report the test as unavailable.",
         )
 
     # EM Algorithm initialization

@@ -1239,9 +1239,29 @@ def verify_standalone_integrity(
         return nums
 
     p_key_re = re.compile(
-        r"^(?:p|p[-_]?(?:val|value|adj|overall|non[-_]?linear|omnibus|q|lrt|wald|trend|interaction))s?$",
+        r"(?<![A-Za-z0-9])(?:p(?![-_.])|p[-_]?(?:val|value|adj|overall|non[-_]?linear|omnibus|q|lrt|wald|trend|interaction))s?(?!(?:-|_|\.)(?:ci|lower|upper)s?(?![A-Za-z0-9]))(?![A-Za-z0-9])",
         re.IGNORECASE,
     )
+
+    p_threshold_word = r"(?:thresh(?:old)?|cut[-_.\s]?off|alpha|sig(?:nificance)?[-_.\s]?level)s?"
+    # A whole key that names a threshold record ("thresholds", "alpha", "significance level").
+    p_threshold_record_re = re.compile(rf"\s*{p_threshold_word}\s*", re.IGNORECASE)
+    # A threshold word joined to the P token; "alpha_diversity_p_value" is an observed P-value.
+    p_threshold_before_re = re.compile(rf"(?<![A-Za-z0-9]){p_threshold_word}[-_.\s]+$", re.IGNORECASE)
+    p_threshold_after_re = re.compile(rf"^[-_.\s]+{p_threshold_word}(?![A-Za-z0-9])", re.IGNORECASE)
+
+    def _is_threshold_key(key_str):
+        if p_threshold_record_re.fullmatch(key_str):
+            return True
+        return any(
+            p_threshold_before_re.search(key_str[: m.start()])
+            or p_threshold_after_re.match(key_str[m.end() :])
+            for m in p_key_re.finditer(key_str)
+        )
+
+    def _is_p_key(key_str):
+        # A P-value key names a P-value, not a threshold, cutoff or alpha level.
+        return bool(p_key_re.search(key_str)) and not _is_threshold_key(key_str)
 
     def _detect_p_qual(key_str):
         k_lower = key_str.lower()
@@ -1264,8 +1284,10 @@ def verify_standalone_integrity(
         if isinstance(d, dict):
             for k, v in d.items():
                 k_str = str(k)
+                if _is_threshold_key(k_str):
+                    continue  # a threshold record holds no P-values, at any depth
                 k_qual = _detect_p_qual(k_str) or parent_qual
-                if p_key_re.match(k_str):
+                if _is_p_key(k_str):
                     if isinstance(v, dict):
                         pvals.extend(_extract_qualified_p_vals(v, parent_qual=k_qual))
                     elif isinstance(v, pd.DataFrame):
@@ -1281,7 +1303,7 @@ def verify_standalone_integrity(
             for col in d.columns:
                 col_str = str(col)
                 col_qual = _detect_p_qual(col_str) or parent_qual
-                if p_key_re.match(col_str):
+                if _is_p_key(col_str):
                     pvals.extend((col_qual, n) for n in _flatten_nums(d[col]) if 0.0 <= n <= 1.0)
         return pvals
 
@@ -1331,8 +1353,20 @@ def verify_standalone_integrity(
             re.search(
                 r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff|prespecified(?:\s+(?:level|threshold|cutoff))?|defined\s+as)"
                 r"(?:\s*(?:[:=]|\b(?:was|were|is)?\s*(?:set\s+at|defined\s+as|of|at)?\b))?\s*"
-                r"\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+[a-zA-Z_-]+\)?|\(?[a-zA-Z_-]+\)?))?\s*([<>]=?|[≤≥])\s*$",
+                r"(?:two\s?-?(?:sided|tailed)\s*)?\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+[a-zA-Z_-]+\)?|\(?[a-zA-Z_-]+\)?))?\s*([<>]=?|[≤≥])\s*$",
                 window_before,
+                re.IGNORECASE,
+            )
+        )
+        # "two-sided P < x" is a threshold only when a threshold keyword defines that same
+        # inequality ("threshold was two-sided P < 0.05"); a keyword elsewhere in the
+        # sentence or in an earlier one never exempts a reported result.
+        # The keyword may also follow as the predicate ("two-sided P < .05 was the threshold").
+        is_threshold_def = is_threshold_def or bool(
+            re.match(
+                r"\s*(?:was|is|were)\s+(?:(?:the|our)\s+)?(?:prespecified\s+)?"
+                r"(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff)\b",
+                window_after,
                 re.IGNORECASE,
             )
         )
@@ -1433,9 +1467,14 @@ def verify_standalone_integrity(
             is_ci_level = val in (90.0, 95.0, 99.0) and bool(
                 re.search(r"\b(?:CI|confidence|credible)\b", window, re.IGNORECASE)
             )
-            is_scale_const = val in (0.0, 100.0) and bool(
+            is_scale_const = (val in (0.0, 100.0) and bool(
                 re.search(r"\b(?:scale|normalized|range|total)\b", window, re.IGNORECASE)
-            )
+            )) or (val in (1.645, 1.96, 2.576) and (
+                (bool(re.search(r"(?:±|\+/-)\s*$", window_before))
+                 and bool(re.match(r"^\s*(?:SDs?|SEs?|SEM|standard\s+(?:deviations?|errors?))\b", window_after, re.IGNORECASE)))
+                or bool(re.match(r"^\s*[×x*]\s*(?:SDs?|SEs?|SEM|standard\s+(?:deviations?|errors?))\b", window_after, re.IGNORECASE))
+                or bool(re.search(r"\bcritical\s+value\s*(?:of\s*)?(?:z\s*)?[=:]?\s*$", window_before, re.IGNORECASE))
+            ))
             is_version = bool(
                 re.search(r"\b(?:Version|v\.)\s*$", window_before, re.IGNORECASE)
             )

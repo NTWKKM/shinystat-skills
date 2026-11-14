@@ -90,9 +90,34 @@ def _flatten_numbers(val: Any) -> list[float]:
 
 
 _P_KEY_RE = re.compile(
-    r"^(?:p|p[-_]?(?:val|value|adj|overall|non[-_]?linear|omnibus|q|lrt|wald|trend|interaction))s?$",
+    r"(?<![A-Za-z0-9])(?:p(?![-_.])|p[-_]?(?:val|value|adj|overall|non[-_]?linear|omnibus|q|lrt|wald|trend|interaction))s?(?!(?:-|_|\.)(?:ci|lower|upper)s?(?![A-Za-z0-9]))(?![A-Za-z0-9])",
     re.IGNORECASE,
 )
+
+
+_P_THRESHOLD_WORD = r"(?:thresh(?:old)?|cut[-_.\s]?off|alpha|sig(?:nificance)?[-_.\s]?level)s?"
+# A whole key that names a threshold record ("thresholds", "alpha", "significance level").
+_P_THRESHOLD_RECORD_RE = re.compile(rf"\s*{_P_THRESHOLD_WORD}\s*", re.IGNORECASE)
+# A threshold word joined to the P token ("p_value_threshold", "threshold_p", "alpha_p");
+# "alpha_diversity_p_value" names an observed P-value and is not one.
+_P_THRESHOLD_BEFORE_RE = re.compile(rf"(?<![A-Za-z0-9]){_P_THRESHOLD_WORD}[-_.\s]+$", re.IGNORECASE)
+_P_THRESHOLD_AFTER_RE = re.compile(rf"^[-_.\s]+{_P_THRESHOLD_WORD}(?![A-Za-z0-9])", re.IGNORECASE)
+
+
+def _is_threshold_key(key_str: str) -> bool:
+    """A key names a threshold, cutoff, alpha or significance level, not an observed P-value."""
+    if _P_THRESHOLD_RECORD_RE.fullmatch(key_str):
+        return True
+    return any(
+        _P_THRESHOLD_BEFORE_RE.search(key_str[: m.start()])
+        or _P_THRESHOLD_AFTER_RE.match(key_str[m.end() :])
+        for m in _P_KEY_RE.finditer(key_str)
+    )
+
+
+def _is_p_key(key_str: str) -> bool:
+    """A P-value key names a P-value, not a threshold, cutoff or alpha level."""
+    return bool(_P_KEY_RE.search(key_str)) and not _is_threshold_key(key_str)
 
 
 def _detect_p_qualifier(key_str: str) -> str | None:
@@ -126,8 +151,10 @@ def _extract_qualified_p_values(
     if isinstance(val, dict):
         for k, v in val.items():
             k_str = str(k)
+            if _is_threshold_key(k_str):
+                continue  # a threshold record holds no P-values, at any depth
             k_qual = _detect_p_qualifier(k_str) or parent_qualifier
-            if _P_KEY_RE.match(k_str):
+            if _is_p_key(k_str):
                 if isinstance(v, dict):
                     pvals.extend(
                         _extract_qualified_p_values(v, parent_qualifier=k_qual)
@@ -151,7 +178,7 @@ def _extract_qualified_p_values(
         for col in val.columns:
             col_str = str(col)
             col_qual = _detect_p_qualifier(col_str) or parent_qualifier
-            if _P_KEY_RE.match(col_str):
+            if _is_p_key(col_str):
                 for n in _flatten_numbers(val[col]):
                     if 0.0 <= n <= 1.0:
                         pvals.append((col_qual, float(n)))
@@ -296,8 +323,20 @@ def _is_structural_context(
             re.search(
                 r"\b(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff|prespecified(?:\s+(?:level|threshold|cutoff))?|defined\s+as)"
                 r"(?:\s*(?:[:=]|\b(?:was|were|is)?\s*(?:set\s+at|defined\s+as|of|at)?\b))?\s*"
-                r"\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+[a-zA-Z_-]+\)?|\(?[a-zA-Z_-]+\)?))?\s*([<>]=?|[≤≥])\s*$",
+                r"(?:two\s?-?(?:sided|tailed)\s*)?\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+[a-zA-Z_-]+\)?|\(?[a-zA-Z_-]+\)?))?\s*([<>]=?|[≤≥])\s*$",
                 window_before,
+                re.IGNORECASE,
+            )
+        )
+        # "two-sided P < x" is a threshold only when a threshold keyword defines that same
+        # inequality ("threshold was two-sided P < 0.05"); a keyword elsewhere in the
+        # sentence or in an earlier one never exempts a reported result.
+        # The keyword may also follow as the predicate ("two-sided P < .05 was the threshold").
+        is_threshold_def = is_threshold_def or bool(
+            re.match(
+                r"\s*(?:was|is|were)\s+(?:(?:the|our)\s+)?(?:prespecified\s+)?"
+                r"(?:alpha|significance\s+(?:level|threshold|cutoff)|threshold|cutoff)\b",
+                window_after,
                 re.IGNORECASE,
             )
         )
@@ -360,6 +399,19 @@ def _is_structural_context(
     # 5. Fixed percentage scale reference (e.g. "on a 0 to 100% scale", "normalized to 100%")
     if val in (0.0, 100.0) and re.search(
         r"\b(?:scale|normalized|range|total)\b", window, re.IGNORECASE
+    ):
+        return True
+
+    # 5b. Normal critical values in method statements: a multiplier of an SD/SE ("mean ± 1.96 SD",
+    # "1.96 × SE") or a named critical value ("critical value of 1.645"). An observed SD after "±",
+    # a result in SD units ("1.96 SDs") and a reported z statistic stay traced.
+    if val in (1.645, 1.96, 2.576) and (
+        (
+            re.search(r"(?:±|\+/-)\s*$", window_before)
+            and re.match(r"^\s*(?:SDs?|SEs?|SEM|standard\s+(?:deviations?|errors?))\b", window_after, re.IGNORECASE)
+        )
+        or re.match(r"^\s*[×x*]\s*(?:SDs?|SEs?|SEM|standard\s+(?:deviations?|errors?))\b", window_after, re.IGNORECASE)
+        or re.search(r"\bcritical\s+value\s*(?:of\s*)?(?:z\s*)?[=:]?\s*$", window_before, re.IGNORECASE)
     ):
         return True
 
