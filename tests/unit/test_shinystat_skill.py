@@ -1527,3 +1527,4 @@ def test_live_eval_round_two_wording_and_engine_adr85():
         in heur
     )
     assert "triggered `#1`–`#4` have explicit user decisions" in local
+    assert 'nan_policy="omit"' in heur and "When skewness remains non-finite" in heur
