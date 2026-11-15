@@ -127,6 +127,9 @@ def test_assert_zero_phi_text_raises_on_violations():
         assert_zero_phi_text(["ผู้ป่วย นายจ้าง ใจดี"])
 
     with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        assert_zero_phi_text(["ผู้ป่วย\u00a0นายจ้าง ใจดี"])
+
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
         assert_zero_phi_text(["ชื่อผู้ป่วย: นายจ้าง ใจดี"])
 
     with pytest.raises(ValueError, match="Zero-PHI Violation"):
