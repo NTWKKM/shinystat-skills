@@ -1528,3 +1528,8 @@ def test_live_eval_round_two_wording_and_engine_adr85():
     )
     assert "triggered `#1`–`#4` have explicit user decisions" in local
     assert 'nan_policy="omit"' in heur and "When skewness remains non-finite" in heur
+    assert (
+        "assign variables with `< 3` observed values directly to `nonnormal_vars`"
+        in heur
+    )
+    assert "rescale values by a positive constant before computing skewness" in heur
