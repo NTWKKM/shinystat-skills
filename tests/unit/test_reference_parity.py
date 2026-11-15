@@ -1869,7 +1869,7 @@ def test_phi_thai_id_and_name_markers_parity(tmp_path):
     clean_csv.write_text(
         "obs,bmi_imp\n1,27.7100083304435\n2,0.5403257538631\n", encoding="utf-8"
     )
-    thai_prose = "Methods: จำนวนพารามิเตอร์ ตลอดระยะเวลา กำหนดระดับ ระมัดระวัง ทำนายการ อาชีพ: นายจ้าง cohort retention OR 1.45 (n=412)."
+    thai_prose = "Methods: จำนวนพารามิเตอร์ ตลอดระยะเวลา กำหนดระดับ ระมัดระวัง ทำนายการ อาชีพ: นายจ้าง อาชีพ: นายจ้าง ใจดี cohort retention OR 1.45 (n=412)."
     results = {"or": 1.45, "n": 412}
 
     doc = ReportDocument(title="Thai Clean", results_dict=results)
@@ -1896,6 +1896,7 @@ def test_phi_thai_id_and_name_markers_parity(tmp_path):
         "Dr. สมชาย",
         "Dr. บี",
         "นาย John",
+        "ผู้ป่วย นายจ้าง ใจดี",
         "ชื่อผู้ป่วย: นายจ้าง ใจดี",
         "นายจ้างชัย ใจดี",
         "ชื่อผู้ป่วย: นายจ้างชัย ใจดี",
