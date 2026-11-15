@@ -4342,12 +4342,16 @@ def test_cloud_verifier_flags_identifier_columns_in_exported_files(
         verify(narrative, results, exported_files=[tmp_path / "absent.csv"])
     # ADR 81 Round 2: BOM, TSV and unsupported formats fail closed like the engine.
     bom = tmp_path / "bom.csv"
-    bom.write_bytes("\ufeffpatient_id,statin_rx\nPATIENT_MOCK_CVD_0001,1\n".encode("utf-8"))
+    bom.write_bytes(
+        "\ufeffpatient_id,statin_rx\nPATIENT_MOCK_CVD_0001,1\n".encode("utf-8")
+    )
     tsv = tmp_path / "ids.tsv"
     tsv.write_text("hn\tstatin_rx\n123\t1\n", encoding="utf-8")
     for fp, col in ((bom, "patient_id"), (tsv, "hn")):
         res = verify(narrative, results, exported_files=[fp])
-        assert res["passed"] is False and any(f"'{col}'" in v for v in res["phi_violations"])
+        assert res["passed"] is False and any(
+            f"'{col}'" in v for v in res["phi_violations"]
+        )
     # Padded headers in binary formats are stripped before matching, as in the engine.
     padded = pd.DataFrame({" patient_id ": ["PATIENT_MOCK_CVD_0001"], "statin_rx": [1]})
     xlsx = tmp_path / "ids.xlsx"
@@ -4356,14 +4360,20 @@ def test_cloud_verifier_flags_identifier_columns_in_exported_files(
     padded.to_parquet(parquet)
     for fp in (xlsx, parquet):
         res = verify(narrative, results, exported_files=[fp])
-        assert res["passed"] is False and any("patient_id" in v for v in res["phi_violations"]), fp.name
+        assert res["passed"] is False and any(
+            "patient_id" in v for v in res["phi_violations"]
+        ), fp.name
     unknown = tmp_path / "ids.json"
     unknown.write_text("{}", encoding="utf-8")
     res = verify(narrative, results, exported_files=[unknown])
-    assert res["passed"] is False and any("could not be audited" in v for v in res["phi_violations"])
+    assert res["passed"] is False and any(
+        "could not be audited" in v for v in res["phi_violations"]
+    )
     # ADR 81 Round 3: UTF-16, invalid UTF-8 and corrupt XLSX fail closed; leading blank rows skipped.
     utf16 = tmp_path / "utf16.csv"
-    utf16.write_bytes("patient_id,statin_rx\nPATIENT_MOCK_CVD_0001,1\n".encode("utf-16-le"))
+    utf16.write_bytes(
+        "patient_id,statin_rx\nPATIENT_MOCK_CVD_0001,1\n".encode("utf-16-le")
+    )
     latin = tmp_path / "latin.csv"
     latin.write_bytes(b"pair_id,site\n1,Sa\xefd\n")
     broken = tmp_path / "broken.xlsx"
@@ -4375,9 +4385,72 @@ def test_cloud_verifier_flags_identifier_columns_in_exported_files(
         assert res["passed"] is False, fp.name
         assert any("could not be audited" in v for v in res["phi_violations"]), fp.name
     blank = tmp_path / "blank_first.csv"
-    blank.write_text("\n , \npatient_id,statin_rx\nPATIENT_MOCK_CVD_0001,1\n", encoding="utf-8")
+    blank.write_text(
+        "\n , \npatient_id,statin_rx\nPATIENT_MOCK_CVD_0001,1\n", encoding="utf-8"
+    )
     res = verify(narrative, results, exported_files=[blank])
     assert any("'patient_id'" in v for v in res["phi_violations"])
+
+
+def test_cloud_verify_standalone_integrity_audits_delivered_text(
+    ensure_packaged_cloud_skill,
+):
+    """ADR 86: verify_standalone_integrity audits delivered_text alongside narrative_text."""
+    verify = _extract_report_builder_namespace()["verify_standalone_integrity"]
+    narrative = "Methods: cohort retention flow yielded OR 1.45 in 412 patients."
+    results = {"or": 1.45, "n": 412}
+    assert (
+        verify(narrative, results, delivered_text="OR 1.45 (n=412).")["passed"] is True
+    )
+    bad_num = verify(narrative, results, delivered_text="Risk fell by 17.3 points.")
+    assert bad_num["passed"] is False and 17.3 in bad_num["untraced_numbers"]
+    bad_phi = verify(narrative, results, delivered_text="Reported by นายสมชาย.")
+    assert bad_phi["passed"] is False and bad_phi["phi_violations"]
+
+
+def test_cloud_generate_html_report_include_plotly_cdn_option(
+    tmp_path, ensure_packaged_cloud_skill
+):
+    """ADR 86: include_plotly_cdn=False omits external cdn.plot.ly script for offline runs."""
+    import matplotlib.pyplot as plt
+
+    ns = _extract_report_builder_namespace()
+    gen_html = ns["generate_html_report"]
+    png_path = tmp_path / "fig.png"
+    fig, ax = plt.subplots()
+    ax.plot([0, 1], [0, 1])
+    fig.savefig(png_path)
+    plt.close(fig)
+
+    plotly_spec = {
+        "data": [{"x": [0, 1], "y": [0, 1], "type": "scatter"}],
+        "layout": {},
+    }
+    html_online = tmp_path / "online.html"
+    gen_html(
+        "Online",
+        {"n": 10},
+        {"T": pd.DataFrame({"A": [1]})},
+        figure_paths=[str(png_path)],
+        plotly_figs=[plotly_spec],
+        out_path=str(html_online),
+        include_plotly_cdn=True,
+    )
+    assert "cdn.plot.ly/plotly-2.35.2.min.js" in html_online.read_text(encoding="utf-8")
+
+    html_offline = tmp_path / "offline.html"
+    gen_html(
+        "Offline",
+        {"n": 10},
+        {"T": pd.DataFrame({"A": [1]})},
+        figure_paths=[str(png_path)],
+        plotly_figs=[plotly_spec],
+        out_path=str(html_offline),
+        include_plotly_cdn=False,
+    )
+    offline_txt = html_offline.read_text(encoding="utf-8")
+    assert "cdn.plot.ly" not in offline_txt
+    assert "spec-1" in offline_txt
 
 
 def test_littles_mcar_df_zero_unavailable_matches_engine(recipes):

@@ -101,13 +101,20 @@ def generate_html_report(
     figure_paths: list[str] = None,
     plotly_figs: list[any] = None,  # optional list of go.Figure matching figure_paths
     out_path: str = "report.html",
+    include_plotly_cdn: bool = True,
 ) -> str:
+    """Render a self-contained HTML report with Dual / Toggle View when plotly_figs are provided.
+
+    Note: ``include_plotly_cdn=True`` loads ``https://cdn.plot.ly/plotly-2.35.2.min.js`` when
+    online (with automatic offline fallback to 300 DPI static images). Set
+    ``include_plotly_cdn=False`` for strict zero-external-reference offline bundles.
+    """
     has_plotly = bool(plotly_figs)
     parts = [
         "<!DOCTYPE html><html><head><meta charset='utf-8'>",
         f"<title>{html.escape(title)}</title>",
     ]
-    if has_plotly:
+    if has_plotly and include_plotly_cdn:
         parts.append("<script src='https://cdn.plot.ly/plotly-2.35.2.min.js'></script>")
 
     parts.extend([
@@ -695,14 +702,20 @@ def verify_standalone_integrity(
     allowed_untraced: list[float] | set[float] | tuple[float, ...] = None,
     study_design: str = None,
     exported_files: list = None,
+    delivered_text: str | None = None,
 ) -> dict:
     """Verifies numerical traceability (len(untraced_numbers) == 0) and screens for PHI without importing medstat.
 
-    Pass the exact text delivered to the reader (for In-Chat Summary, the chat reply) as `narrative_text`,
-    and every data file written beside the report as `exported_files`: a missing file raises, and an
-    identifier column (patient_id, hn, mrn, ...) or PHI pattern in one is a violation (engine parity, ADR 81).
+    Pass the exact text delivered to the reader (for In-Chat Summary, the chat reply; or pass the
+    accompanying chat reply via ``delivered_text`` alongside a file deliverable) as ``narrative_text`` /
+    ``delivered_text`` so both are audited together for PHI and numerical traceability, and every data
+    file written beside the report as ``exported_files``: a missing file raises, and an identifier column
+    (patient_id, hn, mrn, ...) or PHI pattern in one is a violation (engine parity, ADR 81).
     """
     violations = []
+    all_text = narrative_text or ""
+    if delivered_text:
+        all_text = f"{all_text}\n\n{delivered_text}" if all_text else delivered_text
 
     # 1. PHI Scan
     phi_patterns = [
@@ -713,7 +726,7 @@ def verify_standalone_integrity(
             "Hospital Number (HN)",
         ),
         (
-            re.compile(r"\b\d{1}[-\s]?\d{4}[-\s]?\d{5}[-\s]?\d{2}[-\s]?\d{1}\b"),
+            re.compile(r"(?<![\d.])\d{1}[-\s]?\d{4}[-\s]?\d{5}[-\s]?\d{2}[-\s]?\d{1}(?!\d)"),
             "Thai Citizen ID (13 digits)",
         ),
         (
@@ -723,8 +736,12 @@ def verify_standalone_integrity(
             "Phone Number",
         ),
         (
+            re.compile(r"\b(?:Mr\.?|Mrs\.?|Ms\.?|Dr\.?)\s+[A-Za-zก-๙]{2,}(?!\w)"),
+            "Personal Name Marker",
+        ),
+        (
             re.compile(
-                r"\b(?:Mr\.?|Mrs\.?|Ms\.?|Dr\.?|นาย|นาง|นางสาว|นพ\.?|พญ\.?|ดร\.?)\s+[A-Za-zก-๙]{2,}\b"
+                r"(?:(?<![ก-๙])(?:นาย(?!กรัฐมนตรี|จ้าง(?![ก-๙]))|นาง(?!พยาบาล)|นพ(?:\.|(?=\s))|พญ(?:\.|(?=\s))|ดร(?:\.|(?=\s)))|(?<=ผู้ป่วย)(?:นาย(?!กรัฐมนตรี)|นาง(?!พยาบาล))|(?<=คนไข้)(?:นาย(?!กรัฐมนตรี)|นาง(?!พยาบาล))|(?<=ชื่อ)(?:นาย(?!กรัฐมนตรี)|นาง(?!พยาบาล))|(?:ผู้ป่วย|คนไข้|ชื่อ(?:ผู้ป่วย|คนไข้)?)(?:[^\S\r\n\v\f\x85\u2028\u2029]*[:#-][^\S\r\n\v\f\x85\u2028\u2029]*|[^\S\r\n\v\f\x85\u2028\u2029]+)(?:นาย(?!กรัฐมนตรี)|นาง(?!พยาบาล))|นางสาว)\s*[A-Za-zก-๙]{2,}"
             ),
             "Personal Name Marker",
         ),
@@ -738,7 +755,7 @@ def verify_standalone_integrity(
     ]
 
     for pat, label in phi_patterns:
-        for m in pat.findall(narrative_text):
+        for m in pat.findall(all_text):
             violations.append(f"{label}: '{m}'")
 
     id_col_pattern = re.compile(
@@ -813,7 +830,7 @@ def verify_standalone_integrity(
 
     results_keys_normalized = [_normalize_key(k) for k in results_dict]
     results_keys_str = " ".join(results_keys_normalized)
-    text_lower = narrative_text.lower()
+    text_lower = all_text.lower()
     has_causal_key = (
         any(
             k in results_keys_str
@@ -1198,11 +1215,36 @@ def verify_standalone_integrity(
         and not has_causal_claims
         and not is_observational
     )
+    is_non_causal_meta_or_agreement = (
+        bool(
+            clean_design
+            and (
+                any(
+                    term in clean_design
+                    for term in [
+                        "meta_analysis",
+                        "metaanalysis",
+                        "agreement",
+                        "reliability",
+                        "bland_altman",
+                    ]
+                )
+                or re.search(r"(?:^|_)icc(?:_|$)", clean_design)
+            )
+        )
+        and not is_observational
+        and not has_causal_key
+        and not has_causal_claims
+    )
 
     is_causal = (
         is_observational
         or has_causal_key
-        or (has_regression_key and not is_non_causal_prediction)
+        or (
+            has_regression_key
+            and not is_non_causal_prediction
+            and not is_non_causal_meta_or_agreement
+        )
         or has_causal_claims
     )
     has_caveat = True
@@ -1313,11 +1355,11 @@ def verify_standalone_integrity(
     allowed_list = (
         [float(x) for x in allowed_untraced] if allowed_untraced is not None else []
     )
-    clean_text = re.sub(r"(?<=\d),(?=\d{3}\b)", "", narrative_text)
+    clean_text = re.sub(r"(?<=\d),(?=\d{3}\b)", "", all_text)
     doc_has_references = bool(
         re.search(
             r"(?:^|\n)\s*(?:#{1,4}\s*)?(?:References|Bibliography)\b",
-            narrative_text,
+            all_text,
             re.IGNORECASE,
         )
     )
@@ -1327,6 +1369,24 @@ def verify_standalone_integrity(
             clean_text,
         )
     )
+    uuid_span_re = re.compile(
+        r"(?<![0-9a-fA-F])[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![0-9a-fA-F])"
+    )
+    pct_scale_after_re = re.compile(
+        r"^\s*(?:percentage[\s-]+points?\b|pct\.?\s*points?\b|pp(?:\b(?![.\w])|\.(?=\s*(?:$|[A-Z(\[]))))",
+        re.IGNORECASE,
+    )
+    uri_scheme_re = re.compile(r"^(?:file|https?|ftp)://", re.IGNORECASE)
+    path_root_re = re.compile(
+        r"^(?:\.\.?/|~/|[A-Za-z]:\\|/(?:Users|home|tmp|var|opt|private|mnt|srv|etc|app|workspace|scratch|brain)(?:/|$))"
+        r"|(?:^|[/\\])(?:scratch|live_eval|figures|brain|outputs?|reports?)/"
+    )
+    path_ext_re = re.compile(
+        r"\.(?:html?|docx?|pptx?|pdf|png|svg|jpe?g|tiff?|eps|csv|tsv|json|ya?ml|md|qmd|rmd|py|sh|txt|xlsx?|parquet|log|zip)$",
+        re.IGNORECASE,
+    )
+    run_dir_seg_re = re.compile(r"(?:^|[/\\])run_\d{8}(?:_\d{6})?(?:_[^/\s\\]+)?(?:/|\\|$)")
+
     untraced_nums = []
     for m in raw_matches:
         raw_str = m.group("num")
@@ -1343,6 +1403,7 @@ def verify_standalone_integrity(
         window_before = clean_text[max(0, start - 80) : start].split("\n")[-1]
         window_after = clean_text[m.end() : min(len(clean_text), m.end() + 80)].split("\n")[0]
         window = f"{window_before}{raw_str}{window_after}"
+        has_pct_scale = has_pct or bool(pct_scale_after_re.match(window_after))
 
         p_ineq_match = re.search(
             r"(?:((?:[a-zA-Z_-]+(?:\s+(?:ratio\s+)?(?:test|score|statistic))?|[a-zA-Z_-]+))\s*,?\s+)?\bp(?=[-_\s(\<>=≤≥])\s*(?:[-_\s]*(?:value|val|\(?for\s+([a-zA-Z_-]+)\)?|\(?([a-zA-Z_-]+)\)?))?\s*([<>]=?|[≤≥])\s*$",
@@ -1452,8 +1513,8 @@ def verify_standalone_integrity(
                 matched = True
                 break
 
-            # 2. Percentage scale match: only permitted when token explicitly has '%' attached
-            if has_pct:
+            # 2. Percentage scale match: permitted when token carries '%' or percentage-point units (pp / percentage points)
+            if has_pct or has_pct_scale:
                 if abs(val - kn * 100.0) <= tol:
                     matched = True
                     break
@@ -1532,6 +1593,23 @@ def verify_standalone_integrity(
                     )
                 )
             )
+            is_doi = (
+                bool(
+                    re.search(
+                        r"(?:\bdoi\s*:?\s*|https?://(?:dx\.)?doi\.org/)$",
+                        window_before,
+                        re.IGNORECASE,
+                    )
+                    and re.match(r"^10\.\d+/\S*", f"{raw_str}{window_after}")
+                )
+                or bool(
+                    re.search(
+                        r"(?:\bdoi\s*:?\s*|https?://(?:dx\.)?doi\.org/)10\.\d+/[^\s,;]*$",
+                        window_before,
+                        re.IGNORECASE,
+                    )
+                )
+            )
             is_citation = (
                 "." not in raw_str
                 and (
@@ -1552,6 +1630,46 @@ def verify_standalone_integrity(
                     )
                 )
             )
+            seg_before_m = re.search(r"[^\s()\[\]<>\"'`]*$", window_before)
+            seg_after_m = re.match(r"^[^\s()\[\]<>\"'`]*", window_after)
+            seg_before = seg_before_m.group(0) if seg_before_m else ""
+            seg_after = (seg_after_m.group(0) if seg_after_m else "").rstrip(".,;:")
+            tok_span = f"{seg_before}{raw_str}{seg_after}"
+            raw_start = len(seg_before)
+            raw_end = raw_start + len(raw_str)
+            tok_clean = tok_span.lstrip("([<\"'`")
+            is_uuid_tok = any(
+                um.start() <= raw_start and raw_end <= um.end()
+                for um in uuid_span_re.finditer(tok_span)
+            )
+            is_path_or_uri = bool(
+                is_uuid_tok
+                or uri_scheme_re.match(tok_clean)
+                or (
+                    ("/" in tok_clean or "\\" in tok_clean)
+                    and (
+                        path_root_re.search(tok_clean)
+                        or path_ext_re.search(tok_clean)
+                        or run_dir_seg_re.search(tok_clean)
+                    )
+                )
+            )
+            is_naive_km = bool(
+                val == 1.0
+                and "." not in raw_str
+                and not has_pct
+                and re.match(r"^\s*[-–−]\s*(?:KM\b|[Kk]aplan\b)", window_after)
+            )
+            is_dpi_spec = bool(
+                val in (300.0, 600.0)
+                and "." not in raw_str
+                and not has_pct
+                and re.match(
+                    r"^\s*(?:[-/]\s*(?:300|600)\s*)?-?\s*dpi\b",
+                    window_after,
+                    re.IGNORECASE,
+                )
+            )
             if not (
                 is_ci_level
                 or is_alpha_cutoff
@@ -1563,7 +1681,11 @@ def verify_standalone_integrity(
                 or is_author_year
                 or is_scale_unit
                 or is_section
+                or is_doi
                 or is_citation
+                or is_path_or_uri
+                or is_naive_km
+                or is_dpi_spec
             ):
                 untraced_nums.append(val)
 

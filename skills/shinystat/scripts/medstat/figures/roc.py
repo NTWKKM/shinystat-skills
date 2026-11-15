@@ -691,7 +691,7 @@ def plot_reclassification(
 
     source_df = pd.DataFrame(
         {
-            "Patient_ID": [f"ID_{i + 1}" for i in range(len(p_0))],
+            "Obs_Index": [f"ID_{i + 1}" for i in range(len(p_0))],
             "Y_True": y_t,
             "P_Old": p_0,
             "P_New": p_1,

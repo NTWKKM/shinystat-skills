@@ -6,7 +6,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODE="--symlink"
 SCOPE="workspace"
-TARGET="all"
+TARGET="antigravity"
 DRY_RUN=false
 
 while [[ $# -gt 0 ]]; do
@@ -44,7 +44,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -h|--help)
-            echo "Usage: $0 [--symlink|--copy] [--global] [-s|--scope workspace|global] [-t|--target all|antigravity|claude|cursor] [--dry-run]"
+            echo "Usage: $0 [--symlink|--copy] [--global] [-s|--scope workspace|global] [-t|--target antigravity|claude|cursor|all] [--dry-run] (global default target: antigravity)"
             exit 0
             ;;
         *)
@@ -60,7 +60,7 @@ if [[ "$SCOPE" != "workspace" && "$SCOPE" != "global" ]]; then
 fi
 
 if [[ "$TARGET" != "all" && "$TARGET" != "antigravity" && "$TARGET" != "claude" && "$TARGET" != "cursor" ]]; then
-    echo "Error: Invalid target '$TARGET'. Must be one of: all, antigravity, claude, cursor" >&2
+    echo "Error: Invalid target '$TARGET'. Must be one of: antigravity, claude, cursor, all" >&2
     exit 1
 fi
 
@@ -188,6 +188,7 @@ LEGACY_TARGETS=(
     "$REPO_ROOT/.cursor/skills"
     "$REPO_ROOT/.agent/agents"
     "$REPO_ROOT/.agents/agents"
+    "$REPO_ROOT/.claude/agents"
 )
 
 for hdir in "${LEGACY_TARGETS[@]}"; do
@@ -211,10 +212,21 @@ if [[ "$SCOPE" == "global" ]]; then
     echo "[Global] Installing standalone dereferenced skills into global config..."
     GLOBAL_DIRS=()
     if [[ "$TARGET" == "all" || "$TARGET" == "antigravity" ]]; then
-        GLOBAL_DIRS+=(
-            "${HOME}/.gemini/config/skills"
-            "${HOME}/.gemini/antigravity/skills"
-        )
+        GLOBAL_DIRS+=("${HOME}/.gemini/config/skills")
+        # Remove legacy physical duplicate directories in ~/.gemini/antigravity/skills while preserving symlinks
+        LEGACY_AGY_SKILLS="${HOME}/.gemini/antigravity/skills"
+        if [[ -d "$LEGACY_AGY_SKILLS" && ! -L "$LEGACY_AGY_SKILLS" ]]; then
+            for legacy_skill in shinystat shinystat-cloud; do
+                if [[ -e "$LEGACY_AGY_SKILLS/$legacy_skill" ]]; then
+                    if [[ "$DRY_RUN" == true ]]; then
+                        echo "[dry-run] remove legacy duplicate $LEGACY_AGY_SKILLS/$legacy_skill"
+                    else
+                        rm -rf "$LEGACY_AGY_SKILLS/$legacy_skill"
+                        echo "  [remove] legacy duplicate $LEGACY_AGY_SKILLS/$legacy_skill"
+                    fi
+                fi
+            done
+        fi
     fi
     if [[ "$TARGET" == "all" || "$TARGET" == "claude" ]]; then
         GLOBAL_DIRS+=("${HOME}/.claude/skills")
@@ -254,6 +266,16 @@ if [[ "$SCOPE" == "global" ]]; then
             else
                 cp "$CANONICAL_AGENT" "${HOME}/.gemini/config/agents/figure-tester.md"
                 echo "  ✓ Installed figure-tester agent into ${HOME}/.gemini/config/agents/figure-tester.md"
+            fi
+        fi
+    fi
+    if [[ -f "$CANONICAL_AGENT" && -d "${HOME}/.claude/agents" ]]; then
+        if [[ "$TARGET" == "all" || "$TARGET" == "claude" ]]; then
+            if [[ "$DRY_RUN" == true ]]; then
+                echo "[dry-run] would install agent into ${HOME}/.claude/agents/figure-tester.md"
+            else
+                cp "$CANONICAL_AGENT" "${HOME}/.claude/agents/figure-tester.md"
+                echo "  ✓ Installed figure-tester agent into ${HOME}/.claude/agents/figure-tester.md"
             fi
         fi
     fi

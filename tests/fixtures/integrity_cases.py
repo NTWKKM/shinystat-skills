@@ -315,7 +315,12 @@ INTEGRITY_PARITY_CASES: list[IntegrityParityCase] = [
     IntegrityParityCase(
         id="pass_compound_p_key_traces_inequality",
         narrative="Sex was not associated with the outcome (P = 0.68). Age showed P < 0.001 (OR 1.45, n=412).",
-        results_dict={"or_age": 1.45, "n": 412, "sex_p_value": 0.68, "age_p_value": 0.0004},
+        results_dict={
+            "or_age": 1.45,
+            "n": 412,
+            "sex_p_value": 0.68,
+            "age_p_value": 0.0004,
+        },
         expected_passed=True,
         expected_untraced=[],
     ),
@@ -422,7 +427,9 @@ INTEGRITY_PARITY_CASES: list[IntegrityParityCase] = [
         results_dict={
             "or_age": 1.45,
             "n": 412,
-            "model": pd.DataFrame({"p_value_cis": [0.001], "p_lowers": [0.01], "p_uppers": [0.02]}),
+            "model": pd.DataFrame(
+                {"p_value_cis": [0.001], "p_lowers": [0.01], "p_uppers": [0.02]}
+            ),
         },
         expected_passed=False,
         expected_untraced=[0.05],
@@ -447,7 +454,9 @@ INTEGRITY_PARITY_CASES: list[IntegrityParityCase] = [
         results_dict={
             "or_age": 1.45,
             "n": 412,
-            "model": pd.DataFrame({"p_value_cutoff": [0.01], "significance_level_p": [0.01]}),
+            "model": pd.DataFrame(
+                {"p_value_cutoff": [0.01], "significance_level_p": [0.01]}
+            ),
         },
         expected_passed=False,
         expected_untraced=[0.05],
@@ -548,6 +557,81 @@ INTEGRITY_PARITY_CASES: list[IntegrityParityCase] = [
         results_dict=BASE_RESULTS_DICT,
         expected_passed=False,
         expected_untraced=[12.0],
+    ),
+    # --- ADR 86: DOI structural exemption ---
+    IntegrityParityCase(
+        id="pass_doi_identifiers_are_structural",
+        narrative=f"{BASE_NARRATIVE} Sources: doi:10.1016/S1470-2045(15)00188-6 and https://doi.org/10.1056/NEJMoa123456.",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=True,
+        expected_untraced=[],
+    ),
+    IntegrityParityCase(
+        id="fail_number_after_doi_still_traced",
+        narrative=f"See doi:10.1016/S1470-2045(15)00188-6; mortality was 17.3%. {BASE_NARRATIVE}",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=False,
+        expected_untraced=[17.3],
+    ),
+    IntegrityParityCase(
+        id="fail_non_doi_after_doi_word_still_traced",
+        narrative=f"Mentioned doi 17.3% risk. {BASE_NARRATIVE}",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=False,
+        expected_untraced=[17.3],
+    ),
+    # --- ADR 86 Round 1: UUID/URI/file paths, pp/percentage points, 1-KM, DPI specs ---
+    IntegrityParityCase(
+        id="pass_uuid_path_and_uri_tokens",
+        narrative=(
+            f"{BASE_NARRATIVE} Artifacts exported to "
+            "/Users/clinician/.gemini/antigravity/brain/f341b108-fc49-415f-9ad4-ae230b12e431/"
+            "scratch/live_eval/s4_orch/run_20261114_211200_a9e8f6fd/report_v2.html "
+            "and [report.pptx](file:///Users/clinician/.gemini/antigravity/brain/"
+            "f341b108-fc49-415f-9ad4-ae230b12e431/scratch/live_eval/s4_orch/"
+            "run_20261114_211200_a9e8f6fd/figures/fig12_forest.png)."
+        ),
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=True,
+        expected_untraced=[],
+    ),
+    IntegrityParityCase(
+        id="pass_percentage_points_and_naive_km_and_dpi",
+        narrative=(
+            f"{BASE_NARRATIVE} Naive 1 - KM overestimated cumulative incidence by "
+            "+13.9 percentage points (+13.9 pp) across 300/600 DPI figures."
+        ),
+        results_dict={**BASE_RESULTS_DICT, "overestimation_abs": 0.139},
+        expected_passed=True,
+        expected_untraced=[],
+    ),
+    IntegrityParityCase(
+        id="fail_percentage_points_without_result_stays_untraced",
+        narrative=f"{BASE_NARRATIVE} Naive 1 - KM overestimated risk by +13.9 percentage points and +13.9 pp.",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=False,
+        expected_untraced=[13.9, 13.9],
+    ),
+    IntegrityParityCase(
+        id="fail_event_fraction_14_of_14_not_path_exempt",
+        narrative=f"{BASE_NARRATIVE} All 14/14 patients with the variant had the event.",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=False,
+        expected_untraced=[14.0, 14.0],
+    ),
+    IntegrityParityCase(
+        id="fail_page_range_pp_dot_still_traced",
+        narrative=f"{BASE_NARRATIVE} Reviewed 12 pp. 14-18 without scale multiplier.",
+        results_dict={**BASE_RESULTS_DICT, "prop": 0.12},
+        expected_passed=False,
+        expected_untraced=[12.0, 14.0, 18.0],
+    ),
+    IntegrityParityCase(
+        id="fail_300_patients_without_dpi_still_traced",
+        narrative=f"{BASE_NARRATIVE} Screened 300 patients and 600 samples.",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=False,
+        expected_untraced=[300.0, 600.0],
     ),
 ]
 
@@ -810,6 +894,39 @@ STUDY_DESIGN_INTEGRITY_CASES: list[StudyDesignIntegrityCase] = [
         study_design="pre-experimental one-group pretest-posttest design",
         narrative="Methods: Pre-experimental one-group pretest-posttest design evaluating intervention across 250 patients; sample size 250.",
         results_dict={"sample_size": 250},
+        expected_caveat=False,
+        expected_passed=False,
+    ),
+    # --- ADR 86: non-causal meta-analysis & agreement/reliability regression key exemption ---
+    StudyDesignIntegrityCase(
+        id="meta_analysis_with_egger_regression",
+        study_design="meta_analysis_and_reliability",
+        narrative="Methods: Cohort retention flow across 15 studies; Egger regression intercept -1.26.",
+        results_dict={"k": 15, "egger_regression": -1.26},
+        expected_caveat=True,
+        expected_passed=True,
+    ),
+    StudyDesignIntegrityCase(
+        id="agreement_icc_without_causal_caveat",
+        study_design="icc_agreement",
+        narrative="Methods: Cohort retention flow for 40 subjects; ICC 0.95.",
+        results_dict={"n": 40, "icc": 0.95, "logistic_check": 0.95},
+        expected_caveat=True,
+        expected_passed=True,
+    ),
+    StudyDesignIntegrityCase(
+        id="observational_meta_analysis_still_requires_caveat",
+        study_design="observational_meta_analysis",
+        narrative="Methods: Cohort retention flow across 15 observational studies; pooled OR 1.45.",
+        results_dict={"k": 15, "or": 1.45, "egger_regression": 0.2},
+        expected_caveat=False,
+        expected_passed=False,
+    ),
+    StudyDesignIntegrityCase(
+        id="meta_analysis_with_causal_claim_requires_caveat",
+        study_design="meta_analysis",
+        narrative="Methods: Cohort retention flow across 15 studies; statin reduces mortality (OR 0.75).",
+        results_dict={"k": 15, "or": 0.75, "egger_regression": 0.2},
         expected_caveat=False,
         expected_passed=False,
     ),

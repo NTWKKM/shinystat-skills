@@ -199,7 +199,7 @@ For the standalone `shinystat-cloud` skill, 24 zero-`medstat` standalone Python 
 
 #### 1. Instant 1-Line Install via skills.sh (Recommended)
 
-Both `skills/shinystat/` and `skills/shinystat-cloud/` are fully self-contained physical directories vendored in Git (no dangling symlinks or missing sibling dependencies). You can install either skill directly across all supported AI coding agents (**Claude Code**, **Cursor**, **Windsurf**, **Antigravity**) using the open [skills.sh](https://skills.sh) package manager:
+Both `skills/shinystat/` and `skills/shinystat-cloud/` are fully self-contained physical directories vendored in Git (no dangling symlinks or missing sibling dependencies). You can install either skill directly across all supported AI coding agents (**Antigravity**, **Cursor**, **Windsurf**) using the open [skills.sh](https://skills.sh) package manager:
 
 ```bash
 # Interactive selection (pick shinystat, shinystat-cloud, or both)
@@ -228,18 +228,19 @@ npx skills add NTWKKM/shinystat-skills -g --yes
 # Verify skills are synchronized without git drift (used in CI)
 ./scripts/sync-skills.sh --check
 
-# Install standalone skills globally (Antigravity, Claude Code, Cursor)
+# Install standalone skills globally (defaults to Antigravity: ~/.gemini/config/skills/)
 ./scripts/install-skills.sh --global
 ./scripts/install-skills.sh --global --target antigravity
 ./scripts/install-skills.sh --global --target claude
 ./scripts/install-skills.sh --global --target cursor
+./scripts/install-skills.sh --global --target all
 
-# Package standalone shinystat-cloud.zip for cloud sandboxes (e.g., Claude Web)
+# Package standalone shinystat-cloud.zip for cloud sandboxes
 ./scripts/package-cloud-skill.sh
 ```
 - `--global`: Install standalone dereferenced skills into global configuration directories.
 - `-s, --scope <workspace|global>`: Installation scope (default: `workspace`). In workspace scope, duplicate harness mirrors are no longer created (SSOT, ADR 49).
-- `-t, --target <all|antigravity|claude|cursor>`: Target AI harness for global installation (default: `all`).
+- `-t, --target <antigravity|claude|cursor|all>`: Target AI harness for global installation (default: `antigravity`; creates `~/.claude/skills/` or `~/.cursor/skills/` only when `-t claude`, `-t cursor`, or `-t all` is passed).
 - `--dry-run`: Print all sync, packaging, and legacy mirror deletion actions without modifying the filesystem.
 
 Pick your platform and follow the corresponding manual setup if needed:
@@ -247,48 +248,31 @@ Pick your platform and follow the corresponding manual setup if needed:
 <details>
 <summary><strong>Google Antigravity</strong> (Desktop / CLI / IDE)</summary>
 
-Install into your global Antigravity skills directory or link into a project workspace:
+Install into your global Antigravity configuration directory:
 
 ```bash
 git clone https://github.com/NTWKKM/shinystat-skills.git
 cd shinystat-skills
-./scripts/install-skills.sh --global --target antigravity
+./scripts/install-skills.sh --global
 ```
 
-This installs dereferenced copies of `shinystat` and `shinystat-cloud` into `~/.gemini/config/skills/` and `~/.gemini/antigravity/skills/`.
+This installs dereferenced copies of `shinystat` and `shinystat-cloud` into `~/.gemini/config/skills/` (and `~/.gemini/config/agents/figure-tester.md` if `~/.gemini/config/agents/` exists), without creating `~/.claude/skills/`, `~/.cursor/skills/`, or duplicating into `~/.gemini/antigravity/skills/`.
 
 </details>
 
 <details>
-<summary><strong>Claude Code</strong> (Anthropic CLI)</summary>
+<summary><strong>Cloud Sandboxes</strong> (Hosted Python Sandboxes)</summary>
 
-Install skills into your Claude Code skills directory:
-
-```bash
-git clone https://github.com/NTWKKM/shinystat-skills.git
-cd shinystat-skills
-./scripts/install-skills.sh --global --target claude
-```
-
-Claude Code discovers skills in `~/.claude/skills/` (global) or `.claude/skills/` (project). Each `SKILL.md` with valid YAML frontmatter registers as an available skill.
-
-</details>
-
-<details>
-<summary><strong>Claude Web</strong> (claude.ai)</summary>
-
-Upload the cloud skill as a `.zip` file via **Upload a skill**:
+Upload the cloud skill as a `.zip` file:
 
 ```bash
-# Option 1: Package dedicated cloud skill for Claude Web (recommended, includes standalone Recipes 1–24)
-./scripts/package-cloud-skill.sh ~/Desktop
+# Option 1: Package dedicated cloud skill for cloud sandboxes (recommended, includes standalone Recipes 1–24)
+./scripts/package-cloud-skill.sh
 
 # Option 2: Package local skill with dereferenced symlinks
 ./scripts/install-skills.sh --copy
 (cd skills && zip -r ~/Desktop/shinystat.zip shinystat)
 ```
-
-Then in [claude.ai](https://claude.ai): Navigate to **Customize** → **Skills** → **+** → **Create skill** → **Upload a skill** and select `shinystat-cloud.zip`. Ensure **Code execution and file creation** is enabled. Claude reads the YAML frontmatter from `SKILL.md` inside the skill archive.
 
 > **Note:** The dedicated cloud package (`packaging/cloud/shinystat-cloud.zip`) contains 24 modular pure-Python standalone recipes in `references/recipes/01-*.md` through `07-*.md`, standalone figure helpers in `references/figures.md`, and multi-format report generators (`.md`, `.html`, `.docx`, `.pptx`, `.pdf`) + `verify_standalone_integrity` in `references/report-builder.md` so cloud sandboxes can execute all analyses using standard scientific libraries (`pandas`, `scipy.stats`, `statsmodels`, `lifelines`, `scikit-learn`) without `medstat-core` installed.
 

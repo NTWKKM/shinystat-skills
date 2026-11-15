@@ -315,6 +315,21 @@ def test_plot_reclassification_static_and_html(tmp_path):
     assert isinstance(fig_res, FigureResult)
     assert (tmp_path / "reclass.png").exists()
     assert fig_res.csv_path is not None and len(fig_res.csv_path) > 0
+    assert "Obs_Index" in fig_res.source_df.columns
+    assert "Patient_ID" not in fig_res.source_df.columns
+
+    from medstat.reporting.integrity import verify_report_integrity
+    from medstat.reporting.ir import ReportDocument
+
+    doc = ReportDocument(title="Reclassification", results_dict={"n": len(y)})
+    doc.add_heading("Methods", level=2)
+    doc.add_paragraph("Cohort retention flow included 40 participants.")
+    audit = verify_report_integrity(
+        doc,
+        study_design="diagnostic_accuracy",
+        exported_files=[fig_res.csv_path],
+    )
+    assert audit.passed is True, audit.phi_violations
 
     # 2. Dual HTML plot
     out_dual = str(tmp_path / "reclass_dual.png")

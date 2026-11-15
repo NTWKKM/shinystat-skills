@@ -87,6 +87,10 @@ def test_assert_zero_phi_text_raises_on_violations():
     assert_zero_phi_text(["Survival Probability", "Cohort (n = 120)", "Stage 2"])
     assert_zero_phi_text(["นายกรัฐมนตรีแถลงนโยบาย"])
     assert_zero_phi_text(["นางพยาบาลประจำวอร์ด"])
+    assert_zero_phi_text(["อาชีพ: นายจ้าง"])
+    assert_zero_phi_text(["อาชีพ: นายจ้าง ใจดี"])
+    assert_zero_phi_text(["กลุ่มผู้ป่วย\nนายจ้าง ใจดี"])
+    assert_zero_phi_text(["ผู้ป่วย:\nนายจ้าง ใจดี"])
 
     # Violations
     with pytest.raises(ValueError, match="Zero-PHI Violation"):
@@ -109,6 +113,30 @@ def test_assert_zero_phi_text_raises_on_violations():
 
     with pytest.raises(ValueError, match="Zero-PHI Violation"):
         assert_zero_phi_text(["ผู้ป่วยนางสาวสมศรี"])
+
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        assert_zero_phi_text(["Dr. สมชาย"])
+
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        assert_zero_phi_text(["Dr. บี"])
+
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        assert_zero_phi_text(["นาย John"])
+
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        assert_zero_phi_text(["ผู้ป่วย นายจ้าง ใจดี"])
+
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        assert_zero_phi_text(["ผู้ป่วย\u00a0นายจ้าง ใจดี"])
+
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        assert_zero_phi_text(["ชื่อผู้ป่วย: นายจ้าง ใจดี"])
+
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        assert_zero_phi_text(["นายจ้างชัย ใจดี"])
+
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        assert_zero_phi_text(["ชื่อผู้ป่วย: นายจ้างชัย ใจดี"])
 
 
 def test_qa_layout_gate():

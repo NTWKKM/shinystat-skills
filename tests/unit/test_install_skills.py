@@ -94,16 +94,16 @@ def run_installer(
 
 
 def test_user_skill_preserved_and_legacy_mirror_cleaned(fake_repo: dict[str, Path]):
-    """Ensure user skills (.claude/skills/my-skill) remain intact while legacy mirrors are removed."""
+    """Ensure user skills (.cursor/skills/my-skill) remain intact while legacy mirrors are removed."""
     repo = fake_repo["repo"]
     home = fake_repo["home"]
 
-    claude_skills = repo / ".claude" / "skills"
-    user_skill_dir = claude_skills / "my-skill"
+    cursor_skills = repo / ".cursor" / "skills"
+    user_skill_dir = cursor_skills / "my-skill"
     user_skill_dir.mkdir(parents=True)
     (user_skill_dir / "SKILL.md").write_text("# My Custom Skill", encoding="utf-8")
 
-    legacy_mirror = claude_skills / "shinystat"
+    legacy_mirror = cursor_skills / "shinystat"
     legacy_mirror.mkdir(parents=True)
     (legacy_mirror / "SKILL.md").write_text("# Legacy Mirror", encoding="utf-8")
 
@@ -161,8 +161,8 @@ def test_dry_run_performs_zero_deletion(fake_repo: dict[str, Path]):
     repo = fake_repo["repo"]
     home = fake_repo["home"]
 
-    claude_skills = repo / ".claude" / "skills"
-    legacy_dir = claude_skills / "shinystat"
+    cursor_skills = repo / ".cursor" / "skills"
+    legacy_dir = cursor_skills / "shinystat"
     legacy_dir.mkdir(parents=True)
     (legacy_dir / "SKILL.md").write_text("# To Delete", encoding="utf-8")
 
@@ -183,47 +183,47 @@ def test_dry_run_performs_zero_deletion(fake_repo: dict[str, Path]):
     assert legacy_agent.is_file()
 
 
-def test_global_target_claude_isolated(fake_repo: dict[str, Path]):
-    """--global --target claude only affects $HOME/.claude/skills and preserves user skills."""
+def test_global_target_antigravity_and_cursor(fake_repo: dict[str, Path]):
+    """--global defaults to Antigravity (~/.gemini/config/skills) without creating ~/.claude or ~/.cursor unless targeted."""
     repo = fake_repo["repo"]
     home = fake_repo["home"]
 
-    user_claude_skill = home / ".claude" / "skills" / "my-favorite-tool"
-    user_claude_skill.mkdir(parents=True)
-    (user_claude_skill / "SKILL.md").write_text("# Keep Me", encoding="utf-8")
-
-    res = run_installer(repo, home, "--global", "--target", "claude")
-    assert res.returncode == 0, f"Installer failed: {res.stderr}"
-
-    # shinystat and shinystat-cloud installed
-    assert (home / ".claude" / "skills" / "shinystat" / "SKILL.md").is_file()
-    assert (home / ".claude" / "skills" / "shinystat-cloud" / "SKILL.md").is_file()
-
-    # User skill preserved
-    assert (user_claude_skill / "SKILL.md").is_file()
-    assert (user_claude_skill / "SKILL.md").read_text(encoding="utf-8") == "# Keep Me"
-
-    # Other harnesses not touched
-    assert not (home / ".gemini").exists()
+    # Default --global targets antigravity config only
+    res_default = run_installer(repo, home, "--global")
+    assert res_default.returncode == 0
+    assert (home / ".gemini" / "config" / "skills" / "shinystat" / "SKILL.md").is_file()
+    assert (
+        home / ".gemini" / "config" / "skills" / "shinystat-cloud" / "SKILL.md"
+    ).is_file()
+    assert not (home / ".gemini" / "antigravity" / "skills").exists()
+    assert not (home / ".claude").exists()
     assert not (home / ".cursor").exists()
 
+    # Legacy physical duplicate under ~/.gemini/antigravity/skills is cleaned, while symlink is preserved
+    legacy_agy = home / ".gemini" / "antigravity" / "skills"
+    (legacy_agy / "shinystat").mkdir(parents=True)
+    (legacy_agy / "shinystat" / "SKILL.md").write_text(
+        "# Old Duplicate", encoding="utf-8"
+    )
 
-def test_global_target_antigravity_and_cursor(fake_repo: dict[str, Path]):
-    """--global targets select exactly the corresponding directories."""
-    repo = fake_repo["repo"]
-    home = fake_repo["home"]
-
-    # Target antigravity
+    # Explicit -t antigravity
     res_ag = run_installer(repo, home, "--global", "-t", "antigravity")
     assert res_ag.returncode == 0
     assert (home / ".gemini" / "config" / "skills" / "shinystat" / "SKILL.md").is_file()
-    assert (
-        home / ".gemini" / "antigravity" / "skills" / "shinystat-cloud" / "SKILL.md"
-    ).is_file()
-    assert not (home / ".cursor").exists()
+    assert not (legacy_agy / "shinystat").exists()
     assert not (home / ".claude").exists()
+    assert not (home / ".cursor").exists()
 
-    # Target cursor
+    # Explicit --target claude installs into ~/.claude/skills (and agents if present) without creating ~/.cursor
+    (home / ".claude" / "agents").mkdir(parents=True)
+    res_cl = run_installer(repo, home, "--global", "--target", "claude")
+    assert res_cl.returncode == 0
+    assert (home / ".claude" / "skills" / "shinystat" / "SKILL.md").is_file()
+    assert (home / ".claude" / "skills" / "shinystat-cloud" / "SKILL.md").is_file()
+    assert (home / ".claude" / "agents" / "figure-tester.md").is_file()
+    assert not (home / ".cursor").exists()
+
+    # Explicit --target cursor still installs into ~/.cursor/skills
     res_cur = run_installer(repo, home, "--global", "--target", "cursor")
     assert res_cur.returncode == 0
     assert (home / ".cursor" / "skills" / "shinystat" / "SKILL.md").is_file()
@@ -281,11 +281,11 @@ def test_installer_is_idempotent(fake_repo: dict[str, Path]):
     home = fake_repo["home"]
 
     # Seed an unmanaged user skill and a legacy mirror before the first run
-    unmanaged = repo / ".claude" / "skills" / "my-unmanaged"
+    unmanaged = repo / ".cursor" / "skills" / "my-unmanaged"
     unmanaged.mkdir(parents=True)
     (unmanaged / "SKILL.md").write_text("# Unmanaged Skill", encoding="utf-8")
 
-    legacy = repo / ".claude" / "skills" / "shinystat"
+    legacy = repo / ".cursor" / "skills" / "shinystat"
     legacy.mkdir(parents=True)
     (legacy / "SKILL.md").write_text("# Old Mirror", encoding="utf-8")
 
