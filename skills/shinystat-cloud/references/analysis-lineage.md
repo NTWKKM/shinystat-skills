@@ -34,10 +34,12 @@ Reproducibility and anti-p-hacking discipline adapted from OpenResearch's frozen
 
 - A provisional node allows at most **2 repair attempts** (`REPAIR_CAP = 2`).
 - `repair(node_id, new_plan, reason)` already records the preceding failure in `node.failed_attempts` before you run the repaired plan—**never** also call `record_failure()` for a failure that will be followed by `repair()`, or you will double-count failures and trigger the cap early.
-- Execute the two permitted repairs in sequence:
+- **Two-repair sequence (`repair()`):**
   1. Initial run fails → call `repair(..., reason)` (`len(node.failed_attempts) == 1`) and execute repaired run #1.
   2. Repaired run #1 fails → call `repair(..., reason)` (`len(node.failed_attempts) == 2`) without calling `record_failure()` first, and execute repaired run #2.
-  3. Repaired run #2 also fails → check `len(node.failed_attempts) >= REPAIR_CAP` (or call `record_failure()` only for a non-repaired failure where no next `repair()` follows, then check `len(node.failed_attempts) >= REPAIR_CAP`) and **halt immediately and ask the user** via **Grilling Gate #7** rather than attempting a third `repair()` or relying on `RepairCapExceededError` (which raises only on a subsequent call).
+  3. Repaired run #2 also fails → check `len(node.failed_attempts) >= REPAIR_CAP` (do **not** call `record_failure()` or a third `repair()`, as both raise `RepairCapExceededError` when the count is already `2`) and **halt immediately and ask the user** via **Grilling Gate #7**.
+- **Failure-logging-only sequence (`record_failure()` without `repair()`):**
+  - Call `record_failure(node_id, reason)` once per un-repaired failure; immediately after the second call sets `len(node.failed_attempts) >= REPAIR_CAP`, **halt immediately and ask the user** via **Grilling Gate #7** rather than making a third call to trigger `RepairCapExceededError`.
 - Also **halt immediately and ask the user** via **Grilling Gate #7** if the same setup failure recurs on a second node.
 
 ---
