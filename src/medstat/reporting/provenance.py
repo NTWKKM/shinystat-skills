@@ -220,6 +220,14 @@ def _flatten_mapping(mapping: Mapping[str, Any], prefix: str = "") -> dict[str, 
     return flat
 
 
+def _col_dtype_spec(series: pd.Series) -> str:
+    dt = series.dtype
+    if isinstance(dt, pd.CategoricalDtype):
+        cats = [(type(v).__qualname__, repr(v)) for v in dt.categories]
+        return f"category(ordered={bool(dt.ordered)},categories={cats!r})"
+    return f"{dt}"
+
+
 def hash_dataframe(df: pd.DataFrame) -> str:
     """Computes a canonical SHA-256 digest of a DataFrame (column-order independent, row/dtype sensitive)."""
     if not isinstance(df, pd.DataFrame):
@@ -228,7 +236,9 @@ def hash_dataframe(df: pd.DataFrame) -> str:
         )
     sorted_cols = sorted(df.columns, key=lambda c: (str(c), repr(c)))
     df_sorted = df.loc[:, sorted_cols]
-    dtype_line = "|".join(f"{col}:{df_sorted[col].dtype}" for col in sorted_cols)
+    dtype_line = "|".join(
+        f"{col}:{_col_dtype_spec(df_sorted[col])}" for col in sorted_cols
+    )
     csv_body = df_sorted.to_csv(
         index=False,
         float_format="%.17g",

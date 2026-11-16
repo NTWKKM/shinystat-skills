@@ -52,6 +52,19 @@ def test_hash_dataframe_canonical_and_fail_closed():
     df_literal_na = pd.DataFrame({"x": ["<NA>", "a"]})
     assert hash_dataframe(df_missing) != hash_dataframe(df_literal_na)
 
+    # Categorical categories order and ordered flag affect digest
+    df_cat_ab = pd.DataFrame(
+        {"grp": pd.Categorical(["a", "b"], categories=["a", "b"], ordered=True)}
+    )
+    df_cat_ba = pd.DataFrame(
+        {"grp": pd.Categorical(["a", "b"], categories=["b", "a"], ordered=True)}
+    )
+    df_cat_unord = pd.DataFrame(
+        {"grp": pd.Categorical(["a", "b"], categories=["a", "b"], ordered=False)}
+    )
+    assert hash_dataframe(df_cat_ab) != hash_dataframe(df_cat_ba)
+    assert hash_dataframe(df_cat_ab) != hash_dataframe(df_cat_unord)
+
     with pytest.raises(TypeError):
         hash_dataframe({"a": [1, 2]})  # type: ignore[arg-type]
 

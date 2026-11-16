@@ -1717,7 +1717,12 @@ def verify_standalone_integrity(
                 raise TypeError(f"hash_dataframe expects a pandas DataFrame, got {type(data).__name__}")
             _scols = sorted(data.columns, key=lambda c: (str(c), repr(c)))
             _dsort = data.loc[:, _scols]
-            _dline = "|".join(f"{c}:{_dsort[c].dtype}" for c in _scols)
+            _dline = "|".join(
+                f"{c}:category(ordered={bool(_dsort[c].dtype.ordered)},categories={[(type(v).__qualname__, repr(v)) for v in _dsort[c].dtype.categories]!r})"
+                if isinstance(_dsort[c].dtype, pd.CategoricalDtype)
+                else f"{c}:{_dsort[c].dtype}"
+                for c in _scols
+            )
             _cbody = _dsort.to_csv(index=False, float_format="%.17g", lineterminator="\n", na_rep="<NA>")
             _bbytes = f"{_dline}\n{_cbody}".encode("utf-8")
             _namask = _dsort.isna().to_numpy(dtype="uint8").tobytes()
@@ -1820,17 +1825,16 @@ def hash_dataframe(df: pd.DataFrame) -> str:
         raise TypeError(f"hash_dataframe expects a pandas DataFrame, got {type(df).__name__}")
     sorted_cols = sorted(df.columns, key=lambda c: (str(c), repr(c)))
     df_sorted = df.loc[:, sorted_cols]
-    dtype_line = "|".join(f"{col}:{df_sorted[col].dtype}" for col in sorted_cols)
-    csv_body = df_sorted.to_csv(
-        index=False,
-        float_format="%.17g",
-        lineterminator="\n",
-        na_rep="<NA>",
+    dtype_line = "|".join(
+        f"{c}:category(ordered={bool(df_sorted[c].dtype.ordered)},categories={[(type(v).__qualname__, repr(v)) for v in df_sorted[c].dtype.categories]!r})"
+        if isinstance(df_sorted[c].dtype, pd.CategoricalDtype)
+        else f"{c}:{df_sorted[c].dtype}"
+        for c in sorted_cols
     )
+    csv_body = df_sorted.to_csv(index=False, float_format="%.17g", lineterminator="\n", na_rep="<NA>")
     body_bytes = f"{dtype_line}\n{csv_body}".encode("utf-8")
     na_mask = df_sorted.isna().to_numpy(dtype="uint8").tobytes()
-    payload = f"{len(body_bytes)}:".encode("ascii") + body_bytes + na_mask
-    return hashlib.sha256(payload).hexdigest()
+    return hashlib.sha256(f"{len(body_bytes)}:".encode("ascii") + body_bytes + na_mask).hexdigest()
 
 
 def _canonical_json(obj) -> str:
@@ -1907,15 +1911,14 @@ def lineage_violations(nodes: list[dict]) -> list[str]:
         issues.append(f"Multiple primary nodes ({primary_count}); expected at most 1.")
     for node in nodes:
         nid, node_plan = node.get("node_id"), node.get("plan")
-        if node_plan is not None:
-            if not isinstance(node_plan, Mapping):
-                issues.append(f"Node '{nid}' plan must be a Mapping, got {type(node_plan).__name__}.")
-            else:
-                expected_sha, recorded_sha = hash_plan(node_plan), node.get("plan_sha256")
-                if recorded_sha != expected_sha:
-                    issues.append(
-                        f"Node '{nid}' plan_sha256 mismatch: recorded={str(recorded_sha or '')[:12]}, actual={expected_sha[:12]}."
-                    )
+        if not isinstance(node_plan, Mapping):
+            issues.append(f"Node '{nid}' plan must be a Mapping, got {type(node_plan).__name__}.")
+        else:
+            expected_sha, recorded_sha = hash_plan(node_plan), node.get("plan_sha256")
+            if recorded_sha != expected_sha:
+                issues.append(
+                    f"Node '{nid}' plan_sha256 mismatch: recorded={str(recorded_sha or '')[:12]}, actual={expected_sha[:12]}."
+                )
         if node.get("role") == "sensitivity":
             pid = node.get("parent_id")
             if not pid or pid not in by_id:

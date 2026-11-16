@@ -1565,4 +1565,4 @@ def test_analysis_lineage_and_gate7_adr87():
     assert "NaN" in local_skill and "fail-closed reason" in local_skill
     shared_text = shared.read_text(encoding="utf-8")
     assert "len(node.failed_attempts) >= REPAIR_CAP" in shared_text
-    assert "second repaired run also fails" in shared_text
+    assert "never** also call `record_failure()`" in shared_text

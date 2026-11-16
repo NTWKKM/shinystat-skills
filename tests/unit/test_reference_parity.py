@@ -1980,6 +1980,20 @@ def test_provenance_and_lineage_parity_engine_and_cloud():
     assert hash_dataframe(df_missing) == rb["hash_dataframe"](df_missing)
     assert hash_dataframe(df_literal_na) == rb["hash_dataframe"](df_literal_na)
     assert hash_dataframe(df_missing) != hash_dataframe(df_literal_na)
+    df_cat_ab = pd.DataFrame(
+        {"grp": pd.Categorical(["a", "b"], categories=["a", "b"], ordered=True)}
+    )
+    df_cat_ba = pd.DataFrame(
+        {"grp": pd.Categorical(["a", "b"], categories=["b", "a"], ordered=True)}
+    )
+    df_cat_unord = pd.DataFrame(
+        {"grp": pd.Categorical(["a", "b"], categories=["a", "b"], ordered=False)}
+    )
+    assert hash_dataframe(df_cat_ab) == rb["hash_dataframe"](df_cat_ab)
+    assert hash_dataframe(df_cat_ba) == rb["hash_dataframe"](df_cat_ba)
+    assert hash_dataframe(df_cat_unord) == rb["hash_dataframe"](df_cat_unord)
+    assert rb["hash_dataframe"](df_cat_ab) != rb["hash_dataframe"](df_cat_ba)
+    assert rb["hash_dataframe"](df_cat_ab) != rb["hash_dataframe"](df_cat_unord)
     assert hash_plan(plan_p) == rb["hash_plan"](plan_p)
     multi_set_plan = {"tags": {"alpha", "beta", "gamma", "delta"}, "n": 3}
     assert hash_plan(multi_set_plan) == rb["hash_plan"](multi_set_plan)
@@ -2106,7 +2120,30 @@ def test_provenance_and_lineage_parity_engine_and_cloud():
     stale_nodes[1]["plan_delta"] = {"missing.strategy": ("mice", "mice")}
     assert any("stale plan_delta" in v for v in rb["lineage_violations"](stale_nodes))
 
-    # Cloud §3 without §4 helper must fail closed when lineage is supplied, and inline fallback distinguishes <NA>
+    # Omitted plan and plan=None must both be rejected by standalone lineage_violations()
+    omitted_plan_nodes = [
+        {
+            "node_id": "primary",
+            "role": "primary",
+            "question": "Omitted plan",
+            "status": "answered",
+            "headline": "OR 1.00",
+        }
+    ]
+    none_plan_nodes = [
+        {
+            "node_id": "primary",
+            "role": "primary",
+            "question": "None plan",
+            "plan": None,
+            "status": "answered",
+            "headline": "OR 1.00",
+        }
+    ]
+    assert rb["lineage_violations"](omitted_plan_nodes)
+    assert rb["lineage_violations"](none_plan_nodes)
+
+    # Cloud §3 without §4 helper must fail closed when lineage is supplied, and inline fallback distinguishes <NA> and categoricals
     import re
 
     rb_text = (
@@ -2133,5 +2170,18 @@ def test_provenance_and_lineage_parity_engine_and_cloud():
         verify_s3(narrative, results, manifest=man_missing, data=df_literal_na)[
             "passed"
         ]
+        is False
+    )
+    man_cat_ab = rb["build_run_manifest"](df_cat_ab)
+    assert (
+        verify_s3(narrative, results, manifest=man_cat_ab, data=df_cat_ab)["passed"]
+        is True
+    )
+    assert (
+        verify_s3(narrative, results, manifest=man_cat_ab, data=df_cat_ba)["passed"]
+        is False
+    )
+    assert (
+        verify_s3(narrative, results, manifest=man_cat_ab, data=df_cat_unord)["passed"]
         is False
     )
