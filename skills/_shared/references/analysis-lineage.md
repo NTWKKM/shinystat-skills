@@ -32,8 +32,8 @@ Reproducibility and anti-p-hacking discipline adapted from OpenResearch's frozen
 
 ## 4. Repair Cap (2 Attempts → Gate #7)
 
-- A provisional node allows at most **2 repair attempts** (`REPAIR_CAP = 2`).
-- Immediately after calling `repair()` or `record_failure()` on a second failed attempt, explicitly check `len(node.failed_attempts) >= REPAIR_CAP` and **halt and ask the user** via **Grilling Gate #7** rather than relying on `RepairCapExceededError` (which `repair()` and `record_failure()` raise only on a subsequent call) or iterating blindly.
+- A provisional node allows at most **2 repair attempts** (`REPAIR_CAP = 2`), where `repair()` records the prior failure before executing the repaired plan.
+- If the **second repaired run also fails** (or `record_failure()` records the second failed attempt), explicitly check `len(node.failed_attempts) >= REPAIR_CAP` after that run fails and **halt immediately and ask the user** via **Grilling Gate #7** rather than waiting for `RepairCapExceededError` (which `repair()` and `record_failure()` raise only if a third call is attempted) or iterating blindly.
 - Also **halt immediately and ask the user** via **Grilling Gate #7** if the same setup failure recurs on a second node.
 
 ---

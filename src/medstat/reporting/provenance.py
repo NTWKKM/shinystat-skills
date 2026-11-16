@@ -159,14 +159,52 @@ class _FrozenPlanList(list):
         return [copy.deepcopy(v, memo) for v in self]
 
 
+class _FrozenPlanSet(set):
+    """Read-only set view used inside ``AnalysisNode.plan`` after a node is answered."""
+
+    def _blocked(self, *args: Any, **kwargs: Any) -> Any:
+        raise FrozenNodeError(
+            "Cannot mutate plan set of an answered analysis node in place."
+        )
+
+    add = _blocked
+    clear = _blocked
+    discard = _blocked
+    pop = _blocked
+    remove = _blocked
+    update = _blocked
+    intersection_update = _blocked
+    difference_update = _blocked
+    symmetric_difference_update = _blocked
+    __ior__ = _blocked
+    __iand__ = _blocked
+    __isub__ = _blocked
+    __ixor__ = _blocked
+
+    def __repr__(self) -> str:
+        return repr(set(self))
+
+    def __copy__(self) -> set[Any]:
+        return set(self)
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> set[Any]:
+        return {copy.deepcopy(v, memo) for v in self}
+
+
 def _freeze_plan_value(obj: Any) -> Any:
+    if isinstance(obj, (type(None), bool, int, float, str, bytes)):
+        return obj
     if isinstance(obj, Mapping):
         return _FrozenPlanDict((k, _freeze_plan_value(v)) for k, v in obj.items())
     if isinstance(obj, list):
         return _FrozenPlanList(_freeze_plan_value(v) for v in obj)
     if isinstance(obj, tuple):
         return tuple(_freeze_plan_value(v) for v in obj)
-    return obj
+    if isinstance(obj, set):
+        return _FrozenPlanSet(_freeze_plan_value(v) for v in obj)
+    if isinstance(obj, frozenset):
+        return frozenset(_freeze_plan_value(v) for v in obj)
+    raise TypeError(f"Unsupported plan value type for freezing: {type(obj).__name__}")
 
 
 def _flatten_mapping(mapping: Mapping[str, Any], prefix: str = "") -> dict[str, Any]:

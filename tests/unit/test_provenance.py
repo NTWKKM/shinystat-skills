@@ -228,23 +228,36 @@ def test_lineage_freeze_delta_and_repair_cap():
     )
     assert bad_lineage.violations()
 
-    # In-place mutation of answered plan is blocked, while add_primary keeps mutable dict
+    # In-place mutation of answered plan is blocked (dict, list, set), while add_primary keeps mutable dict
     lin_freeze = AnalysisLineage()
     p_node = lin_freeze.add_primary(
         "primary",
         "Freeze check",
-        {"model": {"estimator": "logistic"}, "covariates": ["age"]},
+        {
+            "model": {"estimator": "logistic"},
+            "covariates": ["age"],
+            "tags": {"primary"},
+        },
     )
     assert isinstance(p_node.plan, dict)
     lin_freeze.mark_answered("primary", "OR 1.45")
     assert isinstance(p_node.plan, dict)
+    assert lin_freeze.violations() == []
     with pytest.raises(FrozenNodeError):
         p_node.plan["model"]["estimator"] = "firth"
     with pytest.raises(FrozenNodeError):
         p_node.plan["covariates"].append("sex")
     with pytest.raises(FrozenNodeError):
+        p_node.plan["tags"].add("extra")
+    with pytest.raises(FrozenNodeError):
         p_node.plan = {"model": {"estimator": "firth"}}
     assert dataclasses.asdict(p_node)["plan"]["model"]["estimator"] == "logistic"
+
+    # Unsupported mutable value types are rejected when freezing
+    lin_bad_type = AnalysisLineage()
+    lin_bad_type.add_primary("primary", "Unsupported", {"buf": bytearray(b"abc")})
+    with pytest.raises(TypeError, match="Unsupported plan value type"):
+        lin_bad_type.mark_answered("primary", "OR 1.00")
 
     # Repairing a parent after sensitivity children exist raises LineageError
     lin_parent_child = AnalysisLineage()
