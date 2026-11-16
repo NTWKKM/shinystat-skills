@@ -1566,3 +1566,15 @@ def test_analysis_lineage_and_gate7_adr87():
     shared_text = shared.read_text(encoding="utf-8")
     assert "len(node.failed_attempts) >= REPAIR_CAP" in shared_text
     assert "never** also call `record_failure()`" in shared_text
+    assert (
+        "Repaired run #2 also fails → check `len(node.failed_attempts) >= REPAIR_CAP` "
+        "(do **not** call `record_failure()` or a third `repair()`" in shared_text
+    )
+    assert (
+        "Failure-logging-only sequence (`record_failure()` without `repair()`):"
+        in shared_text
+    )
+    assert (
+        "immediately after the second call sets `len(node.failed_attempts) >= REPAIR_CAP`"
+        in shared_text
+    )
