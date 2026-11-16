@@ -1946,3 +1946,124 @@ def test_delivered_text_parity_engine_and_cloud():
     )
     assert eng_phi.passed is False and eng_phi.phi_violations
     assert cld_phi["passed"] is False and cld_phi["phi_violations"]
+
+
+def test_provenance_and_lineage_parity_engine_and_cloud():
+    """Engine provenance/integrity and cloud report-builder §4 agree identically (ADR 87)."""
+    import dataclasses
+
+    import pandas as pd
+
+    from medstat.reporting.integrity import verify_report_integrity
+    from medstat.reporting.ir import ReportDocument
+    from medstat.reporting.provenance import (
+        AnalysisLineage,
+        build_run_manifest,
+        hash_dataframe,
+        hash_plan,
+        plan_delta,
+    )
+
+    rb = _load_canonical_report_builder()
+    df = pd.DataFrame({"b": [1.0, None, 3.0], "a": [10, 20, 30]})
+    df_recol = pd.DataFrame({"a": [10, 20, 30], "b": [1.0, float("nan"), 3.0]})
+    plan_p = {"model": {"estimator": "logistic"}, "missing": {"strategy": "mice"}}
+    plan_s = {
+        "model": {"estimator": "logistic"},
+        "missing": {"strategy": "complete-case"},
+    }
+
+    assert hash_dataframe(df) == rb["hash_dataframe"](df)
+    assert hash_dataframe(df_recol) == rb["hash_dataframe"](df_recol)
+    assert hash_plan(plan_p) == rb["hash_plan"](plan_p)
+    assert plan_delta(plan_p, plan_s) == rb["plan_delta"](plan_p, plan_s)
+
+    eng_manifest = build_run_manifest(df, plan=plan_p, seed=7)
+    cld_manifest = rb["build_run_manifest"](df, plan=plan_p, seed=7)
+    assert eng_manifest.data_sha256 == cld_manifest["data_sha256"]
+    assert eng_manifest.plan_sha256 == cld_manifest["plan_sha256"]
+    assert eng_manifest.n_rows == cld_manifest["n_rows"]
+    assert eng_manifest.n_cols == cld_manifest["n_cols"]
+    assert eng_manifest.seed == cld_manifest["seed"]
+
+    lin = AnalysisLineage()
+    lin.add_primary("primary", "Primary mortality model", plan_p)
+    lin.mark_answered("primary", "OR 1.45")
+    lin.add_sensitivity("sens_cc", "primary", "Complete-case", plan_s)
+    lin.mark_answered("sens_cc", "OR 1.42")
+    cld_nodes = [dataclasses.asdict(n) for n in lin.nodes]
+    assert lin.violations() == rb["lineage_violations"](cld_nodes) == []
+    assert lin.summary_lines() == rb["lineage_summary_lines"](cld_nodes)
+
+    results = {"or": 1.45, "or_cc": 1.42, "n": 30}
+    narrative = (
+        "Methods: cohort retention flow analyzed 30 patients "
+        "(hash sha256:012345678901); OR 1.45, sensitivity OR 1.42."
+    )
+    verify_cloud = rb["verify_standalone_integrity"]
+
+    # Missing manifest -> warning only, passes
+    doc_no_m = ReportDocument(title="No M", results_dict=results)
+    doc_no_m.add_paragraph(narrative)
+    eng_no_m = verify_report_integrity(doc_no_m)
+    cld_no_m = verify_cloud(narrative, results)
+    assert eng_no_m.passed is True and cld_no_m["passed"] is True
+    assert eng_no_m.has_manifest is False and cld_no_m["has_manifest"] is False
+    assert any("manifest" in w.lower() for w in eng_no_m.warnings)
+    assert any("manifest" in w.lower() for w in cld_no_m["warnings"])
+
+    # Matching manifest + answered lineage -> passes
+    doc_ok = ReportDocument(
+        title="OK", results_dict=results, manifest=eng_manifest, lineage=lin
+    )
+    doc_ok.add_paragraph(narrative)
+    eng_ok = verify_report_integrity(doc_ok, data=df)
+    cld_ok = verify_cloud(
+        narrative, results, manifest=cld_manifest, lineage=cld_nodes, data=df
+    )
+    assert eng_ok.passed is True and cld_ok["passed"] is True
+    assert eng_ok.has_manifest is True and cld_ok["has_manifest"] is True
+
+    # Data mismatch -> fails in both
+    df_bad = df.copy()
+    df_bad.loc[0, "a"] = 99
+    eng_bad = verify_report_integrity(doc_ok, data=df_bad)
+    cld_bad = verify_cloud(
+        narrative, results, manifest=cld_manifest, lineage=cld_nodes, data=df_bad
+    )
+    assert eng_bad.passed is False and cld_bad["passed"] is False
+    assert eng_bad.lineage_violations and cld_bad["lineage_violations"]
+
+    # Provisional primary -> fails in both
+    lin_prov = AnalysisLineage()
+    lin_prov.add_primary("primary", "Unfinished", plan_p)
+    cld_prov_nodes = [dataclasses.asdict(n) for n in lin_prov.nodes]
+    doc_prov = ReportDocument(
+        title="Prov", results_dict=results, manifest=eng_manifest, lineage=lin_prov
+    )
+    doc_prov.add_paragraph(narrative)
+    assert verify_report_integrity(doc_prov, data=df).passed is False
+    assert (
+        verify_cloud(
+            narrative, results, manifest=cld_manifest, lineage=cld_prov_nodes, data=df
+        )["passed"]
+        is False
+    )
+
+    # PHI in plan_delta -> fails in both
+    lin_phi = AnalysisLineage()
+    lin_phi.add_primary("primary", "Primary", {"filter": "age >= 18"})
+    lin_phi.mark_answered("primary", "OR 1.45")
+    lin_phi.add_sensitivity("sens_phi", "primary", "Filtered", {"filter": "HN: 123456"})
+    lin_phi.mark_answered("sens_phi", "OR 1.45")
+    cld_phi_nodes = [dataclasses.asdict(n) for n in lin_phi.nodes]
+    doc_phi = ReportDocument(
+        title="PHI", results_dict=results, manifest=eng_manifest, lineage=lin_phi
+    )
+    doc_phi.add_paragraph(narrative)
+    eng_phi_node = verify_report_integrity(doc_phi, data=df)
+    cld_phi_node = verify_cloud(
+        narrative, results, manifest=cld_manifest, lineage=cld_phi_nodes, data=df
+    )
+    assert eng_phi_node.passed is False and eng_phi_node.phi_violations
+    assert cld_phi_node["passed"] is False and cld_phi_node["phi_violations"]

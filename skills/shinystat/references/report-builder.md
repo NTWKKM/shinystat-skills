@@ -8,7 +8,7 @@ In cloud sandboxes (e.g. Claude Web Artifacts), `medstat` is not installed as an
 - `.docx`: [§2.C (`generate_docx_report`)](#c-standalone-word-docx-report-when-python-docx-is-installed); also load §2.B (`generate_html_report`) when `python-docx` is unavailable and the HTML fallback is used.
 - `.pptx`: [§2.D (`generate_pptx_report`)](#2d-standalone-powerpoint-deck-generator-pptx); also load §2.B (`generate_html_report`) when `python-pptx` is unavailable and the HTML fallback is used.
 - `.pdf`: [§2.E (`generate_pdf_report`)](#2e-standalone-pdf-report-generator-pdf).
-- Every format, before delivery: [§3 (`verify_standalone_integrity`)](#3-standalone-reporting-integrity-verification).
+- Every format, before delivery: [§3 (`verify_standalone_integrity`)](#3-standalone-reporting-integrity-verification) and [§4 (Run Manifest & Analysis Lineage)](#4-standalone-run-manifest--analysis-lineage).
 
 ---
 
@@ -687,6 +687,7 @@ Before releasing any report, run the standalone verification routine:
 
 ```python
 import csv
+import hashlib
 import io
 import math
 import re
@@ -703,6 +704,9 @@ def verify_standalone_integrity(
     study_design: str = None,
     exported_files: list = None,
     delivered_text: str | None = None,
+    manifest: dict | None = None,
+    lineage: list[dict] | None = None,
+    data: pd.DataFrame | None = None,
 ) -> dict:
     """Verifies numerical traceability (len(untraced_numbers) == 0) and screens for PHI without importing medstat.
 
@@ -1372,6 +1376,9 @@ def verify_standalone_integrity(
     uuid_span_re = re.compile(
         r"(?<![0-9a-fA-F])[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![0-9a-fA-F])"
     )
+    hash_span_re = re.compile(
+        r"(?<![0-9a-fA-F])sha256:[0-9a-fA-F]{6,64}(?![0-9a-fA-F])"
+    )
     pct_scale_after_re = re.compile(
         r"^\s*(?:percentage[\s-]+points?\b|pct\.?\s*points?\b|pp(?:\b(?![.\w])|\.(?=\s*(?:$|[A-Z(\[]))))",
         re.IGNORECASE,
@@ -1641,6 +1648,9 @@ def verify_standalone_integrity(
             is_uuid_tok = any(
                 um.start() <= raw_start and raw_end <= um.end()
                 for um in uuid_span_re.finditer(tok_span)
+            ) or any(
+                hm.start() <= raw_start and raw_end <= hm.end()
+                for hm in hash_span_re.finditer(tok_span)
             )
             is_path_or_uri = bool(
                 is_uuid_tok
@@ -1691,18 +1701,251 @@ def verify_standalone_integrity(
 
     traceability_passed = len(untraced_nums) == 0
 
+    # Provenance (RunManifest & AnalysisLineage)
+    has_manifest = manifest is not None
+    lin_violations = []
+    sa_warnings = []
+    if manifest is None:
+        sa_warnings.append(
+            "Document has no RunManifest attached (reproducibility provenance unrecorded)."
+        )
+    elif data is not None:
+        if "hash_dataframe" in globals():
+            actual_hash = hash_dataframe(data)
+        else:
+            if not isinstance(data, pd.DataFrame):
+                raise TypeError(f"hash_dataframe expects a pandas DataFrame, got {type(data).__name__}")
+            _scols = sorted(data.columns, key=lambda c: (str(c), repr(c)))
+            _dsort = data.loc[:, _scols]
+            _dline = "|".join(f"{c}:{_dsort[c].dtype}" for c in _scols)
+            _cbody = _dsort.to_csv(index=False, float_format="%.17g", lineterminator="\n", na_rep="<NA>")
+            actual_hash = hashlib.sha256(f"{_dline}\n{_cbody}".encode("utf-8")).hexdigest()
+        if actual_hash != manifest.get("data_sha256"):
+            lin_violations.append(
+                f"RunManifest data_sha256 hash mismatch: manifest={str(manifest.get('data_sha256', ''))[:12]}, data={actual_hash[:12]}."
+            )
+
+    if lineage is not None:
+        if "lineage_violations" in globals():
+            lin_violations.extend(lineage_violations(lineage))
+        for node in lineage:
+            if node.get("role") == "primary" and node.get("status") != "answered":
+                lin_violations.append(
+                    f"Primary node '{node.get('node_id')}' is provisional (not answered)."
+                )
+            scan_fields = [node.get("question") or "", node.get("headline") or ""]
+            for dk, dv in (node.get("plan_delta") or {}).items():
+                scan_fields.append(f"{dk}={dv}")
+            for field_text in scan_fields:
+                if not field_text:
+                    continue
+                for pat, label in phi_patterns:
+                    for m in pat.findall(field_text):
+                        violations.append(
+                            f"{label} in lineage node '{node.get('node_id')}': '{m}'"
+                        )
+
     return {
-        "passed": len(violations) == 0 and has_caveat and traceability_passed,
+        "passed": len(violations) == 0 and has_caveat and traceability_passed and len(lin_violations) == 0,
         "phi_violations": violations,
         "has_causal_caveat": has_caveat,
         "untraced_numbers": untraced_nums,
         "traceability_passed": traceability_passed,
+        "has_manifest": has_manifest,
+        "lineage_violations": lin_violations,
+        "warnings": sa_warnings,
     }
 ```
 
 ---
 
-## 4. Evidence-Base Verification & Superscript Citations Pipeline
+## 4. Standalone Run Manifest & Analysis Lineage
+
+Zero-dependency provenance helpers matching `medstat.reporting.provenance` (ADR 87):
+
+```python
+import copy
+import hashlib
+import importlib.metadata
+import json
+import platform
+from collections.abc import Mapping
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+import pandas as pd
+
+REPAIR_CAP = 2
+_ABSENT = "<absent>"
+
+
+def _normalize_mapping(obj):
+    if isinstance(obj, Mapping):
+        return {str(k): _normalize_mapping(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_normalize_mapping(v) for v in obj]
+    return obj
+
+
+def _values_equal(a, b) -> bool:
+    if type(a) is bool or type(b) is bool:
+        return type(a) is type(b) and a == b
+    return a == b
+
+
+def _flatten_mapping(mapping: Mapping, prefix: str = "") -> dict:
+    flat = {}
+    for k in sorted(mapping.keys(), key=str):
+        key_str = str(k)
+        full_key = f"{prefix}.{key_str}" if prefix else key_str
+        val = mapping[k]
+        if isinstance(val, Mapping) and len(val) > 0:
+            flat.update(_flatten_mapping(val, full_key))
+        else:
+            flat[full_key] = val
+    return flat
+
+
+def hash_dataframe(df: pd.DataFrame) -> str:
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError(f"hash_dataframe expects a pandas DataFrame, got {type(df).__name__}")
+    sorted_cols = sorted(df.columns, key=lambda c: (str(c), repr(c)))
+    df_sorted = df.loc[:, sorted_cols]
+    dtype_line = "|".join(f"{col}:{df_sorted[col].dtype}" for col in sorted_cols)
+    csv_body = df_sorted.to_csv(
+        index=False,
+        float_format="%.17g",
+        lineterminator="\n",
+        na_rep="<NA>",
+    )
+    return hashlib.sha256(f"{dtype_line}\n{csv_body}".encode("utf-8")).hexdigest()
+
+
+def hash_plan(plan: Mapping) -> str:
+    if not isinstance(plan, Mapping):
+        raise TypeError(f"hash_plan expects a Mapping, got {type(plan).__name__}")
+    canonical = json.dumps(
+        _normalize_mapping(plan), sort_keys=True, separators=(",", ":"), default=str
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def plan_delta(parent: Mapping, child: Mapping) -> dict:
+    if not isinstance(parent, Mapping) or not isinstance(child, Mapping):
+        raise TypeError("plan_delta expects Mapping arguments for parent and child")
+    flat_parent = _flatten_mapping(parent)
+    flat_child = _flatten_mapping(child)
+    delta = {}
+    for key in sorted(set(flat_parent) | set(flat_child)):
+        pv = flat_parent.get(key, _ABSENT)
+        cv = flat_child.get(key, _ABSENT)
+        if not _values_equal(pv, cv):
+            delta[key] = (copy.deepcopy(pv), copy.deepcopy(cv))
+    return delta
+
+
+def build_run_manifest(
+    df: pd.DataFrame,
+    plan: Mapping | None = None,
+    seed: int | None = None,
+    packages=("pandas", "numpy", "scipy", "statsmodels", "lifelines", "scikit-learn"),
+) -> dict:
+    versions = {}
+    for pkg in packages:
+        try:
+            versions[pkg] = importlib.metadata.version(pkg)
+        except importlib.metadata.PackageNotFoundError:
+            versions[pkg] = "not installed"
+    return {
+        "data_sha256": hash_dataframe(df),
+        "n_rows": int(df.shape[0]),
+        "n_cols": int(df.shape[1]),
+        "plan_sha256": hash_plan(plan) if plan is not None else None,
+        "seed": seed,
+        "package_versions": versions,
+        "python_version": platform.python_version(),
+        "created_at": datetime.now(ZoneInfo("Asia/Bangkok")).isoformat(timespec="seconds"),
+    }
+
+
+def lineage_violations(nodes: list[dict]) -> list[str]:
+    issues = []
+    by_id = {}
+    primary_count = 0
+    for node in nodes:
+        nid = node.get("node_id")
+        if nid in by_id:
+            issues.append(f"Duplicate node_id '{nid}'.")
+        by_id[nid] = node
+        if node.get("role") == "primary":
+            primary_count += 1
+    if primary_count > 1:
+        issues.append(f"Multiple primary nodes ({primary_count}); expected at most 1.")
+    for node in nodes:
+        nid = node.get("node_id")
+        if node.get("role") == "sensitivity":
+            pid = node.get("parent_id")
+            if not pid or pid not in by_id:
+                issues.append(f"Sensitivity node '{nid}' references missing parent '{pid}'.")
+            else:
+                parent = by_id[pid]
+                if parent.get("role") == "exploratory":
+                    issues.append(
+                        f"Sensitivity node '{nid}' cannot branch from exploratory parent '{pid}'."
+                    )
+                if not plan_delta(parent.get("plan") or {}, node.get("plan") or {}):
+                    issues.append(
+                        f"Sensitivity node '{nid}' has empty plan_delta relative to '{pid}'."
+                    )
+        if node.get("status") == "answered" and not str(node.get("headline") or "").strip():
+            issues.append(f"Answered node '{nid}' is missing a headline result.")
+        if len(node.get("failed_attempts") or []) > REPAIR_CAP:
+            issues.append(
+                f"Node '{nid}' exceeded repair cap ({len(node.get('failed_attempts') or [])} > {REPAIR_CAP})."
+            )
+    return issues
+
+
+def lineage_summary_lines(nodes: list[dict]) -> list[str]:
+    node_ids = {n.get("node_id") for n in nodes}
+    children_by_parent = {}
+    for node in nodes:
+        pid = node.get("parent_id")
+        key = pid if pid in node_ids else None
+        children_by_parent.setdefault(key, []).append(node)
+    lines = []
+    visited = set()
+
+    def _visit(node: dict, depth: int) -> None:
+        nid = node.get("node_id")
+        if nid in visited:
+            return
+        visited.add(nid)
+        indent = "  " * depth
+        headline = node.get("headline") or "pending"
+        if node.get("role") == "sensitivity":
+            delta_keys = ", ".join(sorted((node.get("plan_delta") or {}).keys())) or "none"
+            prefix = indent or "  "
+            lines.append(
+                f"{prefix}- [sensitivity · {node.get('status', 'provisional')}] {node.get('question', '')} (Δ {delta_keys}): {headline}"
+            )
+        else:
+            lines.append(
+                f"{indent}- [{node.get('role', 'exploratory')} · {node.get('status', 'provisional')}] {node.get('question', '')}: {headline}"
+            )
+        for child in children_by_parent.get(nid, []):
+            _visit(child, depth + 1)
+
+    for root in children_by_parent.get(None, []):
+        _visit(root, 0)
+    for node in nodes:
+        if node.get("node_id") not in visited:
+            _visit(node, 0)
+    return lines
+```
+
+---
+
+## 5. Evidence-Base Verification & Superscript Citations Pipeline
 
 Disclosed to [evidence-pipeline.md](evidence-pipeline.md). Read [evidence-pipeline.md](evidence-pipeline.md) whenever **Polish Grilling Gate (#6)** or **Output Alignment Gate (#5c)** citation verification is engaged.
-```

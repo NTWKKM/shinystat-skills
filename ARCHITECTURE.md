@@ -115,14 +115,15 @@ System architecture and structural specifications for `medstat-core` and the `me
 - **`tables.py`**: Journal-compliant polymorphic HTML table rendering (NEJM, JAMA, APA 7) with strict border rules, no vertical dividers, and support for Table 1, Regression, Diagnostic accuracy, Reclassification tables (`format_reclassification_table`), Time-Dependent ROC tables (`format_time_dependent_roc_table`), Bland-Altman, ICC, Covariate balance (unadjusted, matched, weighted), Competing Risks (`render_competing_risks_table`), Bootstrap internal validation (`format_internal_validation_table`), Recalibration (`format_recalibration_table`), and Riley sample size (`format_riley_sample_size_table`).
 - **`narrative.py`**: Automated biomedical Methods and Results narrative generation.
 - **`checklists.py`**: Audited item checklists for STROBE, CONSORT, TRIPOD, STARD (diagnostic studies), and PRISMA (systematic reviews).
-- **`ir.py`**: Report Intermediate Representation (IR) acting as Single Source of Truth (`ReportDocument`, `Block`, `HeadingBlock`, `ParagraphBlock`, `TableBlock`, `FigureBlock`, `CalloutBlock`).
+- **`ir.py`**: Report Intermediate Representation (IR) acting as Single Source of Truth (`ReportDocument` including optional `manifest` and `lineage`, `Block`, `HeadingBlock`, `ParagraphBlock`, `TableBlock`, `FigureBlock`, `CalloutBlock`).
+- **`provenance.py`**: Zero-PHI `RunManifest` (`hash_dataframe`, `hash_plan`, `plan_delta`, `build_run_manifest`), `AnalysisLineage` (`AnalysisNode` with frozen answered nodes, sensitivity plan deltas, and `REPAIR_CAP = 2` enforcing Gate #7), and `add_reproducibility_appendix` (ADR 87).
 - **`renderers/`**: Multi-format document renderers:
   - `markdown.py`: GitHub Flavored Markdown + linked assets directory (`render_markdown`).
   - `html.py`: Self-contained single-file HTML with embedded base64 figures, ICMJE 3-rule table styling, Output Format Alignment Gate defaults, Dual / Toggle View (`render_html`), and safe inline superscript citation formatting (`<sup>1</sup>`, `<a href="#ref-X">`).
   - `docx.py`: Native Microsoft Word `.docx` with OpenXML `<w:tblBorders>` 3-rule borders, 6.5 in figures, hanging-indent reference list formatting, and native superscript runs (`run.font.superscript = True`; `render_docx`).
   - `pptx.py`: Native PowerPoint 16:9 widescreen presentation with 1 figure per slide layout, structured takeaway cards, and clean Unicode superscript citation formatting (`render_pptx`).
   - `pdf.py`: High-fidelity PDF rendering via Playwright headless Chromium with LibreOffice fallback (`render_pdf`).
-- **`integrity.py`**: Pillar 5 Reporting Integrity audit (`verify_report_integrity`): numerical traceability to `results_dict` ($\pm 0.02$), Zero-PHI regex scan (HN, Thai citizen ID, phone, names), observational causal inference / E-value caveat enforcement, and structural citation / reference marker recognition (`_is_structural_context`). `delivered_text` (an In-Chat Summary reply) is audited with the document, and `exported_files` (CSV, TSV, XLSX, Parquet; any other format fails closed) are scanned for identifier columns and PHI (ADR 81).
+- **`integrity.py`**: Pillar 5 Reporting Integrity audit (`verify_report_integrity`): numerical traceability to `results_dict` ($\pm 0.02$), Zero-PHI regex scan (HN, Thai citizen ID, phone, names), observational causal inference / E-value caveat enforcement, structural citation / reference / `sha256:` marker recognition (`_is_structural_context`), and `RunManifest` / `AnalysisLineage` verification (`data=` hash match, answered primary, sensitivity delta, lineage PHI). `delivered_text` (an In-Chat Summary reply) is audited with the document, and `exported_files` (CSV, TSV, XLSX, Parquet; any other format fails closed) are scanned for identifier columns and PHI (ADR 81, ADR 87).
 
 ---
 
@@ -134,7 +135,8 @@ flowchart TD
     Profile --> Clean[medstat.data.clean: Little's MCAR + Missing Strategy]
     Clean -->|Audited Cohort + Flow| Model[medstat.models / causal / diag / agreement]
     Model -->|Results Dict + Source Data| Figures[medstat.figures: 300 DPI Medical Figures + CSV]
-    Model -->|Results Dict| IR[medstat.reporting.ir: ReportDocument SSOT]
+    Model -->|Results Dict| Provenance[medstat.reporting.provenance: RunManifest + AnalysisLineage]
+    Provenance -->|Manifest + Lineage| IR[medstat.reporting.ir: ReportDocument SSOT]
     Figures -->|FigureResult Blocks| IR
     IR --> Integrity[medstat.reporting.integrity: Pillar 5 Audit]
     Integrity --> Renderers[medstat.reporting.renderers]
@@ -173,7 +175,7 @@ All subcommands and renderers emit structured contracts allowing deterministic c
 
 - **SSOT Integrity & Physical Skill Vendoring (ADR 69)**: `src/medstat/` and `skills/_shared/references/` are the canonical Single Source of Truth. `skills/shinystat/` and `skills/shinystat-cloud/` vendor these files physically (including `skills/shinystat/scripts/medstat/`) and are tracked in Git, ensuring complete out-of-the-box functionality when installed via `npx skills add` without dangling symlinks or missing dependencies. Zero drift is guaranteed via `./scripts/sync-skills.sh --check` in CI.
 - **Progressive Disclosure Recipes**: `skills/shinystat-cloud/references/recipes/` divides 24 standalone zero-`medstat` recipes into 7 focused modules, each within one 2000-line read (`01-data-missing-table1`, `02-regression-firth-ordinal`, `03-survival-competing-risks`, `04-causal-iptw-psm`, `05-diagnostic-accuracy-agreement`, `06-reclassification-tdroc`, `07-validation-samplesize-meta`; ADR 75), routed contextually by `SKILL.md`.
-- **Shared Reference Repository & Cloud Figures Separation**: Common references (`decision-heuristics.md`, `evidence-pipeline.md`, `flows.md`, `house-styles.md`, `illustration.md`, `report-builder.md`, `report-plotly-specs.md`, `subagent-protocol.md`) are centralized in `skills/_shared/references/` and synced via `./scripts/sync-skills.sh`, while `skills/shinystat-cloud/references/figures.md` is maintained as a dedicated zero-`medstat` cloud reference. `skills/shinystat/references/api-quickref.md` is local-only (engine call signatures, held equal to `inspect.signature` by `test_api_quickref_matches_engine`). Both `SKILL.md` files open with an explicit 6-step **Run Sequence** (`§0`) with checkable `*Done when*` completion criteria.
+- **Shared Reference Repository & Cloud Figures Separation**: Common references (`analysis-lineage.md`, `decision-heuristics.md`, `evidence-pipeline.md`, `flows.md`, `house-styles.md`, `illustration.md`, `report-builder.md`, `report-plotly-specs.md`, `subagent-protocol.md`) are centralized in `skills/_shared/references/` and synced via `./scripts/sync-skills.sh`, while `skills/shinystat-cloud/references/figures.md` is maintained as a dedicated zero-`medstat` cloud reference. `skills/shinystat/references/api-quickref.md` is local-only (engine call signatures, held equal to `inspect.signature` by `test_api_quickref_matches_engine`). Both `SKILL.md` files open with an explicit 6-step **Run Sequence** (`§0`) with checkable `*Done when*` completion criteria.
 - **Self-Healing CLI & Pre-Flight Validation**: `medstat_cli.py` exposes `--schema` and `--validate-only <plan.yaml>`, returning structured JSON with `agent_remediation` hints for automatic self-correction.
 
 ---

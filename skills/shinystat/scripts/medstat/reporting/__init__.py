@@ -27,6 +27,20 @@ from medstat.reporting.narrative import (
     generate_time_dependent_roc_narrative,
     validate_calibration_metrics,
 )
+from medstat.reporting.provenance import (
+    REPAIR_CAP,
+    AnalysisLineage,
+    AnalysisNode,
+    FrozenNodeError,
+    LineageError,
+    RepairCapExceededError,
+    RunManifest,
+    add_reproducibility_appendix,
+    build_run_manifest,
+    hash_dataframe,
+    hash_plan,
+    plan_delta,
+)
 from medstat.reporting.renderers import (
     render_docx,
     render_html,
@@ -96,4 +110,16 @@ __all__ = [
     "render_pdf",
     "verify_report_integrity",
     "IntegrityReport",
+    "REPAIR_CAP",
+    "AnalysisLineage",
+    "AnalysisNode",
+    "FrozenNodeError",
+    "LineageError",
+    "RepairCapExceededError",
+    "RunManifest",
+    "add_reproducibility_appendix",
+    "build_run_manifest",
+    "hash_dataframe",
+    "hash_plan",
+    "plan_delta",
 ]

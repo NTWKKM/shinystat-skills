@@ -8,11 +8,14 @@ Every number in paragraph blocks must trace back to the results dictionary.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import pandas as pd
 
 from medstat.figures import FigureResult
+
+if TYPE_CHECKING:
+    from medstat.reporting.provenance import AnalysisLineage, RunManifest
 
 
 @dataclass
@@ -66,6 +69,8 @@ class ReportDocument:
     results_dict: dict[str, Any] = field(default_factory=dict)
     institution: str = ""
     study_design: str | None = None
+    manifest: RunManifest | None = None
+    lineage: AnalysisLineage | None = None
 
     def add_heading(self, text: str, level: int = 1) -> ReportDocument:
         self.blocks.append(HeadingBlock(text=text, level=level))
