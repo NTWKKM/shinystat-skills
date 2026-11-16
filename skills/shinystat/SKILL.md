@@ -75,7 +75,7 @@ After **Pillar 1** pre-flight, ask all triggered gates (`#1`–`#4`; `#4` for $>
    - **5c. Manuscript Polish Mode** ([evidence-pipeline.md](references/evidence-pipeline.md)): **(Standard) Skip Polish (User-Scoped References)** (Step 2A; omit if none provided) vs **(Optional) Full Publication Polish (Execute Gate #6)** (Steps 1–4).
    - **5d. Execution Context Mode** *(ask when unspecified, tools include a subagent tool, e.g. `invoke_subagent`, `Agent`, or `Task`, and the run fits ≥2 distinct estimands (a primary model and its sensitivity re-fits count as one) or uses Full Polish, even when every other axis is specified; otherwise record **Direct in Main Agent**)*: **(Recommended for multi-model/polish runs) Subagent Offload** ([subagent-protocol.md](references/subagent-protocol.md)) vs. **Direct in Main Agent**.
 6. **Polish Grilling Gate (Evidence-Base Verification & Superscript Citations)**: Run [evidence-pipeline.md](references/evidence-pipeline.md) via literature MCPs, `search_web`/`web_search`, and optional `medical-terminology` MCP; halt if any source is unverified, retracted, or contradicts narrative.
-7. **Repair Cap (2 Provisional Failures)**: Halt and ask user after 2 consecutive un-answered repairs on a node (`RepairCapExceededError`) or a repeated setup error ([analysis-lineage.md §4](references/analysis-lineage.md#4-repair-cap-2-attempts--gate-7)).
+7. **Repair Cap (2 Provisional Failures)**: Halt and ask user when a second repaired run also fails (`len(node.failed_attempts) >= REPAIR_CAP`) or the same setup failure recurs on a second node ([analysis-lineage.md §4](references/analysis-lineage.md#4-repair-cap-2-attempts--gate-7)).
 
 ---
 

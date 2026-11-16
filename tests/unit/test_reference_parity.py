@@ -1981,6 +1981,8 @@ def test_provenance_and_lineage_parity_engine_and_cloud():
     assert hash_dataframe(df_literal_na) == rb["hash_dataframe"](df_literal_na)
     assert hash_dataframe(df_missing) != hash_dataframe(df_literal_na)
     assert hash_plan(plan_p) == rb["hash_plan"](plan_p)
+    multi_set_plan = {"tags": {"alpha", "beta", "gamma", "delta"}, "n": 3}
+    assert hash_plan(multi_set_plan) == rb["hash_plan"](multi_set_plan)
     assert plan_delta(plan_p, plan_s) == rb["plan_delta"](plan_p, plan_s)
     assert (
         plan_delta({"flags": [True, [1]]}, {"flags": [1, [True]]})

@@ -230,13 +230,17 @@ def test_lineage_freeze_delta_and_repair_cap():
 
     # In-place mutation of answered plan is blocked (dict, list, set), while add_primary keeps mutable dict
     lin_freeze = AnalysisLineage()
+    collision_set = set(range(80))
+    for i in range(0, 45):
+        collision_set.remove(i)
     p_node = lin_freeze.add_primary(
         "primary",
         "Freeze check",
         {
             "model": {"estimator": "logistic"},
             "covariates": ["age"],
-            "tags": {"primary"},
+            "tags": {"primary", "adjusted", "sensitivity_ready"},
+            "ids": collision_set,
         },
     )
     assert isinstance(p_node.plan, dict)

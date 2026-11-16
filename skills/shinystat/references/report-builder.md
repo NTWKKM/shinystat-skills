@@ -1833,13 +1833,22 @@ def hash_dataframe(df: pd.DataFrame) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _canonical_json(obj) -> str:
+    if isinstance(obj, Mapping):
+        items = sorted({str(k): _canonical_json(v) for k, v in obj.items()}.items())
+        return "{" + ",".join(f"{json.dumps(k)}:{v}" for k, v in items) + "}"
+    if isinstance(obj, (list, tuple)):
+        return "[" + ",".join(_canonical_json(v) for v in obj) + "]"
+    if isinstance(obj, (set, frozenset)):
+        tag = "frozenset" if isinstance(obj, frozenset) else "set"
+        return f'{{"__{tag}__":[' + ",".join(sorted(_canonical_json(v) for v in obj)) + "]}"
+    return json.dumps(obj, default=str)
+
+
 def hash_plan(plan: Mapping) -> str:
     if not isinstance(plan, Mapping):
         raise TypeError(f"hash_plan expects a Mapping, got {type(plan).__name__}")
-    canonical = json.dumps(
-        _normalize_mapping(plan), sort_keys=True, separators=(",", ":"), default=str
-    )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return hashlib.sha256(_canonical_json(plan).encode("utf-8")).hexdigest()
 
 
 def plan_delta(parent: Mapping, child: Mapping) -> dict:
