@@ -1983,6 +1983,23 @@ def test_provenance_and_lineage_parity_engine_and_cloud():
     assert hash_plan(plan_p) == rb["hash_plan"](plan_p)
     multi_set_plan = {"tags": {"alpha", "beta", "gamma", "delta"}, "n": 3}
     assert hash_plan(multi_set_plan) == rb["hash_plan"](multi_set_plan)
+    set_plan = {"covariates": {"age"}}
+    fake_set_plan = {"covariates": {"__set__": ["age"]}}
+    assert hash_plan(set_plan) == rb["hash_plan"](set_plan)
+    assert rb["hash_plan"](set_plan) != rb["hash_plan"](fake_set_plan)
+    assert rb["lineage_violations"](
+        [
+            {
+                "node_id": "primary",
+                "role": "primary",
+                "question": "Set collision check",
+                "plan": fake_set_plan,
+                "plan_sha256": rb["hash_plan"](set_plan),
+                "status": "answered",
+                "headline": "OR 1.00",
+            }
+        ]
+    )
     assert plan_delta(plan_p, plan_s) == rb["plan_delta"](plan_p, plan_s)
     assert (
         plan_delta({"flags": [True, [1]]}, {"flags": [1, [True]]})

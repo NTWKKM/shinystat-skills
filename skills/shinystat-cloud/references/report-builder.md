@@ -1836,13 +1836,16 @@ def hash_dataframe(df: pd.DataFrame) -> str:
 def _canonical_json(obj) -> str:
     if isinstance(obj, Mapping):
         items = sorted({str(k): _canonical_json(v) for k, v in obj.items()}.items())
-        return "{" + ",".join(f"{json.dumps(k)}:{v}" for k, v in items) + "}"
+        return "M{" + ",".join(f"{json.dumps(k)}:{v}" for k, v in items) + "}"
     if isinstance(obj, (list, tuple)):
-        return "[" + ",".join(_canonical_json(v) for v in obj) + "]"
-    if isinstance(obj, (set, frozenset)):
-        tag = "frozenset" if isinstance(obj, frozenset) else "set"
-        return f'{{"__{tag}__":[' + ",".join(sorted(_canonical_json(v) for v in obj)) + "]}"
-    return json.dumps(obj, default=str)
+        return "L[" + ",".join(_canonical_json(v) for v in obj) + "]"
+    if isinstance(obj, frozenset):
+        return "F{" + ",".join(sorted(_canonical_json(v) for v in obj)) + "}"
+    if isinstance(obj, set):
+        return "S{" + ",".join(sorted(_canonical_json(v) for v in obj)) + "}"
+    if isinstance(obj, bytes):
+        return f"B{obj.hex()}"
+    return "J" + json.dumps(obj, default=str)
 
 
 def hash_plan(plan: Mapping) -> str:

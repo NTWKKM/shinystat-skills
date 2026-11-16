@@ -276,6 +276,19 @@ def test_lineage_freeze_delta_and_repair_cap():
     t_node.plan["flag"] = 1
     assert any("plan_sha256" in v for v in lin_tamper.violations())
 
+    # Set vs mapping with reserved-looking key must not collide in hash_plan / violations()
+    assert hash_plan({"covariates": {"age"}}) != hash_plan(
+        {"covariates": {"__set__": ["age"]}}
+    )
+    lin_set_swap = AnalysisLineage()
+    s_swap_node = lin_set_swap.add_primary(
+        "primary", "Set swap", {"covariates": {"age"}}
+    )
+    s_swap_node.plan["covariates"] = {"__set__": ["age"]}
+    with pytest.raises(LineageError, match="plan_sha256"):
+        lin_set_swap.mark_answered("primary", "Answered")
+    assert any("plan_sha256" in v for v in lin_set_swap.violations())
+
     lin_stale = AnalysisLineage()
     lin_stale.add_primary("primary", "Primary", {"flag": True})
     lin_stale.mark_answered("primary", "OR 1.00")
