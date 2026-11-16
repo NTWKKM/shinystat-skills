@@ -1557,3 +1557,11 @@ def test_analysis_lineage_and_gate7_adr87():
         assert "**Repair Cap (2 Provisional Failures)**" in text
         assert "**Lineage & Manifest**" in text
         assert "Gate #7" in text or "`#7`" in text
+
+    local_skill = (repo_root / "skills" / "shinystat" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert "exempt from plotting" in local_skill
+    assert "NaN" in local_skill and "fail-closed reason" in local_skill
+    shared_text = shared.read_text(encoding="utf-8")
+    assert "len(node.failed_attempts) >= REPAIR_CAP" in shared_text

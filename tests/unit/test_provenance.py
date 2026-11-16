@@ -47,6 +47,11 @@ def test_hash_dataframe_canonical_and_fail_closed():
     df_dtype["a"] = df_dtype["a"].astype(float)
     assert hash_dataframe(df1) != hash_dataframe(df_dtype)
 
+    # Missing value must not collide with literal "<NA>" string
+    df_missing = pd.DataFrame({"x": [None, "a"]})
+    df_literal_na = pd.DataFrame({"x": ["<NA>", "a"]})
+    assert hash_dataframe(df_missing) != hash_dataframe(df_literal_na)
+
     with pytest.raises(TypeError):
         hash_dataframe({"a": [1, 2]})  # type: ignore[arg-type]
 
@@ -62,9 +67,18 @@ def test_hash_plan_and_plan_delta():
     }
     assert hash_plan(p1) == hash_plan(p2)
 
-    # bool vs int distinction
+    # bool vs int distinction (scalar and nested sequences/mappings)
     assert hash_plan({"flag": True}) != hash_plan({"flag": 1})
     assert plan_delta({"flag": True}, {"flag": 1}) == {"flag": (True, 1)}
+    assert plan_delta({"seq": [True, [1]]}, {"seq": [1, [True]]}) == {
+        "seq": ([True, [1]], [1, [True]])
+    }
+    assert plan_delta({"seq": [(True, 0)]}, {"seq": [(1, 0)]}) == {
+        "seq": ([(True, 0)], [(1, 0)])
+    }
+    assert plan_delta({"items": [{"flag": True}]}, {"items": [{"flag": 1}]}) == {
+        "items": ([{"flag": True}], [{"flag": 1}])
+    }
 
     child = {
         "model": {"estimator": "firth", "penalizer": 0.5},
@@ -213,6 +227,44 @@ def test_lineage_freeze_delta_and_repair_cap():
         )
     )
     assert bad_lineage.violations()
+
+    # In-place mutation of answered plan is blocked, while add_primary keeps mutable dict
+    lin_freeze = AnalysisLineage()
+    p_node = lin_freeze.add_primary(
+        "primary",
+        "Freeze check",
+        {"model": {"estimator": "logistic"}, "covariates": ["age"]},
+    )
+    assert isinstance(p_node.plan, dict)
+    lin_freeze.mark_answered("primary", "OR 1.45")
+    assert isinstance(p_node.plan, dict)
+    with pytest.raises(FrozenNodeError):
+        p_node.plan["model"]["estimator"] = "firth"
+    with pytest.raises(FrozenNodeError):
+        p_node.plan["covariates"].append("sex")
+    with pytest.raises(FrozenNodeError):
+        p_node.plan = {"model": {"estimator": "firth"}}
+    assert dataclasses.asdict(p_node)["plan"]["model"]["estimator"] == "logistic"
+
+    # Repairing a parent after sensitivity children exist raises LineageError
+    lin_parent_child = AnalysisLineage()
+    lin_parent_child.add_primary("primary", "Primary", {"a": 1})
+    lin_parent_child.add_sensitivity("sens", "primary", "Child", {"a": 2})
+    with pytest.raises(LineageError):
+        lin_parent_child.repair("primary", {"a": 3}, "Late repair")
+
+    # Tampered plan_sha256 and stale plan_delta are both caught by violations()
+    lin_tamper = AnalysisLineage()
+    t_node = lin_tamper.add_primary("primary", "Tampered", {"flag": True})
+    t_node.plan["flag"] = 1
+    assert any("plan_sha256" in v for v in lin_tamper.violations())
+
+    lin_stale = AnalysisLineage()
+    lin_stale.add_primary("primary", "Primary", {"flag": True})
+    lin_stale.mark_answered("primary", "OR 1.00")
+    s_node = lin_stale.add_sensitivity("sens", "primary", "Sens", {"flag": 1})
+    s_node.plan_delta = {"flag": (1, 1)}
+    assert any("stale plan_delta" in v for v in lin_stale.violations())
 
 
 def test_reproducibility_appendix_and_integrity_checks(tmp_path: Path):

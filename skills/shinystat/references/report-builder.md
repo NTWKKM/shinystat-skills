@@ -1719,15 +1719,20 @@ def verify_standalone_integrity(
             _dsort = data.loc[:, _scols]
             _dline = "|".join(f"{c}:{_dsort[c].dtype}" for c in _scols)
             _cbody = _dsort.to_csv(index=False, float_format="%.17g", lineterminator="\n", na_rep="<NA>")
-            actual_hash = hashlib.sha256(f"{_dline}\n{_cbody}".encode("utf-8")).hexdigest()
+            _bbytes = f"{_dline}\n{_cbody}".encode("utf-8")
+            _namask = _dsort.isna().to_numpy(dtype="uint8").tobytes()
+            actual_hash = hashlib.sha256(f"{len(_bbytes)}:".encode("ascii") + _bbytes + _namask).hexdigest()
         if actual_hash != manifest.get("data_sha256"):
             lin_violations.append(
                 f"RunManifest data_sha256 hash mismatch: manifest={str(manifest.get('data_sha256', ''))[:12]}, data={actual_hash[:12]}."
             )
 
     if lineage is not None:
-        if "lineage_violations" in globals():
-            lin_violations.extend(lineage_violations(lineage))
+        if "lineage_violations" not in globals():
+            raise RuntimeError(
+                "lineage_violations() from report-builder.md §4 is required when lineage is provided."
+            )
+        lin_violations.extend(lineage_violations(lineage))
         for node in lineage:
             if node.get("role") == "primary" and node.get("status") != "answered":
                 lin_violations.append(
@@ -1790,6 +1795,10 @@ def _normalize_mapping(obj):
 def _values_equal(a, b) -> bool:
     if type(a) is bool or type(b) is bool:
         return type(a) is type(b) and a == b
+    if (isinstance(a, list) and isinstance(b, list)) or (isinstance(a, tuple) and isinstance(b, tuple)):
+        return len(a) == len(b) and all(_values_equal(x, y) for x, y in zip(a, b, strict=True))
+    if isinstance(a, Mapping) and isinstance(b, Mapping):
+        return len(a) == len(b) and all(k in b and _values_equal(v, b[k]) for k, v in a.items())
     return a == b
 
 
@@ -1818,7 +1827,10 @@ def hash_dataframe(df: pd.DataFrame) -> str:
         lineterminator="\n",
         na_rep="<NA>",
     )
-    return hashlib.sha256(f"{dtype_line}\n{csv_body}".encode("utf-8")).hexdigest()
+    body_bytes = f"{dtype_line}\n{csv_body}".encode("utf-8")
+    na_mask = df_sorted.isna().to_numpy(dtype="uint8").tobytes()
+    payload = f"{len(body_bytes)}:".encode("ascii") + body_bytes + na_mask
+    return hashlib.sha256(payload).hexdigest()
 
 
 def hash_plan(plan: Mapping) -> str:
@@ -1882,7 +1894,16 @@ def lineage_violations(nodes: list[dict]) -> list[str]:
     if primary_count > 1:
         issues.append(f"Multiple primary nodes ({primary_count}); expected at most 1.")
     for node in nodes:
-        nid = node.get("node_id")
+        nid, node_plan = node.get("node_id"), node.get("plan")
+        if node_plan is not None:
+            if not isinstance(node_plan, Mapping):
+                issues.append(f"Node '{nid}' plan must be a Mapping, got {type(node_plan).__name__}.")
+            else:
+                expected_sha, recorded_sha = hash_plan(node_plan), node.get("plan_sha256")
+                if recorded_sha != expected_sha:
+                    issues.append(
+                        f"Node '{nid}' plan_sha256 mismatch: recorded={str(recorded_sha or '')[:12]}, actual={expected_sha[:12]}."
+                    )
         if node.get("role") == "sensitivity":
             pid = node.get("parent_id")
             if not pid or pid not in by_id:
@@ -1890,13 +1911,20 @@ def lineage_violations(nodes: list[dict]) -> list[str]:
             else:
                 parent = by_id[pid]
                 if parent.get("role") == "exploratory":
-                    issues.append(
-                        f"Sensitivity node '{nid}' cannot branch from exploratory parent '{pid}'."
-                    )
-                if not plan_delta(parent.get("plan") or {}, node.get("plan") or {}):
-                    issues.append(
-                        f"Sensitivity node '{nid}' has empty plan_delta relative to '{pid}'."
-                    )
+                    issues.append(f"Sensitivity node '{nid}' cannot branch from exploratory parent '{pid}'.")
+                parent_plan, child_plan = parent.get("plan") or {}, node_plan or {}
+                if isinstance(parent_plan, Mapping) and isinstance(child_plan, Mapping):
+                    expected_delta = plan_delta(parent_plan, child_plan)
+                    stored_delta = node.get("plan_delta")
+                    if not expected_delta:
+                        issues.append(f"Sensitivity node '{nid}' has empty plan_delta relative to '{pid}'.")
+                    elif not isinstance(stored_delta, Mapping):
+                        issues.append(f"Sensitivity node '{nid}' is missing a valid plan_delta mapping.")
+                    else:
+                        norm_stored = {str(k): (list(v) if isinstance(v, tuple) else v) for k, v in stored_delta.items()}
+                        norm_expected = {str(k): [pv, cv] for k, (pv, cv) in expected_delta.items()}
+                        if not _values_equal(norm_stored, norm_expected):
+                            issues.append(f"Sensitivity node '{nid}' has stale plan_delta relative to '{pid}'.")
         if node.get("status") == "answered" and not str(node.get("headline") or "").strip():
             issues.append(f"Answered node '{nid}' is missing a headline result.")
         if len(node.get("failed_attempts") or []) > REPAIR_CAP:

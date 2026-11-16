@@ -1975,8 +1975,18 @@ def test_provenance_and_lineage_parity_engine_and_cloud():
 
     assert hash_dataframe(df) == rb["hash_dataframe"](df)
     assert hash_dataframe(df_recol) == rb["hash_dataframe"](df_recol)
+    df_missing = pd.DataFrame({"x": [None, "a"]})
+    df_literal_na = pd.DataFrame({"x": ["<NA>", "a"]})
+    assert hash_dataframe(df_missing) == rb["hash_dataframe"](df_missing)
+    assert hash_dataframe(df_literal_na) == rb["hash_dataframe"](df_literal_na)
+    assert hash_dataframe(df_missing) != hash_dataframe(df_literal_na)
     assert hash_plan(plan_p) == rb["hash_plan"](plan_p)
     assert plan_delta(plan_p, plan_s) == rb["plan_delta"](plan_p, plan_s)
+    assert (
+        plan_delta({"flags": [True, [1]]}, {"flags": [1, [True]]})
+        == rb["plan_delta"]({"flags": [True, [1]]}, {"flags": [1, [True]]})
+        == {"flags": ([True, [1]], [1, [True]])}
+    )
 
     eng_manifest = build_run_manifest(df, plan=plan_p, seed=7)
     cld_manifest = rb["build_run_manifest"](df, plan=plan_p, seed=7)
@@ -2067,3 +2077,42 @@ def test_provenance_and_lineage_parity_engine_and_cloud():
     )
     assert eng_phi_node.passed is False and eng_phi_node.phi_violations
     assert cld_phi_node["passed"] is False and cld_phi_node["phi_violations"]
+
+    # Standalone dict plan_sha256 mismatch and stale plan_delta caught identically
+    tampered_nodes = [dataclasses.asdict(n) for n in lin.nodes]
+    tampered_nodes[0]["plan"] = {"model": {"estimator": "firth"}}
+    assert rb["lineage_violations"](tampered_nodes)
+
+    stale_nodes = [dataclasses.asdict(n) for n in lin.nodes]
+    stale_nodes[1]["plan_delta"] = {"missing.strategy": ("mice", "mice")}
+    assert any("stale plan_delta" in v for v in rb["lineage_violations"](stale_nodes))
+
+    # Cloud §3 without §4 helper must fail closed when lineage is supplied, and inline fallback distinguishes <NA>
+    import re
+
+    rb_text = (
+        Path(__file__).resolve().parents[2]
+        / "skills"
+        / "_shared"
+        / "references"
+        / "report-builder.md"
+    ).read_text(encoding="utf-8")
+    s3_only_ns: dict = {}
+    for block in re.findall(r"```python\n(.*?)\n```", rb_text, re.DOTALL):
+        if "def verify_standalone_integrity" in block:
+            exec(block, s3_only_ns)
+            break
+    verify_s3 = s3_only_ns["verify_standalone_integrity"]
+    with pytest.raises(RuntimeError, match="lineage_violations"):
+        verify_s3(narrative, results, lineage=cld_nodes)
+    man_missing = rb["build_run_manifest"](df_missing)
+    assert (
+        verify_s3(narrative, results, manifest=man_missing, data=df_missing)["passed"]
+        is True
+    )
+    assert (
+        verify_s3(narrative, results, manifest=man_missing, data=df_literal_na)[
+            "passed"
+        ]
+        is False
+    )

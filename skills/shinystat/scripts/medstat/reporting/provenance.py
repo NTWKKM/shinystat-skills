@@ -92,7 +92,81 @@ def _normalize_mapping(obj: Any) -> Any:
 def _values_equal(a: Any, b: Any) -> bool:
     if type(a) is bool or type(b) is bool:
         return type(a) is type(b) and a == b
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(
+            _values_equal(x, y) for x, y in zip(a, b, strict=True)
+        )
+    if isinstance(a, tuple) and isinstance(b, tuple):
+        return len(a) == len(b) and all(
+            _values_equal(x, y) for x, y in zip(a, b, strict=True)
+        )
+    if isinstance(a, Mapping) and isinstance(b, Mapping):
+        return len(a) == len(b) and all(
+            k in b and _values_equal(v, b[k]) for k, v in a.items()
+        )
     return a == b
+
+
+class _FrozenPlanDict(dict):
+    """Read-only dict view used for ``AnalysisNode.plan`` after a node is answered."""
+
+    def _blocked(self, *args: Any, **kwargs: Any) -> Any:
+        raise FrozenNodeError(
+            "Cannot mutate plan of an answered analysis node in place."
+        )
+
+    __setitem__ = _blocked
+    __delitem__ = _blocked
+    clear = _blocked
+    pop = _blocked
+    popitem = _blocked
+    setdefault = _blocked
+    update = _blocked
+    __ior__ = _blocked
+
+    def __copy__(self) -> dict[Any, Any]:
+        return {k: copy.copy(v) for k, v in self.items()}
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> dict[Any, Any]:
+        return {copy.deepcopy(k, memo): copy.deepcopy(v, memo) for k, v in self.items()}
+
+
+class _FrozenPlanList(list):
+    """Read-only list view used inside ``AnalysisNode.plan`` after a node is answered."""
+
+    def _blocked(self, *args: Any, **kwargs: Any) -> Any:
+        raise FrozenNodeError(
+            "Cannot mutate plan sequence of an answered analysis node in place."
+        )
+
+    __setitem__ = _blocked
+    __delitem__ = _blocked
+    append = _blocked
+    clear = _blocked
+    extend = _blocked
+    insert = _blocked
+    pop = _blocked
+    remove = _blocked
+    reverse = _blocked
+    sort = _blocked
+    __iadd__ = _blocked
+    __imul__ = _blocked
+
+    def __copy__(self) -> list[Any]:
+        return list(self)
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> list[Any]:
+        return [copy.deepcopy(v, memo) for v in self]
+
+
+def _freeze_plan_value(obj: Any) -> Any:
+    if isinstance(obj, Mapping):
+        return _FrozenPlanDict((k, _freeze_plan_value(v)) for k, v in obj.items())
+    if isinstance(obj, list):
+        return _FrozenPlanList(_freeze_plan_value(v) for v in obj)
+    if isinstance(obj, tuple):
+        return tuple(_freeze_plan_value(v) for v in obj)
+    return obj
 
 
 def _flatten_mapping(mapping: Mapping[str, Any], prefix: str = "") -> dict[str, Any]:
@@ -123,7 +197,9 @@ def hash_dataframe(df: pd.DataFrame) -> str:
         lineterminator="\n",
         na_rep="<NA>",
     )
-    payload = f"{dtype_line}\n{csv_body}".encode("utf-8")
+    body_bytes = f"{dtype_line}\n{csv_body}".encode("utf-8")
+    na_mask = df_sorted.isna().to_numpy(dtype="uint8").tobytes()
+    payload = f"{len(body_bytes)}:".encode("ascii") + body_bytes + na_mask
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -215,6 +291,18 @@ class AnalysisNode:
     status: Status = "provisional"
     headline: str | None = None
     failed_attempts: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.status == "answered":
+            object.__setattr__(self, "plan", _freeze_plan_value(self.plan))
+            object.__setattr__(self, "_locked", True)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if self.__dict__.get("_locked") and name != "_locked":
+            raise FrozenNodeError(
+                f"Node '{self.node_id}' is already answered and frozen; cannot modify '{name}'."
+            )
+        super().__setattr__(name, value)
 
 
 class AnalysisLineage:
@@ -308,6 +396,10 @@ class AnalysisLineage:
             raise FrozenNodeError(
                 f"Node '{node_id}' is already answered and frozen; cannot repair in place."
             )
+        if any(n.parent_id == node_id for n in self.nodes):
+            raise LineageError(
+                f"Node '{node_id}' already has child nodes; cannot repair parent plan in place."
+            )
         if len(node.failed_attempts) >= REPAIR_CAP:
             raise RepairCapExceededError(
                 f"Node '{node_id}' reached repair cap ({REPAIR_CAP}) after: {node.failed_attempts}"
@@ -347,8 +439,16 @@ class AnalysisLineage:
             raise LineageError(
                 f"Node '{node_id}' requires a non-empty headline result to be marked answered."
             )
-        node.status = "answered"
+        if not isinstance(node.plan, Mapping) or node.plan_sha256 != hash_plan(
+            node.plan
+        ):
+            raise LineageError(
+                f"Node '{node_id}' plan_sha256 does not match its recorded plan."
+            )
+        object.__setattr__(node, "plan", _freeze_plan_value(node.plan))
         node.headline = str(headline).strip()
+        node.status = "answered"
+        object.__setattr__(node, "_locked", True)
         return node
 
     def violations(self) -> list[str]:
@@ -366,6 +466,16 @@ class AnalysisLineage:
                 f"Multiple primary nodes ({primary_count}); expected at most 1."
             )
         for node in self.nodes:
+            if not isinstance(node.plan, Mapping):
+                issues.append(
+                    f"Node '{node.node_id}' plan must be a Mapping, got {type(node.plan).__name__}."
+                )
+            else:
+                expected_sha = hash_plan(node.plan)
+                if node.plan_sha256 != expected_sha:
+                    issues.append(
+                        f"Node '{node.node_id}' plan_sha256 mismatch: recorded={str(node.plan_sha256 or '')[:12]}, actual={expected_sha[:12]}."
+                    )
             if node.role == "sensitivity":
                 if not node.parent_id or node.parent_id not in by_id:
                     issues.append(
@@ -377,10 +487,31 @@ class AnalysisLineage:
                         issues.append(
                             f"Sensitivity node '{node.node_id}' cannot branch from exploratory parent '{parent.node_id}'."
                         )
-                    if not plan_delta(parent.plan, node.plan):
-                        issues.append(
-                            f"Sensitivity node '{node.node_id}' has empty plan_delta relative to '{parent.node_id}'."
-                        )
+                    if isinstance(parent.plan, Mapping) and isinstance(
+                        node.plan, Mapping
+                    ):
+                        expected_delta = plan_delta(parent.plan, node.plan)
+                        if not expected_delta:
+                            issues.append(
+                                f"Sensitivity node '{node.node_id}' has empty plan_delta relative to '{parent.node_id}'."
+                            )
+                        elif not isinstance(node.plan_delta, Mapping):
+                            issues.append(
+                                f"Sensitivity node '{node.node_id}' is missing a valid plan_delta mapping."
+                            )
+                        else:
+                            norm_stored = {
+                                str(k): (list(v) if isinstance(v, tuple) else v)
+                                for k, v in node.plan_delta.items()
+                            }
+                            norm_expected = {
+                                str(k): [pv, cv]
+                                for k, (pv, cv) in expected_delta.items()
+                            }
+                            if not _values_equal(norm_stored, norm_expected):
+                                issues.append(
+                                    f"Sensitivity node '{node.node_id}' has stale plan_delta relative to '{parent.node_id}'."
+                                )
             if node.status == "answered" and (
                 not node.headline or not str(node.headline).strip()
             ):
