@@ -15,7 +15,7 @@ medstat.models.splines.fit_logistic_rcs(df, outcome, spline_var, covariates=None
 medstat.models.sensitivity.calculate_e_value(estimate, lower=None, upper=None, estimate_type='RR', rare_outcome=False) -> dict[str, Any]
 medstat.causal.iptw.compute_iptw_weights(df, treatment_col=None, covariates=None, estimand='ATE', stabilized=True, truncate_quantiles=(0.01, 0.99), ps_clip=(0.0001, 0.9999), treatment=None, truncation=None, ps_method='logistic') -> IPTWResult
 medstat.causal.iptw.fit_iptw_outcome_model(df, outcome_col, treatment_col=None, weights_col='iptw_weight', covariates=None, outcome_type='continuous', duration_col=None, robust_cov_type='HC1', treatment=None, model_type=None, event_col=None) -> dict[str, Any]
-medstat.reporting.integrity.verify_report_integrity(doc, allowed_untraced=None, study_design=None, delivered_text=None, exported_files=None) -> IntegrityReport
+medstat.reporting.integrity.verify_report_integrity(doc, allowed_untraced=None, study_design=None, delivered_text=None, exported_files=None, data=None) -> IntegrityReport
 medstat.reporting.renderers.render_html(doc, out_path) -> str
 medstat.reporting.renderers.render_docx(doc, out_path) -> str
 medstat.reporting.renderers.render_markdown(doc, out_path, assets_dir_name='figures') -> str
@@ -41,7 +41,7 @@ medstat.figures.html.survival.plot_dual_kaplan_meier(km_curves, risk_table=None,
 medstat.figures.agreement.plot_bland_altman(ba_data, units='mmHg', title='Bland-Altman Limits of Agreement', out_path='figures/bland_altman.png', target='docx', journal=None, canvas='manuscript', export_vector=True) -> FigureResult
 medstat.figures.roc.plot_roc_curve(roc_data, paired_roc_data=None, paired_p_value=None, title='Receiver Operating Characteristic (ROC) Curve', out_path='figures/roc_curve.png', target='docx', journal=None, canvas='manuscript', export_vector=True) -> FigureResult
 medstat.figures.retention.plot_retention_flow(retention_data, title='Participant Retention Flow Diagram (STROBE / CONSORT)', out_path='figures/retention_flow.png', target='docx', journal=None, canvas='manuscript') -> FigureResult
-medstat.reporting.ir.ReportDocument(title, authors=<factory>, date='', blocks=<factory>, results_dict=<factory>, institution='', study_design=None)
+medstat.reporting.ir.ReportDocument(title, authors=<factory>, date='', blocks=<factory>, results_dict=<factory>, institution='', study_design=None, manifest=None, lineage=None)
 medstat.reporting.renderers.render_pptx(doc, out_path) -> str
 medstat.reporting.renderers.render_pdf(doc, out_path) -> str
 medstat.reporting.ir.ReportDocument.add_heading(text, level=1) -> ReportDocument
@@ -101,6 +101,19 @@ medstat.figures.illustration.Scene.callout(s, target, text_xy, size=6.5, ha=None
 medstat.figures.illustration.Scene.label_column(items, x, y_lo, y_hi, side='right', size=6.5, gap=3.4)
 medstat.figures.illustration.Scene.legend_swatches(entries, x, y, dy=3.6, size=6.5, hatch_map=None)
 medstat.figures.illustration.Scene.save(out_path, caption_title, alt_text, notes='Schematic illustration; not to scale; not derived from patient images.', export_vector=True, export_svg=True, dpi=600, strict=True) -> FigureResult
+medstat.reporting.provenance.hash_dataframe(df) -> str
+medstat.reporting.provenance.hash_plan(plan) -> str
+medstat.reporting.provenance.plan_delta(parent, child) -> dict[str, tuple[Any, Any]]
+medstat.reporting.provenance.build_run_manifest(df, plan=None, seed=None, packages=('medstat', 'pandas', 'numpy', 'scipy', 'statsmodels', 'lifelines', 'scikit-learn')) -> RunManifest
+medstat.reporting.provenance.AnalysisLineage.add_primary(node_id, question, plan) -> AnalysisNode
+medstat.reporting.provenance.AnalysisLineage.add_sensitivity(node_id, parent_id, question, plan) -> AnalysisNode
+medstat.reporting.provenance.AnalysisLineage.add_exploratory(node_id, question, plan) -> AnalysisNode
+medstat.reporting.provenance.AnalysisLineage.repair(node_id, plan, reason) -> AnalysisNode
+medstat.reporting.provenance.AnalysisLineage.record_failure(node_id, reason)
+medstat.reporting.provenance.AnalysisLineage.mark_answered(node_id, headline) -> AnalysisNode
+medstat.reporting.provenance.AnalysisLineage.violations() -> list[str]
+medstat.reporting.provenance.AnalysisLineage.summary_lines() -> list[str]
+medstat.reporting.provenance.add_reproducibility_appendix(doc) -> ReportDocument
 ```
 
 ## Return shapes
@@ -118,8 +131,8 @@ medstat.figures.illustration.Scene.save(out_path, caption_title, alt_text, notes
 - Power, ordinal & clustering return dicts: `calculate_riley_sample_size` -> `['n_total', 'n_events', 'n_parameters', 'prevalence', 'events_per_parameter', 'cox_snell_r2', 'nagelkerke_r2', 'r2_max', 'shrinkage_target', 'binding_criterion', 'criteria']`; `fit_proportional_odds` -> `['model', 'summary_df', 'converged', 'predictor_df', 'threshold_df', 'categories', 'k_categories', 'log_likelihood', 'pseudo_r2', 'aic', 'bic', 'nobs']`; `test_proportional_odds` -> `['test', 'omnibus', 'variables', 'interpretation']`; `calculate_design_effect` -> `['n_clusters', 'n_total', 'mean_cluster_size', 'cluster_size_min', 'cluster_size_max', 'icc_cluster', 'design_effect', 'effective_sample_size', 'interpretation']`.
 - `Scene` takes `(width='double_col', aspect=0.6, journal='NEJM', canvas='manuscript', seed=7)` (not `w_mm`/`h_mm`); use `Scene.label_column(...)` for stacked labels and `Scene.vessel_longitudinal` / `Scene.artery_cross_section` (there is no `endothelium` helper).
 - `ReportDocument` methods: `add_heading`, `add_paragraph`, `add_table`, `add_figure`, `add_callout`, `extract_all_text`.
-- `verify_report_integrity`: `delivered_text` is the In-Chat Summary reply, audited with the document; `exported_files` lists data files written beside the report (.csv, .tsv, .xlsx or .parquet; an identifier column such as `patient_id` or any other format fails the audit).
-- `IntegrityReport` fields: `passed`, `untraced_numbers`, `phi_violations`, `warnings`, `has_methods`, `has_retention_flow`, `has_causal_caveat`, `citations_count`, `agent_remediation`; `summary()` returns text. It is a dataclass: use `dataclasses.asdict(report)` for JSON.
+- `verify_report_integrity`: `delivered_text` is the In-Chat Summary reply, audited with the document; `exported_files` lists data files written beside the report (.csv, .tsv, .xlsx or .parquet; an identifier column such as `patient_id` or any other format fails the audit); `data` verifies `doc.manifest.data_sha256`.
+- `IntegrityReport` fields: `passed`, `untraced_numbers`, `phi_violations`, `warnings`, `has_methods`, `has_retention_flow`, `has_causal_caveat`, `citations_count`, `agent_remediation`, `has_manifest`, `lineage_violations`; `summary()` returns text. It is a dataclass: use `dataclasses.asdict(report)` for JSON.
 
 ## Analysis and report notes
 

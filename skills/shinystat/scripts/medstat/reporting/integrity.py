@@ -26,6 +26,7 @@ from medstat.reporting.ir import (
     ReportDocument,
     TableBlock,
 )
+from medstat.reporting.provenance import hash_dataframe
 
 
 @dataclass
@@ -41,6 +42,8 @@ class IntegrityReport:
     has_causal_caveat: bool = True  # True if not needed or properly addressed
     citations_count: int = 0
     agent_remediation: list[str] = field(default_factory=list)
+    has_manifest: bool = False
+    lineage_violations: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
         lines = [f"Integrity Audit: {'PASSED' if self.passed else 'FAILED'}"]
@@ -49,6 +52,12 @@ class IntegrityReport:
                 f"  [CRITICAL] PHI Violations Detected: {len(self.phi_violations)}"
             )
             for v in self.phi_violations[:5]:
+                lines.append(f"    - {v}")
+        if self.lineage_violations:
+            lines.append(
+                f"  [CRITICAL] Lineage / Provenance Violations: {len(self.lineage_violations)}"
+            )
+            for v in self.lineage_violations[:5]:
                 lines.append(f"    - {v}")
         if self.untraced_numbers:
             lines.append(
@@ -258,6 +267,7 @@ _PCT_SCALE_AFTER_RE = re.compile(
 _UUID_SPAN_RE = re.compile(
     r"(?<![0-9a-fA-F])[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![0-9a-fA-F])"
 )
+_HASH_SPAN_RE = re.compile(r"(?<![0-9a-fA-F])sha256:[0-9a-fA-F]{6,64}(?![0-9a-fA-F])")
 _URI_SCHEME_RE = re.compile(r"^(?:file|https?|ftp)://", re.IGNORECASE)
 _PATH_ROOT_RE = re.compile(
     r"^(?:\.\.?/|~/|[A-Za-z]:\\|/(?:Users|home|tmp|var|opt|private|mnt|srv|etc|app|workspace|scratch|brain)(?:/|$))"
@@ -284,6 +294,9 @@ def _is_path_uri_or_uuid_token(
     raw_start = len(seg_before)
     raw_end = raw_start + len(raw_str)
     for m in _UUID_SPAN_RE.finditer(tok_span):
+        if m.start() <= raw_start and raw_end <= m.end():
+            return True
+    for m in _HASH_SPAN_RE.finditer(tok_span):
         if m.start() <= raw_start and raw_end <= m.end():
             return True
     tok_clean = tok_span.lstrip("([<\"'`")
@@ -724,6 +737,7 @@ def verify_report_integrity(
     study_design: str | None = None,
     delivered_text: str | None = None,
     exported_files: Sequence[str | Path] | None = None,
+    data: pd.DataFrame | None = None,
 ) -> IntegrityReport:
     """
     Audits a ReportDocument and returns an IntegrityReport:
@@ -1393,12 +1407,56 @@ def verify_report_integrity(
     )
     citations_count = len(citation_matches)
 
-    passed = (len(phi_violations) == 0) and has_causal_caveat and (len(untraced) == 0)
+    # 6. Provenance (RunManifest & AnalysisLineage)
+    manifest = getattr(doc, "manifest", None)
+    lineage = getattr(doc, "lineage", None)
+    has_manifest = manifest is not None
+    lineage_violations: list[str] = []
+    if manifest is None:
+        warnings.append(
+            "Document has no RunManifest attached (reproducibility provenance unrecorded)."
+        )
+    elif data is not None:
+        actual_hash = hash_dataframe(data)
+        if actual_hash != manifest.data_sha256:
+            lineage_violations.append(
+                f"RunManifest data_sha256 hash mismatch: manifest={manifest.data_sha256[:12]}, data={actual_hash[:12]}."
+            )
+
+    if lineage is not None:
+        lineage_violations.extend(lineage.violations())
+        for node in lineage.nodes:
+            if node.role == "primary" and node.status != "answered":
+                lineage_violations.append(
+                    f"Primary node '{node.node_id}' is provisional (not answered)."
+                )
+            scan_fields = [node.question, node.headline or ""]
+            for dk, dv in node.plan_delta.items():
+                scan_fields.append(f"{dk}={dv}")
+            for field_text in scan_fields:
+                if not field_text:
+                    continue
+                for pattern, label in PHI_PATTERNS:
+                    for m in pattern.findall(field_text):
+                        phi_violations.append(
+                            f"{label} in lineage node '{node.node_id}': '{m}'"
+                        )
+
+    passed = (
+        (len(phi_violations) == 0)
+        and has_causal_caveat
+        and (len(untraced) == 0)
+        and (len(lineage_violations) == 0)
+    )
 
     remediation_hints: list[str] = []
     if phi_violations:
         remediation_hints.append(
             "PHI detected. Remediation: Strip or mask patient identifiers (HN, Thai ID, phone, patient names) before publishing."
+        )
+    if lineage_violations:
+        remediation_hints.append(
+            "Provenance or lineage violation detected. Remediation: Rebuild RunManifest from the current data, resolve any provisional primary node, and keep sensitivity deltas non-empty off a non-exploratory parent."
         )
     if untraced:
         remediation_hints.append(
@@ -1430,4 +1488,6 @@ def verify_report_integrity(
         has_causal_caveat=has_causal_caveat,
         citations_count=citations_count,
         agent_remediation=remediation_hints,
+        has_manifest=has_manifest,
+        lineage_violations=lineage_violations,
     )

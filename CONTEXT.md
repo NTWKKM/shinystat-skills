@@ -84,6 +84,14 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
 | **Zero-PHI Literature Query Boundary** | `zero_phi_literature_boundary` | Privacy invariant prohibiting the transmission of raw user materials, clinical-note text, or patient identifiers (HN, name, DOB, Thai National ID, phone) to external literature MCPs or web searches, requiring queries to be constructed exclusively from de-identified bibliographic metadata and medical concept descriptors. |
 | **Subagent Context-Offload Protocol** | `subagent_context_offload` | Capability-conditional execution mode (`subagent-protocol.md`) selected at Grilling Gate #5 when the runtime exposes a subagent tool. Dispatches parallel literature verification (`Subagent A`) and biostatistical execution (`Subagent B`) via an on-disk Zero-PHI `sap_handoff.json` contract, enforces mid-run `HALT_FOR_GRILLING_GATE` role-specific checkpointing (`checkpoint_state_<role>.json`) with external restricted row-level staging outside `<output_dir>`, and mandates independent Main-Agent on-disk integrity verification. |
 | **Run Sequence** | `run_sequence` | Ordered 6-step execution spine (`SKILL.md §0`: `1. Inspect` -> `2. Ask` -> `3. Plan` -> `4. Execute` -> `5. Render` -> `6. Audit`), where each step ends on an observable `*Done when*` completion criterion and delegates reference rules to Pillars 1–5 and Gate §2. |
+| **Run Manifest** | `RunManifest` | Zero-PHI provenance record capturing `data_sha256` (column-order independent, row/dtype-sensitive), `n_rows`, `n_cols`, `plan_sha256`, `seed`, package versions, Python version, and `Asia/Bangkok` timestamp without paths or column names (ADR 87). |
+| **Analysis Lineage** | `AnalysisLineage` | Directed provenance record tying the single pre-specified `primary` node to sensitivity-analysis child nodes via explicit `plan_delta` diffs and separately labelled `exploratory` nodes. |
+| **Analysis Node** | `AnalysisNode` | Single analysis unit in `AnalysisLineage` carrying `node_id`, `role` (`primary` / `sensitivity` / `exploratory`), `question`, `plan`, `plan_sha256`, `parent_id`, `plan_delta`, `status` (`provisional` / `answered`), `headline`, and `failed_attempts`. |
+| **Answered** | `answered` | Frozen terminal state of an `AnalysisNode` once a run yields an estimate (significant or non-significant) or `NaN` with an explicit fail-closed reason; answered nodes cannot be edited or repaired in place. |
+| **Provisional** | `provisional` | Mutable pre-answer state of an `AnalysisNode` during script errors, non-convergence, or halted gates; repairable in place up to `REPAIR_CAP`. |
+| **Plan Delta** | `plan_delta` | Sorted dictionary of dotted-path parameter/strategy differences (`(parent_val, child_val)`, using `"<absent>"` for added/removed keys) distinguishing a sensitivity child from its parent. |
+| **Repair Cap** | `REPAIR_CAP` | Maximum of 2 provisional repair attempts on a single `AnalysisNode` (or a repeated setup failure across nodes) before halting and asking the user via Grilling Gate #7 (`RepairCapExceededError`). |
+| **Exploratory Analysis** | `exploratory` | Post-hoc or data-driven analysis explicitly labelled hypothesis-generating; cannot parent sensitivity nodes and cannot be silently promoted to primary. |
 
 
 ---
@@ -133,12 +141,14 @@ Domain vocabulary, mathematical definitions, entity models, and clinical convent
   - `svg_path: str | None` (path to SVG vector export)
   - `qa: dict[str, Any] | None` (layout collision, clipping, and font-size QA results)
 - **`ReportDocument` (Report IR)**:
-  - `title: str`, `authors: list[str]`, `date: str`, `institution: str`
+  - `title: str`, `authors: list[str]`, `date: str`, `institution: str`, `study_design: str | None`
   - `blocks: list[Block]` (`HeadingBlock`, `ParagraphBlock`, `TableBlock`, `FigureBlock`, `CalloutBlock`)
   - `results_dict: dict[str, Any]` (immutable source of truth for narrative numbers)
+  - `manifest: RunManifest | None`, `lineage: AnalysisLineage | None`
 - **`IntegrityReport`**:
   - `passed: bool`, `untraced_numbers: list[float]`, `phi_violations: list[str]`
   - `warnings: list[str]`, `has_methods: bool`, `has_retention_flow: bool`, `has_causal_caveat: bool`
+  - `has_manifest: bool`, `lineage_violations: list[str]`
 
 ---
 

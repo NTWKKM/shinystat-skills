@@ -1533,3 +1533,48 @@ def test_live_eval_round_two_wording_and_engine_adr85():
         in heur
     )
     assert "rescale values by a positive constant before computing skewness" in heur
+
+
+def test_analysis_lineage_and_gate7_adr87():
+    """ADR 87: analysis-lineage.md synced, both SKILL.md files wire Gate #7 and Lineage & Manifest."""
+    repo_root = Path(__file__).resolve().parents[2]
+    shared = repo_root / "skills" / "_shared" / "references" / "analysis-lineage.md"
+    local_ref = (
+        repo_root / "skills" / "shinystat" / "references" / "analysis-lineage.md"
+    )
+    cloud_ref = (
+        repo_root / "skills" / "shinystat-cloud" / "references" / "analysis-lineage.md"
+    )
+    assert shared.exists() and local_ref.exists() and cloud_ref.exists()
+    assert shared.read_bytes() == local_ref.read_bytes() == cloud_ref.read_bytes()
+
+    for skill_path in (
+        repo_root / "skills" / "shinystat" / "SKILL.md",
+        repo_root / "skills" / "shinystat-cloud" / "SKILL.md",
+    ):
+        text = skill_path.read_text(encoding="utf-8")
+        assert "references/analysis-lineage.md" in text
+        assert "**Repair Cap (2 Provisional Failures)**" in text
+        assert "**Lineage & Manifest**" in text
+        assert "Gate #7" in text or "`#7`" in text
+
+    local_skill = (repo_root / "skills" / "shinystat" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert "exempt from plotting" in local_skill
+    assert "NaN" in local_skill and "fail-closed reason" in local_skill
+    shared_text = shared.read_text(encoding="utf-8")
+    assert "len(node.failed_attempts) >= REPAIR_CAP" in shared_text
+    assert "never** also call `record_failure()`" in shared_text
+    assert (
+        "Repaired run #2 also fails → check `len(node.failed_attempts) >= REPAIR_CAP` "
+        "(do **not** call `record_failure()` or a third `repair()`" in shared_text
+    )
+    assert (
+        "Failure-logging-only sequence (`record_failure()` without `repair()`):"
+        in shared_text
+    )
+    assert (
+        "immediately after the second call sets `len(node.failed_attempts) >= REPAIR_CAP`"
+        in shared_text
+    )
