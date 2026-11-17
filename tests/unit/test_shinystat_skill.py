@@ -1587,6 +1587,9 @@ def test_analysis_lineage_and_gate7_adr87():
         "analyzed_cohort_dtypes.json",
         "`analyzed_cohort.csv` together with `analyzed_cohort_dtypes.json`",
         "Gate #7 Repair-Cap Decision Contract",
+        'sap_handoff.json["lineage_config"]["primary_plan"]',
+        "(`data_sha256` and `plan_sha256`)",
+        "do **not** call `repair()`",
     ):
         assert needle in proto_text, f"Missing '{needle}' in subagent-protocol.md"
     assert "apply_user_repaired_plan" not in proto_text
