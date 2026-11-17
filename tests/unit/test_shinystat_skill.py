@@ -1561,8 +1561,29 @@ def test_analysis_lineage_and_gate7_adr87():
     local_skill = (repo_root / "skills" / "shinystat" / "SKILL.md").read_text(
         encoding="utf-8"
     )
-    assert "exempt from plotting" in local_skill
-    assert "NaN" in local_skill and "fail-closed reason" in local_skill
+    cloud_skill = (repo_root / "skills" / "shinystat-cloud" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    for text in (local_skill, cloud_skill):
+        assert "exempt from plotting" in text
+        assert "NaN" in text and "fail-closed reason" in text
+
+    proto_text = (
+        repo_root / "skills" / "_shared" / "references" / "subagent-protocol.md"
+    ).read_text(encoding="utf-8")
+    for needle in (
+        "analysis-lineage.md",
+        "report-builder.md §1–§4",
+        "<run_output_dir>/run_manifest.json",
+        "<run_output_dir>/analysis_lineage.json",
+        "analyzed_cohort.parquet",
+        "manifest=manifest, lineage=lineage",
+        "data=df_analyzed",
+        "has_manifest == True",
+        "len(lineage_violations) == 0",
+        "Gate #7",
+    ):
+        assert needle in proto_text, f"Missing '{needle}' in subagent-protocol.md"
     shared_text = shared.read_text(encoding="utf-8")
     assert "len(node.failed_attempts) >= REPAIR_CAP" in shared_text
     assert "never** also call `record_failure()`" in shared_text
