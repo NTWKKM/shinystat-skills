@@ -1583,10 +1583,13 @@ def test_analysis_lineage_and_gate7_adr87():
         "len(lineage_violations) == 0",
         "Gate #7",
         "gate_7_resolution",
+        "fallback_plan",
         "analyzed_cohort_dtypes.json",
+        "`analyzed_cohort.csv` together with `analyzed_cohort_dtypes.json`",
         "Gate #7 Repair-Cap Decision Contract",
     ):
         assert needle in proto_text, f"Missing '{needle}' in subagent-protocol.md"
+    assert "apply_user_repaired_plan" not in proto_text
     shared_text = shared.read_text(encoding="utf-8")
     assert "len(node.failed_attempts) >= REPAIR_CAP" in shared_text
     assert "never** also call `record_failure()`" in shared_text
