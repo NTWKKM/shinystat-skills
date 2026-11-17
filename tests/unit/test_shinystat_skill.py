@@ -1582,6 +1582,9 @@ def test_analysis_lineage_and_gate7_adr87():
         "has_manifest == True",
         "len(lineage_violations) == 0",
         "Gate #7",
+        "gate_7_resolution",
+        "analyzed_cohort_dtypes.json",
+        "Gate #7 Repair-Cap Decision Contract",
     ):
         assert needle in proto_text, f"Missing '{needle}' in subagent-protocol.md"
     shared_text = shared.read_text(encoding="utf-8")
