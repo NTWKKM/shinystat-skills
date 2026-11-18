@@ -1678,7 +1678,7 @@ def test_analysis_lineage_and_gate7_adr87():
     )
 
     def _has_complete_kwarg(text: str, arg: str) -> bool:
-        return re.search(rf"\b{re.escape(arg)}(?=[,)`\s]|$)", text) is not None
+        return re.search(rf"\b{re.escape(arg)}(?=\s*(?:[,)`]|$))", text) is not None
 
     cat_conv_needle = (
         "converting non-missing CSV text to the recorded category value type "
@@ -1707,6 +1707,9 @@ def test_analysis_lineage_and_gate7_adr87():
     assert not _has_complete_kwarg(
         "verify_report_integrity(doc, data=df_analyzed.head(1))", "data=df_analyzed"
     )
+    assert not _has_complete_kwarg(
+        "verify_report_integrity(doc, data=df_analyzed .head(1))", "data=df_analyzed"
+    )
 
     cloud_audit_end = proto_text.index(
         "**Independent Table-to-Results Numerical Reconciliation Audit**:",
@@ -1729,6 +1732,10 @@ def test_analysis_lineage_and_gate7_adr87():
         )
     assert not _has_complete_kwarg(
         "passes data=df_analyzed.head(1) to `verify_standalone_integrity`",
+        "data=df_analyzed",
+    )
+    assert not _has_complete_kwarg(
+        "passes `data=df_analyzed .head(1)` to `verify_standalone_integrity`",
         "data=df_analyzed",
     )
 
