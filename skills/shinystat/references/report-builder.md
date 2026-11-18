@@ -1865,12 +1865,8 @@ def plan_delta(parent: Mapping, child: Mapping) -> dict:
     flat_child = _flatten_mapping(child)
     delta = {}
     for key in sorted(set(flat_parent) | set(flat_child)):
-        pv_present = key in flat_parent
-        cv_present = key in flat_child
-        pv = flat_parent[key] if pv_present else _ABSENT
-        cv = flat_child[key] if cv_present else _ABSENT
-        if pv_present != cv_present or not _values_equal(pv, cv):
-            delta[key] = (copy.deepcopy(pv), copy.deepcopy(cv))
+        if (key in flat_parent) != (key in flat_child) or not _values_equal(flat_parent[key], flat_child[key]):
+            delta[key] = (copy.deepcopy(flat_parent.get(key, _ABSENT)), copy.deepcopy(flat_child.get(key, _ABSENT)))
     return delta
 
 
@@ -1940,6 +1936,8 @@ def lineage_violations(nodes: list[dict]) -> list[str]:
                     else:
                         norm_stored = {str(k): (list(v) if isinstance(v, tuple) else v) for k, v in stored_delta.items()}
                         norm_expected = {str(k): [pv, cv] for k, (pv, cv) in expected_delta.items()}
+                        if norm_stored:
+                            norm_expected = {k: v for k, v in norm_expected.items() if k in norm_stored or v != [_ABSENT, _ABSENT]}
                         if not _values_equal(norm_stored, norm_expected):
                             issues.append(f"Sensitivity node '{nid}' has stale plan_delta relative to '{pid}'.")
         if node.get("status") == "answered" and not str(node.get("headline") or "").strip():

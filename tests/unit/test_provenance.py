@@ -771,6 +771,31 @@ def test_provisional_primary_reconciliation_retains_child_and_reconciles_grandch
     }
     assert lin_del_write.violations() == []
 
+    # Legacy artifact compatibility: a pre-fix persisted node that omitted a literal "<absent>"
+    # deletion/addition key while recording valid non-empty deltas passes violations(), whereas
+    # tampered or empty stored deltas are still flagged stale.
+    lin_legacy = AnalysisLineage()
+    lin_legacy.add_primary(
+        "primary",
+        "Primary",
+        {"model": {"estimator": "logistic"}, "note": "<absent>"},
+    )
+    lin_legacy.add_sensitivity(
+        "sens_legacy",
+        "primary",
+        "Legacy Firth without literal-<absent> delta entry",
+        {"model": {"estimator": "firth"}},
+    )
+    lin_legacy._get("sens_legacy").plan_delta = {
+        "model.estimator": ("logistic", "firth")
+    }
+    assert lin_legacy.violations() == []
+
+    lin_legacy._get("sens_legacy").plan_delta = {"model.estimator": ("wrong", "firth")}
+    assert any("stale plan_delta" in v for v in lin_legacy.violations())
+    lin_legacy._get("sens_legacy").plan_delta = {}
+    assert any("stale plan_delta" in v for v in lin_legacy.violations())
+
     assert lineage.violations() == []
     lineage.mark_answered("primary", "OR 1.10 (95% CI 0.69-1.77, P = 0.69)")
     lineage.mark_answered("sens_firth", "OR 1.12 (95% CI 0.70-1.80, P = 0.64)")

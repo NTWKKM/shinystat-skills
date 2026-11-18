@@ -570,7 +570,24 @@ class AnalysisLineage:
                                 str(k): [pv, cv]
                                 for k, (pv, cv) in expected_delta.items()
                             }
-                            if not _values_equal(norm_stored, norm_expected):
+                            # Legacy artifacts created before plan_delta separated presence from
+                            # literal "<absent>" omitted entries whose value on the present side
+                            # was "<absent>"; keep non-empty valid deltas non-stale for those keys.
+                            legacy_omitted_absent = {
+                                k
+                                for k, pair in norm_expected.items()
+                                if k not in norm_stored and pair == [_ABSENT, _ABSENT]
+                            }
+                            effective_expected = (
+                                {
+                                    k: v
+                                    for k, v in norm_expected.items()
+                                    if k not in legacy_omitted_absent
+                                }
+                                if norm_stored and legacy_omitted_absent
+                                else norm_expected
+                            )
+                            if not _values_equal(norm_stored, effective_expected):
                                 issues.append(
                                     f"Sensitivity node '{node.node_id}' has stale plan_delta relative to '{parent.node_id}'."
                                 )

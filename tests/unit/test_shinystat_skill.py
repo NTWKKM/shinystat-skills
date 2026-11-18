@@ -1661,6 +1661,10 @@ def test_analysis_lineage_and_gate7_adr87():
         "covariate removal/collapse",
         "purge model-dependent entries from `completed_steps`",
         "unless their recorded plan hash (`plan_sha256`) matches the updated `primary_plan`",
+        "comparing values with type-aware equality",
+        "halting for a blocked path only when the old or updated parent plan has a scalar",
+        "treating a child-side scalar replacement of a parent mapping as nested deletions followed by the scalar write",
+        "applying nested deletions (`_del_nested`) before scalar or mapping writes (`_set_nested`)",
     ):
         assert affirmative in reconcile_section, (
             f"Missing '{affirmative}' in Gate #1-#4 reconciliation section"
@@ -1684,6 +1688,17 @@ def test_analysis_lineage_and_gate7_adr87():
         "converting non-missing CSV text to the recorded category value type "
         "before constructing `pd.CategoricalDtype`"
     )
+    typed_reload_needles = (
+        "str(series.dtype)",
+        "Int64",
+        "float64",
+        "string",
+        "datetime64",
+    )
+    for dt_needle in typed_reload_needles:
+        assert dt_needle in proto_text, (
+            f"Missing '{dt_needle}' in analyzed_cohort_dtypes.json writer/reload rules"
+        )
 
     local_audit_start = proto_text.index("**In `shinystat` (Local Engine)**:")
     local_audit_end = proto_text.index(
@@ -1693,6 +1708,10 @@ def test_analysis_lineage_and_gate7_adr87():
     assert cat_conv_needle in local_audit_section, (
         "Missing typed category conversion in local audit reload instructions"
     )
+    for dt_needle in typed_reload_needles:
+        assert dt_needle in local_audit_section, (
+            f"Missing '{dt_needle}' reload parsing rule in local audit section"
+        )
     local_doc_call = re.search(r"ReportDocument\([^)]*\)", local_audit_section)
     assert local_doc_call is not None, "Missing ReportDocument(...) call"
     for arg in ("manifest=manifest", "lineage=lineage"):
@@ -1719,6 +1738,10 @@ def test_analysis_lineage_and_gate7_adr87():
     assert cat_conv_needle in cloud_audit_section, (
         "Missing typed category conversion in cloud audit reload instructions"
     )
+    for dt_needle in typed_reload_needles:
+        assert dt_needle in cloud_audit_section, (
+            f"Missing '{dt_needle}' reload parsing rule in cloud audit section"
+        )
     cloud_pass_clause = re.search(
         r"\bpasses\b(?:(?!\.\s).)*?\bto\s+`verify_standalone_integrity`",
         cloud_audit_section,
