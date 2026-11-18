@@ -1610,14 +1610,23 @@ def test_analysis_lineage_and_gate7_adr87():
     )
     reconcile_section = proto_text[reconcile_start:reconcile_end]
     for affirmative in (
-        "reapply each provisional child's intended methodological change",
         "when an intermediate parent is retained with an updated plan",
         "reparent a provisional descendant to the retired child's parent only when its lineage remains valid",
         "already has an `answered` sensitivity child or descendant",
+        "directly into the new run's `<output_dir>/run_<new_run_id>/sap_handoff.json`",
     ):
         assert affirmative in reconcile_section, (
             f"Missing '{affirmative}' in Gate #1-#4 reconciliation section"
         )
+    assert re.search(
+        r"(?<!\bnot\s)(?<!\bnever\s)\breapply each provisional child's intended methodological change\b",
+        reconcile_section,
+    ), "Expected affirmative reapply instruction in Gate #1-#4 reconciliation section"
+    assert not re.search(
+        r"\b(?:do\s+not|don't|not|never)\s+reapply each provisional child's intended methodological change\b",
+        reconcile_section,
+        re.IGNORECASE,
+    )
     assert "apply_user_repaired_plan" not in proto_text
     shared_text = shared.read_text(encoding="utf-8")
     assert "len(node.failed_attempts) >= REPAIR_CAP" in shared_text
