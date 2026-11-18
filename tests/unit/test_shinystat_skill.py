@@ -1590,6 +1590,10 @@ def test_analysis_lineage_and_gate7_adr87():
         'sap_handoff.json["lineage_config"]["primary_plan"]',
         "(`data_sha256` and `plan_sha256`)",
         "do **not** call `repair()`",
+        "keep_default_na=False",
+        "missing-value mask",
+        'checkpoint_state_biostat_execution.json["analyzed_data_path"]',
+        "do **not** reconcile Gate #4 provenance or edit the primary node",
     ):
         assert needle in proto_text, f"Missing '{needle}' in subagent-protocol.md"
     assert "apply_user_repaired_plan" not in proto_text
