@@ -544,28 +544,46 @@ def _reconcile_provisional_primary(
 
         new_parent_plan = updated_plans[target_parent_id]
         old_parent_plan = old_plans[orig_parent_id]
-        reapplied = copy.deepcopy(new_parent_plan)
+        old_child_plan = old_plans[node.node_id]
 
-        for dotted_key, (_, child_val) in node.plan_delta.items():
+        def _plan_vals_equal(a, b) -> bool:
+            if a is _MISSING or b is _MISSING:
+                return a is _MISSING and b is _MISSING
+            return _values_equal(a, b)
+
+        deletions: list[str] = []
+        writes: list[tuple[str, object]] = []
+
+        for dotted_key in node.plan_delta:
             old_pval = _get_nested(old_parent_plan, dotted_key)
             new_pval = _get_nested(new_parent_plan, dotted_key)
             if old_pval is _BLOCKED or new_pval is _BLOCKED:
                 raise ValueError(
                     f"Blocked path '{dotted_key}' on '{node.node_id}': scalar blocks nested replay."
                 )
-            old_cmp = "<absent>" if old_pval is _MISSING else old_pval
-            new_cmp = "<absent>" if new_pval is _MISSING else new_pval
-            if not _values_equal(old_cmp, new_cmp) and not _values_equal(
-                new_cmp, child_val
+            target_cval = _get_nested(old_child_plan, dotted_key)
+            if target_cval is _BLOCKED:
+                target_cval = _MISSING
+            if not _plan_vals_equal(old_pval, new_pval) and not _plan_vals_equal(
+                new_pval, target_cval
             ):
+                old_disp = "<absent>" if old_pval is _MISSING else old_pval
+                new_disp = "<absent>" if new_pval is _MISSING else new_pval
+                child_disp = "<absent>" if target_cval is _MISSING else target_cval
                 raise ValueError(
                     f"Conflict on '{node.node_id}' key '{dotted_key}': "
-                    f"parent changed {old_cmp!r} -> {new_cmp!r}, child had {child_val!r}."
+                    f"parent changed {old_disp!r} -> {new_disp!r}, child had {child_disp!r}."
                 )
-            if child_val == "<absent>":
-                _del_nested(reapplied, dotted_key)
+            if target_cval is _MISSING:
+                deletions.append(dotted_key)
             else:
-                _set_nested(reapplied, dotted_key, child_val)
+                writes.append((dotted_key, target_cval))
+
+        reapplied = copy.deepcopy(new_parent_plan)
+        for dotted_key in deletions:
+            _del_nested(reapplied, dotted_key)
+        for dotted_key, target_cval in writes:
+            _set_nested(reapplied, dotted_key, target_cval)
 
         new_delta = plan_delta(new_parent_plan, reapplied)
         if not new_delta:
@@ -714,6 +732,45 @@ def test_provisional_primary_reconciliation_retains_child_and_reconciles_grandch
     assert mice_sub_node.plan == updated_primary | {"subgroup": "elderly"}
     assert mice_sub_node.plan_delta == {"subgroup": ("<absent>", "elderly")}
 
+    # Literal "<absent>" value vs deleted/added key produces non-empty delta,
+    # and deleting a nested path before writing a parent scalar succeeds when both parents share the dict.
+    assert plan_delta({"note": "<absent>"}, {}) != {}
+    assert plan_delta({}, {"note": "<absent>"}) != {}
+
+    lin_del_write = AnalysisLineage()
+    lin_del_write.add_primary(
+        "primary",
+        "Primary",
+        {"model": {"estimator": "logistic", "trim": True}, "missing": "complete-case"},
+    )
+    lin_del_write.add_sensitivity(
+        "sens_cox",
+        "primary",
+        "Switch model dict to scalar cox",
+        {"model": "cox", "missing": "complete-case"},
+    )
+    lin_del_write.add_sensitivity(
+        "sens_note",
+        "primary",
+        "Add extra note when both parents omit it",
+        {
+            "model": {"estimator": "logistic", "trim": True},
+            "missing": "complete-case",
+            "extra": "note",
+        },
+    )
+    _reconcile_provisional_primary(
+        lin_del_write,
+        {"model": {"estimator": "logistic", "trim": True}, "missing": "mice"},
+    )
+    assert lin_del_write._get("sens_cox").plan == {"model": "cox", "missing": "mice"}
+    assert lin_del_write._get("sens_note").plan == {
+        "model": {"estimator": "logistic", "trim": True},
+        "missing": "mice",
+        "extra": "note",
+    }
+    assert lin_del_write.violations() == []
+
     assert lineage.violations() == []
     lineage.mark_answered("primary", "OR 1.10 (95% CI 0.69-1.77, P = 0.69)")
     lineage.mark_answered("sens_firth", "OR 1.12 (95% CI 0.70-1.80, P = 0.64)")
@@ -813,3 +870,17 @@ def test_provisional_primary_reconciliation_halts_on_conflict():
     assert lineage_typed._get("primary").plan == p_old
     assert lineage_typed._get("sens_firth").plan == c_firth
     assert lineage_typed.violations() == []
+
+    # 4. Parent sets omitted key 'extra' to literal string "<absent>" while child added 'extra': 'note'
+    lineage_absent = AnalysisLineage()
+    c_extra_note = copy.deepcopy(p_old) | {"extra": "note"}
+    lineage_absent.add_primary("primary", "Primary", p_old)
+    lineage_absent.add_sensitivity(
+        "sens_extra", "primary", "Add extra note", c_extra_note
+    )
+    updated_literal_absent = copy.deepcopy(p_old) | {"extra": "<absent>"}
+    with pytest.raises(ValueError, match="Conflict on 'sens_extra' key 'extra'"):
+        _reconcile_provisional_primary(lineage_absent, updated_literal_absent)
+    assert lineage_absent._get("primary").plan == p_old
+    assert lineage_absent._get("sens_extra").plan == c_extra_note
+    assert lineage_absent.violations() == []

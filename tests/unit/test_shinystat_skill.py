@@ -1564,16 +1564,23 @@ def test_analysis_lineage_and_gate7_adr87():
     cloud_skill = (repo_root / "skills" / "shinystat-cloud" / "SKILL.md").read_text(
         encoding="utf-8"
     )
+    exemption_re = re.compile(
+        r"exempt from plotting[^)]*"
+        r"(?<!\beven\s)\b(?:provided|only\s+if)\b"
+        r"(?![^)]*\b(?:omits?|without|excludes?|skips?)\b)"
+        r"[^)]*\b(?:includes?|records?|contains?|states?|reports?|documents?)\b"
+        r"[^)]*`?NaN`?[^)]*fail-closed reason"
+    )
     for text in (local_skill, cloud_skill):
         render_start = text.index("5. **Render**:")
         render_end = text.index("6. **Audit**:", render_start)
         render_step = text[render_start:render_end]
-        assert re.search(
-            r"exempt from plotting[^)]*(?:provided|if)[^)]*`?NaN`?[^)]*fail-closed reason",
-            render_step,
-        ), (
+        assert exemption_re.search(render_step), (
             f"Expected conditional NaN/fail-closed plotting exemption in Render step:\n{render_step}"
         )
+    assert not exemption_re.search(
+        "exempt from plotting, even if the deliverable omits the NaN estimate and fail-closed reason"
+    )
 
     proto_text = (
         repo_root / "skills" / "_shared" / "references" / "subagent-protocol.md"
@@ -1617,6 +1624,24 @@ def test_analysis_lineage_and_gate7_adr87():
     single_branch_section = proto_text[single_start:single_end]
     assert "`answered` descendant at any depth" in single_branch_section
 
+    parallel_start = proto_text.index(
+        "2. **Parallel Sibling Completion & Single-Turn Halt Aggregation**:"
+    )
+    parallel_end = proto_text.index(
+        "3. **Selective Resume & Preprocessing Provenance Invalidation**:",
+        parallel_start,
+    )
+    parallel_section = proto_text[parallel_start:parallel_end]
+    for p_needle in (
+        "citations_verified.json",
+        "gate_6_decision",
+        "checkpoint_state_literature_verifier.json",
+        "Standard offline no-citation fallback",
+    ):
+        assert p_needle in parallel_section, (
+            f"Missing '{p_needle}' in Parallel Dispatch section"
+        )
+
     reconcile_start = proto_text.index(
         "**Gate #1–#4 Decision & Provenance Reconciliation**"
     )
@@ -1631,29 +1656,56 @@ def test_analysis_lineage_and_gate7_adr87():
         "already has an `answered` sensitivity child or descendant",
         "directly into the new run's `<output_dir>/run_<new_run_id>/sap_handoff.json`",
         "stage and validate",
+        "restore the prior generation intact if any staging or publication step fails",
         "preprocessing_provenance",
-        "recorded plan and cohort match its owning node",
         "covariate removal/collapse",
+        "purge model-dependent entries from `completed_steps`",
+        "unless their recorded plan hash (`plan_sha256`) matches the updated `primary_plan`",
     ):
         assert affirmative in reconcile_section, (
             f"Missing '{affirmative}' in Gate #1-#4 reconciliation section"
         )
+    retention_re = re.compile(
+        r"(?:retain\s+each\s+entry\s+in\s+`partial_results`\s*/\s*`results_dict`|"
+        r"`partial_results`\s*/\s*`results_dict`\s+retaining\s+each\s+entry)\s+"
+        r"only\s+when\s+its\s+recorded\s+plan\s+and\s+cohort\s+match\s+its\s+owning\s+node"
+    )
+    assert retention_re.search(reconcile_section), (
+        "Missing plan-and-cohort retention prerequisite in Gate #1-#4 reconciliation section"
+    )
+    assert not retention_re.search(
+        "preserve prior complete-case sensitivity results unconditionally even when Gate #4 changes the complete-case cohort"
+    )
+
+    def _has_complete_kwarg(text: str, arg: str) -> bool:
+        return re.search(rf"\b{re.escape(arg)}(?=[,)`\s]|$)", text) is not None
+
+    cat_conv_needle = (
+        "converting non-missing CSV text to the recorded category value type "
+        "before constructing `pd.CategoricalDtype`"
+    )
 
     local_audit_start = proto_text.index("**In `shinystat` (Local Engine)**:")
     local_audit_end = proto_text.index(
         "**In `shinystat-cloud` (Standalone Cloud Sandbox)**:", local_audit_start
     )
     local_audit_section = proto_text[local_audit_start:local_audit_end]
+    assert cat_conv_needle in local_audit_section, (
+        "Missing typed category conversion in local audit reload instructions"
+    )
     local_doc_call = re.search(r"ReportDocument\([^)]*\)", local_audit_section)
     assert local_doc_call is not None, "Missing ReportDocument(...) call"
     for arg in ("manifest=manifest", "lineage=lineage"):
-        assert arg in local_doc_call.group(0), (
-            f"Missing '{arg}' in local ReportDocument(...) call"
+        assert _has_complete_kwarg(local_doc_call.group(0), arg), (
+            f"Missing complete '{arg}' in local ReportDocument(...) call"
         )
     local_call = re.search(r"verify_report_integrity\([^)]*\)", local_audit_section)
     assert local_call is not None, "Missing verify_report_integrity(...) call"
-    assert "data=df_analyzed" in local_call.group(0), (
-        "Missing 'data=df_analyzed' in local verify_report_integrity(...) call"
+    assert _has_complete_kwarg(local_call.group(0), "data=df_analyzed"), (
+        "Missing complete 'data=df_analyzed' in local verify_report_integrity(...) call"
+    )
+    assert not _has_complete_kwarg(
+        "verify_report_integrity(doc, data=df_analyzed.head(1))", "data=df_analyzed"
     )
 
     cloud_audit_end = proto_text.index(
@@ -1661,6 +1713,9 @@ def test_analysis_lineage_and_gate7_adr87():
         local_audit_end,
     )
     cloud_audit_section = proto_text[local_audit_end:cloud_audit_end]
+    assert cat_conv_needle in cloud_audit_section, (
+        "Missing typed category conversion in cloud audit reload instructions"
+    )
     cloud_pass_clause = re.search(
         r"\bpasses\b(?:(?!\.\s).)*?\bto\s+`verify_standalone_integrity`",
         cloud_audit_section,
@@ -1669,9 +1724,22 @@ def test_analysis_lineage_and_gate7_adr87():
         "Missing sentence passing verifier inputs to verify_standalone_integrity"
     )
     for arg in ("manifest=manifest", "lineage=lineage", "data=df_analyzed"):
-        assert arg in cloud_pass_clause.group(0), (
-            f"Missing '{arg}' in cloud verify_standalone_integrity pass clause"
+        assert _has_complete_kwarg(cloud_pass_clause.group(0), arg), (
+            f"Missing complete '{arg}' in cloud verify_standalone_integrity pass clause"
         )
+    assert not _has_complete_kwarg(
+        "passes data=df_analyzed.head(1) to `verify_standalone_integrity`",
+        "data=df_analyzed",
+    )
+
+    table_audit_end = proto_text.index(
+        "**Mandatory Manual Review for Unprefixed Patient Names**:",
+        cloud_audit_end,
+    )
+    table_audit_section = proto_text[cloud_audit_end:table_audit_end]
+    assert "Run Manifest (Zero-PHI Provenance)" in table_audit_section
+    assert "<run_output_dir>/run_manifest.json" in table_audit_section
+    assert "exempting manifest rows" in table_audit_section
     assert re.search(
         r"(?<!\bnot\s)(?<!\bnever\s)\breapply each provisional child's intended methodological change\b",
         reconcile_section,

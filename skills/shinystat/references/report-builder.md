@@ -1865,9 +1865,11 @@ def plan_delta(parent: Mapping, child: Mapping) -> dict:
     flat_child = _flatten_mapping(child)
     delta = {}
     for key in sorted(set(flat_parent) | set(flat_child)):
-        pv = flat_parent.get(key, _ABSENT)
-        cv = flat_child.get(key, _ABSENT)
-        if not _values_equal(pv, cv):
+        pv_present = key in flat_parent
+        cv_present = key in flat_child
+        pv = flat_parent[key] if pv_present else _ABSENT
+        cv = flat_child[key] if cv_present else _ABSENT
+        if pv_present != cv_present or not _values_equal(pv, cv):
             delta[key] = (copy.deepcopy(pv), copy.deepcopy(cv))
     return delta
 
