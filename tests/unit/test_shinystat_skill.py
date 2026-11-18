@@ -1601,6 +1601,7 @@ def test_analysis_lineage_and_gate7_adr87():
         "reparent a provisional descendant to the retired child's parent only when its lineage remains valid",
         "missing-parent",
         "record the Firth fit as a `sensitivity` child node",
+        "when an intermediate parent is retained with an updated plan",
     ):
         assert needle in proto_text, f"Missing '{needle}' in subagent-protocol.md"
     assert "apply_user_repaired_plan" not in proto_text

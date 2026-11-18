@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 from pathlib import Path
 
@@ -427,3 +428,134 @@ def test_reproducibility_appendix_and_integrity_checks(tmp_path: Path):
     audit_phi = verify_report_integrity(doc_phi, data=df)
     assert audit_phi.passed is False
     assert audit_phi.phi_violations
+
+
+def test_provisional_primary_reconciliation_retains_child_and_reconciles_grandchild():
+    """Topological reconciliation updates retained children, their grandchildren, and retired-child descendants."""
+    lineage = AnalysisLineage()
+    p_old = {"model": "logistic", "missing_strategy": "complete-case", "m": None}
+    c_firth = {"model": "firth", "missing_strategy": "complete-case", "m": None}
+    g_firth_trim = {
+        "model": "firth",
+        "missing_strategy": "complete-case",
+        "m": None,
+        "trim": True,
+    }
+    c_mice = {"model": "logistic", "missing_strategy": "mice", "m": 5}
+    g_mice_sub = {
+        "model": "logistic",
+        "missing_strategy": "mice",
+        "m": 5,
+        "subgroup": "elderly",
+    }
+
+    lineage.add_primary("primary", "Primary effect", p_old)
+    lineage.add_sensitivity("sens_firth", "primary", "Firth sensitivity", c_firth)
+    lineage.add_sensitivity(
+        "sens_firth_trim", "sens_firth", "Trimmed Firth", g_firth_trim
+    )
+    lineage.add_sensitivity("sens_mice", "primary", "MICE sensitivity", c_mice)
+    lineage.add_sensitivity(
+        "sens_mice_sub", "sens_mice", "Elderly MICE subgroup", g_mice_sub
+    )
+
+    # Gate #4 switches provisional primary from complete-case to MICE (m=5) without calling repair().
+    updated_primary = {"model": "logistic", "missing_strategy": "mice", "m": 5}
+    primary = lineage._get("primary")
+    assert primary.status == "provisional"
+    primary.plan = copy.deepcopy(updated_primary)
+    primary.plan_sha256 = hash_plan(updated_primary)
+
+    # Topological walk (parents precede children because sensitivity nodes branch off existing parents).
+    retired: set[str] = set()
+    reparent_to: dict[str, str] = {}
+    retained: dict[str, AnalysisNode] = {"primary": primary}
+    kept_nodes: list[AnalysisNode] = [primary]
+
+    for node in lineage.nodes[1:]:
+        if node.parent_id in retired:
+            if node.parent_id not in reparent_to:
+                retired.add(node.node_id)
+                continue
+            node.parent_id = reparent_to[node.parent_id]
+
+        parent = retained.get(node.parent_id or "")
+        if parent is None or parent.role == "exploratory":
+            retired.add(node.node_id)
+            continue
+
+        # Reapply node's intended delta (added/changed keys) onto the updated parent plan.
+        reapplied = copy.deepcopy(parent.plan)
+        for dotted_key, (_, child_val) in node.plan_delta.items():
+            if child_val == "<absent>":
+                reapplied.pop(dotted_key, None)
+            else:
+                reapplied[dotted_key] = copy.deepcopy(child_val)
+
+        new_delta = plan_delta(parent.plan, reapplied)
+        if not new_delta:
+            retired.add(node.node_id)
+            reparent_to[node.node_id] = parent.node_id
+            continue
+
+        node.plan = reapplied
+        node.plan_sha256 = hash_plan(reapplied)
+        node.plan_delta = new_delta
+        retained[node.node_id] = node
+        kept_nodes.append(node)
+
+    lineage.nodes = kept_nodes
+
+    assert [n.node_id for n in lineage.nodes] == [
+        "primary",
+        "sens_firth",
+        "sens_firth_trim",
+        "sens_mice_sub",
+    ]
+    assert primary.failed_attempts == []
+
+    # Retained child inherited MICE (m=5) while keeping Firth.
+    firth_node = lineage._get("sens_firth")
+    assert firth_node.parent_id == "primary"
+    assert firth_node.plan == updated_primary | {"model": "firth"}
+    assert firth_node.plan_delta == {"model": ("logistic", "firth")}
+
+    # Grandchild of retained child inherited BOTH MICE (m=5) AND Firth from updated sens_firth.
+    firth_trim_node = lineage._get("sens_firth_trim")
+    assert firth_trim_node.parent_id == "sens_firth"
+    assert firth_trim_node.plan == updated_primary | {"model": "firth", "trim": True}
+    assert firth_trim_node.plan_delta == {"trim": ("<absent>", True)}
+
+    # Grandchild of retired sens_mice was reparented to primary with clean delta.
+    mice_sub_node = lineage._get("sens_mice_sub")
+    assert mice_sub_node.parent_id == "primary"
+    assert mice_sub_node.plan == updated_primary | {"subgroup": "elderly"}
+    assert mice_sub_node.plan_delta == {"subgroup": ("<absent>", "elderly")}
+
+    assert lineage.violations() == []
+    lineage.mark_answered("primary", "OR 1.10 (95% CI 0.69-1.77, P = 0.69)")
+    lineage.mark_answered("sens_firth", "OR 1.12 (95% CI 0.70-1.80, P = 0.64)")
+    lineage.mark_answered("sens_firth_trim", "OR 1.15 (95% CI 0.71-1.85, P = 0.58)")
+    lineage.mark_answered("sens_mice_sub", "OR 1.08 (95% CI 0.66-1.76, P = 0.75)")
+    assert lineage.violations() == []
+
+    df = pd.DataFrame({"outcome": [0, 1, 0, 1], "x": [1.0, 2.0, 3.0, 4.0]})
+    manifest = build_run_manifest(df, plan=updated_primary, seed=42)
+    doc = ReportDocument(
+        title="Topological Lineage Reconciliation",
+        results_dict={
+            "primary": {"or": 1.10, "ci_l": 0.69, "ci_u": 1.77, "p": 0.69},
+            "sens_firth": {"or": 1.12, "ci_l": 0.70, "ci_u": 1.80, "p": 0.64},
+            "sens_firth_trim": {"or": 1.15, "ci_l": 0.71, "ci_u": 1.85, "p": 0.58},
+            "sens_mice_sub": {"or": 1.08, "ci_l": 0.66, "ci_u": 1.76, "p": 0.75},
+        },
+        manifest=manifest,
+        lineage=lineage,
+    )
+    doc.add_paragraph(
+        "Methods: cohort retention flow OR 1.10 (95% CI 0.69-1.77, P = 0.69)."
+    )
+    add_reproducibility_appendix(doc)
+    audit = verify_report_integrity(doc, data=df)
+    assert audit.passed is True, audit.lineage_violations
+    assert audit.lineage_violations == []
