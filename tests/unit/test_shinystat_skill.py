@@ -1596,14 +1596,28 @@ def test_analysis_lineage_and_gate7_adr87():
         "do **not** reconcile Gate #4 provenance or edit the primary node",
         "guaranteeing that `manifest_path` and `lineage_path` in the checkpoint refer to existing files",
         "recompute `plan_delta = plan_delta(updated_primary_plan, child.plan)`",
-        "do **not** edit the `primary` node or overwrite the existing `<run_output_dir>/run_manifest.json`",
-        "reapply each provisional child's intended methodological change",
-        "reparent a provisional descendant to the retired child's parent only when its lineage remains valid",
+        "Do **not** edit `primary`, update or reparent answered descendants",
         "missing-parent",
         "record the Firth fit as a `sensitivity` child node",
-        "when an intermediate parent is retained with an updated plan",
+        "`answered` descendant at any depth",
     ):
         assert needle in proto_text, f"Missing '{needle}' in subagent-protocol.md"
+    reconcile_start = proto_text.index(
+        "**Gate #1–#4 Decision & Provenance Reconciliation**"
+    )
+    reconcile_end = proto_text.index(
+        "**Gate #6 Citation Decision Contract**", reconcile_start
+    )
+    reconcile_section = proto_text[reconcile_start:reconcile_end]
+    for affirmative in (
+        "reapply each provisional child's intended methodological change",
+        "when an intermediate parent is retained with an updated plan",
+        "reparent a provisional descendant to the retired child's parent only when its lineage remains valid",
+        "already has an `answered` sensitivity child or descendant",
+    ):
+        assert affirmative in reconcile_section, (
+            f"Missing '{affirmative}' in Gate #1-#4 reconciliation section"
+        )
     assert "apply_user_repaired_plan" not in proto_text
     shared_text = shared.read_text(encoding="utf-8")
     assert "len(node.failed_attempts) >= REPAIR_CAP" in shared_text

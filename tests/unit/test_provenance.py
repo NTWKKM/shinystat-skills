@@ -430,23 +430,172 @@ def test_reproducibility_appendix_and_integrity_checks(tmp_path: Path):
     assert audit_phi.phi_violations
 
 
+def _get_nested(mapping: dict, dotted_key: str, default=None):
+    cur = mapping
+    for part in dotted_key.split("."):
+        if not isinstance(cur, dict) or part not in cur:
+            return default
+        cur = cur[part]
+    return cur
+
+
+def _set_nested(mapping: dict, dotted_key: str, value) -> None:
+    parts = dotted_key.split(".")
+    cur = mapping
+    for part in parts[:-1]:
+        if part not in cur or not isinstance(cur[part], dict):
+            cur[part] = {}
+        cur = cur[part]
+    cur[parts[-1]] = copy.deepcopy(value)
+
+
+def _del_nested(mapping: dict, dotted_key: str) -> None:
+    parts = dotted_key.split(".")
+    cur = mapping
+    for part in parts[:-1]:
+        if not isinstance(cur, dict) or part not in cur:
+            return
+        cur = cur[part]
+    if isinstance(cur, dict):
+        cur.pop(parts[-1], None)
+
+
+def _reconcile_provisional_primary(
+    lineage: AnalysisLineage, updated_primary: dict
+) -> None:
+    """Reconcile a provisional primary and all provisional descendants in topological order.
+
+    Halts with ValueError before committing any mutation if an answered descendant exists
+    or if a provisional child's intended change conflicts with its updated parent plan.
+    """
+    primary = lineage._get("primary")
+    if primary.status != "provisional" or any(
+        n.status == "answered" for n in lineage.nodes[1:]
+    ):
+        raise ValueError(
+            "Cannot reconcile in place when primary or any descendant is answered."
+        )
+
+    old_plans: dict[str, dict] = {
+        n.node_id: copy.deepcopy(n.plan) for n in lineage.nodes
+    }
+    updated_plans: dict[str, dict] = {"primary": copy.deepcopy(updated_primary)}
+    updated_parents: dict[str, str | None] = {"primary": None}
+    updated_deltas: dict[str, dict] = {"primary": {}}
+    retired: set[str] = set()
+    reparent_to: dict[str, str] = {}
+    kept_ids: list[str] = ["primary"]
+
+    for node in lineage.nodes[1:]:
+        orig_parent_id = node.parent_id or ""
+        target_parent_id = orig_parent_id
+        was_reparented = False
+        if orig_parent_id in retired:
+            if orig_parent_id not in reparent_to:
+                retired.add(node.node_id)
+                continue
+            target_parent_id = reparent_to[orig_parent_id]
+            was_reparented = True
+
+        if target_parent_id not in updated_plans:
+            retired.add(node.node_id)
+            continue
+
+        parent_node = lineage._get(target_parent_id)
+        if parent_node.role == "exploratory":
+            retired.add(node.node_id)
+            continue
+
+        new_parent_plan = updated_plans[target_parent_id]
+        old_parent_plan = old_plans[orig_parent_id]
+        reapplied = copy.deepcopy(new_parent_plan)
+
+        for dotted_key, (_, child_val) in node.plan_delta.items():
+            old_pval = _get_nested(old_parent_plan, dotted_key, "<absent>")
+            new_pval = _get_nested(new_parent_plan, dotted_key, "<absent>")
+            if old_pval != new_pval and new_pval != child_val:
+                raise ValueError(
+                    f"Conflict on '{node.node_id}' key '{dotted_key}': "
+                    f"parent changed {old_pval!r} -> {new_pval!r}, child had {child_val!r}."
+                )
+            if child_val == "<absent>":
+                _del_nested(reapplied, dotted_key)
+            else:
+                _set_nested(reapplied, dotted_key, child_val)
+
+        new_delta = plan_delta(new_parent_plan, reapplied)
+        if not new_delta:
+            retired.add(node.node_id)
+            if not was_reparented:
+                reparent_to[node.node_id] = target_parent_id
+            continue
+
+        updated_plans[node.node_id] = reapplied
+        updated_parents[node.node_id] = target_parent_id
+        updated_deltas[node.node_id] = new_delta
+        kept_ids.append(node.node_id)
+
+    # Commit atomically only after validation succeeds.
+    primary.plan = updated_plans["primary"]
+    primary.plan_sha256 = hash_plan(primary.plan)
+    kept_nodes: list[AnalysisNode] = [primary]
+    for nid in kept_ids[1:]:
+        n = lineage._get(nid)
+        n.parent_id = updated_parents[nid]
+        n.plan = updated_plans[nid]
+        n.plan_sha256 = hash_plan(n.plan)
+        n.plan_delta = updated_deltas[nid]
+        kept_nodes.append(n)
+    lineage.nodes = kept_nodes
+
+
 def test_provisional_primary_reconciliation_retains_child_and_reconciles_grandchild():
     """Topological reconciliation updates retained children, their grandchildren, and retired-child descendants."""
     lineage = AnalysisLineage()
-    p_old = {"model": "logistic", "missing_strategy": "complete-case", "m": None}
-    c_firth = {"model": "firth", "missing_strategy": "complete-case", "m": None}
-    g_firth_trim = {
-        "model": "firth",
+    p_old = {
+        "model": {"estimator": "logistic"},
         "missing_strategy": "complete-case",
         "m": None,
+        "seed": 1,
+    }
+    c_firth = {
+        "model": {"estimator": "firth"},
+        "missing_strategy": "complete-case",
+        "m": None,
+        "seed": 1,
+    }
+    g_firth_trim = {
+        "model": {"estimator": "firth"},
+        "missing_strategy": "complete-case",
+        "m": None,
+        "seed": 1,
         "trim": True,
     }
-    c_mice = {"model": "logistic", "missing_strategy": "mice", "m": 5}
-    g_mice_sub = {
-        "model": "logistic",
+    c_mice = {
+        "model": {"estimator": "logistic"},
         "missing_strategy": "mice",
         "m": 5,
+        "seed": 1,
+    }
+    g_mice_sub = {
+        "model": {"estimator": "logistic"},
+        "missing_strategy": "mice",
+        "m": 5,
+        "seed": 1,
         "subgroup": "elderly",
+    }
+    g_mice_seed2 = {
+        "model": {"estimator": "logistic"},
+        "missing_strategy": "mice",
+        "m": 5,
+        "seed": 2,
+    }
+    gg_mice_seed2_sub = {
+        "model": {"estimator": "logistic"},
+        "missing_strategy": "mice",
+        "m": 5,
+        "seed": 2,
+        "subgroup": "female",
     }
 
     lineage.add_primary("primary", "Primary effect", p_old)
@@ -458,53 +607,22 @@ def test_provisional_primary_reconciliation_retains_child_and_reconciles_grandch
     lineage.add_sensitivity(
         "sens_mice_sub", "sens_mice", "Elderly MICE subgroup", g_mice_sub
     )
+    lineage.add_sensitivity("sens_mice_seed2", "sens_mice", "MICE seed 2", g_mice_seed2)
+    lineage.add_sensitivity(
+        "sens_mice_seed2_sub",
+        "sens_mice_seed2",
+        "Female MICE seed 2 subgroup",
+        gg_mice_seed2_sub,
+    )
 
-    # Gate #4 switches provisional primary from complete-case to MICE (m=5) without calling repair().
-    updated_primary = {"model": "logistic", "missing_strategy": "mice", "m": 5}
-    primary = lineage._get("primary")
-    assert primary.status == "provisional"
-    primary.plan = copy.deepcopy(updated_primary)
-    primary.plan_sha256 = hash_plan(updated_primary)
-
-    # Topological walk (parents precede children because sensitivity nodes branch off existing parents).
-    retired: set[str] = set()
-    reparent_to: dict[str, str] = {}
-    retained: dict[str, AnalysisNode] = {"primary": primary}
-    kept_nodes: list[AnalysisNode] = [primary]
-
-    for node in lineage.nodes[1:]:
-        if node.parent_id in retired:
-            if node.parent_id not in reparent_to:
-                retired.add(node.node_id)
-                continue
-            node.parent_id = reparent_to[node.parent_id]
-
-        parent = retained.get(node.parent_id or "")
-        if parent is None or parent.role == "exploratory":
-            retired.add(node.node_id)
-            continue
-
-        # Reapply node's intended delta (added/changed keys) onto the updated parent plan.
-        reapplied = copy.deepcopy(parent.plan)
-        for dotted_key, (_, child_val) in node.plan_delta.items():
-            if child_val == "<absent>":
-                reapplied.pop(dotted_key, None)
-            else:
-                reapplied[dotted_key] = copy.deepcopy(child_val)
-
-        new_delta = plan_delta(parent.plan, reapplied)
-        if not new_delta:
-            retired.add(node.node_id)
-            reparent_to[node.node_id] = parent.node_id
-            continue
-
-        node.plan = reapplied
-        node.plan_sha256 = hash_plan(reapplied)
-        node.plan_delta = new_delta
-        retained[node.node_id] = node
-        kept_nodes.append(node)
-
-    lineage.nodes = kept_nodes
+    # Gate #4 switches provisional primary to MICE (m=5, seed=2) without calling repair().
+    updated_primary = {
+        "model": {"estimator": "logistic"},
+        "missing_strategy": "mice",
+        "m": 5,
+        "seed": 2,
+    }
+    _reconcile_provisional_primary(lineage, updated_primary)
 
     assert [n.node_id for n in lineage.nodes] == [
         "primary",
@@ -512,21 +630,28 @@ def test_provisional_primary_reconciliation_retains_child_and_reconciles_grandch
         "sens_firth_trim",
         "sens_mice_sub",
     ]
+    primary = lineage._get("primary")
     assert primary.failed_attempts == []
 
-    # Retained child inherited MICE (m=5) while keeping Firth.
+    # Retained child inherited MICE (m=5, seed=2) while keeping nested Firth estimator.
     firth_node = lineage._get("sens_firth")
     assert firth_node.parent_id == "primary"
-    assert firth_node.plan == updated_primary | {"model": "firth"}
-    assert firth_node.plan_delta == {"model": ("logistic", "firth")}
+    assert firth_node.plan == updated_primary | {"model": {"estimator": "firth"}}
+    assert "model.estimator" not in firth_node.plan
+    assert firth_node.plan_delta == {"model.estimator": ("logistic", "firth")}
 
-    # Grandchild of retained child inherited BOTH MICE (m=5) AND Firth from updated sens_firth.
+    # Grandchild of retained child inherited MICE (m=5, seed=2) AND nested Firth.
     firth_trim_node = lineage._get("sens_firth_trim")
     assert firth_trim_node.parent_id == "sens_firth"
-    assert firth_trim_node.plan == updated_primary | {"model": "firth", "trim": True}
+    assert firth_trim_node.plan == updated_primary | {
+        "model": {"estimator": "firth"},
+        "trim": True,
+    }
+    assert "model.estimator" not in firth_trim_node.plan
     assert firth_trim_node.plan_delta == {"trim": ("<absent>", True)}
 
-    # Grandchild of retired sens_mice was reparented to primary with clean delta.
+    # Grandchild of retired sens_mice was reparented to primary with clean delta,
+    # whereas sens_mice_seed2 (differing only by seed=2) and its subgroup child were removed.
     mice_sub_node = lineage._get("sens_mice_sub")
     assert mice_sub_node.parent_id == "primary"
     assert mice_sub_node.plan == updated_primary | {"subgroup": "elderly"}
@@ -558,4 +683,44 @@ def test_provisional_primary_reconciliation_retains_child_and_reconciles_grandch
     add_reproducibility_appendix(doc)
     audit = verify_report_integrity(doc, data=df)
     assert audit.passed is True, audit.lineage_violations
+    assert audit.has_manifest is True
     assert audit.lineage_violations == []
+
+
+def test_provisional_primary_reconciliation_halts_on_conflict():
+    """Conflicting child change (m=10 vs updated primary m=5) halts before mutating lineage."""
+    lineage = AnalysisLineage()
+    p_old = {
+        "model": {"estimator": "logistic"},
+        "missing_strategy": "complete-case",
+        "m": None,
+    }
+    c_firth = {
+        "model": {"estimator": "firth"},
+        "missing_strategy": "complete-case",
+        "m": None,
+    }
+    c_m10 = {
+        "model": {"estimator": "logistic"},
+        "missing_strategy": "mice",
+        "m": 10,
+    }
+    lineage.add_primary("primary", "Primary", p_old)
+    lineage.add_sensitivity("sens_firth", "primary", "Firth sensitivity", c_firth)
+    lineage.add_sensitivity("sens_m10", "primary", "MICE m=10", c_m10)
+
+    updated_primary = {
+        "model": {"estimator": "logistic"},
+        "missing_strategy": "mice",
+        "m": 5,
+    }
+    with pytest.raises(ValueError, match="Conflict on 'sens_m10' key 'm'"):
+        _reconcile_provisional_primary(lineage, updated_primary)
+
+    # Original lineage—including the earlier non-conflicting Firth sibling—remains intact.
+    assert [n.node_id for n in lineage.nodes] == ["primary", "sens_firth", "sens_m10"]
+    assert lineage._get("primary").plan == p_old
+    assert lineage._get("primary").plan_sha256 == hash_plan(p_old)
+    assert lineage._get("sens_firth").plan == c_firth
+    assert lineage._get("sens_m10").plan == c_m10
+    assert lineage.violations() == []
