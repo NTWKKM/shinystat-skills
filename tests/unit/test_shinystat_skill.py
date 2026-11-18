@@ -1661,10 +1661,16 @@ def test_analysis_lineage_and_gate7_adr87():
         local_audit_end,
     )
     cloud_audit_section = proto_text[local_audit_end:cloud_audit_end]
-    assert "verify_standalone_integrity" in cloud_audit_section
+    cloud_pass_clause = re.search(
+        r"\bpasses\b(?:(?!\.\s).)*?\bto\s+`verify_standalone_integrity`",
+        cloud_audit_section,
+    )
+    assert cloud_pass_clause is not None, (
+        "Missing sentence passing verifier inputs to verify_standalone_integrity"
+    )
     for arg in ("manifest=manifest", "lineage=lineage", "data=df_analyzed"):
-        assert arg in cloud_audit_section, (
-            f"Missing '{arg}' in cloud verify_standalone_integrity section"
+        assert arg in cloud_pass_clause.group(0), (
+            f"Missing '{arg}' in cloud verify_standalone_integrity pass clause"
         )
     assert re.search(
         r"(?<!\bnot\s)(?<!\bnever\s)\breapply each provisional child's intended methodological change\b",
