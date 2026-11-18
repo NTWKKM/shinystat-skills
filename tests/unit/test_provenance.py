@@ -20,6 +20,7 @@ from medstat.reporting.provenance import (
     LineageError,
     RepairCapExceededError,
     RunManifest,
+    _values_equal,
     add_reproducibility_appendix,
     build_run_manifest,
     hash_dataframe,
@@ -430,11 +431,17 @@ def test_reproducibility_appendix_and_integrity_checks(tmp_path: Path):
     assert audit_phi.phi_violations
 
 
-def _get_nested(mapping: dict, dotted_key: str, default=None):
+_MISSING = object()
+_BLOCKED = object()
+
+
+def _get_nested(mapping: dict, dotted_key: str):
     cur = mapping
     for part in dotted_key.split("."):
-        if not isinstance(cur, dict) or part not in cur:
-            return default
+        if not isinstance(cur, dict):
+            return _BLOCKED
+        if part not in cur:
+            return _MISSING
         cur = cur[part]
     return cur
 
@@ -443,8 +450,12 @@ def _set_nested(mapping: dict, dotted_key: str, value) -> None:
     parts = dotted_key.split(".")
     cur = mapping
     for part in parts[:-1]:
-        if part not in cur or not isinstance(cur[part], dict):
+        if part not in cur:
             cur[part] = {}
+        elif not isinstance(cur[part], dict):
+            raise ValueError(
+                f"Blocked nested path '{dotted_key}': intermediate '{part}' is {type(cur[part]).__name__}."
+            )
         cur = cur[part]
     cur[parts[-1]] = copy.deepcopy(value)
 
@@ -453,11 +464,32 @@ def _del_nested(mapping: dict, dotted_key: str) -> None:
     parts = dotted_key.split(".")
     cur = mapping
     for part in parts[:-1]:
-        if not isinstance(cur, dict) or part not in cur:
+        if part not in cur:
             return
+        if not isinstance(cur[part], dict):
+            raise ValueError(
+                f"Blocked nested path '{dotted_key}': intermediate '{part}' is {type(cur[part]).__name__}."
+            )
         cur = cur[part]
-    if isinstance(cur, dict):
-        cur.pop(parts[-1], None)
+    cur.pop(parts[-1], None)
+
+
+def _primary_descendant_ids(lineage: AnalysisLineage) -> list[str]:
+    """Collect node_ids of primary descendants in topological order by ancestry."""
+    descendants: set[str] = set()
+    ordered: list[str] = []
+    # Fixed-point pass handles any node ordering; preserves node order when topological.
+    changed = True
+    while changed:
+        changed = False
+        for node in lineage.nodes:
+            if node.node_id == "primary" or node.node_id in descendants:
+                continue
+            if node.parent_id == "primary" or node.parent_id in descendants:
+                descendants.add(node.node_id)
+                ordered.append(node.node_id)
+                changed = True
+    return ordered
 
 
 def _reconcile_provisional_primary(
@@ -465,12 +497,15 @@ def _reconcile_provisional_primary(
 ) -> None:
     """Reconcile a provisional primary and all provisional descendants in topological order.
 
-    Halts with ValueError before committing any mutation if an answered descendant exists
-    or if a provisional child's intended change conflicts with its updated parent plan.
+    Selects targets by ancestry (leaving unrelated roots untouched) and halts with
+    ValueError before committing any mutation if an answered descendant exists, a nested
+    path is blocked by a scalar, or a provisional child conflicts with its updated parent.
     """
     primary = lineage._get("primary")
+    descendant_ids = _primary_descendant_ids(lineage)
+    descendant_set = set(descendant_ids)
     if primary.status != "provisional" or any(
-        n.status == "answered" for n in lineage.nodes[1:]
+        lineage._get(nid).status == "answered" for nid in descendant_ids
     ):
         raise ValueError(
             "Cannot reconcile in place when primary or any descendant is answered."
@@ -484,9 +519,10 @@ def _reconcile_provisional_primary(
     updated_deltas: dict[str, dict] = {"primary": {}}
     retired: set[str] = set()
     reparent_to: dict[str, str] = {}
-    kept_ids: list[str] = ["primary"]
+    kept_descendants: set[str] = set()
 
-    for node in lineage.nodes[1:]:
+    for nid in descendant_ids:
+        node = lineage._get(nid)
         orig_parent_id = node.parent_id or ""
         target_parent_id = orig_parent_id
         was_reparented = False
@@ -511,12 +547,20 @@ def _reconcile_provisional_primary(
         reapplied = copy.deepcopy(new_parent_plan)
 
         for dotted_key, (_, child_val) in node.plan_delta.items():
-            old_pval = _get_nested(old_parent_plan, dotted_key, "<absent>")
-            new_pval = _get_nested(new_parent_plan, dotted_key, "<absent>")
-            if old_pval != new_pval and new_pval != child_val:
+            old_pval = _get_nested(old_parent_plan, dotted_key)
+            new_pval = _get_nested(new_parent_plan, dotted_key)
+            if old_pval is _BLOCKED or new_pval is _BLOCKED:
+                raise ValueError(
+                    f"Blocked path '{dotted_key}' on '{node.node_id}': scalar blocks nested replay."
+                )
+            old_cmp = "<absent>" if old_pval is _MISSING else old_pval
+            new_cmp = "<absent>" if new_pval is _MISSING else new_pval
+            if not _values_equal(old_cmp, new_cmp) and not _values_equal(
+                new_cmp, child_val
+            ):
                 raise ValueError(
                     f"Conflict on '{node.node_id}' key '{dotted_key}': "
-                    f"parent changed {old_pval!r} -> {new_pval!r}, child had {child_val!r}."
+                    f"parent changed {old_cmp!r} -> {new_cmp!r}, child had {child_val!r}."
                 )
             if child_val == "<absent>":
                 _del_nested(reapplied, dotted_key)
@@ -533,24 +577,28 @@ def _reconcile_provisional_primary(
         updated_plans[node.node_id] = reapplied
         updated_parents[node.node_id] = target_parent_id
         updated_deltas[node.node_id] = new_delta
-        kept_ids.append(node.node_id)
+        kept_descendants.add(node.node_id)
 
-    # Commit atomically only after validation succeeds.
+    # Commit atomically only after validation succeeds; keep unrelated roots unchanged.
     primary.plan = updated_plans["primary"]
     primary.plan_sha256 = hash_plan(primary.plan)
-    kept_nodes: list[AnalysisNode] = [primary]
-    for nid in kept_ids[1:]:
-        n = lineage._get(nid)
-        n.parent_id = updated_parents[nid]
-        n.plan = updated_plans[nid]
-        n.plan_sha256 = hash_plan(n.plan)
-        n.plan_delta = updated_deltas[nid]
-        kept_nodes.append(n)
+    kept_nodes: list[AnalysisNode] = []
+    for n in lineage.nodes:
+        if n.node_id == "primary":
+            kept_nodes.append(primary)
+        elif n.node_id not in descendant_set:
+            kept_nodes.append(n)
+        elif n.node_id in kept_descendants:
+            n.parent_id = updated_parents[n.node_id]
+            n.plan = updated_plans[n.node_id]
+            n.plan_sha256 = hash_plan(n.plan)
+            n.plan_delta = updated_deltas[n.node_id]
+            kept_nodes.append(n)
     lineage.nodes = kept_nodes
 
 
 def test_provisional_primary_reconciliation_retains_child_and_reconciles_grandchild():
-    """Topological reconciliation updates retained children, their grandchildren, and retired-child descendants."""
+    """Topological reconciliation updates retained children, their grandchildren, retired-child descendants, and preserves unrelated roots."""
     lineage = AnalysisLineage()
     p_old = {
         "model": {"estimator": "logistic"},
@@ -597,7 +645,12 @@ def test_provisional_primary_reconciliation_retains_child_and_reconciles_grandch
         "seed": 2,
         "subgroup": "female",
     }
+    exp_plan = {"model": {"estimator": "logistic"}, "subgroup": "exploratory_only"}
 
+    lineage.add_exploratory(
+        "exp_root", "Exploratory (hypothesis-generating) baseline check", exp_plan
+    )
+    lineage.mark_answered("exp_root", "OR 1.05 (95% CI 0.50-2.20, P = 0.89)")
     lineage.add_primary("primary", "Primary effect", p_old)
     lineage.add_sensitivity("sens_firth", "primary", "Firth sensitivity", c_firth)
     lineage.add_sensitivity(
@@ -625,11 +678,15 @@ def test_provisional_primary_reconciliation_retains_child_and_reconciles_grandch
     _reconcile_provisional_primary(lineage, updated_primary)
 
     assert [n.node_id for n in lineage.nodes] == [
+        "exp_root",
         "primary",
         "sens_firth",
         "sens_firth_trim",
         "sens_mice_sub",
     ]
+    exp_node = lineage._get("exp_root")
+    assert exp_node.status == "answered"
+    assert exp_node.plan == exp_plan
     primary = lineage._get("primary")
     assert primary.failed_attempts == []
 
@@ -669,6 +726,7 @@ def test_provisional_primary_reconciliation_retains_child_and_reconciles_grandch
     doc = ReportDocument(
         title="Topological Lineage Reconciliation",
         results_dict={
+            "exp_root": {"or": 1.05, "ci_l": 0.50, "ci_u": 2.20, "p": 0.89},
             "primary": {"or": 1.10, "ci_l": 0.69, "ci_u": 1.77, "p": 0.69},
             "sens_firth": {"or": 1.12, "ci_l": 0.70, "ci_u": 1.80, "p": 0.64},
             "sens_firth_trim": {"or": 1.15, "ci_l": 0.71, "ci_u": 1.85, "p": 0.58},
@@ -688,22 +746,26 @@ def test_provisional_primary_reconciliation_retains_child_and_reconciles_grandch
 
 
 def test_provisional_primary_reconciliation_halts_on_conflict():
-    """Conflicting child change (m=10 vs updated primary m=5) halts before mutating lineage."""
+    """Conflicting child change (m=10 vs m=5), typed bool-vs-int conflict, and scalar-blocked path halt atomically."""
+    # 1. Numeric parameter conflict (m=None -> child m=10 vs updated primary m=5)
     lineage = AnalysisLineage()
     p_old = {
         "model": {"estimator": "logistic"},
         "missing_strategy": "complete-case",
         "m": None,
+        "flag": False,
     }
     c_firth = {
         "model": {"estimator": "firth"},
         "missing_strategy": "complete-case",
         "m": None,
+        "flag": False,
     }
     c_m10 = {
         "model": {"estimator": "logistic"},
         "missing_strategy": "mice",
         "m": 10,
+        "flag": False,
     }
     lineage.add_primary("primary", "Primary", p_old)
     lineage.add_sensitivity("sens_firth", "primary", "Firth sensitivity", c_firth)
@@ -713,14 +775,41 @@ def test_provisional_primary_reconciliation_halts_on_conflict():
         "model": {"estimator": "logistic"},
         "missing_strategy": "mice",
         "m": 5,
+        "flag": False,
     }
     with pytest.raises(ValueError, match="Conflict on 'sens_m10' key 'm'"):
         _reconcile_provisional_primary(lineage, updated_primary)
 
-    # Original lineage—including the earlier non-conflicting Firth sibling—remains intact.
     assert [n.node_id for n in lineage.nodes] == ["primary", "sens_firth", "sens_m10"]
     assert lineage._get("primary").plan == p_old
     assert lineage._get("primary").plan_sha256 == hash_plan(p_old)
     assert lineage._get("sens_firth").plan == c_firth
     assert lineage._get("sens_m10").plan == c_m10
     assert lineage.violations() == []
+
+    # 2. Typed bool-vs-int conflict (old flag=False, child flag=True, updated parent flag=1)
+    lineage_typed = AnalysisLineage()
+    c_flag_true = copy.deepcopy(p_old) | {"flag": True}
+    lineage_typed.add_primary("primary", "Primary", p_old)
+    lineage_typed.add_sensitivity("sens_firth", "primary", "Firth sensitivity", c_firth)
+    lineage_typed.add_sensitivity("sens_flag", "primary", "Bool flag", c_flag_true)
+
+    updated_int_flag = copy.deepcopy(p_old) | {"flag": 1}
+    with pytest.raises(ValueError, match="Conflict on 'sens_flag' key 'flag'"):
+        _reconcile_provisional_primary(lineage_typed, updated_int_flag)
+    assert lineage_typed._get("primary").plan == p_old
+    assert lineage_typed._get("sens_firth").plan == c_firth
+    assert lineage_typed._get("sens_flag").plan == c_flag_true
+
+    # 3. Scalar-blocked nested path (parent collapses dict 'model' -> scalar 'logistic')
+    updated_scalar_model = {
+        "model": "logistic",
+        "missing_strategy": "complete-case",
+        "m": None,
+        "flag": False,
+    }
+    with pytest.raises(ValueError, match="Blocked path 'model.estimator'"):
+        _reconcile_provisional_primary(lineage_typed, updated_scalar_model)
+    assert lineage_typed._get("primary").plan == p_old
+    assert lineage_typed._get("sens_firth").plan == c_firth
+    assert lineage_typed.violations() == []

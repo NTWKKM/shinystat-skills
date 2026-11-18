@@ -1565,8 +1565,15 @@ def test_analysis_lineage_and_gate7_adr87():
         encoding="utf-8"
     )
     for text in (local_skill, cloud_skill):
-        assert "exempt from plotting" in text
-        assert "NaN" in text and "fail-closed reason" in text
+        render_start = text.index("5. **Render**:")
+        render_end = text.index("6. **Audit**:", render_start)
+        render_step = text[render_start:render_end]
+        assert re.search(
+            r"exempt from plotting[^)]*(?:provided|if)[^)]*`?NaN`?[^)]*fail-closed reason",
+            render_step,
+        ), (
+            f"Expected conditional NaN/fail-closed plotting exemption in Render step:\n{render_step}"
+        )
 
     proto_text = (
         repo_root / "skills" / "_shared" / "references" / "subagent-protocol.md"
@@ -1577,8 +1584,6 @@ def test_analysis_lineage_and_gate7_adr87():
         "<run_output_dir>/run_manifest.json",
         "<run_output_dir>/analysis_lineage.json",
         "analyzed_cohort.parquet",
-        "manifest=manifest, lineage=lineage",
-        "data=df_analyzed",
         "has_manifest == True",
         "len(lineage_violations) == 0",
         "Gate #7",
@@ -1598,10 +1603,20 @@ def test_analysis_lineage_and_gate7_adr87():
         "recompute `plan_delta = plan_delta(updated_primary_plan, child.plan)`",
         "Do **not** edit `primary`, update or reparent answered descendants",
         "missing-parent",
-        "record the Firth fit as a `sensitivity` child node",
-        "`answered` descendant at any depth",
+        "as a `sensitivity` child node",
+        "category value type",
+        "launch a **fresh Subagent B execution**",
     ):
         assert needle in proto_text, f"Missing '{needle}' in subagent-protocol.md"
+
+    single_start = proto_text.index("1. **Single-Branch Execution Halt**:")
+    single_end = proto_text.index(
+        "2. **Parallel Sibling Completion & Single-Turn Halt Aggregation**:",
+        single_start,
+    )
+    single_branch_section = proto_text[single_start:single_end]
+    assert "`answered` descendant at any depth" in single_branch_section
+
     reconcile_start = proto_text.index(
         "**Gate #1–#4 Decision & Provenance Reconciliation**"
     )
@@ -1609,14 +1624,47 @@ def test_analysis_lineage_and_gate7_adr87():
         "**Gate #6 Citation Decision Contract**", reconcile_start
     )
     reconcile_section = proto_text[reconcile_start:reconcile_end]
+    assert "`answered` descendant at any depth" in reconcile_section
     for affirmative in (
         "when an intermediate parent is retained with an updated plan",
         "reparent a provisional descendant to the retired child's parent only when its lineage remains valid",
         "already has an `answered` sensitivity child or descendant",
         "directly into the new run's `<output_dir>/run_<new_run_id>/sap_handoff.json`",
+        "stage and validate",
+        "preprocessing_provenance",
+        "recorded plan and cohort match its owning node",
+        "covariate removal/collapse",
     ):
         assert affirmative in reconcile_section, (
             f"Missing '{affirmative}' in Gate #1-#4 reconciliation section"
+        )
+
+    local_audit_start = proto_text.index("**In `shinystat` (Local Engine)**:")
+    local_audit_end = proto_text.index(
+        "**In `shinystat-cloud` (Standalone Cloud Sandbox)**:", local_audit_start
+    )
+    local_audit_section = proto_text[local_audit_start:local_audit_end]
+    local_doc_call = re.search(r"ReportDocument\([^)]*\)", local_audit_section)
+    assert local_doc_call is not None, "Missing ReportDocument(...) call"
+    for arg in ("manifest=manifest", "lineage=lineage"):
+        assert arg in local_doc_call.group(0), (
+            f"Missing '{arg}' in local ReportDocument(...) call"
+        )
+    local_call = re.search(r"verify_report_integrity\([^)]*\)", local_audit_section)
+    assert local_call is not None, "Missing verify_report_integrity(...) call"
+    assert "data=df_analyzed" in local_call.group(0), (
+        "Missing 'data=df_analyzed' in local verify_report_integrity(...) call"
+    )
+
+    cloud_audit_end = proto_text.index(
+        "**Independent Table-to-Results Numerical Reconciliation Audit**:",
+        local_audit_end,
+    )
+    cloud_audit_section = proto_text[local_audit_end:cloud_audit_end]
+    assert "verify_standalone_integrity" in cloud_audit_section
+    for arg in ("manifest=manifest", "lineage=lineage", "data=df_analyzed"):
+        assert arg in cloud_audit_section, (
+            f"Missing '{arg}' in cloud verify_standalone_integrity section"
         )
     assert re.search(
         r"(?<!\bnot\s)(?<!\bnever\s)\breapply each provisional child's intended methodological change\b",
