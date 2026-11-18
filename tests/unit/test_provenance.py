@@ -554,7 +554,7 @@ def _reconcile_provisional_primary(
         deletions: list[str] = []
         writes: list[tuple[str, object]] = []
 
-        for dotted_key in node.plan_delta:
+        for dotted_key in plan_delta(old_parent_plan, old_child_plan):
             old_pval = _get_nested(old_parent_plan, dotted_key)
             new_pval = _get_nested(new_parent_plan, dotted_key)
             if old_pval is _BLOCKED or new_pval is _BLOCKED:
@@ -772,29 +772,55 @@ def test_provisional_primary_reconciliation_retains_child_and_reconciles_grandch
     assert lin_del_write.violations() == []
 
     # Legacy artifact compatibility: a pre-fix persisted node that omitted a literal "<absent>"
-    # deletion/addition key while recording valid non-empty deltas passes violations(), whereas
-    # tampered or empty stored deltas are still flagged stale.
+    # deletion/addition key while recording valid non-empty deltas passes violations() AND replays
+    # its omitted deletion via plan_delta(old_parent_plan, old_child_plan), whereas tampered or
+    # empty stored deltas are still flagged stale.
     lin_legacy = AnalysisLineage()
     lin_legacy.add_primary(
         "primary",
         "Primary",
-        {"model": {"estimator": "logistic"}, "note": "<absent>"},
+        {
+            "model": {"estimator": "logistic"},
+            "note": "<absent>",
+            "missing": "complete-case",
+        },
     )
     lin_legacy.add_sensitivity(
         "sens_legacy",
         "primary",
         "Legacy Firth without literal-<absent> delta entry",
-        {"model": {"estimator": "firth"}},
+        {"model": {"estimator": "firth"}, "missing": "complete-case"},
     )
     lin_legacy._get("sens_legacy").plan_delta = {
         "model.estimator": ("logistic", "firth")
     }
     assert lin_legacy.violations() == []
 
+    # Check tampered/empty guards before mutating via replay
     lin_legacy._get("sens_legacy").plan_delta = {"model.estimator": ("wrong", "firth")}
     assert any("stale plan_delta" in v for v in lin_legacy.violations())
     lin_legacy._get("sens_legacy").plan_delta = {}
     assert any("stale plan_delta" in v for v in lin_legacy.violations())
+
+    # Restore valid legacy delta, replay primary change, and verify omitted "note" deletion holds
+    lin_legacy._get("sens_legacy").plan_delta = {
+        "model.estimator": ("logistic", "firth")
+    }
+    _reconcile_provisional_primary(
+        lin_legacy,
+        {
+            "model": {"estimator": "logistic"},
+            "note": "<absent>",
+            "missing": "mice",
+        },
+    )
+    replayed_legacy = lin_legacy._get("sens_legacy")
+    assert replayed_legacy.plan == {"model": {"estimator": "firth"}, "missing": "mice"}
+    assert replayed_legacy.plan_delta == {
+        "model.estimator": ("logistic", "firth"),
+        "note": ("<absent>", "<absent>"),
+    }
+    assert lin_legacy.violations() == []
 
     assert lineage.violations() == []
     lineage.mark_answered("primary", "OR 1.10 (95% CI 0.69-1.77, P = 0.69)")
