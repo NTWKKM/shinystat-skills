@@ -1594,6 +1594,9 @@ def test_analysis_lineage_and_gate7_adr87():
         "missing-value mask",
         'checkpoint_state_biostat_execution.json["analyzed_data_path"]',
         "do **not** reconcile Gate #4 provenance or edit the primary node",
+        "guaranteeing that `manifest_path` and `lineage_path` in the checkpoint refer to existing files",
+        "recompute `plan_delta = plan_delta(updated_primary_plan, child.plan)`",
+        "do **not** edit the `primary` node or overwrite the existing `<run_output_dir>/run_manifest.json`",
     ):
         assert needle in proto_text, f"Missing '{needle}' in subagent-protocol.md"
     assert "apply_user_repaired_plan" not in proto_text
