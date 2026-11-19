@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from medstat.reporting.provenance import (
     LineageError,
     RepairCapExceededError,
     RunManifest,
+    _values_equal,
     add_reproducibility_appendix,
     build_run_manifest,
     hash_dataframe,
@@ -427,3 +429,509 @@ def test_reproducibility_appendix_and_integrity_checks(tmp_path: Path):
     audit_phi = verify_report_integrity(doc_phi, data=df)
     assert audit_phi.passed is False
     assert audit_phi.phi_violations
+
+
+_MISSING = object()
+_BLOCKED = object()
+
+
+def _get_nested(mapping: dict, dotted_key: str):
+    cur = mapping
+    for part in dotted_key.split("."):
+        if not isinstance(cur, dict):
+            return _BLOCKED
+        if part not in cur:
+            return _MISSING
+        cur = cur[part]
+    return cur
+
+
+def _set_nested(mapping: dict, dotted_key: str, value) -> None:
+    parts = dotted_key.split(".")
+    cur = mapping
+    for part in parts[:-1]:
+        if part not in cur:
+            cur[part] = {}
+        elif not isinstance(cur[part], dict):
+            raise ValueError(
+                f"Blocked nested path '{dotted_key}': intermediate '{part}' is {type(cur[part]).__name__}."
+            )
+        cur = cur[part]
+    cur[parts[-1]] = copy.deepcopy(value)
+
+
+def _del_nested(mapping: dict, dotted_key: str) -> None:
+    parts = dotted_key.split(".")
+    cur = mapping
+    for part in parts[:-1]:
+        if part not in cur:
+            return
+        if not isinstance(cur[part], dict):
+            raise ValueError(
+                f"Blocked nested path '{dotted_key}': intermediate '{part}' is {type(cur[part]).__name__}."
+            )
+        cur = cur[part]
+    cur.pop(parts[-1], None)
+
+
+def _primary_descendant_ids(lineage: AnalysisLineage) -> list[str]:
+    """Collect node_ids of primary descendants in topological order by ancestry."""
+    descendants: set[str] = set()
+    ordered: list[str] = []
+    # Fixed-point pass handles any node ordering; preserves node order when topological.
+    changed = True
+    while changed:
+        changed = False
+        for node in lineage.nodes:
+            if node.node_id == "primary" or node.node_id in descendants:
+                continue
+            if node.parent_id == "primary" or node.parent_id in descendants:
+                descendants.add(node.node_id)
+                ordered.append(node.node_id)
+                changed = True
+    return ordered
+
+
+def _reconcile_provisional_primary(
+    lineage: AnalysisLineage, updated_primary: dict
+) -> None:
+    """Reconcile a provisional primary and all provisional descendants in topological order.
+
+    Selects targets by ancestry (leaving unrelated roots untouched) and halts with
+    ValueError before committing any mutation if an answered descendant exists, a nested
+    path is blocked by a scalar, or a provisional child conflicts with its updated parent.
+    """
+    primary = lineage._get("primary")
+    descendant_ids = _primary_descendant_ids(lineage)
+    descendant_set = set(descendant_ids)
+    if primary.status != "provisional" or any(
+        lineage._get(nid).status == "answered" for nid in descendant_ids
+    ):
+        raise ValueError(
+            "Cannot reconcile in place when primary or any descendant is answered."
+        )
+
+    old_plans: dict[str, dict] = {
+        n.node_id: copy.deepcopy(n.plan) for n in lineage.nodes
+    }
+    updated_plans: dict[str, dict] = {"primary": copy.deepcopy(updated_primary)}
+    updated_parents: dict[str, str | None] = {"primary": None}
+    updated_deltas: dict[str, dict] = {"primary": {}}
+    retired: set[str] = set()
+    reparent_to: dict[str, str] = {}
+    kept_descendants: set[str] = set()
+
+    for nid in descendant_ids:
+        node = lineage._get(nid)
+        orig_parent_id = node.parent_id or ""
+        target_parent_id = orig_parent_id
+        was_reparented = False
+        if orig_parent_id in retired:
+            if orig_parent_id not in reparent_to:
+                retired.add(node.node_id)
+                continue
+            target_parent_id = reparent_to[orig_parent_id]
+            was_reparented = True
+
+        if target_parent_id not in updated_plans:
+            retired.add(node.node_id)
+            continue
+
+        parent_node = lineage._get(target_parent_id)
+        if parent_node.role == "exploratory":
+            retired.add(node.node_id)
+            continue
+
+        new_parent_plan = updated_plans[target_parent_id]
+        old_parent_plan = old_plans[orig_parent_id]
+        old_child_plan = old_plans[node.node_id]
+
+        def _plan_vals_equal(a, b) -> bool:
+            if a is _MISSING or b is _MISSING:
+                return a is _MISSING and b is _MISSING
+            return _values_equal(a, b)
+
+        deletions: list[str] = []
+        writes: list[tuple[str, object]] = []
+
+        for dotted_key in plan_delta(old_parent_plan, old_child_plan):
+            old_pval = _get_nested(old_parent_plan, dotted_key)
+            new_pval = _get_nested(new_parent_plan, dotted_key)
+            if old_pval is _BLOCKED or new_pval is _BLOCKED:
+                raise ValueError(
+                    f"Blocked path '{dotted_key}' on '{node.node_id}': scalar blocks nested replay."
+                )
+            target_cval = _get_nested(old_child_plan, dotted_key)
+            if target_cval is _BLOCKED:
+                target_cval = _MISSING
+            if not _plan_vals_equal(old_pval, new_pval) and not _plan_vals_equal(
+                new_pval, target_cval
+            ):
+                old_disp = "<absent>" if old_pval is _MISSING else old_pval
+                new_disp = "<absent>" if new_pval is _MISSING else new_pval
+                child_disp = "<absent>" if target_cval is _MISSING else target_cval
+                raise ValueError(
+                    f"Conflict on '{node.node_id}' key '{dotted_key}': "
+                    f"parent changed {old_disp!r} -> {new_disp!r}, child had {child_disp!r}."
+                )
+            if target_cval is _MISSING:
+                deletions.append(dotted_key)
+            else:
+                writes.append((dotted_key, target_cval))
+
+        reapplied = copy.deepcopy(new_parent_plan)
+        for dotted_key in deletions:
+            _del_nested(reapplied, dotted_key)
+        for dotted_key, target_cval in writes:
+            _set_nested(reapplied, dotted_key, target_cval)
+
+        new_delta = plan_delta(new_parent_plan, reapplied)
+        if not new_delta:
+            retired.add(node.node_id)
+            if not was_reparented:
+                reparent_to[node.node_id] = target_parent_id
+            continue
+
+        updated_plans[node.node_id] = reapplied
+        updated_parents[node.node_id] = target_parent_id
+        updated_deltas[node.node_id] = new_delta
+        kept_descendants.add(node.node_id)
+
+    # Commit atomically only after validation succeeds; keep unrelated roots unchanged.
+    primary.plan = updated_plans["primary"]
+    primary.plan_sha256 = hash_plan(primary.plan)
+    kept_nodes: list[AnalysisNode] = []
+    for n in lineage.nodes:
+        if n.node_id == "primary":
+            kept_nodes.append(primary)
+        elif n.node_id not in descendant_set:
+            kept_nodes.append(n)
+        elif n.node_id in kept_descendants:
+            n.parent_id = updated_parents[n.node_id]
+            n.plan = updated_plans[n.node_id]
+            n.plan_sha256 = hash_plan(n.plan)
+            n.plan_delta = updated_deltas[n.node_id]
+            kept_nodes.append(n)
+    lineage.nodes = kept_nodes
+
+
+def test_provisional_primary_reconciliation_retains_child_and_reconciles_grandchild():
+    """Topological reconciliation updates retained children, their grandchildren, retired-child descendants, and preserves unrelated roots."""
+    lineage = AnalysisLineage()
+    p_old = {
+        "model": {"estimator": "logistic"},
+        "missing_strategy": "complete-case",
+        "m": None,
+        "seed": 1,
+    }
+    c_firth = {
+        "model": {"estimator": "firth"},
+        "missing_strategy": "complete-case",
+        "m": None,
+        "seed": 1,
+    }
+    g_firth_trim = {
+        "model": {"estimator": "firth"},
+        "missing_strategy": "complete-case",
+        "m": None,
+        "seed": 1,
+        "trim": True,
+    }
+    c_mice = {
+        "model": {"estimator": "logistic"},
+        "missing_strategy": "mice",
+        "m": 5,
+        "seed": 1,
+    }
+    g_mice_sub = {
+        "model": {"estimator": "logistic"},
+        "missing_strategy": "mice",
+        "m": 5,
+        "seed": 1,
+        "subgroup": "elderly",
+    }
+    g_mice_seed2 = {
+        "model": {"estimator": "logistic"},
+        "missing_strategy": "mice",
+        "m": 5,
+        "seed": 2,
+    }
+    gg_mice_seed2_sub = {
+        "model": {"estimator": "logistic"},
+        "missing_strategy": "mice",
+        "m": 5,
+        "seed": 2,
+        "subgroup": "female",
+    }
+    exp_plan = {"model": {"estimator": "logistic"}, "subgroup": "exploratory_only"}
+
+    lineage.add_exploratory(
+        "exp_root", "Exploratory (hypothesis-generating) baseline check", exp_plan
+    )
+    lineage.mark_answered("exp_root", "OR 1.05 (95% CI 0.50-2.20, P = 0.89)")
+    lineage.add_primary("primary", "Primary effect", p_old)
+    lineage.add_sensitivity("sens_firth", "primary", "Firth sensitivity", c_firth)
+    lineage.add_sensitivity(
+        "sens_firth_trim", "sens_firth", "Trimmed Firth", g_firth_trim
+    )
+    lineage.add_sensitivity("sens_mice", "primary", "MICE sensitivity", c_mice)
+    lineage.add_sensitivity(
+        "sens_mice_sub", "sens_mice", "Elderly MICE subgroup", g_mice_sub
+    )
+    lineage.add_sensitivity("sens_mice_seed2", "sens_mice", "MICE seed 2", g_mice_seed2)
+    lineage.add_sensitivity(
+        "sens_mice_seed2_sub",
+        "sens_mice_seed2",
+        "Female MICE seed 2 subgroup",
+        gg_mice_seed2_sub,
+    )
+
+    # Gate #4 switches provisional primary to MICE (m=5, seed=2) without calling repair().
+    updated_primary = {
+        "model": {"estimator": "logistic"},
+        "missing_strategy": "mice",
+        "m": 5,
+        "seed": 2,
+    }
+    _reconcile_provisional_primary(lineage, updated_primary)
+
+    assert [n.node_id for n in lineage.nodes] == [
+        "exp_root",
+        "primary",
+        "sens_firth",
+        "sens_firth_trim",
+        "sens_mice_sub",
+    ]
+    exp_node = lineage._get("exp_root")
+    assert exp_node.status == "answered"
+    assert exp_node.plan == exp_plan
+    primary = lineage._get("primary")
+    assert primary.failed_attempts == []
+
+    # Retained child inherited MICE (m=5, seed=2) while keeping nested Firth estimator.
+    firth_node = lineage._get("sens_firth")
+    assert firth_node.parent_id == "primary"
+    assert firth_node.plan == updated_primary | {"model": {"estimator": "firth"}}
+    assert "model.estimator" not in firth_node.plan
+    assert firth_node.plan_delta == {"model.estimator": ("logistic", "firth")}
+
+    # Grandchild of retained child inherited MICE (m=5, seed=2) AND nested Firth.
+    firth_trim_node = lineage._get("sens_firth_trim")
+    assert firth_trim_node.parent_id == "sens_firth"
+    assert firth_trim_node.plan == updated_primary | {
+        "model": {"estimator": "firth"},
+        "trim": True,
+    }
+    assert "model.estimator" not in firth_trim_node.plan
+    assert firth_trim_node.plan_delta == {"trim": ("<absent>", True)}
+
+    # Grandchild of retired sens_mice was reparented to primary with clean delta,
+    # whereas sens_mice_seed2 (differing only by seed=2) and its subgroup child were removed.
+    mice_sub_node = lineage._get("sens_mice_sub")
+    assert mice_sub_node.parent_id == "primary"
+    assert mice_sub_node.plan == updated_primary | {"subgroup": "elderly"}
+    assert mice_sub_node.plan_delta == {"subgroup": ("<absent>", "elderly")}
+
+    # Literal "<absent>" value vs deleted/added key produces non-empty delta,
+    # and deleting a nested path before writing a parent scalar succeeds when both parents share the dict.
+    assert plan_delta({"note": "<absent>"}, {}) != {}
+    assert plan_delta({}, {"note": "<absent>"}) != {}
+
+    lin_del_write = AnalysisLineage()
+    lin_del_write.add_primary(
+        "primary",
+        "Primary",
+        {"model": {"estimator": "logistic", "trim": True}, "missing": "complete-case"},
+    )
+    lin_del_write.add_sensitivity(
+        "sens_cox",
+        "primary",
+        "Switch model dict to scalar cox",
+        {"model": "cox", "missing": "complete-case"},
+    )
+    lin_del_write.add_sensitivity(
+        "sens_note",
+        "primary",
+        "Add extra note when both parents omit it",
+        {
+            "model": {"estimator": "logistic", "trim": True},
+            "missing": "complete-case",
+            "extra": "note",
+        },
+    )
+    _reconcile_provisional_primary(
+        lin_del_write,
+        {"model": {"estimator": "logistic", "trim": True}, "missing": "mice"},
+    )
+    assert lin_del_write._get("sens_cox").plan == {"model": "cox", "missing": "mice"}
+    assert lin_del_write._get("sens_note").plan == {
+        "model": {"estimator": "logistic", "trim": True},
+        "missing": "mice",
+        "extra": "note",
+    }
+    assert lin_del_write.violations() == []
+
+    # Legacy artifact compatibility: a pre-fix persisted node that omitted a literal "<absent>"
+    # deletion/addition key while recording valid non-empty deltas passes violations() AND replays
+    # its omitted deletion via plan_delta(old_parent_plan, old_child_plan), whereas tampered or
+    # empty stored deltas are still flagged stale.
+    lin_legacy = AnalysisLineage()
+    lin_legacy.add_primary(
+        "primary",
+        "Primary",
+        {
+            "model": {"estimator": "logistic"},
+            "note": "<absent>",
+            "missing": "complete-case",
+        },
+    )
+    lin_legacy.add_sensitivity(
+        "sens_legacy",
+        "primary",
+        "Legacy Firth without literal-<absent> delta entry",
+        {"model": {"estimator": "firth"}, "missing": "complete-case"},
+    )
+    lin_legacy._get("sens_legacy").plan_delta = {
+        "model.estimator": ("logistic", "firth")
+    }
+    assert lin_legacy.violations() == []
+
+    # Check tampered/empty guards before mutating via replay
+    lin_legacy._get("sens_legacy").plan_delta = {"model.estimator": ("wrong", "firth")}
+    assert any("stale plan_delta" in v for v in lin_legacy.violations())
+    lin_legacy._get("sens_legacy").plan_delta = {}
+    assert any("stale plan_delta" in v for v in lin_legacy.violations())
+
+    # Restore valid legacy delta, replay primary change, and verify omitted "note" deletion holds
+    lin_legacy._get("sens_legacy").plan_delta = {
+        "model.estimator": ("logistic", "firth")
+    }
+    _reconcile_provisional_primary(
+        lin_legacy,
+        {
+            "model": {"estimator": "logistic"},
+            "note": "<absent>",
+            "missing": "mice",
+        },
+    )
+    replayed_legacy = lin_legacy._get("sens_legacy")
+    assert replayed_legacy.plan == {"model": {"estimator": "firth"}, "missing": "mice"}
+    assert replayed_legacy.plan_delta == {
+        "model.estimator": ("logistic", "firth"),
+        "note": ("<absent>", "<absent>"),
+    }
+    assert lin_legacy.violations() == []
+
+    assert lineage.violations() == []
+    lineage.mark_answered("primary", "OR 1.10 (95% CI 0.69-1.77, P = 0.69)")
+    lineage.mark_answered("sens_firth", "OR 1.12 (95% CI 0.70-1.80, P = 0.64)")
+    lineage.mark_answered("sens_firth_trim", "OR 1.15 (95% CI 0.71-1.85, P = 0.58)")
+    lineage.mark_answered("sens_mice_sub", "OR 1.08 (95% CI 0.66-1.76, P = 0.75)")
+    assert lineage.violations() == []
+
+    df = pd.DataFrame({"outcome": [0, 1, 0, 1], "x": [1.0, 2.0, 3.0, 4.0]})
+    manifest = build_run_manifest(df, plan=updated_primary, seed=42)
+    doc = ReportDocument(
+        title="Topological Lineage Reconciliation",
+        results_dict={
+            "exp_root": {"or": 1.05, "ci_l": 0.50, "ci_u": 2.20, "p": 0.89},
+            "primary": {"or": 1.10, "ci_l": 0.69, "ci_u": 1.77, "p": 0.69},
+            "sens_firth": {"or": 1.12, "ci_l": 0.70, "ci_u": 1.80, "p": 0.64},
+            "sens_firth_trim": {"or": 1.15, "ci_l": 0.71, "ci_u": 1.85, "p": 0.58},
+            "sens_mice_sub": {"or": 1.08, "ci_l": 0.66, "ci_u": 1.76, "p": 0.75},
+        },
+        manifest=manifest,
+        lineage=lineage,
+    )
+    doc.add_paragraph(
+        "Methods: cohort retention flow OR 1.10 (95% CI 0.69-1.77, P = 0.69)."
+    )
+    add_reproducibility_appendix(doc)
+    audit = verify_report_integrity(doc, data=df)
+    assert audit.passed is True, audit.lineage_violations
+    assert audit.has_manifest is True
+    assert audit.lineage_violations == []
+
+
+def test_provisional_primary_reconciliation_halts_on_conflict():
+    """Conflicting child change (m=10 vs m=5), typed bool-vs-int conflict, and scalar-blocked path halt atomically."""
+    # 1. Numeric parameter conflict (m=None -> child m=10 vs updated primary m=5)
+    lineage = AnalysisLineage()
+    p_old = {
+        "model": {"estimator": "logistic"},
+        "missing_strategy": "complete-case",
+        "m": None,
+        "flag": False,
+    }
+    c_firth = {
+        "model": {"estimator": "firth"},
+        "missing_strategy": "complete-case",
+        "m": None,
+        "flag": False,
+    }
+    c_m10 = {
+        "model": {"estimator": "logistic"},
+        "missing_strategy": "mice",
+        "m": 10,
+        "flag": False,
+    }
+    lineage.add_primary("primary", "Primary", p_old)
+    lineage.add_sensitivity("sens_firth", "primary", "Firth sensitivity", c_firth)
+    lineage.add_sensitivity("sens_m10", "primary", "MICE m=10", c_m10)
+
+    updated_primary = {
+        "model": {"estimator": "logistic"},
+        "missing_strategy": "mice",
+        "m": 5,
+        "flag": False,
+    }
+    with pytest.raises(ValueError, match="Conflict on 'sens_m10' key 'm'"):
+        _reconcile_provisional_primary(lineage, updated_primary)
+
+    assert [n.node_id for n in lineage.nodes] == ["primary", "sens_firth", "sens_m10"]
+    assert lineage._get("primary").plan == p_old
+    assert lineage._get("primary").plan_sha256 == hash_plan(p_old)
+    assert lineage._get("sens_firth").plan == c_firth
+    assert lineage._get("sens_m10").plan == c_m10
+    assert lineage.violations() == []
+
+    # 2. Typed bool-vs-int conflict (old flag=False, child flag=True, updated parent flag=1)
+    lineage_typed = AnalysisLineage()
+    c_flag_true = copy.deepcopy(p_old) | {"flag": True}
+    lineage_typed.add_primary("primary", "Primary", p_old)
+    lineage_typed.add_sensitivity("sens_firth", "primary", "Firth sensitivity", c_firth)
+    lineage_typed.add_sensitivity("sens_flag", "primary", "Bool flag", c_flag_true)
+
+    updated_int_flag = copy.deepcopy(p_old) | {"flag": 1}
+    with pytest.raises(ValueError, match="Conflict on 'sens_flag' key 'flag'"):
+        _reconcile_provisional_primary(lineage_typed, updated_int_flag)
+    assert lineage_typed._get("primary").plan == p_old
+    assert lineage_typed._get("sens_firth").plan == c_firth
+    assert lineage_typed._get("sens_flag").plan == c_flag_true
+
+    # 3. Scalar-blocked nested path (parent collapses dict 'model' -> scalar 'logistic')
+    updated_scalar_model = {
+        "model": "logistic",
+        "missing_strategy": "complete-case",
+        "m": None,
+        "flag": False,
+    }
+    with pytest.raises(ValueError, match="Blocked path 'model.estimator'"):
+        _reconcile_provisional_primary(lineage_typed, updated_scalar_model)
+    assert lineage_typed._get("primary").plan == p_old
+    assert lineage_typed._get("sens_firth").plan == c_firth
+    assert lineage_typed.violations() == []
+
+    # 4. Parent sets omitted key 'extra' to literal string "<absent>" while child added 'extra': 'note'
+    lineage_absent = AnalysisLineage()
+    c_extra_note = copy.deepcopy(p_old) | {"extra": "note"}
+    lineage_absent.add_primary("primary", "Primary", p_old)
+    lineage_absent.add_sensitivity(
+        "sens_extra", "primary", "Add extra note", c_extra_note
+    )
+    updated_literal_absent = copy.deepcopy(p_old) | {"extra": "<absent>"}
+    with pytest.raises(ValueError, match="Conflict on 'sens_extra' key 'extra'"):
+        _reconcile_provisional_primary(lineage_absent, updated_literal_absent)
+    assert lineage_absent._get("primary").plan == p_old
+    assert lineage_absent._get("sens_extra").plan == c_extra_note
+    assert lineage_absent.violations() == []

@@ -2120,6 +2120,14 @@ def test_provenance_and_lineage_parity_engine_and_cloud():
     stale_nodes[1]["plan_delta"] = {"missing.strategy": ("mice", "mice")}
     assert any("stale plan_delta" in v for v in rb["lineage_violations"](stale_nodes))
 
+    # Pre-fix legacy node omitting an added/removed literal "<absent>" key matches between engine and cloud
+    lin_leg = AnalysisLineage()
+    lin_leg.add_primary("primary", "Primary", {"model": "logistic", "note": "<absent>"})
+    lin_leg.add_sensitivity("sens_leg", "primary", "Firth", {"model": "firth"})
+    lin_leg._get("sens_leg").plan_delta = {"model": ("logistic", "firth")}
+    leg_dicts = [dataclasses.asdict(n) for n in lin_leg.nodes]
+    assert lin_leg.violations() == rb["lineage_violations"](leg_dicts) == []
+
     # Omitted plan and plan=None must both be rejected by standalone lineage_violations()
     omitted_plan_nodes = [
         {

@@ -284,9 +284,11 @@ def plan_delta(
     flat_child = _flatten_mapping(child)
     delta: dict[str, tuple[Any, Any]] = {}
     for key in sorted(set(flat_parent) | set(flat_child)):
-        pv = flat_parent.get(key, _ABSENT)
-        cv = flat_child.get(key, _ABSENT)
-        if not _values_equal(pv, cv):
+        pv_present = key in flat_parent
+        cv_present = key in flat_child
+        pv = flat_parent[key] if pv_present else _ABSENT
+        cv = flat_child[key] if cv_present else _ABSENT
+        if pv_present != cv_present or not _values_equal(pv, cv):
             delta[key] = (copy.deepcopy(pv), copy.deepcopy(cv))
     return delta
 
@@ -568,7 +570,24 @@ class AnalysisLineage:
                                 str(k): [pv, cv]
                                 for k, (pv, cv) in expected_delta.items()
                             }
-                            if not _values_equal(norm_stored, norm_expected):
+                            # Legacy artifacts created before plan_delta separated presence from
+                            # literal "<absent>" omitted entries whose value on the present side
+                            # was "<absent>"; keep non-empty valid deltas non-stale for those keys.
+                            legacy_omitted_absent = {
+                                k
+                                for k, pair in norm_expected.items()
+                                if k not in norm_stored and pair == [_ABSENT, _ABSENT]
+                            }
+                            effective_expected = (
+                                {
+                                    k: v
+                                    for k, v in norm_expected.items()
+                                    if k not in legacy_omitted_absent
+                                }
+                                if norm_stored and legacy_omitted_absent
+                                else norm_expected
+                            )
+                            if not _values_equal(norm_stored, effective_expected):
                                 issues.append(
                                     f"Sensitivity node '{node.node_id}' has stale plan_delta relative to '{parent.node_id}'."
                                 )
