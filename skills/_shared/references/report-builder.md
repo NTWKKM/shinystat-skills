@@ -683,7 +683,7 @@ def generate_pdf_report(
 
 ## 3. Standalone Reporting Integrity Verification
 
-Before releasing any report, run the standalone verification routine (keep ISO `created_at` timestamps out of narrative prose, write `"95% CI"` rather than `"95% PL CI"`, and pass non-statistical label/year constants such as `95`, `2017`, or `2020` in `allowed_untraced` when used outside standard author-year citations):
+Before releasing any report, run the standalone verification routine (keep ISO `created_at` timestamps out of narrative prose; retain the CI method while keeping `"CI"` adjacent to `"95%"`—e.g., `"95% profile-likelihood CI"` or `"95% CI (profile likelihood)"`—so the verifier's CI-level exemption still matches; and note that `allowed_untraced` exempts every matching value globally regardless of context, so manually reconcile every occurrence against its statistical context or use a context-specific exemption and verify any statistic sharing a whitelisted value is present in `results_dict`):
 
 ```python
 import csv
