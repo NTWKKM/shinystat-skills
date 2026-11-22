@@ -24,6 +24,9 @@ A change is done when every line that applies to it holds:
 - `uv run --extra dev pytest` is green.
 - `uv run ruff check src tests scripts` is clean.
 - The contract describing the changed behaviour states what the code now does (see Contracts).
+- When the user asks to sync/release skills locally, update **both**:
+  1. Antigravity's installed `shinystat` skill (`~/.gemini/config/skills/shinystat/`), and
+  2. `~/Desktop/shinystat-cloud.zip` (rebuilt via `./scripts/package-cloud-skill.sh` and copied to `~/Desktop/shinystat-cloud.zip`).
 
 ## Commands
 
