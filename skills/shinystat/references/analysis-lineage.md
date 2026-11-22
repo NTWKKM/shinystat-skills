@@ -85,7 +85,7 @@ Organize multi-file deliverables under one descriptive topic directory instead o
   data/                      # only when data files are requested; Zero-PHI verified
 ```
 
-Create `figures/` or `data/` only when files exist for them (no empty scaffolding).
+Create `figures/` or `data/` only when files exist for them (no empty scaffolding). Never substitute or rewrite a caller-supplied `<run_output_dir>` (e.g., into a subagent's own conversation directory); if a file-writing tool enforces a local artifact-directory boundary on cross-conversation paths, write scripts/files into `<run_output_dir>` via Python or shell.
 
 ---
 
