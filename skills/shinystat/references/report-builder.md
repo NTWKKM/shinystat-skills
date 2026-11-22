@@ -683,7 +683,7 @@ def generate_pdf_report(
 
 ## 3. Standalone Reporting Integrity Verification
 
-Before releasing any report, run the standalone verification routine (keep ISO `created_at` timestamps out of narrative prose; retain the CI method while keeping `"CI"` adjacent to `"95%"`—e.g., `"95% profile-likelihood CI"` or `"95% CI (profile likelihood)"`—so the verifier's CI-level exemption still matches; and note that `allowed_untraced` exempts every matching value globally regardless of context, so manually reconcile every occurrence against its statistical context or use a context-specific exemption and verify any statistic sharing a whitelisted value is present in `results_dict`):
+Before releasing any report, run the standalone verification routine (keep ISO `created_at` timestamps out of narrative prose; retain the CI method while keeping `"CI"` adjacent to `"95%"`—e.g., `"95% profile-likelihood CI"` or `"95% CI (profile likelihood)"`—so the verifier's CI-level exemption still matches; and manually reconcile every `90%`, `95%`, or `99%` value accepted by the CI-level exemption as well as every value in `allowed_untraced` against its statistical context—because `allowed_untraced` exempts matching values globally regardless of context—ensuring every real statistic is present in `results_dict`, or use a context-specific exemption):
 
 ```python
 import csv
