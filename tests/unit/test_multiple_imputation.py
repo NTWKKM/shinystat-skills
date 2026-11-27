@@ -137,6 +137,38 @@ class TestMICEImputer:
         for col in result.columns_imputed:
             assert col in ["x1", "x2"]
 
+    def test_mice_binary_cols_strictly_zero_one(self):
+        """MICEImputer with binary_cols imputes strictly {0, 1} with variance."""
+        rng = np.random.default_rng(42)
+        n = 150
+        x = rng.normal(0, 1, size=n)
+        prob = 1.0 / (1.0 + np.exp(-0.8 * x))
+        exposure = rng.binomial(1, prob).astype(float)
+        outcome = rng.binomial(
+            1, 1.0 / (1.0 + np.exp(-(0.5 * x - 0.6 * exposure)))
+        ).astype(float)
+        miss_mask = rng.random(n) < 0.45
+        exposure[miss_mask] = np.nan
+        df = pd.DataFrame({"x": x, "exposure": exposure, "outcome": outcome})
+
+        imputer = MICEImputer(
+            n_imputations=5, max_iter=5, random_state=42, binary_cols=["exposure"]
+        )
+        result = imputer.fit_transform(df)
+        assert "exposure" in result.columns_imputed
+        imputed_slices = []
+        for df_imp in result.imputed_datasets:
+            assert df_imp["exposure"].isna().sum() == 0
+            vals = set(df_imp["exposure"].unique().tolist())
+            assert vals.issubset({0.0, 1.0})
+            imputed_slices.append(df_imp.loc[miss_mask, "exposure"].to_numpy())
+        stacked = np.vstack(imputed_slices)
+        assert np.any(np.std(stacked, axis=0) > 0)
+
+        bad_df = pd.DataFrame({"x": [1.0, 2.0, 3.0], "exposure": [0.0, 2.0, np.nan]})
+        with pytest.raises(ValueError, match="only 0/1"):
+            MICEImputer(binary_cols=["exposure"]).fit_transform(bad_df)
+
 
 class TestKNNAndIndicatorImputation:
     """Tests for KNN and indicator imputation methods."""

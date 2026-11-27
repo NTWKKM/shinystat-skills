@@ -268,7 +268,8 @@ def get_missing_summary_df(
 class MICEImputer:
     """
     Multiple Imputation by Chained Equations (MICE) Imputer.
-    Uses IterativeImputer with sample_posterior=True.
+    Uses IterativeImputer with sample_posterior=True for continuous columns and
+    bootstrap-drawn LogisticRegression for declared ``binary_cols``.
     """
 
     def __init__(
@@ -276,12 +277,14 @@ class MICEImputer:
         n_imputations: int = 5,
         max_iter: int = 10,
         random_state: int = 42,
+        binary_cols: list[str] | None = None,
     ):
         if n_imputations < 1:
             raise ValueError("n_imputations must be >= 1")
         self.n_imputations = n_imputations
         self.max_iter = max_iter
         self.random_state = random_state
+        self.binary_cols = list(binary_cols) if binary_cols is not None else []
 
     def fit_transform(
         self,
@@ -305,8 +308,22 @@ class MICEImputer:
                 c for c in columns if pd.api.types.is_numeric_dtype(df_work[c])
             ]
 
+        for bcol in self.binary_cols:
+            if bcol not in df_work.columns or not pd.api.types.is_numeric_dtype(
+                df_work[bcol]
+            ):
+                raise ValueError(f"Invalid binary column for MICE: {bcol}")
+            obs_vals = set(df_work[bcol].dropna().unique().tolist())
+            if not obs_vals.issubset({0, 1, 0.0, 1.0}):
+                raise ValueError(
+                    f"Binary column '{bcol}' must contain only 0/1 values, got {sorted(obs_vals)}"
+                )
+            if bcol not in numeric_cols:
+                numeric_cols.append(bcol)
+
         missing_mask = df_work[numeric_cols].isna()
         cols_with_missing = [c for c in numeric_cols if missing_mask[c].any()]
+        binary_missing_cols = [c for c in self.binary_cols if c in cols_with_missing]
 
         if not cols_with_missing:
             return MICEResult(
@@ -316,9 +333,12 @@ class MICEImputer:
                 original_missing_mask=missing_mask,
             )
 
+        from sklearn.linear_model import LogisticRegression
+
         imputed_datasets = []
         for m in range(self.n_imputations):
             rng_seed = self.random_state + m * 1000
+            rng = np.random.default_rng(rng_seed)
             imputer = IterativeImputer(
                 max_iter=self.max_iter,
                 random_state=rng_seed,
@@ -327,6 +347,32 @@ class MICEImputer:
             imputed_vals = imputer.fit_transform(df_work[numeric_cols])
             df_imp = df_work.copy()
             df_imp[numeric_cols] = imputed_vals
+
+            for bcol in binary_missing_cols:
+                miss_idx = missing_mask[bcol].to_numpy()
+                obs_idx = ~miss_idx
+                pred_cols = [c for c in numeric_cols if c != bcol]
+                y_obs = df_work.loc[obs_idx, bcol].to_numpy(dtype=int)
+                if len(np.unique(y_obs)) >= 2 and pred_cols:
+                    X_all = df_imp[pred_cols].to_numpy(dtype=float)
+                    X_obs = X_all[obs_idx]
+                    X_miss = X_all[miss_idx]
+                    boot_i = rng.integers(0, len(y_obs), size=len(y_obs))
+                    y_boot = y_obs[boot_i]
+                    if len(np.unique(y_boot)) >= 2:
+                        scaler = StandardScaler()
+                        Xb_s = scaler.fit_transform(X_obs[boot_i])
+                        Xm_s = scaler.transform(X_miss)
+                        clf = LogisticRegression(max_iter=500, random_state=rng_seed)
+                        clf.fit(Xb_s, y_boot)
+                        probs = np.clip(clf.predict_proba(Xm_s)[:, 1], 1e-6, 1.0 - 1e-6)
+                    else:
+                        probs = np.full(miss_idx.sum(), float(np.mean(y_obs)))
+                else:
+                    p_obs = float(np.mean(y_obs)) if len(y_obs) else 0.5
+                    probs = np.full(miss_idx.sum(), np.clip(p_obs, 1e-6, 1.0 - 1e-6))
+                df_imp.loc[miss_idx, bcol] = rng.binomial(1, probs).astype(float)
+
             imputed_datasets.append(df_imp)
 
         result = MICEResult(

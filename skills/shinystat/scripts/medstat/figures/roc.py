@@ -174,7 +174,7 @@ def plot_roc_curve(
                 diff_text = f"Paired DeLong {format_p_value(paired_p_value, journal)}"
                 ax.text(
                     0.96,
-                    0.20,
+                    0.27,
                     diff_text,
                     transform=ax.transAxes,
                     fontsize=8.0,
@@ -217,7 +217,22 @@ def plot_roc_curve(
     ax.set_ylabel("Sensitivity (True Positive Rate)", labelpad=6)
     ax.set_title(title, loc="left", pad=10)
     if journal is not None:
-        ax.legend(loc="lower right", frameon=False, fontsize=7.8)
+        handles, labels = ax.get_legend_handles_labels()
+        wrapped = [
+            lbl
+            if len(lbl) <= 34
+            else "\n".join(lbl[i : i + 34] for i in range(0, len(lbl), 34))
+            for lbl in labels
+        ]
+        ax.legend(
+            handles,
+            wrapped,
+            loc="lower right",
+            bbox_to_anchor=(1.0, 0.02),
+            borderaxespad=0.3,
+            frameon=False,
+            fontsize=7.2 if paired_roc_data is not None else 7.8,
+        )
     else:
         ax.legend(loc="lower right")
 

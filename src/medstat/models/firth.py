@@ -38,6 +38,8 @@ def check_separation(
     """
     y_arr = np.asarray(y, dtype=int).ravel()
     X_arr = np.asarray(X, dtype=float)
+    if X_arr.ndim == 1:
+        X_arr = X_arr.reshape(-1, 1)
 
     # detect_separation returns a SeparationResult dataclass; its truth value is
     # always True, so read the flag itself.

@@ -1869,8 +1869,8 @@ def test_phi_thai_id_and_name_markers_parity(tmp_path):
     clean_csv.write_text(
         "obs,bmi_imp\n1,27.7100083304435\n2,0.5403257538631\n", encoding="utf-8"
     )
-    thai_prose = "Methods: จำนวนพารามิเตอร์ ตลอดระยะเวลา กำหนดระดับ ระมัดระวัง ทำนายการ อาชีพ: นายจ้าง อาชีพ: นายจ้าง ใจดี กลุ่มผู้ป่วย\nนายจ้าง ใจดี cohort retention OR 1.45 (n=412)."
-    results = {"or": 1.45, "n": 412}
+    thai_prose = "Methods: จำนวนพารามิเตอร์ ตลอดระยะเวลา กำหนดระดับ ระมัดระวัง ทำนายการ อาชีพ: นายจ้าง อาชีพ: นายจ้าง ใจดี กลุ่มผู้ป่วย\nนายจ้าง ใจดี cohort retention OR 1.45 (n=412; extreme float 6914750462913.45)."
+    results = {"or": 1.45, "n": 412, "extreme_or": 6914750462913.45}
 
     doc = ReportDocument(title="Thai Clean", results_dict=results)
     doc.add_paragraph(thai_prose)
@@ -1946,6 +1946,18 @@ def test_delivered_text_parity_engine_and_cloud():
     )
     assert eng_phi.passed is False and eng_phi.phi_violations
     assert cld_phi["passed"] is False and cld_phi["phi_violations"]
+
+
+def test_check_separation_accepts_1d_series_and_array():
+    """Single-predictor 1D Series/ndarray inputs are reshaped cleanly in check_separation."""
+    from medstat.models.firth import check_separation
+
+    y = pd.Series([0, 0, 0, 0, 1, 1, 1, 1])
+    x_sep = pd.Series([0, 0, 0, 0, 1, 1, 1, 1])
+    res_series = check_separation(y, x_sep)
+    assert res_series["is_separated"] is True
+    res_arr = check_separation(y.to_numpy(), np.array([0, 1, 0, 1, 0, 1, 0, 1]))
+    assert res_arr["is_separated"] is False
 
 
 def test_provenance_and_lineage_parity_engine_and_cloud():

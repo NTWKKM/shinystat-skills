@@ -16,82 +16,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 JOURNAL_SPECS = {
-    "NEJM": {
-        "palette": ["#BC3C29", "#0072B5", "#E18727", "#20854E", "#7876B1", "#6F99AD", "#FFDC91", "#EE4C97"],
-        "bg_editorial": "#FBF7F0",
-        "bg_manuscript": "#FFFFFF",
-        "grid_y": False,
-        "spine_lw": 0.8,
-        "tick_dir": "out",
-        "decimal_sep": ".",
-        "p_prefix": "P",
-        "leading_zero_p": True,
-    },
-    "JAMA": {
-        "palette": ["#374E55", "#DF8F44", "#00A1D5", "#B24745", "#79AF97", "#6A6599", "#80796B", "#0073C2"],
-        "bg_editorial": "#FFFFFF",
-        "bg_manuscript": "#FFFFFF",
-        "grid_y": True,
-        "spine_lw": 0.8,
-        "tick_dir": "out",
-        "decimal_sep": ".",
-        "p_prefix": "P",
-        "leading_zero_p": False,  # AMA style: P = .03, P < .001
-    },
-    "LANCET": {
-        "palette": ["#00468B", "#ED0000", "#42B540", "#0099B4", "#925E9F", "#FDAF91", "#AD002A", "#ADB6B6"],
-        "bg_editorial": "#FFFFFF",
-        "bg_manuscript": "#FFFFFF",
-        "grid_y": False,
-        "spine_lw": 0.8,
-        "tick_dir": "out",
-        "decimal_sep": "\u00b7",  # Lancet mid-dot: 0·85
-        "p_prefix": "p",
-        "leading_zero_p": True,
-    },
-    "BMJ": {
-        "palette": ["#003366", "#D52B1E", "#008080", "#E87722", "#6F2C91", "#2D68C4", "#708090", "#118AB2"],
-        "bg_editorial": "#FFFFFF",
-        "bg_manuscript": "#FFFFFF",
-        "grid_y": False,
-        "spine_lw": 0.8,
-        "tick_dir": "out",
-        "decimal_sep": ".",
-        "p_prefix": "P",
-        "leading_zero_p": True,
-    },
-    "CLINICAL": {
-        "palette": ["#2563EB", "#DC2626", "#059669", "#D97706", "#7C3AED", "#0891B2", "#475569", "#0F172A"],
-        "bg_editorial": "#FFFFFF",
-        "bg_manuscript": "#FFFFFF",
-        "grid_y": True,
-        "spine_lw": 0.8,
-        "tick_dir": "out",
-        "decimal_sep": ".",
-        "p_prefix": "P",
-        "leading_zero_p": True,
-    },
-    "OKABE_ITO": {
-        "palette": ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9", "#F0E442", "#000000"],
-        "bg_editorial": "#FFFFFF",
-        "bg_manuscript": "#FFFFFF",
-        "grid_y": False,
-        "spine_lw": 0.8,
-        "tick_dir": "out",
-        "decimal_sep": ".",
-        "p_prefix": "P",
-        "leading_zero_p": True,
-    },
+    "NEJM": {"palette": ["#BC3C29", "#0072B5", "#E18727", "#20854E", "#7876B1", "#6F99AD", "#FFDC91", "#EE4C97"], "bg_editorial": "#FBF7F0", "bg_manuscript": "#FFFFFF", "grid_y": False, "spine_lw": 0.8, "tick_dir": "out", "decimal_sep": ".", "p_prefix": "P", "leading_zero_p": True},
+    "JAMA": {"palette": ["#374E55", "#DF8F44", "#00A1D5", "#B24745", "#79AF97", "#6A6599", "#80796B", "#0073C2"], "bg_editorial": "#FFFFFF", "bg_manuscript": "#FFFFFF", "grid_y": True, "spine_lw": 0.8, "tick_dir": "out", "decimal_sep": ".", "p_prefix": "P", "leading_zero_p": False},  # AMA style: P = .03, P < .001
+    "LANCET": {"palette": ["#00468B", "#ED0000", "#42B540", "#0099B4", "#925E9F", "#FDAF91", "#AD002A", "#ADB6B6"], "bg_editorial": "#FFFFFF", "bg_manuscript": "#FFFFFF", "grid_y": False, "spine_lw": 0.8, "tick_dir": "out", "decimal_sep": "\u00b7", "p_prefix": "p", "leading_zero_p": True},  # Lancet mid-dot: 0·85
+    "BMJ": {"palette": ["#003366", "#D52B1E", "#008080", "#E87722", "#6F2C91", "#2D68C4", "#708090", "#118AB2"], "bg_editorial": "#FFFFFF", "bg_manuscript": "#FFFFFF", "grid_y": False, "spine_lw": 0.8, "tick_dir": "out", "decimal_sep": ".", "p_prefix": "P", "leading_zero_p": True},
+    "CLINICAL": {"palette": ["#2563EB", "#DC2626", "#059669", "#D97706", "#7C3AED", "#0891B2", "#475569", "#0F172A"], "bg_editorial": "#FFFFFF", "bg_manuscript": "#FFFFFF", "grid_y": True, "spine_lw": 0.8, "tick_dir": "out", "decimal_sep": ".", "p_prefix": "P", "leading_zero_p": True},
+    "OKABE_ITO": {"palette": ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9", "#F0E442", "#000000"], "bg_editorial": "#FFFFFF", "bg_manuscript": "#FFFFFF", "grid_y": False, "spine_lw": 0.8, "tick_dir": "out", "decimal_sep": ".", "p_prefix": "P", "leading_zero_p": True},
 }
 
-TARGET_WIDTHS = {
-    "single_col": 3.5,
-    "one_half_col": 5.0,
-    "double_col": 7.0,
-    "docx": 6.5,
-    "pptx": 11.5,
-    "web": 7.5,
-}
+TARGET_WIDTHS = {"single_col": 3.5, "one_half_col": 5.0, "double_col": 7.0, "docx": 6.5, "pptx": 11.5, "web": 7.5}
 ```
 
 ---
