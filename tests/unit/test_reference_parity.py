@@ -1976,6 +1976,8 @@ def test_check_separation_accepts_1d_series_and_array():
         check_separation(
             y.to_numpy(), np.array([1.0, np.nan, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
         )
+    with pytest.raises(ValueError, match="fractional"):
+        check_separation(np.array([0.0, 0.2, 0.8, 0.4]), np.ones((4, 1)))
 
     res_single_const = check_separation(np.zeros(8, dtype=int), np.ones((8, 1)))
     assert res_single_const["is_separated"] is True

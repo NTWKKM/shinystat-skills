@@ -265,16 +265,26 @@ class TestMICEImputer:
                 assert df_imp["complete_int"].dtype == pd.Int64Dtype()
                 obs_age = df["age"].notna()
                 assert (
-                    df_imp.loc[obs_age, "age"].astype("Int64") == df.loc[obs_age, "age"]
+                    df_imp.loc[obs_age, "age"]
+                    == df.loc[obs_age, "age"].astype("Float64")
                 ).all()
                 if binary_cols is not None:
                     assert set(df_imp["exposure"].unique().tolist()).issubset(
                         {0.0, 1.0}
                     )
 
-    def test_mice_binary_rejects_all_missing_continuous_column(self):
-        """FCS imputation rejects a continuous column with no observed values."""
-        df = pd.DataFrame(
+    def test_mice_rejects_all_missing_continuous_column(self):
+        """Both IterativeImputer and FCS reject a continuous column with no observed values."""
+        df_iter = pd.DataFrame(
+            {
+                "all_missing": [np.nan, np.nan, np.nan, np.nan],
+                "x": [1.0, 2.0, 3.0, 4.0],
+            }
+        )
+        with pytest.raises(ValueError, match="no observed values"):
+            MICEImputer(n_imputations=2, max_iter=2).fit_transform(df_iter)
+
+        df_fcs = pd.DataFrame(
             {
                 "all_missing": [np.nan, np.nan, np.nan, np.nan],
                 "exposure": [0.0, 1.0, np.nan, 0.0],
@@ -283,7 +293,7 @@ class TestMICEImputer:
         with pytest.raises(ValueError, match="no observed values"):
             MICEImputer(
                 n_imputations=2, max_iter=2, binary_cols=["exposure"]
-            ).fit_transform(df)
+            ).fit_transform(df_fcs)
 
 
 class TestKNNAndIndicatorImputation:

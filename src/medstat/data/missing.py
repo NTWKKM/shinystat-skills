@@ -338,12 +338,11 @@ class MICEImputer:
         cont_missing_cols = [
             c for c in cols_with_missing if c not in binary_missing_cols
         ]
-        if binary_missing_cols:
-            all_missing_cont = [c for c in cont_missing_cols if missing_mask[c].all()]
-            if all_missing_cont:
-                raise ValueError(
-                    f"Cannot impute continuous column(s) with no observed values: {all_missing_cont}"
-                )
+        all_missing_cont = [c for c in cont_missing_cols if missing_mask[c].all()]
+        if all_missing_cont:
+            raise ValueError(
+                f"Cannot impute continuous column(s) with no observed values: {all_missing_cont}"
+            )
 
         imputed_datasets = []
         for m in range(self.n_imputations):

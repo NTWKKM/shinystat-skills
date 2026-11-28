@@ -41,7 +41,11 @@ def check_separation(
         raise ValueError("Empty input: y must contain at least one observation.")
     if not np.all(np.isfinite(y_float)):
         raise ValueError("Outcome y contains non-finite values (NaN or Inf).")
-    y_arr = np.asarray(y, dtype=int).ravel()
+    if not np.all(np.equal(y_float, np.trunc(y_float))):
+        raise ValueError(
+            "Outcome y must contain integer-valued class labels, got fractional values."
+        )
+    y_arr = y_float.astype(int)
 
     X_arr = np.asarray(X, dtype=float)
     if X_arr.ndim == 1:
