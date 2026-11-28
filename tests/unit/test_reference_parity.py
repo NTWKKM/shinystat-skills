@@ -1883,6 +1883,8 @@ def test_phi_thai_id_and_name_markers_parity(tmp_path):
     for marker in [
         "1234567890123",
         "1-2345-67890-12-3",
+        "ID.1-2345-67890-12-3",
+        "ID.1 2345 67890 12 3",
         "1-2345-67890-12-3.0",
         "1-2345-67890-12-3Next",
         "นายสมชาย",
@@ -1968,6 +1970,22 @@ def test_check_separation_accepts_1d_series_and_array():
     assert res_const_plus["is_separated"] is True
     with pytest.raises(ValueError, match="at most 2 unique classes"):
         check_separation(np.array([0, 1, 2, 0, 1, 2, 0, 1]), np.ones((8, 1)))
+    with pytest.raises(ValueError, match="Mismatched sample counts"):
+        check_separation(y.to_numpy(), np.ones((6, 1)))
+    with pytest.raises(ValueError, match="non-finite"):
+        check_separation(
+            y.to_numpy(), np.array([1.0, np.nan, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+        )
+
+    res_single_const = check_separation(np.zeros(8, dtype=int), np.ones((8, 1)))
+    assert res_single_const["is_separated"] is True
+    assert "both outcome classes" in res_single_const["recommendation"].lower()
+    assert "use firth" not in res_single_const["recommendation"].lower()
+
+    res_single_nonconst = check_separation(np.ones(8, dtype=int), x_sep.to_numpy())
+    assert res_single_nonconst["is_separated"] is True
+    assert "both outcome classes" in res_single_nonconst["recommendation"].lower()
+    assert "use firth" not in res_single_nonconst["recommendation"].lower()
 
 
 def test_provenance_and_lineage_parity_engine_and_cloud():

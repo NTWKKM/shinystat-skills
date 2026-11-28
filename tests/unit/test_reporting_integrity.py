@@ -2229,3 +2229,12 @@ def test_95_cis_plural_and_author_year_method_citation():
     )
     bad_conf_audit = verify_report_integrity(bad_conf_doc)
     assert bad_conf_audit.passed is False and 95.0 in bad_conf_audit.untraced_numbers
+
+    bad_paren_doc = ReportDocument(
+        title="Integrity", results_dict={"or": 1.45, "n": 412}
+    )
+    bad_paren_doc.add_paragraph(
+        "Methods: retention flow. Confidence intervals (95% of patients had events) for OR 1.45 in 412 patients."
+    )
+    bad_paren_audit = verify_report_integrity(bad_paren_doc)
+    assert bad_paren_audit.passed is False and 95.0 in bad_paren_audit.untraced_numbers

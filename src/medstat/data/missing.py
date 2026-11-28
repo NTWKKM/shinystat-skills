@@ -338,6 +338,12 @@ class MICEImputer:
         cont_missing_cols = [
             c for c in cols_with_missing if c not in binary_missing_cols
         ]
+        if binary_missing_cols:
+            all_missing_cont = [c for c in cont_missing_cols if missing_mask[c].all()]
+            if all_missing_cont:
+                raise ValueError(
+                    f"Cannot impute continuous column(s) with no observed values: {all_missing_cont}"
+                )
 
         imputed_datasets = []
         for m in range(self.n_imputations):
@@ -350,9 +356,24 @@ class MICEImputer:
                     random_state=rng_seed,
                     sample_posterior=True,
                 )
-                imputed_vals = imputer.fit_transform(df_work[numeric_cols])
+                imputed_vals = imputer.fit_transform(
+                    df_work[numeric_cols].astype(float)
+                )
                 df_imp = df_work.copy()
-                df_imp[numeric_cols] = imputed_vals
+                for j, col in enumerate(numeric_cols):
+                    miss_idx = missing_mask[col].to_numpy()
+                    if not miss_idx.any():
+                        continue
+                    obs_idx = ~miss_idx
+                    if pd.api.types.is_integer_dtype(df_imp[col].dtype):
+                        target_dtype = (
+                            "Float64"
+                            if pd.api.types.is_extension_array_dtype(df_imp[col].dtype)
+                            else float
+                        )
+                        df_imp[col] = df_imp[col].astype(target_dtype)
+                    df_imp.loc[miss_idx, col] = imputed_vals[miss_idx, j]
+                    df_imp.loc[obs_idx, col] = df_work.loc[obs_idx, col]
                 imputed_datasets.append(df_imp)
                 continue
 
@@ -360,13 +381,17 @@ class MICEImputer:
             # following van Buuren & Groothuis-Oudshoorn (2011). Each iteration
             # updates every incomplete continuous and binary column in turn so
             # subsequent models condition on the latest draws.
-            df_imp = df_work.copy()
+            # Keep model inputs in a separate float DataFrame so observed values
+            # in df_imp are never overwritten by float casts.
+            df_model = df_work[numeric_cols].astype(float)
             for ccol in cont_missing_cols:
-                df_imp[ccol] = df_imp[ccol].astype(float)
                 miss_idx = missing_mask[ccol].to_numpy()
                 obs_vals = df_work.loc[~miss_idx, ccol].to_numpy(dtype=float)
-                fill_val = float(np.mean(obs_vals)) if len(obs_vals) else 0.0
-                df_imp.loc[miss_idx, ccol] = fill_val
+                if len(obs_vals) == 0:
+                    raise ValueError(
+                        f"Cannot impute continuous column '{ccol}' with no observed values."
+                    )
+                df_model.loc[miss_idx, ccol] = float(np.mean(obs_vals))
 
             for bcol in binary_missing_cols:
                 miss_idx = missing_mask[bcol].to_numpy()
@@ -380,7 +405,7 @@ class MICEImputer:
                         1.0 - 1e-6,
                     )
                 )
-                df_imp.loc[miss_idx, bcol] = rng.binomial(
+                df_model.loc[miss_idx, bcol] = rng.binomial(
                     1, p_init, size=int(miss_idx.sum())
                 ).astype(float)
 
@@ -391,7 +416,7 @@ class MICEImputer:
                     pred_cols = [c for c in numeric_cols if c != ccol]
                     y_obs = df_work.loc[obs_idx, ccol].to_numpy(dtype=float)
                     if len(y_obs) >= 2 and pred_cols:
-                        X_all = df_imp[pred_cols].to_numpy(dtype=float)
+                        X_all = df_model[pred_cols].to_numpy(dtype=float)
                         reg = BayesianRidge()
                         reg.fit(X_all[obs_idx], y_obs)
                         y_mean, y_std = reg.predict(X_all[miss_idx], return_std=True)
@@ -401,8 +426,10 @@ class MICEImputer:
                         sd = float(np.std(y_obs, ddof=1)) if len(y_obs) > 1 else 0.0
                         draws = rng.normal(mu, max(sd, 1e-12), size=int(miss_idx.sum()))
                     else:
-                        draws = np.zeros(int(miss_idx.sum()), dtype=float)
-                    df_imp.loc[miss_idx, ccol] = draws
+                        raise ValueError(
+                            f"Cannot impute continuous column '{ccol}' with no observed values."
+                        )
+                    df_model.loc[miss_idx, ccol] = draws
 
                 for bcol in binary_missing_cols:
                     miss_idx = missing_mask[bcol].to_numpy()
@@ -411,7 +438,7 @@ class MICEImputer:
                     y_obs = df_work.loc[obs_idx, bcol].to_numpy(dtype=int)
                     probs = None
                     if len(np.unique(y_obs)) >= 2 and pred_cols:
-                        X_all = df_imp[pred_cols].to_numpy(dtype=float)
+                        X_all = df_model[pred_cols].to_numpy(dtype=float)
                         X_obs = X_all[obs_idx]
                         X_miss = X_all[miss_idx]
                         boot_i = rng.integers(0, len(y_obs), size=len(y_obs))
@@ -441,7 +468,30 @@ class MICEImputer:
                             )
                         )
                         probs = np.full(int(miss_idx.sum()), p_draw)
-                    df_imp.loc[miss_idx, bcol] = rng.binomial(1, probs).astype(float)
+                    df_model.loc[miss_idx, bcol] = rng.binomial(1, probs).astype(float)
+
+            df_imp = df_work.copy()
+            for ccol in cont_missing_cols:
+                miss_idx = missing_mask[ccol].to_numpy()
+                obs_idx = ~miss_idx
+                if pd.api.types.is_integer_dtype(df_imp[ccol].dtype):
+                    target_dtype = (
+                        "Float64"
+                        if pd.api.types.is_extension_array_dtype(df_imp[ccol].dtype)
+                        else float
+                    )
+                    df_imp[ccol] = df_imp[ccol].astype(target_dtype)
+                df_imp.loc[miss_idx, ccol] = df_model.loc[miss_idx, ccol]
+                df_imp.loc[obs_idx, ccol] = df_work.loc[obs_idx, ccol]
+
+            for bcol in binary_missing_cols:
+                miss_idx = missing_mask[bcol].to_numpy()
+                obs_idx = ~miss_idx
+                draws_bcol = df_model.loc[miss_idx, bcol]
+                if pd.api.types.is_integer_dtype(df_imp[bcol].dtype):
+                    draws_bcol = draws_bcol.round().astype(int)
+                df_imp.loc[miss_idx, bcol] = draws_bcol
+                df_imp.loc[obs_idx, bcol] = df_work.loc[obs_idx, bcol]
 
             imputed_datasets.append(df_imp)
 

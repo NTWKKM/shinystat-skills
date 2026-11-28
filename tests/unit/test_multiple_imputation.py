@@ -246,20 +246,44 @@ class TestMICEImputer:
         assert np.any(np.vstack(imputed_vals) == 1.0)
 
     def test_mice_binary_with_nullable_int_continuous_column(self):
-        """Nullable Int64 continuous columns convert cleanly to float during FCS imputation."""
+        """Nullable Int64 continuous columns use Float64 and preserve observed values."""
         df = pd.DataFrame(
             {
                 "age": pd.array([40, 50, pd.NA, 60, 70, 80], dtype="Int64"),
                 "exposure": [0.0, 1.0, 0.0, np.nan, 1.0, 0.0],
+                "complete_int": pd.array([1, 2, 3, 4, 5, 6], dtype="Int64"),
             }
         )
-        result = MICEImputer(
-            n_imputations=3, max_iter=2, random_state=42, binary_cols=["exposure"]
-        ).fit_transform(df)
-        for df_imp in result.imputed_datasets:
-            assert df_imp["age"].isna().sum() == 0
-            assert df_imp["exposure"].isna().sum() == 0
-            assert set(df_imp["exposure"].unique().tolist()).issubset({0.0, 1.0})
+        for binary_cols in (None, ["exposure"]):
+            result = MICEImputer(
+                n_imputations=3, max_iter=2, random_state=42, binary_cols=binary_cols
+            ).fit_transform(df)
+            for df_imp in result.imputed_datasets:
+                assert df_imp["age"].isna().sum() == 0
+                assert df_imp["exposure"].isna().sum() == 0
+                assert df_imp["age"].dtype == pd.Float64Dtype()
+                assert df_imp["complete_int"].dtype == pd.Int64Dtype()
+                obs_age = df["age"].notna()
+                assert (
+                    df_imp.loc[obs_age, "age"].astype("Int64") == df.loc[obs_age, "age"]
+                ).all()
+                if binary_cols is not None:
+                    assert set(df_imp["exposure"].unique().tolist()).issubset(
+                        {0.0, 1.0}
+                    )
+
+    def test_mice_binary_rejects_all_missing_continuous_column(self):
+        """FCS imputation rejects a continuous column with no observed values."""
+        df = pd.DataFrame(
+            {
+                "all_missing": [np.nan, np.nan, np.nan, np.nan],
+                "exposure": [0.0, 1.0, np.nan, 0.0],
+            }
+        )
+        with pytest.raises(ValueError, match="no observed values"):
+            MICEImputer(
+                n_imputations=2, max_iter=2, binary_cols=["exposure"]
+            ).fit_transform(df)
 
 
 class TestKNNAndIndicatorImputation:
