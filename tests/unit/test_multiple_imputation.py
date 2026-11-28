@@ -169,6 +169,61 @@ class TestMICEImputer:
         with pytest.raises(ValueError, match="only 0/1"):
             MICEImputer(binary_cols=["exposure"]).fit_transform(bad_df)
 
+    def test_mice_binary_single_column_posterior_draw(self):
+        """Single numeric binary column draws posterior prevalence rather than fixed p."""
+        df = pd.DataFrame(
+            {"exposure": [0.0, 1.0, 0.0, 1.0, 0.0, 1.0, np.nan, np.nan, np.nan]}
+        )
+        result = MICEImputer(
+            n_imputations=12, max_iter=3, random_state=42, binary_cols=["exposure"]
+        ).fit_transform(df)
+        obs_mask = ~df["exposure"].isna()
+        miss_draws = []
+        for df_imp in result.imputed_datasets:
+            assert df_imp["exposure"].isna().sum() == 0
+            assert set(df_imp["exposure"].unique().tolist()).issubset({0.0, 1.0})
+            assert np.array_equal(
+                df_imp.loc[obs_mask, "exposure"].to_numpy(),
+                df.loc[obs_mask, "exposure"].to_numpy(),
+            )
+            miss_draws.append(df_imp.loc[~obs_mask, "exposure"].to_numpy())
+        assert np.any(np.std(np.vstack(miss_draws), axis=0) > 0)
+
+    def test_mice_binary_one_class_bootstrap_uses_posterior(self):
+        """One-class observed/bootstrap binary column uses posterior draw without failing."""
+        df = pd.DataFrame(
+            {
+                "x": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+                "exposure": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    np.nan,
+                    np.nan,
+                    np.nan,
+                    np.nan,
+                ],
+            }
+        )
+        result = MICEImputer(
+            n_imputations=15, max_iter=3, random_state=7, binary_cols=["exposure"]
+        ).fit_transform(df)
+        obs_mask = ~df["exposure"].isna()
+        imputed_vals = []
+        for df_imp in result.imputed_datasets:
+            assert df_imp["exposure"].isna().sum() == 0
+            assert set(df_imp["exposure"].unique().tolist()).issubset({0.0, 1.0})
+            assert np.array_equal(
+                df_imp.loc[obs_mask, "exposure"].to_numpy(),
+                df.loc[obs_mask, "exposure"].to_numpy(),
+            )
+            imputed_vals.append(df_imp.loc[~obs_mask, "exposure"].to_numpy())
+        # Posterior Beta(0.5, 6.5) has non-zero variance unlike fixed/bootstrap 0.0
+        assert np.any(np.vstack(imputed_vals) == 1.0)
+
 
 class TestKNNAndIndicatorImputation:
     """Tests for KNN and indicator imputation methods."""

@@ -726,7 +726,9 @@ def verify_standalone_integrity(
             "Hospital Number (HN)",
         ),
         (
-            re.compile(r"(?<![\d.])\d{1}[-\s]?\d{4}[-\s]?\d{5}[-\s]?\d{2}[-\s]?\d{1}(?!\d|\.\d)"),
+            re.compile(
+                r"(?<![\d.])(?:\d{13}(?!\d|\.\d)|(?!\d{13})\d{1}[-\s]?\d{4}[-\s]?\d{5}[-\s]?\d{2}[-\s]?\d{1}(?!\d))"
+            ),
             "Thai Citizen ID (13 digits)",
         ),
         (
@@ -1528,8 +1530,10 @@ def verify_standalone_integrity(
                 matched = True
 
         if not matched:
-            is_ci_level = val in (90.0, 95.0, 99.0) and bool(
-                re.search(r"\b(?:CIs?|confidence|credible)\b", window, re.IGNORECASE)
+            is_ci_level = val in (90.0, 95.0, 99.0) and (
+                (has_pct and bool(re.match(r"^\s*(?:[-\w]+\s+){0,2}(?:CIs?|CrIs?|confidence|credible)\b", window_after, re.IGNORECASE)))
+                or bool(re.match(r"^\s*percent\s+(?:[-\w]+\s+){0,2}(?:CIs?|CrIs?|confidence|credible)\b", window_after, re.IGNORECASE))
+                or bool(re.search(r"\b(?:CIs?|confidence|credible)\s+(?:level|levels|interval|intervals)?\s*(?:of\s+)?$", window_before, re.IGNORECASE))
             )
             is_scale_const = (val in (0.0, 100.0) and bool(
                 re.search(r"\b(?:scale|normalized|range|total)\b", window, re.IGNORECASE)
@@ -1561,12 +1565,9 @@ def verify_standalone_integrity(
                     # Bracket or next author closes a citation; ; , . : or line end only after
                     # "(", "Surname," or a second author, so "Total 1987." stays untraced (ADR 79)
                     bool(re.match(r"^[a-z]?(?:\s*[)\]]|\s+(?:and|&)\s+[A-Z])", window_after))
-                    or bool(
-                        re.match(
-                            r"^[a-z]?\s+(?:method|test|placement|criteria|criterion|score|formula|correction|rule|rules|equation|model|estimator|approach|algorithm|index|regression|curve)\b",
-                            window_after,
-                            re.IGNORECASE,
-                        )
+                    or (
+                        bool(re.match(r"^[a-z]?\s+(?:method|test|placement|criteria|criterion|score|formula|correction|rule|rules|equation|model|estimator|approach|algorithm|index|regression|curve)\b", window_after, re.IGNORECASE))
+                        and bool(re.search(r"(?:(?:\(|,|(?:&|\band)\s+[A-Z][a-zA-Z'’\-]+)|\b(?:the|a|an|using|via|by|with|per|from|of|after|following|under)\s+[A-Z][a-zA-Z'’\-]+,?\s*\(?)$", window_before, re.IGNORECASE))
                     )
                     or (
                         bool(re.match(r"^[a-z]?\s*(?:[;,.:]|$)", window_after))

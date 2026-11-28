@@ -4,6 +4,8 @@ src/medstat/figures/roc.py: Publication-grade Receiver Operating Characteristic 
 
 from __future__ import annotations
 
+import re
+import textwrap
 from pathlib import Path
 from typing import Any, Literal
 
@@ -26,6 +28,34 @@ from medstat.figures.styles import (
     save_publication_figure,
     set_clinical_figure_style,
 )
+
+
+def _wrap_roc_legend_label(lbl: str, width: int = 34) -> str:
+    """Wrap ROC legend labels at whitespace or semantic separators.
+
+    Keeps formatted AUROC values and confidence-interval bounds intact on a
+    single line rather than slicing at fixed character offsets.
+    """
+    if len(lbl) <= width:
+        return lbl
+    if ": AUROC " in lbl:
+        prefix, auroc_part = lbl.split(": AUROC ", 1)
+        prefix_wrapped = textwrap.fill(
+            f"{prefix}:",
+            width=width,
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+        return f"{prefix_wrapped}\nAUROC {auroc_part}"
+    # Protect parenthesized numeric/CI spans from breaking mid-expression.
+    protected = re.sub(r"\([^)]*\)", lambda m: m.group(0).replace(" ", "\u00a0"), lbl)
+    wrapped = textwrap.fill(
+        protected,
+        width=width,
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    return wrapped.replace("\u00a0", " ")
 
 
 def plot_roc_curve(
@@ -218,12 +248,7 @@ def plot_roc_curve(
     ax.set_title(title, loc="left", pad=10)
     if journal is not None:
         handles, labels = ax.get_legend_handles_labels()
-        wrapped = [
-            lbl
-            if len(lbl) <= 34
-            else "\n".join(lbl[i : i + 34] for i in range(0, len(lbl), 34))
-            for lbl in labels
-        ]
+        wrapped = [_wrap_roc_legend_label(lbl, width=34) for lbl in labels]
         ax.legend(
             handles,
             wrapped,

@@ -333,45 +333,114 @@ class MICEImputer:
                 original_missing_mask=missing_mask,
             )
 
-        from sklearn.linear_model import LogisticRegression
+        from sklearn.linear_model import BayesianRidge, LogisticRegression
+
+        cont_missing_cols = [
+            c for c in cols_with_missing if c not in binary_missing_cols
+        ]
 
         imputed_datasets = []
         for m in range(self.n_imputations):
             rng_seed = self.random_state + m * 1000
             rng = np.random.default_rng(rng_seed)
-            imputer = IterativeImputer(
-                max_iter=self.max_iter,
-                random_state=rng_seed,
-                sample_posterior=True,
-            )
-            imputed_vals = imputer.fit_transform(df_work[numeric_cols])
+
+            if not binary_missing_cols:
+                imputer = IterativeImputer(
+                    max_iter=self.max_iter,
+                    random_state=rng_seed,
+                    sample_posterior=True,
+                )
+                imputed_vals = imputer.fit_transform(df_work[numeric_cols])
+                df_imp = df_work.copy()
+                df_imp[numeric_cols] = imputed_vals
+                imputed_datasets.append(df_imp)
+                continue
+
+            # Chained-equation (FCS) sweep when binary_cols have missing values,
+            # following van Buuren & Groothuis-Oudshoorn (2011). Each iteration
+            # updates every incomplete continuous and binary column in turn so
+            # subsequent models condition on the latest draws.
             df_imp = df_work.copy()
-            df_imp[numeric_cols] = imputed_vals
+            for ccol in cont_missing_cols:
+                miss_idx = missing_mask[ccol].to_numpy()
+                obs_vals = df_work.loc[~miss_idx, ccol].to_numpy(dtype=float)
+                fill_val = float(np.mean(obs_vals)) if len(obs_vals) else 0.0
+                df_imp.loc[miss_idx, ccol] = fill_val
 
             for bcol in binary_missing_cols:
                 miss_idx = missing_mask[bcol].to_numpy()
-                obs_idx = ~miss_idx
-                pred_cols = [c for c in numeric_cols if c != bcol]
-                y_obs = df_work.loc[obs_idx, bcol].to_numpy(dtype=int)
-                if len(np.unique(y_obs)) >= 2 and pred_cols:
-                    X_all = df_imp[pred_cols].to_numpy(dtype=float)
-                    X_obs = X_all[obs_idx]
-                    X_miss = X_all[miss_idx]
-                    boot_i = rng.integers(0, len(y_obs), size=len(y_obs))
-                    y_boot = y_obs[boot_i]
-                    if len(np.unique(y_boot)) >= 2:
-                        scaler = StandardScaler()
-                        Xb_s = scaler.fit_transform(X_obs[boot_i])
-                        Xm_s = scaler.transform(X_miss)
-                        clf = LogisticRegression(max_iter=500, random_state=rng_seed)
-                        clf.fit(Xb_s, y_boot)
-                        probs = np.clip(clf.predict_proba(Xm_s)[:, 1], 1e-6, 1.0 - 1e-6)
+                y_obs = df_work.loc[~miss_idx, bcol].to_numpy(dtype=int)
+                k_obs = int(y_obs.sum()) if len(y_obs) else 0
+                n_obs = len(y_obs)
+                p_init = float(
+                    np.clip(
+                        rng.beta(k_obs + 0.5, (n_obs - k_obs) + 0.5),
+                        1e-6,
+                        1.0 - 1e-6,
+                    )
+                )
+                df_imp.loc[miss_idx, bcol] = rng.binomial(
+                    1, p_init, size=int(miss_idx.sum())
+                ).astype(float)
+
+            for it in range(self.max_iter):
+                for ccol in cont_missing_cols:
+                    miss_idx = missing_mask[ccol].to_numpy()
+                    obs_idx = ~miss_idx
+                    pred_cols = [c for c in numeric_cols if c != ccol]
+                    y_obs = df_work.loc[obs_idx, ccol].to_numpy(dtype=float)
+                    if len(y_obs) >= 2 and pred_cols:
+                        X_all = df_imp[pred_cols].to_numpy(dtype=float)
+                        reg = BayesianRidge()
+                        reg.fit(X_all[obs_idx], y_obs)
+                        y_mean, y_std = reg.predict(X_all[miss_idx], return_std=True)
+                        draws = rng.normal(y_mean, np.maximum(y_std, 1e-12))
+                    elif len(y_obs) >= 1:
+                        mu = float(np.mean(y_obs))
+                        sd = float(np.std(y_obs, ddof=1)) if len(y_obs) > 1 else 0.0
+                        draws = rng.normal(mu, max(sd, 1e-12), size=int(miss_idx.sum()))
                     else:
-                        probs = np.full(miss_idx.sum(), float(np.mean(y_obs)))
-                else:
-                    p_obs = float(np.mean(y_obs)) if len(y_obs) else 0.5
-                    probs = np.full(miss_idx.sum(), np.clip(p_obs, 1e-6, 1.0 - 1e-6))
-                df_imp.loc[miss_idx, bcol] = rng.binomial(1, probs).astype(float)
+                        draws = np.zeros(int(miss_idx.sum()), dtype=float)
+                    df_imp.loc[miss_idx, ccol] = draws
+
+                for bcol in binary_missing_cols:
+                    miss_idx = missing_mask[bcol].to_numpy()
+                    obs_idx = ~miss_idx
+                    pred_cols = [c for c in numeric_cols if c != bcol]
+                    y_obs = df_work.loc[obs_idx, bcol].to_numpy(dtype=int)
+                    probs = None
+                    if len(np.unique(y_obs)) >= 2 and pred_cols:
+                        X_all = df_imp[pred_cols].to_numpy(dtype=float)
+                        X_obs = X_all[obs_idx]
+                        X_miss = X_all[miss_idx]
+                        boot_i = rng.integers(0, len(y_obs), size=len(y_obs))
+                        y_boot = y_obs[boot_i]
+                        if len(np.unique(y_boot)) >= 2:
+                            scaler = StandardScaler()
+                            Xb_s = scaler.fit_transform(X_obs[boot_i])
+                            Xm_s = scaler.transform(X_miss)
+                            clf = LogisticRegression(
+                                max_iter=500, random_state=rng_seed + it
+                            )
+                            clf.fit(Xb_s, y_boot)
+                            probs = np.clip(
+                                clf.predict_proba(Xm_s)[:, 1], 1e-6, 1.0 - 1e-6
+                            )
+                    if probs is None:
+                        # Single-class observed/bootstrap or empty pred_cols:
+                        # draw prevalence from Jeffreys Beta(0.5, 0.5) posterior
+                        # (van Buuren & Groothuis-Oudshoorn, 2011).
+                        k_obs = int(y_obs.sum()) if len(y_obs) else 0
+                        n_obs = len(y_obs)
+                        p_draw = float(
+                            np.clip(
+                                rng.beta(k_obs + 0.5, (n_obs - k_obs) + 0.5),
+                                1e-6,
+                                1.0 - 1e-6,
+                            )
+                        )
+                        probs = np.full(int(miss_idx.sum()), p_draw)
+                    df_imp.loc[miss_idx, bcol] = rng.binomial(1, probs).astype(float)
 
             imputed_datasets.append(df_imp)
 

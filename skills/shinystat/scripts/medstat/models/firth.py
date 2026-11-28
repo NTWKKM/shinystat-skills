@@ -41,9 +41,22 @@ def check_separation(
     if X_arr.ndim == 1:
         X_arr = X_arr.reshape(-1, 1)
 
+    if X_arr.shape[0] > 0 and X_arr.shape[1] > 0:
+        is_const = np.all(X_arr == X_arr[0:1, :], axis=0)
+        X_nonconst = X_arr[:, ~is_const]
+        if X_nonconst.shape[1] == 0:
+            is_separated = len(np.unique(y_arr)) < 2
+            return {
+                "is_separated": is_separated,
+                "recommendation": "Use Firth penalized regression"
+                if is_separated
+                else "Standard MLE acceptable",
+            }
+        X_arr = X_nonconst
+
     # detect_separation returns a SeparationResult dataclass; its truth value is
     # always True, so read the flag itself.
-    is_separated = bool(detect_separation(X_arr, y_arr).separation)
+    is_separated = bool(detect_separation(X_arr, y_arr, fit_intercept=True).separation)
     return {
         "is_separated": is_separated,
         "recommendation": "Use Firth penalized regression"

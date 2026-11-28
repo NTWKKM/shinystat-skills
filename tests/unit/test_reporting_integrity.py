@@ -2202,3 +2202,21 @@ def test_95_cis_plural_and_author_year_method_citation():
     )
     bad_audit = verify_report_integrity(bad_doc)
     assert bad_audit.passed is False and 1987.0 in bad_audit.untraced_numbers
+
+    bad_model_doc = ReportDocument(
+        title="Integrity", results_dict={"or": 1.45, "n": 412}
+    )
+    bad_model_doc.add_paragraph(
+        "Methods: retention flow. Total 1987 model fits were performed. OR 1.45 in 412 patients."
+    )
+    bad_model_audit = verify_report_integrity(bad_model_doc)
+    assert (
+        bad_model_audit.passed is False and 1987.0 in bad_model_audit.untraced_numbers
+    )
+
+    bad_ci_doc = ReportDocument(title="Integrity", results_dict={"or": 1.45, "n": 412})
+    bad_ci_doc.add_paragraph(
+        "Methods: retention flow. Of 95 patients, CIs were computed for OR 1.45 in 412 patients."
+    )
+    bad_ci_audit = verify_report_integrity(bad_ci_doc)
+    assert bad_ci_audit.passed is False and 95.0 in bad_ci_audit.untraced_numbers

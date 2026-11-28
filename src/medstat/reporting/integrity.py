@@ -323,6 +323,10 @@ _CITATION_SOFT_AFTER_YEAR = re.compile(r"^[a-z]?\s*(?:[;,.:]|$)")
 _AUTHOR_CONTEXT_BEFORE_YEAR = re.compile(
     r"(?:\(|,|(?:&|\band)\s+[A-Z][a-zA-Z'’\-]+)\s*\(?$"
 )
+_AUTHOR_METHOD_ATTRIB_BEFORE_YEAR = re.compile(
+    r"(?:(?:\(|,|(?:&|\band)\s+[A-Z][a-zA-Z'’\-]+)|\b(?:the|a|an|using|via|by|with|per|from|of|after|following|under)\s+[A-Z][a-zA-Z'’\-]+,?\s*\(?)$",
+    re.IGNORECASE,
+)
 
 
 def _is_section_number(
@@ -364,7 +368,25 @@ def _is_structural_context(
 
     # 1. Confidence interval levels (e.g., 90%, 95%, 99% CI / CIs)
     if val in (90.0, 95.0, 99.0):
-        if re.search(r"\b(?:CIs?|confidence|credible)\b", window, re.IGNORECASE):
+        if (
+            has_pct
+            and re.match(
+                r"^\s*(?:[-\w]+\s+){0,2}(?:CIs?|CrIs?|confidence|credible)\b",
+                window_after,
+                re.IGNORECASE,
+            )
+        ) or (
+            re.match(
+                r"^\s*percent\s+(?:[-\w]+\s+){0,2}(?:CIs?|CrIs?|confidence|credible)\b",
+                window_after,
+                re.IGNORECASE,
+            )
+            or re.search(
+                r"\b(?:CIs?|confidence|credible)\s+(?:level|levels|interval|intervals)?\s*(?:of\s+)?$",
+                window_before,
+                re.IGNORECASE,
+            )
+        ):
             return True
 
     # 2. Alpha thresholds and p-value cutoffs (e.g., alpha = 0.05, significance threshold 0.05)
@@ -454,12 +476,15 @@ def _is_structural_context(
         and _AUTHOR_BEFORE_YEAR.search(window_before)
         and (
             _CITATION_CLOSE_AFTER_YEAR.match(window_after)
-            or bool(
-                re.match(
-                    r"^[a-z]?\s+(?:method|test|placement|criteria|criterion|score|formula|correction|rule|rules|equation|model|estimator|approach|algorithm|index|regression|curve)\b",
-                    window_after,
-                    re.IGNORECASE,
+            or (
+                bool(
+                    re.match(
+                        r"^[a-z]?\s+(?:method|test|placement|criteria|criterion|score|formula|correction|rule|rules|equation|model|estimator|approach|algorithm|index|regression|curve)\b",
+                        window_after,
+                        re.IGNORECASE,
+                    )
                 )
+                and bool(_AUTHOR_METHOD_ATTRIB_BEFORE_YEAR.search(window_before))
             )
             or (
                 _CITATION_SOFT_AFTER_YEAR.match(window_after)

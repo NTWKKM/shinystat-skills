@@ -119,7 +119,7 @@ medstat.reporting.provenance.add_reproducibility_appendix(doc) -> ReportDocument
 ## Return shapes
 
 - `detect_outliers` returns a tuple `(outlier_mask, info)`; unpack it.
-- `check_separation(y, X)` accepts 1D or 2D `X` without an intercept column (and takes no `feature_names` kwarg; a constant column raises "rank deficient") and returns `{"is_separated": bool, "recommendation": str}`. `fit_firth_logistic` returns `"summary_df"` indexed by term name (not a `'predictor'` column).
+- `check_separation(y, X)` accepts 1D or 2D `X` without an intercept column (and takes no `feature_names` kwarg; constant columns are ignored when checking separation) and returns `{"is_separated": bool, "recommendation": str}`. `fit_firth_logistic` returns `"summary_df"` indexed by term name (not a `'predictor'` column).
 - `MissingnessAudit` uses `.total_missing_cells` (not `.total_missing`). `fit_survival_analysis_suite` returns `"km_summary"`, `"cox_table"`, `"schoenfeld"`, etc. (check returned `.keys()` before indexing).
 - Python f-strings: never write unparenthesized walrus `f"{var:= expr}"` (`:=` parses as format alignment); assign variables before the f-string. Format extreme ORs `>= 1e6` in scientific notation (`6.91e12`) in tables to avoid 13-digit numeric strings.
 - `compute_iptw_weights` and `medstat.causal.psm.propensity_score_match` raise `ValueError` on a rank-deficient propensity design, and the default `ps_method="logistic"` also raises on separation or non-convergence; neither substitutes an estimator. The explicit `ps_method="firth"` may return scores, subject to its own convergence check. After Gate #3 option A pass `ps_method="firth"`; the estimator used is in `diagnostics["ps_method"]` / `info["ps_method"]`.
