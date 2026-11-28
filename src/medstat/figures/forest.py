@@ -51,6 +51,16 @@ def _ratio_axis_limits(
     xmin, xmax = min(xmin, 0.8), max(xmax, 1.25)
     if xmin >= 0.05 and xmax <= 20.0:
         ticks = [t for t in _STANDARD_RATIO_TICKS if xmin <= t <= xmax]
+        if xmax / max(xmin, 1e-9) > 40.0 and len(ticks) > 4:
+            # Prune closely spaced standard ticks (e.g., 0.25 vs 0.5) on wide log panels while preserving 1.0
+            min_gap = 0.36
+            kept = [1.0] if 1.0 in ticks else []
+            for t in sorted(ticks):
+                if t == 1.0:
+                    continue
+                if all(abs(np.log10(t) - np.log10(k)) >= min_gap for k in kept):
+                    kept.append(t)
+            ticks = sorted(kept)
     else:
         lo_dec = int(np.ceil(np.log10(xmin)))
         hi_dec = int(np.floor(np.log10(xmax)))
@@ -334,7 +344,9 @@ def plot_forest(
         if favor_left_label is not None and favor_right_label is not None:
             _x_tr = ax_mid.get_xaxis_transform()
             _shift = mpl.transforms.ScaledTranslation(3 / 72, 0, fig.dpi_scale_trans)
-            _shift_inv = mpl.transforms.ScaledTranslation(-3 / 72, 0, fig.dpi_scale_trans)
+            _shift_inv = mpl.transforms.ScaledTranslation(
+                -3 / 72, 0, fig.dpi_scale_trans
+            )
             ax_mid.text(
                 ref_val,
                 -0.34,
@@ -510,7 +522,10 @@ def plot_forest(
     for idx, y in enumerate(y_positions):
         # Whole numbers from 100 upward keep a separated-data interval clear of the P column.
         est_str = "{} [{}, {}]".format(
-            *(f"{v:.{_ci_decimals(v)}f}" for v in (estimates[idx], ci_lowers[idx], ci_uppers[idx]))
+            *(
+                f"{v:.{_ci_decimals(v)}f}"
+                for v in (estimates[idx], ci_lowers[idx], ci_uppers[idx])
+            )
         )
         ax_text.text(
             0.0,

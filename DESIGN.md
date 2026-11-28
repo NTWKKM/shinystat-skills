@@ -2472,3 +2472,24 @@ Two `orx` practices were deliberately rejected:
   - Updated `AnalysisLineage.violations()` (`src/medstat/reporting/provenance.py`) and `lineage_violations()` (`skills/_shared/references/report-builder.md`, mirror-synced) so pre-existing legacy runs whose non-empty `plan_delta` omitted an added/deleted literal `"<absent>"` entry are not flagged stale while tampered or empty stored deltas remain rejected; added unit & parity coverage in `tests/unit/test_provenance.py`, `tests/unit/test_reference_parity.py`, and `tests/unit/test_shinystat_skill.py`.
 - **Round 17 (CodeRabbit PR 34 fourteenth follow-up)**:
   - Updated `_reconcile_provisional_primary()` in `tests/unit/test_provenance.py` to derive child replay keys from `plan_delta(old_parent_plan, old_child_plan)` rather than stored `node.plan_delta` keys so legacy artifacts omitting literal `"<absent>"` deletions still replay cleanly; added replay assertions on the legacy fixture.
+
+## ADR 88: Antigravity 25-Run Live-Agent Audit Hardening
+
+### Context
+
+A 25-run live-agent evaluation campaign (`S01a`–`S16` via `shinystat`, `C01a`–`C04` via `shinystat-cloud`, including 4 consistency/parity benchmark groups `CON-1`–`CON-4`) inside Antigravity surfaced concrete failure modes and friction points across the skills and engine:
+1. **Gate #5 / #5d Skipping**: In `S15a`/`S15b` (Thai prompt with `"หาหลักฐานมาประกอบ"` triggering Gate #6 Full Polish while omitting `#5d`) and `C04` (`shinystat-cloud` omitting `#5a`–`#5d`), agents inferred non-interactive defaults or skipped the Gate `#5d` Subagent Offload halt.
+2. **Integrity Audit First-Run False Positives (18/24 runs)**: Plural `"95% CIs"` failed `_is_structural_context` (`\bCI\b` without `s?`), `"DeLong 1988 method"` failed author-year context, and an unformatted 13-digit extreme OR bound (`6914750462913`) collided with the Thai Citizen ID regex.
+3. **Engine & Quickref Friction**: `check_separation(y, X)` raised `ValueError` on 1D Series/ndarray inputs; `MICEImputer` lacked binary `0/1` imputation (`binary_cols`), forcing `S05` to borrow cloud Recipe 12; `bootstrap_internal_validation` (`metrics['auroc']` vs `'c_statistic'`) and f-string walrus mistakes caused preventable retries; `plot_forest` (`0.25` vs `0.5`) and `plot_roc_curve` (legend vs `0.0`/`0.2` ticks) caused figure QA retries.
+4. **Reference & Efficiency Friction**: `decision-heuristics.md` (212L) and `house-styles.md` (240L) exceeded Antigravity's 200-line whole-read guideline (`45` whole reads > 200L), and `M` under MICE drifted (`M=5` vs `10` vs `20`).
+
+### Decision
+
+1. **Gate Hardening**: Added an explicit negative guard in `skills/shinystat/SKILL.md` and `skills/shinystat-cloud/SKILL.md` forbidding inferred non-interactive defaults, promoted **5d. Execution Context Mode** to a bold `HARD STOP`, standardized deterministic MICE `M = max(10, ceil(max_pct_missing))`, and required persisting standalone `run_manifest.json` and `analysis_lineage.json` in `<run_output_dir>/`.
+2. **Engine & Cloud Integrity Parity**: Updated `src/medstat/_phi.py` (and `skills/_shared/references/report-builder.md` §3) with `(?!\d|\.\d)` on the 13-digit Thai Citizen ID regex, exempted plural `CIs?` and named statistical method citations (`DeLong 1988 method`) in `src/medstat/reporting/integrity.py` and `report-builder.md`, reshaped 1D `X` in `src/medstat/models/firth.py:check_separation`, added `binary_cols` bootstrap-logistic imputation to `src/medstat/data/missing.py:MICEImputer`, and prevented label/legend collisions in `src/medstat/figures/forest.py` and `src/medstat/figures/roc.py`.
+3. **Quickref & Reference Hygiene**: Documented `MICEImputer(..., binary_cols=None)`, nested return keys (`metrics['auroc']`), and the f-string walrus guardrail in `skills/shinystat/references/api-quickref.md`; added a `qa["passed"] == True` no-re-read rule to `skills/_shared/references/figures.md`; compacted `house-styles.md` (`<= 195` lines) and updated `decision-heuristics.md` §2.B for `binary_cols`.
+
+### Consequences
+
+- Multi-estimand and Full-Polish runs reliably halt at Gate `#5` / `#5d` unless explicitly authorized as non-interactive.
+- Local and cloud integrity verifiers stay in parity on `"95% CIs"`, named method citations, and extreme floating-point ORs, while single-predictor `check_separation` and binary `MICEImputer` work natively in `medstat`.

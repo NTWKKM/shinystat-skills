@@ -137,6 +137,164 @@ class TestMICEImputer:
         for col in result.columns_imputed:
             assert col in ["x1", "x2"]
 
+    def test_mice_binary_cols_strictly_zero_one(self):
+        """MICEImputer with binary_cols imputes strictly {0, 1} with variance."""
+        rng = np.random.default_rng(42)
+        n = 150
+        x = rng.normal(0, 1, size=n)
+        prob = 1.0 / (1.0 + np.exp(-0.8 * x))
+        exposure = rng.binomial(1, prob).astype(float)
+        outcome = rng.binomial(
+            1, 1.0 / (1.0 + np.exp(-(0.5 * x - 0.6 * exposure)))
+        ).astype(float)
+        miss_mask = rng.random(n) < 0.45
+        exposure[miss_mask] = np.nan
+        df = pd.DataFrame({"x": x, "exposure": exposure, "outcome": outcome})
+
+        imputer = MICEImputer(
+            n_imputations=5, max_iter=5, random_state=42, binary_cols=["exposure"]
+        )
+        result = imputer.fit_transform(df)
+        assert "exposure" in result.columns_imputed
+        imputed_slices = []
+        for df_imp in result.imputed_datasets:
+            assert df_imp["exposure"].isna().sum() == 0
+            vals = set(df_imp["exposure"].unique().tolist())
+            assert vals.issubset({0.0, 1.0})
+            imputed_slices.append(df_imp.loc[miss_mask, "exposure"].to_numpy())
+        stacked = np.vstack(imputed_slices)
+        assert np.any(np.std(stacked, axis=0) > 0)
+
+        bad_df = pd.DataFrame({"x": [1.0, 2.0, 3.0], "exposure": [0.0, 2.0, np.nan]})
+        with pytest.raises(ValueError, match="only 0/1"):
+            MICEImputer(binary_cols=["exposure"]).fit_transform(bad_df)
+
+    def test_mice_binary_single_column_posterior_draw(self):
+        """Single numeric binary column draws posterior prevalence rather than fixed p."""
+        # All-zero observed: fixed p=0 would always impute 0.0, whereas Jeffreys Beta(0.5, 8.5)
+        # draws non-zero prevalence across imputations and leaves observed cells untouched.
+        df = pd.DataFrame({"exposure": [0.0] * 8 + [np.nan] * 6})
+        result = MICEImputer(
+            n_imputations=25, max_iter=2, random_state=42, binary_cols=["exposure"]
+        ).fit_transform(df)
+        obs_mask = ~df["exposure"].isna()
+        miss_draws = []
+        for df_imp in result.imputed_datasets:
+            assert df_imp["exposure"].isna().sum() == 0
+            assert set(df_imp["exposure"].unique().tolist()).issubset({0.0, 1.0})
+            assert np.array_equal(
+                df_imp.loc[obs_mask, "exposure"].to_numpy(),
+                df.loc[obs_mask, "exposure"].to_numpy(),
+            )
+            miss_draws.append(df_imp.loc[~obs_mask, "exposure"].to_numpy())
+        assert np.any(np.vstack(miss_draws) == 1.0)
+
+    def test_mice_binary_one_class_bootstrap_uses_posterior(self, monkeypatch):
+        """Two-class observed data that yields a one-class bootstrap sample falls back to posterior."""
+        real_default_rng = np.random.default_rng
+        beta_calls = []
+        bootstrap_calls = 0
+
+        class _ForcedOneClassRng:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def integers(self, low, high=None, size=None, **kwargs):
+                nonlocal bootstrap_calls
+                bootstrap_calls += 1
+                # Force every bootstrap draw to pick index 0 (exposure == 0.0 -> 1 class)
+                return np.zeros(size, dtype=int)
+
+            def beta(self, a, b, size=None):
+                val = self._inner.beta(a, b, size=size)
+                beta_calls.append((a, b, val))
+                return val
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+        monkeypatch.setattr(
+            np.random,
+            "default_rng",
+            lambda seed=None: _ForcedOneClassRng(real_default_rng(seed)),
+        )
+
+        df = pd.DataFrame(
+            {
+                "x": np.arange(1.0, 13.0),
+                "exposure": [0.0] * 7 + [1.0] + [np.nan] * 4,
+            }
+        )
+        result = MICEImputer(
+            n_imputations=12, max_iter=2, random_state=7, binary_cols=["exposure"]
+        ).fit_transform(df)
+        obs_mask = ~df["exposure"].isna()
+        # 12 imputations * 2 sweeps = 24 forced one-class bootstrap samples;
+        # 12 init beta draws + 24 fallback beta draws = 36 total.
+        assert bootstrap_calls == 24
+        assert len(beta_calls) == 36
+        assert len({round(float(v), 6) for _, _, v in beta_calls}) > 1
+        imputed_vals = []
+        for df_imp in result.imputed_datasets:
+            assert df_imp["exposure"].isna().sum() == 0
+            assert set(df_imp["exposure"].unique().tolist()).issubset({0.0, 1.0})
+            assert np.array_equal(
+                df_imp.loc[obs_mask, "exposure"].to_numpy(),
+                df.loc[obs_mask, "exposure"].to_numpy(),
+            )
+            imputed_vals.append(df_imp.loc[~obs_mask, "exposure"].to_numpy())
+        assert np.any(np.vstack(imputed_vals) == 1.0)
+
+    def test_mice_binary_with_nullable_int_continuous_column(self):
+        """Nullable Int64 continuous columns use Float64 and preserve observed values."""
+        df = pd.DataFrame(
+            {
+                "age": pd.array([40, 50, pd.NA, 60, 70, 80], dtype="Int64"),
+                "exposure": [0.0, 1.0, 0.0, np.nan, 1.0, 0.0],
+                "complete_int": pd.array([1, 2, 3, 4, 5, 6], dtype="Int64"),
+            }
+        )
+        for binary_cols in (None, ["exposure"]):
+            result = MICEImputer(
+                n_imputations=3, max_iter=2, random_state=42, binary_cols=binary_cols
+            ).fit_transform(df)
+            for df_imp in result.imputed_datasets:
+                assert df_imp["age"].isna().sum() == 0
+                assert df_imp["exposure"].isna().sum() == 0
+                assert df_imp["age"].dtype == pd.Float64Dtype()
+                assert df_imp["complete_int"].dtype == pd.Int64Dtype()
+                obs_age = df["age"].notna()
+                assert (
+                    df_imp.loc[obs_age, "age"]
+                    == df.loc[obs_age, "age"].astype("Float64")
+                ).all()
+                if binary_cols is not None:
+                    assert set(df_imp["exposure"].unique().tolist()).issubset(
+                        {0.0, 1.0}
+                    )
+
+    def test_mice_rejects_all_missing_continuous_column(self):
+        """Both IterativeImputer and FCS reject a continuous column with no observed values."""
+        df_iter = pd.DataFrame(
+            {
+                "all_missing": [np.nan, np.nan, np.nan, np.nan],
+                "x": [1.0, 2.0, 3.0, 4.0],
+            }
+        )
+        with pytest.raises(ValueError, match="no observed values"):
+            MICEImputer(n_imputations=2, max_iter=2).fit_transform(df_iter)
+
+        df_fcs = pd.DataFrame(
+            {
+                "all_missing": [np.nan, np.nan, np.nan, np.nan],
+                "exposure": [0.0, 1.0, np.nan, 0.0],
+            }
+        )
+        with pytest.raises(ValueError, match="no observed values"):
+            MICEImputer(
+                n_imputations=2, max_iter=2, binary_cols=["exposure"]
+            ).fit_transform(df_fcs)
+
 
 class TestKNNAndIndicatorImputation:
     """Tests for KNN and indicator imputation methods."""

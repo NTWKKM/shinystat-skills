@@ -633,6 +633,20 @@ INTEGRITY_PARITY_CASES: list[IntegrityParityCase] = [
         expected_passed=False,
         expected_untraced=[300.0, 600.0],
     ),
+    IntegrityParityCase(
+        id="pass_parenthesized_ci_level_95_pct",
+        narrative=f"{BASE_NARRATIVE} Confidence intervals (95%) were computed.",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=True,
+        expected_untraced=[],
+    ),
+    IntegrityParityCase(
+        id="fail_parenthesized_95_pct_patients_not_ci_level",
+        narrative=f"{BASE_NARRATIVE} Confidence intervals (95% of patients had events) were reviewed.",
+        results_dict=BASE_RESULTS_DICT,
+        expected_passed=False,
+        expected_untraced=[95.0],
+    ),
 ]
 
 # Task 2b: Statistical token mutations (+-1 last decimal digit, *10, *100, /100, and n+-3)

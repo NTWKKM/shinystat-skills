@@ -4,6 +4,8 @@ src/medstat/figures/roc.py: Publication-grade Receiver Operating Characteristic 
 
 from __future__ import annotations
 
+import re
+import textwrap
 from pathlib import Path
 from typing import Any, Literal
 
@@ -26,6 +28,34 @@ from medstat.figures.styles import (
     save_publication_figure,
     set_clinical_figure_style,
 )
+
+
+def _wrap_roc_legend_label(lbl: str, width: int = 34) -> str:
+    """Wrap ROC legend labels at whitespace or semantic separators.
+
+    Keeps formatted AUROC values and confidence-interval bounds intact on a
+    single line rather than slicing at fixed character offsets.
+    """
+    if len(lbl) <= width:
+        return lbl
+    if ": AUROC " in lbl:
+        prefix, auroc_part = lbl.split(": AUROC ", 1)
+        prefix_wrapped = textwrap.fill(
+            f"{prefix}:",
+            width=width,
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+        return f"{prefix_wrapped}\nAUROC {auroc_part}"
+    # Protect parenthesized numeric/CI spans from breaking mid-expression.
+    protected = re.sub(r"\([^)]*\)", lambda m: m.group(0).replace(" ", "\u00a0"), lbl)
+    wrapped = textwrap.fill(
+        protected,
+        width=width,
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    return wrapped.replace("\u00a0", " ")
 
 
 def plot_roc_curve(
@@ -174,7 +204,7 @@ def plot_roc_curve(
                 diff_text = f"Paired DeLong {format_p_value(paired_p_value, journal)}"
                 ax.text(
                     0.96,
-                    0.20,
+                    0.27,
                     diff_text,
                     transform=ax.transAxes,
                     fontsize=8.0,
@@ -217,7 +247,17 @@ def plot_roc_curve(
     ax.set_ylabel("Sensitivity (True Positive Rate)", labelpad=6)
     ax.set_title(title, loc="left", pad=10)
     if journal is not None:
-        ax.legend(loc="lower right", frameon=False, fontsize=7.8)
+        handles, labels = ax.get_legend_handles_labels()
+        wrapped = [_wrap_roc_legend_label(lbl, width=34) for lbl in labels]
+        ax.legend(
+            handles,
+            wrapped,
+            loc="lower right",
+            bbox_to_anchor=(1.0, 0.02),
+            borderaxespad=0.3,
+            frameon=False,
+            fontsize=7.2 if paired_roc_data is not None else 7.8,
+        )
     else:
         ax.legend(loc="lower right")
 

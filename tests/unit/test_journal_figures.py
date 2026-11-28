@@ -100,6 +100,9 @@ def test_assert_zero_phi_text_raises_on_violations():
         assert_zero_phi_text(["ID: 1100500123456"])
 
     with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        assert_zero_phi_text(["ID: 1100500123456.0"])
+
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
         assert_zero_phi_text(["Dr. Somchai report"])
 
     with pytest.raises(ValueError, match="Zero-PHI Violation"):
@@ -910,3 +913,14 @@ def test_wound_topdown_and_artery_validation(monkeypatch):
         assert abs(ach["slough"] - 0.3) < 0.05
     finally:
         plt.close(sc.fig)
+
+
+def test_roc_legend_label_wrapping_preserves_auroc_and_ci():
+    """ROC legend wrapping breaks at whitespace/separators and keeps AUROC + CI intact."""
+    from medstat.figures.roc import _wrap_roc_legend_label
+
+    lbl = "Logistic Regression (MICE): AUROC 0.842 (0.781–0.903)"
+    wrapped = _wrap_roc_legend_label(lbl, width=34)
+    lines = wrapped.splitlines()
+    assert len(lines) >= 2
+    assert any("AUROC 0.842 (0.781–0.903)" == line for line in lines)

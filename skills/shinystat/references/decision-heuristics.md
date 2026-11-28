@@ -2,10 +2,9 @@
 
 Shared by `shinystat` (local) and `shinystat-cloud`. Consult during Pillar 2 (Research & Estimand Triangulation) to map a clinical research question to its model. Each method names both routes: the **local API** function in the bundled engine (`scripts/medstat/`; module map in the local SKILL.md Pillar 3) and the **cloud Recipe #** (file map in the cloud SKILL.md Recipe Index). Use the route your skill provides.
 
-> **Read §3 before modeling (lines ~200–220):** §3 pins the deterministic **Table 1 normality rule** (`|skewness| <= 1.0` Mean (SD); `> 1.0` Median [IQR]) and **predictor unit scaling** (`age` per 10 years and labeled in years when metadata establishes years; other continuous predictors and unlabeled `age` per 1 SD; `"unit not stated"` only when no supplied metadata identifies the unit, asking for clarification when needed). Do not truncate before §3.
+> **Read §3 before modeling (lines ~175–195):** §3 pins the deterministic **Table 1 normality rule** (`|skewness| <= 1.0` Mean (SD); `> 1.0` Median [IQR]) and **predictor unit scaling** (`age` per 10 years and labeled in years when metadata establishes years; other continuous predictors and unlabeled `age` per 1 SD; `"unit not stated"` only when no supplied metadata identifies the unit, asking for clarification when needed). Do not truncate before §3.
 
 ---
-
 ## 1. Clinical Study Archetype to Statistical Model Mapping
 
 | Study Archetype | Target Estimand / Goal | Primary Model / Method | Key Assumption / Diagnostics | Local API · Cloud Recipe |
@@ -28,9 +27,7 @@ Shared by `shinystat` (local) and `shinystat-cloud`. Consult during Pillar 2 (Re
 | **Type 9: Sample Size Determination** | Required N, Events, EPP, Statistical Power | Riley et al. (BMJ 2020) & Obuchowski (1998) | 4 criteria (intercept, MAPE, shrinkage, optimism); Obuchowski AUROC variance | `calculate_riley_sample_size`, `calculate_diagnostic_auroc_sample_size` · Recipe 20 |
 
 ---
-
 ## 2. Decision Trees for Common Statistical Challenges
-
 ### A. Events Per Variable (EPV), Sparse Data & Separation
 ```
 Calculate diagnostic EPV:
@@ -53,7 +50,6 @@ Calculate diagnostic EPV:
 ```
 
 *Note on Modern EPV Evidence:* As demonstrated by Vittinghoff & McCulloch (2007) and van Smeden et al. (2016), EPV < 10 is an exploratory diagnostic indicator rather than an unconditional hard stop. Firth penalization resolves monotone separation and reduces first-order finite-sample parameter estimation bias (Heinze & Schemper, 2002); however, for prediction modeling, shrinkage/penalization is required to control overfitting.
-
 ### B. Missing Data Strategy
 ```
 Audit Missingness Pattern & Mechanism (`littles_mcar_test` / Recipe 8; note H0: MCAR; failing to reject does not prove MCAR)
@@ -66,15 +62,14 @@ Audit Missingness Pattern & Mechanism (`littles_mcar_test` / Recipe 8; note H0: 
     `intercept` to the constant term; name those columns).
 
 ├── Per-variable missingness < 5% in non-primary covariates ──▶ Complete-case analysis with documented justification
-├── Missing 5%–40% under Missing at Random (MAR) ──▶ Multiple Imputation by Chained Equations for numeric (continuous) targets (`MICEImputer` / Recipe 12 `impute_mice_datasets`; categorical or binary targets need a type-appropriate imputation model such as logistic / polytomous regression, e.g. Recipe 12 `impute_mice_mixed_datasets`; include categorical predictors, fully observed ones too, in every continuous-target imputation model so the imputation model is congenial with the analysis model: fully observed categorical predictors are dummy-encoded before fitting (local: listed in `MICEImputer.fit_transform(columns=...)`; cloud: Recipe 12 `predictors`), while categorical predictors with missing values must be imputed jointly with type-appropriate categorical models (cloud: Recipe 12 `impute_mice_mixed_datasets`), never as dummy columns in `MICEImputer`, which imputes them as continuous; proper Bayesian draws, M ≥ 5 for ≤ 30% missing, M ≥ 20 for > 30% missing; MICE is the primary analysis and Complete-Case Analysis the sensitivity analysis, noting agreement does not prove MAR or exclude MNAR bias; the retention flow ends at the primary analytic N and the complete-case n is reported beside the sensitivity estimate)
+├── Missing 5%–40% under Missing at Random (MAR) ──▶ Multiple Imputation by Chained Equations for numeric (continuous) targets (`MICEImputer` / Recipe 12 `impute_mice_datasets`) and declared 0/1 binary targets (`MICEImputer(..., binary_cols=[...])` / Recipe 12 `impute_mice_mixed_datasets`); multi-category (>2-level) targets or predictors with missing values need a type-appropriate polytomous imputation model (cloud: Recipe 12 `impute_mice_mixed_datasets`; never pass incomplete multi-category predictors as dummy columns in `MICEImputer`, which imputes them as continuous); include categorical predictors, fully observed ones too, in every continuous-target imputation model so the imputation model is congenial with the analysis model: fully observed categorical predictors are dummy-encoded before fitting (local: listed in `MICEImputer.fit_transform(columns=...)`; cloud: Recipe 12 `predictors`); proper Bayesian/bootstrap draws with M = max(10, ceil(max % missing)) (matching the SKILL.md triage rule); MICE is the primary analysis and Complete-Case Analysis the sensitivity analysis, noting agreement does not prove MAR or exclude MNAR bias; the retention flow ends at the primary analytic N and the complete-case n is reported beside the sensitivity estimate)
 ├── Primary Exposure Missing = 100% in the analytic cohort (after applying the approved outcome disposition) ──▶ Stop: no exposure value is observed, so MICE cannot fit its imputation model and complete-case analysis has no rows; ask for usable exposure data or report the analysis as not estimable
-├── Primary Exposure Missing > 40% and < 100% (Not MNAR) ──▶ Halt at Grilling Gate #4: the primary analysis is high-M MICE (M ≥ 40, tracking FMI) that imputes the exposure under MAR (imputation model includes the outcome and every analysis covariate); the user chooses its sensitivity analyses: (a) complete-case, and/or (b) pattern-mixture / delta-adjustment for departures from MAR; the exposure is never dropped. A categorical or binary exposure needs a type-appropriate imputation model (cloud: Recipe 12 `impute_mice_mixed_datasets`), never `MICEImputer`, which imputes numeric columns as continuous; the local engine has no categorical imputer, so the local run halts and reports the exposure as not locally imputable
+├── Primary Exposure Missing > 40% and < 100% (Not MNAR) ──▶ Halt at Grilling Gate #4: the primary analysis is high-M MICE (M ≥ 40, tracking FMI) that imputes the exposure under MAR (imputation model includes the outcome and every analysis covariate); the user chooses its sensitivity analyses: (a) complete-case, and/or (b) pattern-mixture / delta-adjustment for departures from MAR; the exposure is never dropped. A categorical or binary exposure needs a type-appropriate imputation model (cloud: Recipe 12 `impute_mice_mixed_datasets`; local: `MICEImputer(..., binary_cols=[col])` supports binary 0/1 exposures), never continuous-only `MICEImputer`; the local engine has no multi-category (>2-level) imputer, so for multi-category exposures the local run halts and reports the exposure as not locally imputable
 ├── Important Non-Primary Confounder Missing = 100% in the analytic cohort ──▶ Stop / Halt at Grilling Gate #4: no confounder value is observed, so neither Option B (high-M MICE) nor Option C (pattern-mixture modeling) can fit or anchor sensitivity assumptions; halt analysis and request usable data, or report the primary estimate as not estimable
 ├── Non-Primary Missing > 40% (Not MNAR; any model covariate counts as non-primary, only the outcome and the exposure of interest are primary) ──▶ Halt at Grilling Gate #4 — distinguish genuinely auxiliary covariates from variables that may confound the exposure–outcome relationship: for genuinely auxiliary covariates only, present Option A (Recommended for auxiliary covariates only): drop/exclude the > 40% auxiliary covariate from primary multivariable models (optionally evaluate in secondary sensitivity); for important confounders with observed data (< 100% missing), do not recommend removal from the primary model with sensitivity analysis optional—require an appropriate strategy to address missingness via Option B: high-M MICE (M ≥ 40, tracking FMI) under MAR, or Option C: pattern-mixture modeling (or missing-indicator adjustment restricted to randomized-trial baseline covariates or explicitly labeled sensitivity analyses)
 ├── Primary Outcome Missing (any row; ask at Gate #1 unless the user gave a disposition) ──▶ Recommended option: avoid outcome imputation in observational cohorts and preserve retention flow (N_initial ➔ N_analyzed); for trial/longitudinal dropout under MAR, allow protocol-justified outcome imputation (MICE) or MMRM with mandatory complete-case and tipping-point sensitivity analyses
 └── Missingness Informative / MNAR ──▶ Halt for clinical domain review or sensitivity bounds
 ```
-
 ### C. Diagnostic Test Directionality & Cutpoint Selection
 ```
 Identify Clinical Biomarker Mechanism
@@ -85,7 +80,6 @@ Identify Clinical Biomarker Mechanism
     ├── Prespecified clinical threshold ──▶ Report nominal 2x2 metrics (Recipe 2)
     └── Data-driven cutpoint (Youden's J) ──▶ Report with anti-p-hacking disclosure (Recipe 3)
 ```
-
 ### D. Observational Causal Inference: PSM vs. IPTW vs. Overlap Weights
 ```
 Evaluate Treatment Assignment & Causal Target
@@ -102,7 +96,6 @@ Evaluate Treatment Assignment & Causal Target
 ├── Matched-Pair Outcome ──▶ Headline OR from GEE logistic clustered on pair ID (exchangeable); RR and RD from the same pairs as secondary; E-value from the RR when the outcome is common (> 15%)
 └── Weighted Outcome Model ──▶ IPTW weights as probability weights with sandwich variance (local: `medstat.causal.iptw.fit_iptw_outcome_model`; cloud: Recipe 14 `fit_weighted_outcome_model`); frequency weights inflate N and understate the variance
 ```
-
 ### E. Time-to-Event Analysis Under Competing Risks & Proportional Hazards Violations
 ```
 Audit Event Types: Event of Interest vs. Competing Risks (e.g., CV death vs. non-CV death)
@@ -126,7 +119,6 @@ On Schoenfeld P <= 0.05, inspect `plot_schoenfeld_residuals` (figures.md §9), t
 - **Nuisance covariate**: refit with `strata=[...]` for a meaningful categorical or defensibly grouped continuous variable (`refit_cox_with_strata`; its HR is no longer reported). When continuous non-linear misspecification is suspected, refit with RCS and reassess PH; if the violation persists, model the time-varying effect or report it as a limitation.
 - **Exposure**: piecewise / time-varying HR (`piecewise_hr`), or RMST.
 - **Reporting**: report both models and name the remedy beside each violator.
-
 ### F. Diagnostic Risk Reclassification & Incremental Value
 ```
 Evaluating Added Value of Updated Biomarker/Model over Baseline
@@ -139,7 +131,6 @@ Evaluating Added Value of Updated Biomarker/Model over Baseline
 └── Integrated Discrimination Improvement (IDI) (Recipe 16)
     └── Difference in discrimination slopes (mean predicted risk difference between events and non-events)
 ```
-
 ### G. Time-Dependent ROC in Longitudinal Follow-up
 ```
 Evaluating Diagnostic / Prognostic Biomarkers Over Follow-up Time
@@ -149,9 +140,7 @@ Evaluating Diagnostic / Prognostic Biomarkers Over Follow-up Time
 ├── Horizon Selection ──▶ Clinically meaningful milestones (e.g., 30d, 90d, 1y, 3y, 5y); avoid horizons where remaining cases or controls < 5
 └── Reporting ──▶ AUROC(t) trajectory curve with 95% bootstrap CI band, optimal Youden cutpoint, sensitivity, specificity per milestone (Recipe 17)
 ```
-
 ### H. TRIPOD+AI Prediction Model Internal Validation & Uniform Shrinkage
-
 ```
 Developing / Validating Clinical Prediction Models
 ├── Apparent Performance ──▶ Optimistically biased due to fitting on derivation data
@@ -164,9 +153,7 @@ Developing / Validating Clinical Prediction Models
 │   └── Re-estimated Intercept: solve sum(expit(alpha_0 + LP_shrunk)) = sum(Y) to maintain calibration-in-the-large
 └── Clinical Safeguards ──▶ EPP < 10 warning; s_hat < 0.80 severe overfitting warning; <50% bootstrap convergence alert (Recipe 18)
 ```
-
 ### I. Minimum Sample Size for Clinical Prediction Models (Riley et al. 2020)
-
 ```
 Determining Required Sample Size for Multivariable Prediction Model Development
 ├── Do NOT rely on simplistic 10 EPP rule-of-thumb
@@ -178,11 +165,8 @@ Determining Required Sample Size for Multivariable Prediction Model Development
 ├── Model Strength Input: C-statistic, Cox-Snell R2, or Nagelkerke R2
 └── Required Sample Size = max(N1, N2, N3, N4) with binding criterion explicitly reported (Recipe 20)
 ```
-
 ### J. Polish Grilling Gate & Evidence Grounding Decision Tree
-
 For full verification rules, source-appropriate metadata requirements, provenance signals, and superscript citation formatting, read the single source of truth at [evidence-pipeline.md](evidence-pipeline.md):
-
 ```
 Polish Grilling Gate #6 Activation & Routing
 ├── User prompt explicitly requests literature evidence (e.g. "หาหลักฐานมาประกอบ", "find evidence")
@@ -191,16 +175,13 @@ Polish Grilling Gate #6 Activation & Routing
     ├── (Standard) Skip Polish (User-Scoped References) ──▶ Verify only user-provided sources via evidence-pipeline.md Step 2A (omit References section if none provided)
     └── (Optional) Full Publication Polish ──▶ Execute full evidence-pipeline.md Steps 1–4 including Step 2B exploratory literature enrichment
 ```
-
 ### K. Ordinal Regression, Restricted Cubic Splines, Clustered GEE & Meta-Analysis
-
 - **Ordinal Outcomes ($\ge 3$ ordered levels)**: Fit Cumulative Logit Proportional Odds models (`fit_proportional_odds` [local API & Recipe 21 cloud]) and verify parallel slopes via the Brant test (`assess_proportional_odds` / `test_proportional_odds` in local API and Recipe 21 [cloud]); compare the omnibus $P$-value with the prespecified diagnostic $\alpha$ (using $0.05$ when unspecified), and fall back to multinomial logistic regression (`fit_multinomial_logistic`) when the omnibus $P$-value is below that $\alpha$ ($P < \alpha$).
 - **Non-Linear Continuous Predictors**: Fit Harrell Restricted Cubic Splines (local API: `fit_logistic_rcs`, `fit_cox_rcs`; cloud recipe: `fit_rcs_spline_model` in Recipe 22) and report both `p_overall` and `p_nonlinearity`.
 - **Clustered / Multi-Center Cohorts**: Compute cluster intraclass correlation ($\text{ICC}_{\text{cluster}}$) and Design Effect ($\text{DEFF} = 1 + (\bar{m} - 1)\text{ICC}$); fit GEE with robust sandwich standard errors or mixed-effects models (local API and cloud recipe: `fit_gee` in Recipe 23).
 - **Systematic Synthesis & Meta-Analysis**: An undeclared effect scale (log ratio vs raw difference) is a Gate #1 question; `run_meta_analysis` raises `EffectScaleError` without it. Run inverse-variance Fixed-Effects and DerSimonian-Laird Random-Effects meta-analysis (`run_meta_analysis` / Recipe 24), reporting Cochran's $Q$, Higgins' $I^2$, $\hat{\tau}^2$, and the 95% prediction interval.
 
 ---
-
 ## 3. Reporting & Publication Standards
 
 - **NEJM Style**: 3 horizontal rules (top border 2px, header border 1px, bottom border 2px), zero vertical dividers, $P$-values formatted as $P = 0.04$ or $P < 0.001$. Render via `render_nejm_table` (local) or Recipe 13 (cloud).

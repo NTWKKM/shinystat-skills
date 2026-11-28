@@ -36,12 +36,56 @@ def check_separation(
     """
     Check for quasi-complete or complete linear separation in binary data.
     """
-    y_arr = np.asarray(y, dtype=int).ravel()
+    y_float = np.asarray(y, dtype=float).ravel()
+    if y_float.size == 0:
+        raise ValueError("Empty input: y must contain at least one observation.")
+    if not np.all(np.isfinite(y_float)):
+        raise ValueError("Outcome y contains non-finite values (NaN or Inf).")
+    if not np.all(np.equal(y_float, np.trunc(y_float))):
+        raise ValueError(
+            "Outcome y must contain integer-valued class labels, got fractional values."
+        )
+    y_arr = y_float.astype(int)
+
     X_arr = np.asarray(X, dtype=float)
+    if X_arr.ndim == 1:
+        X_arr = X_arr.reshape(-1, 1)
+    if X_arr.shape[0] != y_arr.shape[0]:
+        raise ValueError(
+            f"Mismatched sample counts: y has {y_arr.shape[0]}, X has {X_arr.shape[0]}."
+        )
+    if not np.all(np.isfinite(X_arr)):
+        raise ValueError("Predictor matrix X contains non-finite values (NaN or Inf).")
+
+    unique_y = np.unique(y_arr)
+    if len(unique_y) > 2:
+        raise ValueError(
+            f"Expected binary outcome with at most 2 unique classes, got {len(unique_y)}"
+        )
+    if len(unique_y) < 2:
+        return {
+            "is_separated": True,
+            "recommendation": "Both outcome classes are required before a Firth fit; cannot fit logistic regression with only one unique outcome class.",
+        }
+
+    if X_arr.shape[1] == 0:
+        return {
+            "is_separated": False,
+            "recommendation": "Standard MLE acceptable",
+        }
+
+    is_const = np.all(X_arr == X_arr[0:1, :], axis=0)
+    X_nonconst = X_arr[:, ~is_const]
+    if X_nonconst.shape[1] == 0:
+        return {
+            "is_separated": False,
+            "recommendation": "Standard MLE acceptable",
+        }
+    X_arr = X_nonconst
 
     # detect_separation returns a SeparationResult dataclass; its truth value is
     # always True, so read the flag itself.
-    is_separated = bool(detect_separation(X_arr, y_arr).separation)
+    is_separated = bool(detect_separation(X_arr, y_arr, fit_intercept=True).separation)
     return {
         "is_separated": is_separated,
         "recommendation": "Use Firth penalized regression"

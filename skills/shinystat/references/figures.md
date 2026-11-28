@@ -15,6 +15,7 @@
 - **Colorblind-Safe Palettes**: Okabe-Ito / Tol palettes (`#0072B2`, `#D55E00`, `#009E73`, `#CC79A7`, `#E69F00`).
 - **Thai Typography Support**: Built-in fallback chain (`Sarabun`, `Thonburi`, `Sukhumvit Set`, `Arial`) ensures clean Thai text rendering without square-box glyph errors.
 - **Zero-PHI Guarantee**: Figure axis labels, legends, and hover texts strictly prohibit raw patient identifiers (HN, Thai citizen IDs, patient names).
+- **Efficiency**: When `qa["passed"] == True`, do not re-read unmodified generated `.png` files via `read_file`.
 
 ### Figure Return Contract
 Every plotting function returns a `FigureResult` dataclass:

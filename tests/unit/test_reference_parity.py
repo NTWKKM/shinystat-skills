@@ -1869,8 +1869,8 @@ def test_phi_thai_id_and_name_markers_parity(tmp_path):
     clean_csv.write_text(
         "obs,bmi_imp\n1,27.7100083304435\n2,0.5403257538631\n", encoding="utf-8"
     )
-    thai_prose = "Methods: จำนวนพารามิเตอร์ ตลอดระยะเวลา กำหนดระดับ ระมัดระวัง ทำนายการ อาชีพ: นายจ้าง อาชีพ: นายจ้าง ใจดี กลุ่มผู้ป่วย\nนายจ้าง ใจดี cohort retention OR 1.45 (n=412)."
-    results = {"or": 1.45, "n": 412}
+    thai_prose = "Methods: จำนวนพารามิเตอร์ ตลอดระยะเวลา กำหนดระดับ ระมัดระวัง ทำนายการ อาชีพ: นายจ้าง อาชีพ: นายจ้าง ใจดี กลุ่มผู้ป่วย\nนายจ้าง ใจดี cohort retention OR 1.45 (n=412; extreme float 6914750462913.45)."
+    results = {"or": 1.45, "n": 412, "extreme_or": 6914750462913.45}
 
     doc = ReportDocument(title="Thai Clean", results_dict=results)
     doc.add_paragraph(thai_prose)
@@ -1883,6 +1883,10 @@ def test_phi_thai_id_and_name_markers_parity(tmp_path):
     for marker in [
         "1234567890123",
         "1-2345-67890-12-3",
+        "ID.1-2345-67890-12-3",
+        "ID.1 2345 67890 12 3",
+        "1-2345-67890-12-3.0",
+        "1-2345-67890-12-3Next",
         "นายสมชาย",
         "ผู้ป่วยนายสมชาย",
         "นางสาวสมหญิง",
@@ -1946,6 +1950,44 @@ def test_delivered_text_parity_engine_and_cloud():
     )
     assert eng_phi.passed is False and eng_phi.phi_violations
     assert cld_phi["passed"] is False and cld_phi["phi_violations"]
+
+
+def test_check_separation_accepts_1d_series_and_array():
+    """Single-predictor 1D Series/ndarray inputs are reshaped cleanly in check_separation."""
+    from medstat.models.firth import check_separation
+
+    y = pd.Series([0, 0, 0, 0, 1, 1, 1, 1])
+    x_sep = pd.Series([0, 0, 0, 0, 1, 1, 1, 1])
+    res_series = check_separation(y, x_sep)
+    assert res_series["is_separated"] is True
+    res_arr = check_separation(y.to_numpy(), np.array([0, 1, 0, 1, 0, 1, 0, 1]))
+    assert res_arr["is_separated"] is False
+    res_const_only = check_separation(y.to_numpy(), np.ones((8, 1)))
+    assert res_const_only["is_separated"] is False
+    res_const_plus = check_separation(
+        y.to_numpy(), np.column_stack([np.ones(8), x_sep.to_numpy()])
+    )
+    assert res_const_plus["is_separated"] is True
+    with pytest.raises(ValueError, match="at most 2 unique classes"):
+        check_separation(np.array([0, 1, 2, 0, 1, 2, 0, 1]), np.ones((8, 1)))
+    with pytest.raises(ValueError, match="Mismatched sample counts"):
+        check_separation(y.to_numpy(), np.ones((6, 1)))
+    with pytest.raises(ValueError, match="non-finite"):
+        check_separation(
+            y.to_numpy(), np.array([1.0, np.nan, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+        )
+    with pytest.raises(ValueError, match="fractional"):
+        check_separation(np.array([0.0, 0.2, 0.8, 0.4]), np.ones((4, 1)))
+
+    res_single_const = check_separation(np.zeros(8, dtype=int), np.ones((8, 1)))
+    assert res_single_const["is_separated"] is True
+    assert "both outcome classes" in res_single_const["recommendation"].lower()
+    assert "use firth" not in res_single_const["recommendation"].lower()
+
+    res_single_nonconst = check_separation(np.ones(8, dtype=int), x_sep.to_numpy())
+    assert res_single_nonconst["is_separated"] is True
+    assert "both outcome classes" in res_single_nonconst["recommendation"].lower()
+    assert "use firth" not in res_single_nonconst["recommendation"].lower()
 
 
 def test_provenance_and_lineage_parity_engine_and_cloud():

@@ -11,18 +11,14 @@ In cloud sandboxes (e.g. Claude Web Artifacts), `medstat` is not installed as an
 - Every format, before delivery: [§3 (`verify_standalone_integrity`)](#3-standalone-reporting-integrity-verification) and [§4 (Run Manifest & Analysis Lineage)](#4-standalone-run-manifest--analysis-lineage).
 
 ---
-
 ## 1. Cloud Report Generation Architecture
-
 1. **Default & Primary Formats (Zero Extra Dependencies)**:
    - **Self-Contained HTML (`.html`)**: **Recommended format at alignment gate**. When the user prompt omits a deliverable format, the agent must wait for the user's format selection at the Output Format Alignment Gate rather than silently falling back. Always available; embeds plots via base64 data URIs and applies ICMJE 3-rule CSS styling.
    - **Markdown (`.md`)**: Always available; formats tables via `pandas.DataFrame.to_markdown()` and links figure assets.
 2. **Office Document Fallbacks (`python-docx` / `python-pptx`)**:
    - If `docx` or `pptx` packages are installed in the sandbox, use the standalone snippets below upon explicit user request.
    - If either package is missing (`ImportError`), automatically fall back to generating **Self-Contained HTML**.
-
 ---
-
 ## 2. Standalone Document Generation Recipes
 
 ### A. Markdown Report (`generate_markdown_report`)
@@ -730,7 +726,9 @@ def verify_standalone_integrity(
             "Hospital Number (HN)",
         ),
         (
-            re.compile(r"(?<![\d.])\d{1}[-\s]?\d{4}[-\s]?\d{5}[-\s]?\d{2}[-\s]?\d{1}(?!\d)"),
+            re.compile(
+                r"(?<![\d.])\d{13}(?!\d|\.\d*[1-9])|(?<!\d)(?!\d{13})\d{1}[-\s]?\d{4}[-\s]?\d{5}[-\s]?\d{2}[-\s]?\d{1}(?!\d)"
+            ),
             "Thai Citizen ID (13 digits)",
         ),
         (
@@ -1532,8 +1530,10 @@ def verify_standalone_integrity(
                 matched = True
 
         if not matched:
-            is_ci_level = val in (90.0, 95.0, 99.0) and bool(
-                re.search(r"\b(?:CI|confidence|credible)\b", window, re.IGNORECASE)
+            is_ci_level = val in (90.0, 95.0, 99.0) and (
+                (has_pct and bool(re.match(r"^\s*(?:[-\w]+\s+){0,2}(?:CIs?|CrIs?|confidence|credible)\b", window_after, re.IGNORECASE)))
+                or bool(re.match(r"^\s*percent\s+(?:[-\w]+\s+){0,2}(?:CIs?|CrIs?|confidence|credible)\b", window_after, re.IGNORECASE))
+                or (has_pct and (bool(re.search(r"\b(?:CIs?|confidence|credible)\s+(?:level|levels|interval|intervals)\s*(?:of\s+)?$", window_before, re.IGNORECASE)) or (bool(re.search(r"\b(?:CIs?|confidence|credible)\s+(?:level|levels|interval|intervals)\s*\(\s*$", window_before, re.IGNORECASE)) and bool(re.match(r"^\s*\)", window_after)))))
             )
             is_scale_const = (val in (0.0, 100.0) and bool(
                 re.search(r"\b(?:scale|normalized|range|total)\b", window, re.IGNORECASE)
@@ -1565,6 +1565,10 @@ def verify_standalone_integrity(
                     # Bracket or next author closes a citation; ; , . : or line end only after
                     # "(", "Surname," or a second author, so "Total 1987." stays untraced (ADR 79)
                     bool(re.match(r"^[a-z]?(?:\s*[)\]]|\s+(?:and|&)\s+[A-Z])", window_after))
+                    or (
+                        bool(re.match(r"^[a-z]?\s+(?:method|test|placement|criteria|criterion|score|formula|correction|rule|rules|equation|model|estimator|approach|algorithm|index|regression|curve)\b", window_after, re.IGNORECASE))
+                        and bool(re.search(r"(?:(?:\(|,|(?:&|\band)\s+[A-Z][a-zA-Z'’\-]+)|\b(?:the|a|an|using|via|by|with|per|from|of|after|following|under)\s+[A-Z][a-zA-Z'’\-]+,?\s*\(?)$", window_before, re.IGNORECASE))
+                    )
                     or (
                         bool(re.match(r"^[a-z]?\s*(?:[;,.:]|$)", window_after))
                         and bool(re.search(r"(?:\(|,|(?:&|\band)\s+[A-Z][a-zA-Z'’\-]+)\s*\(?$", window_before))

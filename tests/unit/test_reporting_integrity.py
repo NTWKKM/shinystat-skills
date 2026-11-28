@@ -2090,15 +2090,21 @@ def test_integrity_study_design_regression_suite(case):
 
 def _audit_doc():
     doc = ReportDocument(title="Audit", results_dict={"or": 1.45, "n": 412})
-    doc.add_paragraph("Methods: logistic regression; 412 patients were analysed (retention flow).")
+    doc.add_paragraph(
+        "Methods: logistic regression; 412 patients were analysed (retention flow)."
+    )
     doc.add_paragraph("The odds ratio was 1.45.")
     return doc
 
 
 def test_delivered_text_is_audited_with_the_document():
     """ADR 81: an In-Chat reply is audited, so a number added only in chat fails."""
-    assert verify_report_integrity(_audit_doc(), delivered_text="OR 1.45 in 412 patients.").passed
-    audit = verify_report_integrity(_audit_doc(), delivered_text="OR 1.45; risk fell by 17.3 points.")
+    assert verify_report_integrity(
+        _audit_doc(), delivered_text="OR 1.45 in 412 patients."
+    ).passed
+    audit = verify_report_integrity(
+        _audit_doc(), delivered_text="OR 1.45; risk fell by 17.3 points."
+    )
     assert audit.passed is False and audit.untraced_numbers == [17.3]
 
 
@@ -2107,11 +2113,15 @@ def test_exported_files_with_identifier_columns_fail(tmp_path):
     clean = tmp_path / "matched.csv"
     clean.write_text("pair_id,statin_rx,cv_event\n1,1,0\n", encoding="utf-8")
     leaked = tmp_path / "matched_ids.csv"
-    leaked.write_text("patient_id,statin_rx,cv_event\nPATIENT_MOCK_CVD_0001,1,0\n", encoding="utf-8")
+    leaked.write_text(
+        "patient_id,statin_rx,cv_event\nPATIENT_MOCK_CVD_0001,1,0\n", encoding="utf-8"
+    )
     assert verify_report_integrity(_audit_doc(), exported_files=[clean]).passed
     audit = verify_report_integrity(_audit_doc(), exported_files=[clean, leaked])
     assert audit.passed is False
-    assert any("patient_id" in v and "matched_ids.csv" in v for v in audit.phi_violations)
+    assert any(
+        "patient_id" in v and "matched_ids.csv" in v for v in audit.phi_violations
+    )
     with pytest.raises(FileNotFoundError):
         verify_report_integrity(_audit_doc(), exported_files=[tmp_path / "absent.csv"])
 
@@ -2119,7 +2129,9 @@ def test_exported_files_with_identifier_columns_fail(tmp_path):
 def test_exported_files_bom_tsv_xlsx_parquet_and_unsupported(tmp_path):
     """ADR 81 Round 2: a BOM, a tab delimiter or a binary format cannot hide patient_id."""
     bom = tmp_path / "bom.csv"
-    bom.write_bytes("\ufeffpatient_id,statin_rx\nPATIENT_MOCK_CVD_0001,1\n".encode("utf-8"))
+    bom.write_bytes(
+        "\ufeffpatient_id,statin_rx\nPATIENT_MOCK_CVD_0001,1\n".encode("utf-8")
+    )
     tsv = tmp_path / "ids.tsv"
     tsv.write_text("hn\tstatin_rx\n123\t1\n", encoding="utf-8")
     frame = pd.DataFrame({"patient_id": ["PATIENT_MOCK_CVD_0001"], "statin_rx": [1]})
@@ -2127,7 +2139,12 @@ def test_exported_files_bom_tsv_xlsx_parquet_and_unsupported(tmp_path):
     frame.rename(columns={"patient_id": " patient_id "}).to_excel(xlsx, index=False)
     parquet = tmp_path / "ids.parquet"
     frame.to_parquet(parquet)
-    for fp, col in ((bom, "patient_id"), (tsv, "hn"), (xlsx, "patient_id"), (parquet, "patient_id")):
+    for fp, col in (
+        (bom, "patient_id"),
+        (tsv, "hn"),
+        (xlsx, "patient_id"),
+        (parquet, "patient_id"),
+    ):
         audit = verify_report_integrity(_audit_doc(), exported_files=[fp])
         assert audit.passed is False, fp.name
         assert any(col in v and fp.name in v for v in audit.phi_violations), fp.name
@@ -2145,7 +2162,9 @@ def test_exported_files_unreadable_text_corrupt_xlsx_and_leading_blank_rows(tmp_
     """ADR 81 Round 3: UTF-16, invalid UTF-8 and corrupt XLSX fail closed; blank rows
     before the header cannot hide an identifier column."""
     utf16 = tmp_path / "utf16.csv"
-    utf16.write_bytes("patient_id,statin_rx\nPATIENT_MOCK_CVD_0001,1\n".encode("utf-16-le"))
+    utf16.write_bytes(
+        "patient_id,statin_rx\nPATIENT_MOCK_CVD_0001,1\n".encode("utf-16-le")
+    )
     latin = tmp_path / "latin.csv"
     latin.write_bytes(b"pair_id,site\n1,Sa\xefd\n")
     broken = tmp_path / "broken.xlsx"
@@ -2155,8 +2174,67 @@ def test_exported_files_unreadable_text_corrupt_xlsx_and_leading_blank_rows(tmp_
     for fp in (utf16, latin, broken, oversized):
         audit = verify_report_integrity(_audit_doc(), exported_files=[fp])
         assert audit.passed is False, fp.name
-        assert any("could not be audited" in v and fp.name in v for v in audit.phi_violations), fp.name
+        assert any(
+            "could not be audited" in v and fp.name in v for v in audit.phi_violations
+        ), fp.name
     blank = tmp_path / "blank_first.csv"
-    blank.write_text("\n , \npatient_id,statin_rx\nPATIENT_MOCK_CVD_0001,1\n", encoding="utf-8")
+    blank.write_text(
+        "\n , \npatient_id,statin_rx\nPATIENT_MOCK_CVD_0001,1\n", encoding="utf-8"
+    )
     audit = verify_report_integrity(_audit_doc(), exported_files=[blank])
     assert any("'patient_id'" in v for v in audit.phi_violations)
+
+
+def test_95_cis_plural_and_author_year_method_citation():
+    """Plural '95% CIs' and named statistical method citations ('DeLong 1988 method') exempt cleanly."""
+    doc = ReportDocument(title="Integrity", results_dict={"or": 1.45, "n": 412})
+    doc.add_paragraph(
+        "Methods: 412 patients were analysed (retention flow) using the DeLong 1988 method; "
+        "Confidence intervals (95%) and 95% CIs were computed via profile likelihood."
+    )
+    doc.add_paragraph("The odds ratio was 1.45.")
+    audit = verify_report_integrity(doc)
+    assert audit.passed is True and audit.untraced_numbers == []
+
+    bad_doc = ReportDocument(title="Integrity", results_dict={"or": 1.45, "n": 412})
+    bad_doc.add_paragraph(
+        "Methods: retention flow. Total 1987. OR 1.45 in 412 patients."
+    )
+    bad_audit = verify_report_integrity(bad_doc)
+    assert bad_audit.passed is False and 1987.0 in bad_audit.untraced_numbers
+
+    bad_model_doc = ReportDocument(
+        title="Integrity", results_dict={"or": 1.45, "n": 412}
+    )
+    bad_model_doc.add_paragraph(
+        "Methods: retention flow. Total 1987 model fits were performed. OR 1.45 in 412 patients."
+    )
+    bad_model_audit = verify_report_integrity(bad_model_doc)
+    assert (
+        bad_model_audit.passed is False and 1987.0 in bad_model_audit.untraced_numbers
+    )
+
+    bad_ci_doc = ReportDocument(title="Integrity", results_dict={"or": 1.45, "n": 412})
+    bad_ci_doc.add_paragraph(
+        "Methods: retention flow. Of 95 patients, CIs were computed for OR 1.45 in 412 patients."
+    )
+    bad_ci_audit = verify_report_integrity(bad_ci_doc)
+    assert bad_ci_audit.passed is False and 95.0 in bad_ci_audit.untraced_numbers
+
+    bad_conf_doc = ReportDocument(
+        title="Integrity", results_dict={"or": 1.45, "n": 412}
+    )
+    bad_conf_doc.add_paragraph(
+        "Methods: retention flow. The confidence of 95 patients was assessed for OR 1.45 in 412 patients."
+    )
+    bad_conf_audit = verify_report_integrity(bad_conf_doc)
+    assert bad_conf_audit.passed is False and 95.0 in bad_conf_audit.untraced_numbers
+
+    bad_paren_doc = ReportDocument(
+        title="Integrity", results_dict={"or": 1.45, "n": 412}
+    )
+    bad_paren_doc.add_paragraph(
+        "Methods: retention flow. Confidence intervals (95% of patients had events) for OR 1.45 in 412 patients."
+    )
+    bad_paren_audit = verify_report_integrity(bad_paren_doc)
+    assert bad_paren_audit.passed is False and 95.0 in bad_paren_audit.untraced_numbers
