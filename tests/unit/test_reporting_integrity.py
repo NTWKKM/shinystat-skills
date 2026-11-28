@@ -2220,3 +2220,12 @@ def test_95_cis_plural_and_author_year_method_citation():
     )
     bad_ci_audit = verify_report_integrity(bad_ci_doc)
     assert bad_ci_audit.passed is False and 95.0 in bad_ci_audit.untraced_numbers
+
+    bad_conf_doc = ReportDocument(
+        title="Integrity", results_dict={"or": 1.45, "n": 412}
+    )
+    bad_conf_doc.add_paragraph(
+        "Methods: retention flow. The confidence of 95 patients was assessed for OR 1.45 in 412 patients."
+    )
+    bad_conf_audit = verify_report_integrity(bad_conf_doc)
+    assert bad_conf_audit.passed is False and 95.0 in bad_conf_audit.untraced_numbers

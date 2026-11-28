@@ -171,11 +171,11 @@ class TestMICEImputer:
 
     def test_mice_binary_single_column_posterior_draw(self):
         """Single numeric binary column draws posterior prevalence rather than fixed p."""
-        df = pd.DataFrame(
-            {"exposure": [0.0, 1.0, 0.0, 1.0, 0.0, 1.0, np.nan, np.nan, np.nan]}
-        )
+        # All-zero observed: fixed p=0 would always impute 0.0, whereas Jeffreys Beta(0.5, 8.5)
+        # draws non-zero prevalence across imputations and leaves observed cells untouched.
+        df = pd.DataFrame({"exposure": [0.0] * 8 + [np.nan] * 6})
         result = MICEImputer(
-            n_imputations=12, max_iter=3, random_state=42, binary_cols=["exposure"]
+            n_imputations=25, max_iter=2, random_state=42, binary_cols=["exposure"]
         ).fit_transform(df)
         obs_mask = ~df["exposure"].isna()
         miss_draws = []
@@ -187,25 +187,16 @@ class TestMICEImputer:
                 df.loc[obs_mask, "exposure"].to_numpy(),
             )
             miss_draws.append(df_imp.loc[~obs_mask, "exposure"].to_numpy())
-        assert np.any(np.std(np.vstack(miss_draws), axis=0) > 0)
+        assert np.any(np.vstack(miss_draws) == 1.0)
 
     def test_mice_binary_one_class_bootstrap_uses_posterior(self):
-        """One-class observed/bootstrap binary column uses posterior draw without failing."""
+        """Two-class observed data that yields a one-class bootstrap sample falls back to posterior."""
+        # 11 zeros and 1 one: bootstrap frequently draws all zeros (one class),
+        # exercising the one-class bootstrap fallback without failing.
         df = pd.DataFrame(
             {
-                "x": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
-                "exposure": [
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    np.nan,
-                    np.nan,
-                    np.nan,
-                    np.nan,
-                ],
+                "x": np.arange(1.0, 17.0),
+                "exposure": [0.0] * 11 + [1.0] + [np.nan] * 4,
             }
         )
         result = MICEImputer(
@@ -221,7 +212,6 @@ class TestMICEImputer:
                 df.loc[obs_mask, "exposure"].to_numpy(),
             )
             imputed_vals.append(df_imp.loc[~obs_mask, "exposure"].to_numpy())
-        # Posterior Beta(0.5, 6.5) has non-zero variance unlike fixed/bootstrap 0.0
         assert np.any(np.vstack(imputed_vals) == 1.0)
 
 

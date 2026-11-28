@@ -381,10 +381,13 @@ def _is_structural_context(
                 window_after,
                 re.IGNORECASE,
             )
-            or re.search(
-                r"\b(?:CIs?|confidence|credible)\s+(?:level|levels|interval|intervals)?\s*(?:of\s+)?$",
-                window_before,
-                re.IGNORECASE,
+            or (
+                has_pct
+                and re.search(
+                    r"\b(?:CIs?|confidence|credible)\s+(?:level|levels|interval|intervals)\s*(?:of\s+)?$",
+                    window_before,
+                    re.IGNORECASE,
+                )
             )
         ):
             return True

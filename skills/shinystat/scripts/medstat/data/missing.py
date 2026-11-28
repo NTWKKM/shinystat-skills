@@ -429,7 +429,7 @@ class MICEImputer:
                     if probs is None:
                         # Single-class observed/bootstrap or empty pred_cols:
                         # draw prevalence from Jeffreys Beta(0.5, 0.5) posterior
-                        # (van Buuren & Groothuis-Oudshoorn, 2011).
+                        # (Brown, Cai & DasGupta, 2001).
                         k_obs = int(y_obs.sum()) if len(y_obs) else 0
                         n_obs = len(y_obs)
                         p_draw = float(

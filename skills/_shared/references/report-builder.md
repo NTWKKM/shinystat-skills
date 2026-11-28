@@ -1533,7 +1533,7 @@ def verify_standalone_integrity(
             is_ci_level = val in (90.0, 95.0, 99.0) and (
                 (has_pct and bool(re.match(r"^\s*(?:[-\w]+\s+){0,2}(?:CIs?|CrIs?|confidence|credible)\b", window_after, re.IGNORECASE)))
                 or bool(re.match(r"^\s*percent\s+(?:[-\w]+\s+){0,2}(?:CIs?|CrIs?|confidence|credible)\b", window_after, re.IGNORECASE))
-                or bool(re.search(r"\b(?:CIs?|confidence|credible)\s+(?:level|levels|interval|intervals)?\s*(?:of\s+)?$", window_before, re.IGNORECASE))
+                or (has_pct and bool(re.search(r"\b(?:CIs?|confidence|credible)\s+(?:level|levels|interval|intervals)\s*(?:of\s+)?$", window_before, re.IGNORECASE)))
             )
             is_scale_const = (val in (0.0, 100.0) and bool(
                 re.search(r"\b(?:scale|normalized|range|total)\b", window, re.IGNORECASE)
