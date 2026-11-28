@@ -193,12 +193,15 @@ class TestMICEImputer:
         """Two-class observed data that yields a one-class bootstrap sample falls back to posterior."""
         real_default_rng = np.random.default_rng
         beta_calls = []
+        bootstrap_calls = 0
 
         class _ForcedOneClassRng:
             def __init__(self, inner):
                 self._inner = inner
 
             def integers(self, low, high=None, size=None, **kwargs):
+                nonlocal bootstrap_calls
+                bootstrap_calls += 1
                 # Force every bootstrap draw to pick index 0 (exposure == 0.0 -> 1 class)
                 return np.zeros(size, dtype=int)
 
@@ -226,7 +229,10 @@ class TestMICEImputer:
             n_imputations=12, max_iter=2, random_state=7, binary_cols=["exposure"]
         ).fit_transform(df)
         obs_mask = ~df["exposure"].isna()
-        assert len(beta_calls) >= 12
+        # 12 imputations * 2 sweeps = 24 forced one-class bootstrap samples;
+        # 12 init beta draws + 24 fallback beta draws = 36 total.
+        assert bootstrap_calls == 24
+        assert len(beta_calls) == 36
         assert len({round(float(v), 6) for _, _, v in beta_calls}) > 1
         imputed_vals = []
         for df_imp in result.imputed_datasets:
