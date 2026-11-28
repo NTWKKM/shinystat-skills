@@ -100,6 +100,9 @@ def test_assert_zero_phi_text_raises_on_violations():
         assert_zero_phi_text(["ID: 1100500123456"])
 
     with pytest.raises(ValueError, match="Zero-PHI Violation"):
+        assert_zero_phi_text(["ID: 1100500123456.0"])
+
+    with pytest.raises(ValueError, match="Zero-PHI Violation"):
         assert_zero_phi_text(["Dr. Somchai report"])
 
     with pytest.raises(ValueError, match="Zero-PHI Violation"):

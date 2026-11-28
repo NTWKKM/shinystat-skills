@@ -362,6 +362,7 @@ class MICEImputer:
             # subsequent models condition on the latest draws.
             df_imp = df_work.copy()
             for ccol in cont_missing_cols:
+                df_imp[ccol] = df_imp[ccol].astype(float)
                 miss_idx = missing_mask[ccol].to_numpy()
                 obs_vals = df_work.loc[~miss_idx, ccol].to_numpy(dtype=float)
                 fill_val = float(np.mean(obs_vals)) if len(obs_vals) else 0.0

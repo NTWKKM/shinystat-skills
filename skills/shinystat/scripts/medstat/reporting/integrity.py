@@ -384,7 +384,7 @@ def _is_structural_context(
             or (
                 has_pct
                 and re.search(
-                    r"\b(?:CIs?|confidence|credible)\s+(?:level|levels|interval|intervals)\s*(?:of\s+)?$",
+                    r"\b(?:CIs?|confidence|credible)\s+(?:level|levels|interval|intervals)\s*(?:of\s+|\(\s*)?$",
                     window_before,
                     re.IGNORECASE,
                 )

@@ -45,7 +45,12 @@ def check_separation(
         is_const = np.all(X_arr == X_arr[0:1, :], axis=0)
         X_nonconst = X_arr[:, ~is_const]
         if X_nonconst.shape[1] == 0:
-            is_separated = len(np.unique(y_arr)) < 2
+            unique_y = np.unique(y_arr)
+            if len(unique_y) > 2:
+                raise ValueError(
+                    f"Expected binary outcome with at most 2 unique classes, got {len(unique_y)}"
+                )
+            is_separated = len(unique_y) < 2
             return {
                 "is_separated": is_separated,
                 "recommendation": "Use Firth penalized regression"

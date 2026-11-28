@@ -2190,7 +2190,7 @@ def test_95_cis_plural_and_author_year_method_citation():
     doc = ReportDocument(title="Integrity", results_dict={"or": 1.45, "n": 412})
     doc.add_paragraph(
         "Methods: 412 patients were analysed (retention flow) using the DeLong 1988 method; "
-        "95% CIs were computed via profile likelihood."
+        "Confidence intervals (95%) and 95% CIs were computed via profile likelihood."
     )
     doc.add_paragraph("The odds ratio was 1.45.")
     audit = verify_report_integrity(doc)

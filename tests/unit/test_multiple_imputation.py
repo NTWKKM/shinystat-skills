@@ -245,6 +245,22 @@ class TestMICEImputer:
             imputed_vals.append(df_imp.loc[~obs_mask, "exposure"].to_numpy())
         assert np.any(np.vstack(imputed_vals) == 1.0)
 
+    def test_mice_binary_with_nullable_int_continuous_column(self):
+        """Nullable Int64 continuous columns convert cleanly to float during FCS imputation."""
+        df = pd.DataFrame(
+            {
+                "age": pd.array([40, 50, pd.NA, 60, 70, 80], dtype="Int64"),
+                "exposure": [0.0, 1.0, 0.0, np.nan, 1.0, 0.0],
+            }
+        )
+        result = MICEImputer(
+            n_imputations=3, max_iter=2, random_state=42, binary_cols=["exposure"]
+        ).fit_transform(df)
+        for df_imp in result.imputed_datasets:
+            assert df_imp["age"].isna().sum() == 0
+            assert df_imp["exposure"].isna().sum() == 0
+            assert set(df_imp["exposure"].unique().tolist()).issubset({0.0, 1.0})
+
 
 class TestKNNAndIndicatorImputation:
     """Tests for KNN and indicator imputation methods."""

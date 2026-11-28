@@ -1966,6 +1966,8 @@ def test_check_separation_accepts_1d_series_and_array():
         y.to_numpy(), np.column_stack([np.ones(8), x_sep.to_numpy()])
     )
     assert res_const_plus["is_separated"] is True
+    with pytest.raises(ValueError, match="at most 2 unique classes"):
+        check_separation(np.array([0, 1, 2, 0, 1, 2, 0, 1]), np.ones((8, 1)))
 
 
 def test_provenance_and_lineage_parity_engine_and_cloud():
