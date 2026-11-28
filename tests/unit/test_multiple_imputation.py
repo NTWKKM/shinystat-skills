@@ -189,20 +189,45 @@ class TestMICEImputer:
             miss_draws.append(df_imp.loc[~obs_mask, "exposure"].to_numpy())
         assert np.any(np.vstack(miss_draws) == 1.0)
 
-    def test_mice_binary_one_class_bootstrap_uses_posterior(self):
+    def test_mice_binary_one_class_bootstrap_uses_posterior(self, monkeypatch):
         """Two-class observed data that yields a one-class bootstrap sample falls back to posterior."""
-        # 11 zeros and 1 one: bootstrap frequently draws all zeros (one class),
-        # exercising the one-class bootstrap fallback without failing.
+        real_default_rng = np.random.default_rng
+        beta_calls = []
+
+        class _ForcedOneClassRng:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def integers(self, low, high=None, size=None, **kwargs):
+                # Force every bootstrap draw to pick index 0 (exposure == 0.0 -> 1 class)
+                return np.zeros(size, dtype=int)
+
+            def beta(self, a, b, size=None):
+                val = self._inner.beta(a, b, size=size)
+                beta_calls.append((a, b, val))
+                return val
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+        monkeypatch.setattr(
+            np.random,
+            "default_rng",
+            lambda seed=None: _ForcedOneClassRng(real_default_rng(seed)),
+        )
+
         df = pd.DataFrame(
             {
-                "x": np.arange(1.0, 17.0),
-                "exposure": [0.0] * 11 + [1.0] + [np.nan] * 4,
+                "x": np.arange(1.0, 13.0),
+                "exposure": [0.0] * 7 + [1.0] + [np.nan] * 4,
             }
         )
         result = MICEImputer(
-            n_imputations=15, max_iter=3, random_state=7, binary_cols=["exposure"]
+            n_imputations=12, max_iter=2, random_state=7, binary_cols=["exposure"]
         ).fit_transform(df)
         obs_mask = ~df["exposure"].isna()
+        assert len(beta_calls) >= 12
+        assert len({round(float(v), 6) for _, _, v in beta_calls}) > 1
         imputed_vals = []
         for df_imp in result.imputed_datasets:
             assert df_imp["exposure"].isna().sum() == 0
